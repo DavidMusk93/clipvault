@@ -81,11 +81,11 @@ final class DatabaseManager: ObservableObject {
         for file in files where file.pathExtension == "json" {
             if let data = try? Data(contentsOf: file),
                let item = try? decoder.decode(ClipboardItem.self, from: data) {
-                saveItemSync(item)
+                _ = saveItemSync(item)
             }
-            try? fileManager.removeItem(at: file) // 删除已迁移的文件
+            try? fileManager.removeItem(at: file)
         }
-        try? fileManager.removeItem(at: itemsDir) // 删除目录
+        try? fileManager.removeItem(at: itemsDir)
         print("Migration complete.")
     }
     
@@ -98,30 +98,32 @@ final class DatabaseManager: ObservableObject {
     }
     
     private func saveItemSync(_ item: ClipboardItem) -> Bool {
+        guard let connection = connection else { return false }
         do {
             let sql = """
-            INSERT OR REPLACE INTO clipboard_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO clipboard_items (id, timestamp, type, content_hash, text_content, image_data, file_urls, url, rtf_data, pdf_data, html_content, raw_data, source_app, ocr_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
-            let stmt = try connection?.prepareStatement(sql)
+            let stmt = try PreparedStatement(connection: connection, query: sql)
             
             let fileURLsStr = item.fileURLs?.map { $0.path }.joined(separator: "|")
             
-            try stmt?.execute(
-                item.id.uuidString,
-                item.timestamp.timeIntervalSince1970,
-                item.type.rawValue,
-                item.contentHash,
-                item.textContent,
-                item.imageData,
-                fileURLsStr,
-                item.url?.absoluteString,
-                item.rtfData,
-                item.pdfData,
-                item.htmlContent,
-                item.rawData,
-                item.sourceApp,
-                item.ocrText
-            )
+            try stmt.bind(item.id.uuidString, at: 1)
+            try stmt.bind(item.timestamp.timeIntervalSince1970, at: 2)
+            try stmt.bind(item.type.rawValue, at: 3)
+            try stmt.bind(item.contentHash, at: 4)
+            try stmt.bind(item.textContent, at: 5)
+            try stmt.bind(item.imageData, at: 6)
+            try stmt.bind(fileURLsStr, at: 7)
+            try stmt.bind(item.url?.absoluteString, at: 8)
+            try stmt.bind(item.rtfData, at: 9)
+            try stmt.bind(item.pdfData, at: 10)
+            try stmt.bind(item.htmlContent, at: 11)
+            try stmt.bind(item.rawData, at: 12)
+            try stmt.bind(item.sourceApp, at: 13)
+            try stmt.bind(item.ocrText, at: 14)
+            
+            _ = try stmt.execute()
             return true
         } catch {
             print("Failed to save item: \(error)")
@@ -145,16 +147,21 @@ final class DatabaseManager: ObservableObject {
     
     func searchItems(query: String, limit: Int = 100, completion: @escaping ([ClipboardItem]) -> Void) {
         dbQueue.async { [weak self] in
-            guard let self = self else { completion([]); return }
+            guard let self = self, let connection = self.connection else { completion([]); return }
             do {
                 let sql = """
                 SELECT * FROM clipboard_items 
                 WHERE text_content ILIKE ? OR source_app ILIKE ? OR ocr_text ILIKE ?
                 ORDER BY timestamp DESC LIMIT ?
                 """
-                let stmt = try self.connection?.prepareStatement(sql)
+                let stmt = try PreparedStatement(connection: connection, query: sql)
                 let pattern = "%\(query)%"
-                let result = try stmt?.query(pattern, pattern, pattern, limit)
+                try stmt.bind(pattern, at: 1)
+                try stmt.bind(pattern, at: 2)
+                try stmt.bind(pattern, at: 3)
+                try stmt.bind(Int64(limit), at: 4)
+                
+                let result = try stmt.execute()
                 let items = self.parseResult(result)
                 DispatchQueue.main.async { completion(items) }
             } catch {
@@ -190,32 +197,46 @@ final class DatabaseManager: ObservableObject {
         }
     }
     
-    private func parseResult(_ result: QueryResult?) -> [ClipboardItem] {
+    private func parseResult(_ result: ResultSet?) -> [ClipboardItem] {
         guard let result = result else { return [] }
         var items: [ClipboardItem] = []
+        let rowCount = result.rowCount
         
-        for i in 0..<result.rowCount {
-            // DuckDB result casting. Adjust types as needed based on library behavior.
-            // Assuming result[col][row] returns correct Swift type or nil
-            guard let idStr = result[0][i] as? String,
+        let idCol = result[0].cast(to: String.self)
+        let tsCol = result[1].cast(to: Double.self)
+        let typeCol = result[2].cast(to: String.self)
+        let hashCol = result[3].cast(to: String.self)
+        let textCol = result[4].cast(to: String.self)
+        let imageCol = result[5].cast(to: Data.self)
+        let filesCol = result[6].cast(to: String.self)
+        let urlCol = result[7].cast(to: String.self)
+        let rtfCol = result[8].cast(to: Data.self)
+        let pdfCol = result[9].cast(to: Data.self)
+        let htmlCol = result[10].cast(to: String.self)
+        let rawCol = result[11].cast(to: Data.self)
+        let appCol = result[12].cast(to: String.self)
+        let ocrCol = result[13].cast(to: String.self)
+        
+        for i in 0..<rowCount {
+            guard let idStr = idCol[i],
                   let id = UUID(uuidString: idStr),
-                  let ts = result[1][i] as? Double,
-                  let typeStr = result[2][i] as? String,
+                  let ts = tsCol[i],
+                  let typeStr = typeCol[i],
                   let type = ClipboardType(rawValue: typeStr),
-                  let hash = result[3][i] as? String else { continue }
+                  let hash = hashCol[i] else { continue }
             
-            let textContent = result[4][i] as? String
-            let imageData = result[5][i] as? Data
-            let fileURLsStr = result[6][i] as? String
+            let textContent = textCol[i]
+            let imageData = imageCol[i]
+            let fileURLsStr = filesCol[i]
             let fileURLs = fileURLsStr?.split(separator: "|").map { URL(fileURLWithPath: String($0)) }
-            let urlStr = result[7][i] as? String
+            let urlStr = urlCol[i]
             let url = urlStr != nil ? URL(string: urlStr!) : nil
-            let rtfData = result[8][i] as? Data
-            let pdfData = result[9][i] as? Data
-            let htmlContent = result[10][i] as? String
-            let rawData = result[11][i] as? Data
-            let sourceApp = result[12][i] as? String
-            let ocrText = result[13][i] as? String
+            let rtfData = rtfCol[i]
+            let pdfData = pdfCol[i]
+            let htmlContent = htmlCol[i]
+            let rawData = rawCol[i]
+            let sourceApp = appCol[i]
+            let ocrText = ocrCol[i]
             
             let item = ClipboardItem(
                 id: id,

@@ -548,6 +548,7 @@ final class BackupManager {
         return appSupport.appendingPathComponent("ClipFlow/items")
     }
 }
+}
 
 // MARK: - Helpers
 extension ClipboardViewModel {
@@ -564,6 +565,13 @@ extension ClipboardViewModel {
         }
         // 维持时间逆序
         return map.values.sorted { $0.timestamp > $1.timestamp }
+    }
+}
+
+extension NSImage {
+    func pngData() -> Data? {
+        guard let tiff = self.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        return rep.representation(using: .png, properties: [:])
     }
 }
 
@@ -612,11 +620,4 @@ final class LogManager {
         try? tail.write(to: self.fileURL, options: .atomic)
     }
     func logPath() -> String { fileURL.path }
-}
-
-extension NSImage {
-    func pngData() -> Data? {
-        guard let tiff = self.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        return rep.representation(using: .png, properties: [:])
-    }
 }

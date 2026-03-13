@@ -1,0 +1,3 @@
+[submodule "Vendor/duckdb-swift"]
+	path = Vendor/duckdb-swift
+	url = https://github.com/duckdb/duckdb-swift.git

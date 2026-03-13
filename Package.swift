@@ -16,15 +16,11 @@ let package = Package(
             targets: ["ClipFlowKit"]
         )
     ],
-    dependencies: [
-        .package(url: "https://github.com/duckdb/duckdb-swift", from: "1.0.0")
-    ],
+    dependencies: [],
     targets: [
         .target(
             name: "ClipFlowKit",
-            dependencies: [
-                .product(name: "DuckDB", package: "duckdb-swift")
-            ],
+            dependencies: [],
             path: "ClipFlow"
         ),
         .executableTarget(
