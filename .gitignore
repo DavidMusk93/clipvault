@@ -32,3 +32,9 @@ tools/paddleocr_venv/
 .idea/
 .vscode/
 
+## Database & Logs (Runtime)
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+Logs/
+test_write

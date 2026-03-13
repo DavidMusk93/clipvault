@@ -37,9 +37,14 @@ class ClipboardMonitor: ObservableObject {
         guard currentChangeCount != lastChangeCount else { return }
         
         lastChangeCount = currentChangeCount
+        LogManager.shared.write("[Monitor] Detected change. Count: \(currentChangeCount)")
         
         monitorQueue.async { [weak self] in
-            guard let self = self, let item = self.createClipboardItem() else { return }
+            guard let self = self, let item = self.createClipboardItem() else {
+                LogManager.shared.write("[Monitor] Failed to create item")
+                return
+            }
+            LogManager.shared.write("[Monitor] Created item: \(item.type) from \(item.sourceApp ?? "unknown")")
             
             DispatchQueue.main.async {
                 self.lastItem = item

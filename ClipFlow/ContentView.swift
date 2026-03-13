@@ -10,16 +10,21 @@ struct ContentView: View {
     // 移除不必要的 showDetail 状态，依赖 selectedItem 展示详情
     
     var body: some View {
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            if let item = selectedItem {
-                ItemDetailView(item: item, viewModel: viewModel)
-            } else {
-                emptyDetail
+        VStack(spacing: 0) {
+            NavigationSplitView {
+                sidebar
+            } detail: {
+                if let item = selectedItem {
+                    ItemDetailView(item: item, viewModel: viewModel)
+                } else {
+                    emptyDetail
+                }
             }
+            .frame(minWidth: 800, minHeight: 500)
+            
+            Divider()
+            statusBar
         }
-        .frame(minWidth: 800, minHeight: 500)
         .onAppear {
             viewModel.startMonitoring()
         }
@@ -39,15 +44,6 @@ struct ContentView: View {
             }
         } message: {
             Text(viewModel.errorMessage ?? "")
-        }
-        .safeAreaInset(edge: .bottom) {
-            Group {
-                if viewModel.isICloudBackupEnabled {
-                    statusBar
-                } else {
-                    Color.clear.frame(height: 0)
-                }
-            }
         }
     }
     
@@ -191,7 +187,12 @@ struct ContentView: View {
     // 底部状态栏：展示 iCloud 同步状态/权限问题
     private var statusBar: some View {
         HStack(spacing: 12) {
+            Text("\(viewModel.items.count) items")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
             if viewModel.isICloudBackupEnabled {
+                Divider().frame(height: 12)
                 Image(systemName: "icloud").foregroundColor(.secondary)
                 if viewModel.iCloudSyncInProgress {
                     ProgressView().controlSize(.small)
@@ -227,6 +228,15 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color(nsColor: .underPageBackgroundColor))
+        .onAppear {
+            LogManager.shared.write("[View] StatusBar appeared. items: \(viewModel.items.count)")
+        }
+        .onChange(of: viewModel.items.count) { count in
+            LogManager.shared.write("[View] StatusBar items count changed: \(count)")
+        }
+        .onChange(of: viewModel.isICloudBackupEnabled) { enabled in
+            LogManager.shared.write("[View] StatusBar iCloud changed: \(enabled)")
+        }
     }
     
     private var searchBar: some View {

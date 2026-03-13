@@ -17,9 +17,10 @@ final class DatabaseManager: ObservableObject {
     
     init() {
         let fileManager = FileManager.default
-        let appSupportDir = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ??
+        // Changed to Documents for easier access/debug and avoiding potential sandbox issues
+        let docsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first ??
             fileManager.temporaryDirectory.appendingPathComponent("com.clipflow.app")
-        let appDir = appSupportDir.appendingPathComponent("ClipFlow")
+        let appDir = docsDir.appendingPathComponent("ClipFlow")
         
         try? fileManager.createDirectory(at: appDir, withIntermediateDirectories: true)
         
@@ -33,12 +34,15 @@ final class DatabaseManager: ObservableObject {
     
     private func initializeDatabase() {
         do {
+            LogManager.shared.write("[Database] Initializing DuckDB at \(dbPath.path)")
             database = try Database(store: .file(at: dbPath))
             connection = try database?.connect()
             try createTables()
             migrateFromJSON()
+            LogManager.shared.write("[Database] Initialization success")
         } catch {
             print("Failed to initialize DuckDB: \(error)")
+            LogManager.shared.write("[Database] Failed to initialize: \(error)")
         }
     }
     

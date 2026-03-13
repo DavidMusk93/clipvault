@@ -6,7 +6,11 @@ import Vision
 
 @MainActor
 class ClipboardViewModel: ObservableObject {
-    @Published var items: [ClipboardItem] = []
+    @Published var items: [ClipboardItem] = [] {
+        didSet {
+            LogManager.shared.write("[ViewModel] items updated: count=\(items.count)")
+        }
+    }
     @Published var searchText: String = ""
     @Published var isLoading: Bool = false
     @Published var selectedItem: ClipboardItem?
@@ -43,6 +47,7 @@ class ClipboardViewModel: ObservableObject {
     private func setupBindings() {
         monitor.$lastItem
             .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] item in
                 self?.handleNewItem(item)
             }
@@ -242,15 +247,19 @@ class ClipboardViewModel: ObservableObject {
         backupManager.backupDatabase(dbURL: database.dbFileURL, progress: { [weak self] phase in
             DispatchQueue.main.async { self?.iCloudSyncPhase = phase }
         }, completion: { [weak self] success, path in
-            guard let self = self else { return }
-            self.iCloudSyncInProgress = false
-            self.iCloudSyncPhase = nil
-            if success {
-                self.lastICloudBackupPath = path
-                LogManager.shared.write("[iCloud] backup triggered via toggle -> \(path)")
-                self.errorMessage = "已备份到 iCloud：\(path)"
-            } else {
-                self.errorMessage = "iCloud 容器不可用：请在系统设置登录 iCloud 并启用 iCloud Drive"
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.iCloudSyncInProgress = false
+                self.iCloudSyncPhase = nil
+                if success {
+                    self.lastICloudBackupPath = path
+                    LogManager.shared.write("[iCloud] backup triggered via toggle -> \(path)")
+                    self.errorMessage = "已备份到 iCloud：\(path)"
+                } else if path == "Merged" || path == "Disabled" {
+                    // 被合并或未启用，不做任何提示
+                } else {
+                    self.errorMessage = "iCloud 容器不可用：请在系统设置登录 iCloud 并启用 iCloud Drive"
+                }
             }
         })
     }
@@ -468,17 +477,30 @@ final class BackupManager {
         // 若协调失败，忽略（常见于未登录 iCloud 或容器不可用）
     }
 
+    private var pendingCompletion: ((Bool, String) -> Void)?
+
     // 备份数据库文件（duckdb/sqlite）。为了避免高频复制，做 2 秒节流合并。
     func backupDatabase(dbURL: URL, progress: ((String) -> Void)? = nil, completion: ((Bool, String) -> Void)? = nil) {
-        guard enabled else { return }
+        guard enabled else { completion?(false, "Disabled"); return }
+        
+        // 如果有正在等待的 Timer，说明之前的请求被合并了
+        if throttleTimer != nil {
+            pendingCompletion?(false, "Merged")
+        }
+        
         pendingDBURL = dbURL
+        pendingCompletion = completion
+        
         DispatchQueue.main.async {
             self.throttleTimer?.invalidate()
             self.throttleTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+                self?.throttleTimer = nil
                 progress?("准备备份…")
-                // 在后台执行，避免阻塞主线程
+                let comp = self?.pendingCompletion
+                self?.pendingCompletion = nil
+                
                 DispatchQueue.global(qos: .utility).async { [weak self] in
-                    self?.performBackupDatabase(progress: progress, completion: completion)
+                    self?.performBackupDatabase(progress: progress, completion: comp)
                 }
             }
         }
@@ -587,8 +609,9 @@ final class LogManager {
         return df
     }()
     private init() {
-        let logsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/ClipFlow")
+        let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ??
+            FileManager.default.temporaryDirectory
+        let logsDir = docsDir.appendingPathComponent("ClipFlow/Logs")
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
         fileURL = logsDir.appendingPathComponent("clipflow.log")
     }
