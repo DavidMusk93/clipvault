@@ -61,29 +61,50 @@ enum LogoRenderer {
     static func makeLobsterAppIcon(size: CGFloat = 256, scale: CGFloat = 2) -> NSImage {
         let pixel = size * scale
         let image = NSImage(size: NSSize(width: pixel, height: pixel))
-        image.lockFocus(); defer { image.unlockFocus() }
-        let ctx = NSGraphicsContext.current!.cgContext
-        ctx.saveGState(); defer { ctx.restoreGState() }
-        ctx.clear(CGRect(x: 0, y: 0, width: pixel, height: pixel))
-        ctx.scaleBy(x: scale, y: scale)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+        
+        if let ctx = NSGraphicsContext.current?.cgContext {
+            ctx.saveGState()
+            defer { ctx.restoreGState() }
+            ctx.clear(CGRect(x: 0, y: 0, width: pixel, height: pixel))
+            ctx.scaleBy(x: scale, y: scale)
+        }
+        
         // 牛头：上部头骨 + 下部口鼻（棕色）
         let headColor = NSColor.systemBrown
         headColor.setFill()
-        NSBezierPath(ovalIn: CGRect(x: size*0.35, y: size*0.50, width: size*0.30, height: size*0.22)).fill()
-        NSBezierPath(roundedRect: CGRect(x: size*0.38, y: size*0.38, width: size*0.24, height: size*0.16), xRadius: size*0.05, yRadius: size*0.05).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.35, y: size * 0.50, width: size * 0.30, height: size * 0.22)).fill()
+        NSBezierPath(roundedRect: CGRect(x: size * 0.38, y: size * 0.38, width: size * 0.24, height: size * 0.16), xRadius: size * 0.05, yRadius: size * 0.05).fill()
+        
         // 耳朵
-        NSBezierPath(ovalIn: CGRect(x: size*0.28, y: size*0.54, width: size*0.12, height: size*0.10)).fill()
-        NSBezierPath(ovalIn: CGRect(x: size*0.60, y: size*0.54, width: size*0.12, height: size*0.10)).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.28, y: size * 0.54, width: size * 0.12, height: size * 0.10)).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.60, y: size * 0.54, width: size * 0.12, height: size * 0.10)).fill()
+        
         // 角（浅色）
-        let hornColor = NSColor(calibratedWhite: 0.95, alpha: 1); hornColor.setFill()
-        let lh = NSBezierPath(); lh.move(to: CGPoint(x: size*0.36, y: size*0.64)); lh.curve(to: CGPoint(x: size*0.22, y: size*0.74), controlPoint1: CGPoint(x: size*0.30, y: size*0.70), controlPoint2: CGPoint(x: size*0.26, y: size*0.74)); lh.line(to: CGPoint(x: size*0.28, y: size*0.66)); lh.close(); lh.fill()
-        let rh = NSBezierPath(); rh.move(to: CGPoint(x: size*0.64, y: size*0.64)); rh.curve(to: CGPoint(x: size*0.78, y: size*0.74), controlPoint1: CGPoint(x: size*0.70, y: size*0.70), controlPoint2: CGPoint(x: size*0.74, y: size*0.74)); rh.line(to: CGPoint(x: size*0.72, y: size*0.66)); rh.close(); rh.fill()
+        let hornColor = NSColor(calibratedWhite: 0.95, alpha: 1)
+        hornColor.setFill()
+        let lh = NSBezierPath()
+        lh.move(to: CGPoint(x: size * 0.36, y: size * 0.64))
+        lh.curve(to: CGPoint(x: size * 0.22, y: size * 0.74), controlPoint1: CGPoint(x: size * 0.30, y: size * 0.70), controlPoint2: CGPoint(x: size * 0.26, y: size * 0.74))
+        lh.line(to: CGPoint(x: size * 0.28, y: size * 0.66))
+        lh.close()
+        lh.fill()
+        
+        let rh = NSBezierPath()
+        rh.move(to: CGPoint(x: size * 0.64, y: size * 0.64))
+        rh.curve(to: CGPoint(x: size * 0.78, y: size * 0.74), controlPoint1: CGPoint(x: size * 0.70, y: size * 0.70), controlPoint2: CGPoint(x: size * 0.74, y: size * 0.74))
+        rh.line(to: CGPoint(x: size * 0.72, y: size * 0.66))
+        rh.close()
+        rh.fill()
+        
         // 眼睛与鼻孔（黑色）
         NSColor.black.setFill()
-        NSBezierPath(ovalIn: CGRect(x: size*0.46, y: size*0.56, width: size*0.024, height: size*0.024)).fill()
-        NSBezierPath(ovalIn: CGRect(x: size*0.54, y: size*0.56, width: size*0.024, height: size*0.024)).fill()
-        NSBezierPath(ovalIn: CGRect(x: size*0.49, y: size*0.44, width: size*0.02, height: size*0.028)).fill()
-        NSBezierPath(ovalIn: CGRect(x: size*0.53, y: size*0.44, width: size*0.02, height: size*0.028)).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.46, y: size * 0.56, width: size * 0.024, height: size * 0.024)).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.54, y: size * 0.56, width: size * 0.024, height: size * 0.024)).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.49, y: size * 0.44, width: size * 0.02, height: size * 0.028)).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.53, y: size * 0.44, width: size * 0.02, height: size * 0.028)).fill()
+        
         return image
     }
 
@@ -91,21 +112,41 @@ enum LogoRenderer {
     static func makeLobsterStatusGlyph(size: CGFloat = 18, scale: CGFloat = 2) -> NSImage {
         let pixel = size * scale
         let image = NSImage(size: NSSize(width: pixel, height: pixel))
-        image.lockFocus(); defer { image.unlockFocus() }
-        let ctx = NSGraphicsContext.current!.cgContext
-        ctx.saveGState(); defer { ctx.restoreGState() }
-        ctx.clear(CGRect(x: 0, y: 0, width: pixel, height: pixel))
-        ctx.scaleBy(x: scale, y: scale)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+        
+        if let ctx = NSGraphicsContext.current?.cgContext {
+            ctx.saveGState()
+            defer { ctx.restoreGState() }
+            ctx.clear(CGRect(x: 0, y: 0, width: pixel, height: pixel))
+            ctx.scaleBy(x: scale, y: scale)
+        }
+        
         NSColor.black.setFill()
+        
         // 头部
-        NSBezierPath(ovalIn: CGRect(x: size*0.36, y: size*0.58, width: size*0.28, height: size*0.18)).fill()
-        NSBezierPath(roundedRect: CGRect(x: size*0.40, y: size*0.46, width: size*0.20, height: size*0.12), xRadius: 2, yRadius: 2).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.36, y: size * 0.58, width: size * 0.28, height: size * 0.18)).fill()
+        NSBezierPath(roundedRect: CGRect(x: size * 0.40, y: size * 0.46, width: size * 0.20, height: size * 0.12), xRadius: 2, yRadius: 2).fill()
+        
         // 耳朵
-        NSBezierPath(ovalIn: CGRect(x: size*0.30, y: size*0.60, width: size*0.10, height: size*0.08)).fill()
-        NSBezierPath(ovalIn: CGRect(x: size*0.60, y: size*0.60, width: size*0.10, height: size*0.08)).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.30, y: size * 0.60, width: size * 0.10, height: size * 0.08)).fill()
+        NSBezierPath(ovalIn: CGRect(x: size * 0.60, y: size * 0.60, width: size * 0.10, height: size * 0.08)).fill()
+        
         // 角（三角弧）
-        let lh = NSBezierPath(); lh.move(to: CGPoint(x: size*0.38, y: size*0.66)); lh.curve(to: CGPoint(x: size*0.26, y: size*0.74), controlPoint1: CGPoint(x: size*0.32, y: size*0.70), controlPoint2: CGPoint(x: size*0.28, y: size*0.74)); lh.line(to: CGPoint(x: size*0.32, y: size*0.66)); lh.close(); lh.fill()
-        let rh = NSBezierPath(); rh.move(to: CGPoint(x: size*0.62, y: size*0.66)); rh.curve(to: CGPoint(x: size*0.74, y: size*0.74), controlPoint1: CGPoint(x: size*0.68, y: size*0.70), controlPoint2: CGPoint(x: size*0.72, y: size*0.74)); rh.line(to: CGPoint(x: size*0.68, y: size*0.66)); rh.close(); rh.fill()
+        let lh = NSBezierPath()
+        lh.move(to: CGPoint(x: size * 0.38, y: size * 0.66))
+        lh.curve(to: CGPoint(x: size * 0.26, y: size * 0.74), controlPoint1: CGPoint(x: size * 0.32, y: size * 0.70), controlPoint2: CGPoint(x: size * 0.28, y: size * 0.74))
+        lh.line(to: CGPoint(x: size * 0.32, y: size * 0.66))
+        lh.close()
+        lh.fill()
+        
+        let rh = NSBezierPath()
+        rh.move(to: CGPoint(x: size * 0.62, y: size * 0.66))
+        rh.curve(to: CGPoint(x: size * 0.74, y: size * 0.74), controlPoint1: CGPoint(x: size * 0.68, y: size * 0.70), controlPoint2: CGPoint(x: size * 0.72, y: size * 0.74))
+        rh.line(to: CGPoint(x: size * 0.68, y: size * 0.66))
+        rh.close()
+        rh.fill()
+        
         return image
     }
 

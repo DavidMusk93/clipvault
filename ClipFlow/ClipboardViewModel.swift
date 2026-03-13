@@ -13,8 +13,8 @@ class ClipboardViewModel: ObservableObject {
     @Published var errorMessage: String?
     // iCloud 同步可视状态
     @Published var iCloudSyncInProgress: Bool = false
-    @Published var iCloudSyncPhase: String? = nil
-    @Published var lastICloudBackupPath: String? = nil
+    @Published var iCloudSyncPhase: String?
+    @Published var lastICloudBackupPath: String?
     
     var isMonitoring: Bool {
         monitor.isMonitoring
@@ -72,63 +72,62 @@ class ClipboardViewModel: ObservableObject {
         items.insert(item, at: 0)
         
         database.saveItem(item) { [weak self] success in
+            guard let self = self else { return }
             if !success {
-                self?.errorMessage = "Failed to save item"
+                self.errorMessage = "Failed to save item"
             }
             // 备份到 iCloud（若开启）
-            if success, UserDefaults.standard.bool(forKey: "clipflow.backup.icloud"), let self = self {
+            if success, UserDefaults.standard.bool(forKey: "clipflow.backup.icloud") {
                 self.backupManager.backupDatabase(dbURL: self.database.dbFileURL)
             }
         }
         
-        // 若开启 OCR，且为图片，则异步识别并更新条目
-        if UserDefaults.standard.bool(forKey: "clipflow.ocr.enabled"),
-           item.type == .image, let data = item.imageData {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self = self else { return }
-                self.log.debug("[OCR] 开始识别，id=\(item.id.uuidString)")
-                LogManager.shared.write("[OCR] start id=\(item.id.uuidString)")
-                let mgr = OCRManager.shared
-                let provider = mgr.resolveProviderWithLog()
-                
-                if let text = provider.recognizeText(from: data), !text.isEmpty {
-                    let updated = ClipboardItem(
-                        id: item.id,
-                        timestamp: item.timestamp,
-                        type: item.type,
-                        contentHash: item.contentHash,
-                        textContent: item.textContent,
-                        imageData: item.imageData,
-                        fileURLs: item.fileURLs,
-                        url: item.url,
-                        rtfData: item.rtfData,
-                        pdfData: item.pdfData,
-                        htmlContent: item.htmlContent,
-                        rawData: item.rawData,
-                        ocrText: text,
-                        sourceApp: item.sourceApp
-                    )
-                    DispatchQueue.main.async {
-                        if let idx = self.items.firstIndex(where: { $0.id == item.id }) {
-                            self.items[idx] = updated
-                        }
-                        self.database.saveItem(updated) { success in
-                            if !success { self.errorMessage = "Failed to save OCR result" }
-                            if success, UserDefaults.standard.bool(forKey: "clipflow.backup.icloud") {
-                                self.backupManager.backupDatabase(dbURL: self.database.dbFileURL)
-                            }
-                        }
-                        let preview = text.count > 30 ? String(text.prefix(30)) + "…" : text
-                        self.errorMessage = "OCR 识别完成：\(preview)"
-                    }
-                    LogManager.shared.write("[OCR] success id=\(item.id.uuidString) len=\(text.count)")
-                } else {
-                    self.log.warning("[OCR] 识别为空或失败，id=\(item.id.uuidString)")
-                    LogManager.shared.write("[OCR] empty or failed id=\(item.id.uuidString)")
-                    DispatchQueue.main.async { self.errorMessage = "OCR 未识别到文本（请检查图片清晰度）" }
-                }
+        performOCR(for: item)
+    }
+
+    private func performOCR(for item: ClipboardItem) {
+        guard UserDefaults.standard.bool(forKey: "clipflow.ocr.enabled"),
+              item.type == .image, let data = item.imageData else { return }
+              
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            self.log.debug("[OCR] 开始识别，id=\(item.id.uuidString)")
+            LogManager.shared.write("[OCR] start id=\(item.id.uuidString)")
+            let mgr = OCRManager.shared
+            let provider = mgr.resolveProviderWithLog()
+            
+            if let text = provider.recognizeText(from: data), !text.isEmpty {
+                self.handleOCRSuccess(item: item, text: text)
+            } else {
+                self.log.warning("[OCR] 识别为空或失败，id=\(item.id.uuidString)")
+                LogManager.shared.write("[OCR] empty or failed id=\(item.id.uuidString)")
+                DispatchQueue.main.async { self.errorMessage = "OCR 未识别到文本（请检查图片清晰度）" }
             }
         }
+    }
+
+    private func handleOCRSuccess(item: ClipboardItem, text: String) {
+        let updated = ClipboardItem(
+            id: item.id, timestamp: item.timestamp, type: item.type,
+            contentHash: item.contentHash, textContent: item.textContent,
+            imageData: item.imageData, fileURLs: item.fileURLs, url: item.url,
+            rtfData: item.rtfData, pdfData: item.pdfData, htmlContent: item.htmlContent,
+            rawData: item.rawData, ocrText: text, sourceApp: item.sourceApp
+        )
+        DispatchQueue.main.async {
+            if let idx = self.items.firstIndex(where: { $0.id == item.id }) {
+                self.items[idx] = updated
+            }
+            self.database.saveItem(updated) { success in
+                if !success { self.errorMessage = "Failed to save OCR result" }
+                if success, UserDefaults.standard.bool(forKey: "clipflow.backup.icloud") {
+                    self.backupManager.backupDatabase(dbURL: self.database.dbFileURL)
+                }
+            }
+            let preview = text.count > 30 ? String(text.prefix(30)) + "…" : text
+            self.errorMessage = "OCR 识别完成：\(preview)"
+        }
+        LogManager.shared.write("[OCR] success id=\(item.id.uuidString) len=\(text.count)")
     }
     
     private func searchItems(query: String) {
@@ -351,28 +350,27 @@ class ClipboardViewModel: ObservableObject {
                     ocrText: text,
                     sourceApp: item.sourceApp
                 )
-            DispatchQueue.main.async {
-                if let idx = self.items.firstIndex(where: { $0.id == item.id }) {
-                    self.items[idx] = updated
-                }
-                self.database.saveItem(updated) { success in
-                    if !success { self.errorMessage = "Failed to save OCR result" }
-                    if success, UserDefaults.standard.bool(forKey: "clipflow.backup.icloud") {
-                        self.backupManager.backupDatabase(dbURL: self.database.dbFileURL)
+                DispatchQueue.main.async {
+                    if let idx = self.items.firstIndex(where: { $0.id == item.id }) {
+                        self.items[idx] = updated
                     }
+                    self.database.saveItem(updated) { success in
+                        if !success { self.errorMessage = "Failed to save OCR result" }
+                        if success, UserDefaults.standard.bool(forKey: "clipflow.backup.icloud") {
+                            self.backupManager.backupDatabase(dbURL: self.database.dbFileURL)
+                        }
+                    }
+                    // 给出可见成功反馈（展示前 30 字符）
+                    let preview = text.count > 30 ? String(text.prefix(30)) + "…" : text
+                    self.errorMessage = "OCR 识别完成：\(preview)"
                 }
-                // 给出可见成功反馈（展示前 30 字符）
-                let preview = text.count > 30 ? String(text.prefix(30)) + "…" : text
-                self.errorMessage = "OCR 识别完成：\(preview)"
+                LogManager.shared.write("[OCR] manual: success id=\(item.id.uuidString) len=\(text.count)")
+            } else {
+                LogManager.shared.write("[OCR] manual: empty or failed id=\(item.id.uuidString)")
+                DispatchQueue.main.async { self.errorMessage = "OCR 未识别到文本或执行失败（查看控制台日志）" }
             }
-            LogManager.shared.write("[OCR] manual: success id=\(item.id.uuidString) len=\(text.count)")
-        } else {
-            LogManager.shared.write("[OCR] manual: empty or failed id=\(item.id.uuidString)")
-            DispatchQueue.main.async { self.errorMessage = "OCR 未识别到文本或执行失败（查看控制台日志）" }
         }
     }
-}
-}
 
 // MARK: - Deep Modules (in-file for simplicity of learning project)
 
@@ -545,7 +543,8 @@ final class BackupManager {
         ubiquityURL?.path
     }
     private func itemsDir() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ??
+            FileManager.default.temporaryDirectory.appendingPathComponent("com.clipflow.app")
         return appSupport.appendingPathComponent("ClipFlow/items")
     }
 }
@@ -574,11 +573,14 @@ final class LogManager {
     private let queue = DispatchQueue(label: "com.clipflow.log", qos: .utility)
     private let fileURL: URL
     private let dateFormatter: DateFormatter = {
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"; df.locale = Locale(identifier: "en_US_POSIX"); return df
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        return df
     }()
     private init() {
         let logsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library").appendingPathComponent("Logs").appendingPathComponent("ClipFlow")
+            .appendingPathComponent("Library/Logs/ClipFlow")
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
         fileURL = logsDir.appendingPathComponent("clipflow.log")
     }
@@ -588,13 +590,26 @@ final class LogManager {
         queue.async {
             guard let data = line.data(using: .utf8) else { return }
             if FileManager.default.fileExists(atPath: self.fileURL.path) {
-                if let h = try? FileHandle(forWritingTo: self.fileURL) { defer { try? h.close() }; try? h.seekToEnd(); try? h.write(contentsOf: data) }
+                if let h = try? FileHandle(forWritingTo: self.fileURL) {
+                    defer { try? h.close() }
+                    try? h.seekToEnd()
+                    try? h.write(contentsOf: data)
+                }
             } else { try? data.write(to: self.fileURL) }
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: self.fileURL.path), let size = attrs[.size] as? NSNumber, size.intValue > 5*1024*1024,
-               let content = try? Data(contentsOf: self.fileURL), content.count > 1024*1024 {
-                let tail = content.suffix(1024*1024); try? tail.write(to: self.fileURL, options: .atomic)
-            }
+            
+            self.rotateLogIfNeeded()
         }
+    }
+    
+    private func rotateLogIfNeeded() {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: self.fileURL.path),
+              let size = attrs[.size] as? NSNumber,
+              size.intValue > 5 * 1024 * 1024,
+              let content = try? Data(contentsOf: self.fileURL),
+              content.count > 1024 * 1024 else { return }
+              
+        let tail = content.suffix(1024 * 1024)
+        try? tail.write(to: self.fileURL, options: .atomic)
     }
     func logPath() -> String { fileURL.path }
 }

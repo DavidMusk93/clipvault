@@ -50,99 +50,89 @@ class ClipboardMonitor: ObservableObject {
     private func createClipboardItem() -> ClipboardItem? {
         let timestamp = Date()
         let sourceApp = NSWorkspace.shared.frontmostApplication?.localizedName
-        
-        let types = pasteboard.types ?? []
-        
-        if let fileURLs = getFileURLs(), !fileURLs.isEmpty {
-            let hash = computeHash(for: fileURLs.map { $0.path }.joined())
-            return ClipboardItem(
-                timestamp: timestamp,
-                type: .file,
-                contentHash: hash,
-                fileURLs: fileURLs,
-                sourceApp: sourceApp
-            )
-        }
-        
-        if let image = getImage(), let imageData = image.tiffRepresentation {
-            let hash = computeHash(for: imageData)
-            return ClipboardItem(
-                timestamp: timestamp,
-                type: .image,
-                contentHash: hash,
-                imageData: imageData,
-                sourceApp: sourceApp
-            )
-        }
-        
-        if let url = getURL() {
-            let hash = computeHash(for: url.absoluteString)
-            return ClipboardItem(
-                timestamp: timestamp,
-                type: .url,
-                contentHash: hash,
-                textContent: url.absoluteString,
-                url: url,
-                sourceApp: sourceApp
-            )
-        }
-        
-        if let pdfData = getPDFData() {
-            let hash = computeHash(for: pdfData)
-            return ClipboardItem(
-                timestamp: timestamp,
-                type: .pdf,
-                contentHash: hash,
-                pdfData: pdfData,
-                sourceApp: sourceApp
-            )
-        }
-        
-        if let rtfData = getRTFData() {
-            let hash = computeHash(for: rtfData)
-            return ClipboardItem(
-                timestamp: timestamp,
-                type: .rtf,
-                contentHash: hash,
-                rtfData: rtfData,
-                sourceApp: sourceApp
-            )
-        }
-        
-        if let html = getHTML() {
-            let hash = computeHash(for: html)
-            return ClipboardItem(
-                timestamp: timestamp,
-                type: .html,
-                contentHash: hash,
-                htmlContent: html,
-                sourceApp: sourceApp
-            )
-        }
-        
-        if let text = getText() {
-            let hash = computeHash(for: text)
-            return ClipboardItem(
-                timestamp: timestamp,
-                type: .text,
-                contentHash: hash,
-                textContent: text,
-                sourceApp: sourceApp
-            )
-        }
-        
-        if let rawData = getRawData() {
-            let hash = computeHash(for: rawData)
-            return ClipboardItem(
-                timestamp: timestamp,
-                type: .other,
-                contentHash: hash,
-                rawData: rawData,
-                sourceApp: sourceApp
-            )
-        }
-        
+
+        if let item = createFileItem(timestamp: timestamp, sourceApp: sourceApp) { return item }
+        if let item = createImageItem(timestamp: timestamp, sourceApp: sourceApp) { return item }
+        if let item = createURLItem(timestamp: timestamp, sourceApp: sourceApp) { return item }
+        if let item = createPDFItem(timestamp: timestamp, sourceApp: sourceApp) { return item }
+        if let item = createRTFItem(timestamp: timestamp, sourceApp: sourceApp) { return item }
+        if let item = createHTMLItem(timestamp: timestamp, sourceApp: sourceApp) { return item }
+        if let item = createTextItem(timestamp: timestamp, sourceApp: sourceApp) { return item }
+        if let item = createRawItem(timestamp: timestamp, sourceApp: sourceApp) { return item }
+
         return nil
+    }
+
+    private func createFileItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
+        guard let fileURLs = getFileURLs(), !fileURLs.isEmpty else { return nil }
+        let hash = computeHash(for: fileURLs.map { $0.path }.joined())
+        return ClipboardItem(
+            timestamp: timestamp, type: .file, contentHash: hash,
+            fileURLs: fileURLs, sourceApp: sourceApp
+        )
+    }
+
+    private func createImageItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
+        guard let image = getImage(), let imageData = image.tiffRepresentation else { return nil }
+        let hash = computeHash(for: imageData)
+        return ClipboardItem(
+            timestamp: timestamp, type: .image, contentHash: hash,
+            imageData: imageData, sourceApp: sourceApp
+        )
+    }
+
+    private func createURLItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
+        guard let url = getURL() else { return nil }
+        let hash = computeHash(for: url.absoluteString)
+        return ClipboardItem(
+            timestamp: timestamp, type: .url, contentHash: hash,
+            textContent: url.absoluteString, url: url, sourceApp: sourceApp
+        )
+    }
+
+    private func createPDFItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
+        guard let pdfData = getPDFData() else { return nil }
+        let hash = computeHash(for: pdfData)
+        return ClipboardItem(
+            timestamp: timestamp, type: .pdf, contentHash: hash,
+            pdfData: pdfData, sourceApp: sourceApp
+        )
+    }
+
+    private func createRTFItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
+        guard let rtfData = getRTFData() else { return nil }
+        let hash = computeHash(for: rtfData)
+        return ClipboardItem(
+            timestamp: timestamp, type: .rtf, contentHash: hash,
+            rtfData: rtfData, sourceApp: sourceApp
+        )
+    }
+
+    private func createHTMLItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
+        guard let html = getHTML() else { return nil }
+        let hash = computeHash(for: html)
+        return ClipboardItem(
+            timestamp: timestamp, type: .html, contentHash: hash,
+            htmlContent: html, sourceApp: sourceApp
+        )
+    }
+
+    private func createTextItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
+        guard let text = getText() else { return nil }
+        let hash = computeHash(for: text)
+        return ClipboardItem(
+            timestamp: timestamp, type: .text, contentHash: hash,
+            textContent: text, sourceApp: sourceApp
+        )
+    }
+
+    private func createRawItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
+        guard let rawData = getRawData() else { return nil }
+        let hash = computeHash(for: rawData)
+        return ClipboardItem(
+            timestamp: timestamp, type: .other, contentHash: hash,
+            rawData: rawData, sourceApp: sourceApp
+        )
     }
     
     private func getText() -> String? {
