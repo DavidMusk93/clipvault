@@ -28,5 +28,9 @@ opt_in_rules:
   - redundant_nil_coalescing
   - force_unwrapping
 
-reporter: "xcode"
+excluded:
+  - Vendor
+  - .build
+  - .swiftpm
+
 

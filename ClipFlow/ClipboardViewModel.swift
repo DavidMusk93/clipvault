@@ -4,6 +4,7 @@ import Combine
 import AppKit
 import Vision
 
+// swiftlint:disable type_body_length cyclomatic_complexity
 @MainActor
 class ClipboardViewModel: ObservableObject {
     @Published var items: [ClipboardItem] = [] {
@@ -320,7 +321,7 @@ class ClipboardViewModel: ObservableObject {
             let coordinator = NSFileCoordinator(filePresenter: nil)
             var err: NSError?
             coordinator.coordinate(writingItemAt: testFile, options: .forReplacing, error: &err) { url in
-                _ = try? "ping".data(using: .utf8)?.write(to: url)
+                _ = try? Data("ping".utf8).write(to: url)
             }
             let ok = fm.fileExists(atPath: testFile.path)
             report.append("写入测试：\(ok ? "成功" : "失败") -> \(testFile.path)")
@@ -525,7 +526,11 @@ final class BackupManager {
                 dstDirOpt = def
             }
         }
-        guard let dstDir = dstDirOpt else { LogManager.shared.write("[iCloud] ubiquity container unavailable (both explicit & default)"); completion?(false, ""); return }
+        guard let dstDir = dstDirOpt else {
+            LogManager.shared.write("[iCloud] ubiquity container unavailable (both explicit & default)")
+            completion?(false, "")
+            return
+        }
         try? FileManager.default.createDirectory(at: dstDir, withIntermediateDirectories: true)
         let dst = dstDir.appendingPathComponent(src.lastPathComponent)
         let coordinator = NSFileCoordinator(filePresenter: nil)
@@ -619,12 +624,13 @@ final class LogManager {
         let ts = dateFormatter.string(from: Date())
         let line = "[\(ts)] \(message)\n"
         queue.async {
-            guard let data = line.data(using: .utf8) else { return }
-            if FileManager.default.fileExists(atPath: self.fileURL.path) {
-                if let h = try? FileHandle(forWritingTo: self.fileURL) {
-                    defer { try? h.close() }
-                    try? h.seekToEnd()
-                    try? h.write(contentsOf: data)
+            let data = Data(line.utf8)
+            let fileManager = FileManager.default
+            if fileManager.fileExists(atPath: self.fileURL.path) {
+                if let handle = try? FileHandle(forWritingTo: self.fileURL) {
+                    defer { try? handle.close() }
+                    try? handle.seekToEnd()
+                    try? handle.write(contentsOf: data)
                 }
             } else { try? data.write(to: self.fileURL) }
             

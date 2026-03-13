@@ -340,7 +340,6 @@ class WebServer {
             })
         }
     }
-
     
     private func sendErrorResponse(connection: NWConnection, status: Int, message: String) {
         let html = """

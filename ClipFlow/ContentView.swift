@@ -84,15 +84,16 @@ struct ContentView: View {
                 Spacer()
                 Button(action: {
                     viewModel.refresh()
-                }) {
+                }, label: {
                     Image(systemName: "arrow.clockwise")
-                }
+                })
                 .buttonStyle(.bordered)
+                
                 Button(action: {
                     viewModel.clearAll()
-                }) {
+                }, label: {
                     Image(systemName: "trash")
-                }
+                })
                 .buttonStyle(.bordered)
             }
         }
@@ -310,15 +311,15 @@ struct ContentView: View {
     private func contextMenu(for item: ClipboardItem) -> some View {
         Button(action: {
             viewModel.copyItem(item)
-        }) {
+        }, label: {
             Label("Copy", systemImage: "doc.on.doc")
-        }
+        })
 
         Button(action: {
             selectedItem = item
-        }) {
+        }, label: {
             Label("View Details", systemImage: "eye")
-        }
+        })
         
         Divider()
         
@@ -327,9 +328,9 @@ struct ContentView: View {
             if selectedItem?.id == item.id {
                 selectedItem = nil
             }
-        }) {
+        }, label: {
             Label("Delete", systemImage: "trash")
-        }
+        })
     }
     
     private var emptyDetail: some View {
@@ -349,10 +350,10 @@ struct ItemRowView: View {
     let item: ClipboardItem
     let isSelected: Bool
     private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        f.locale = Locale.current
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.locale = Locale.current
+        return formatter
     }()
     
     var body: some View {
@@ -432,15 +433,15 @@ struct ItemDetailView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button(action: {
                     viewModel.copyItem(item)
-                }) {
+                }, label: {
                     Label("Copy", systemImage: "doc.on.doc")
-                }
+                })
                 
                 Button(role: .destructive, action: {
                     viewModel.deleteItem(item)
-                }) {
+                }, label: {
                     Label("Delete", systemImage: "trash")
-                }
+                })
             }
         }
     }
@@ -616,13 +617,15 @@ struct RTFTextView: NSViewRepresentable {
         textView.isEditable = false
         textView.isRichText = true
         textView.backgroundColor = .clear
-        if let attr = try? NSAttributedString(data: rtfData, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
+        if let attr = try? NSAttributedString(
+            data: rtfData,
+            options: [.documentType: NSAttributedString.DocumentType.rtf],
+            documentAttributes: nil
+        ) {
             textView.textStorage?.setAttributedString(attr)
         } else {
             // 无法解析时进行转义展示
-            let escaped = String(decoding: rtfData, as: UTF8.self)
-                .replacingOccurrences(of: "<", with: "&lt;")
-                .replacingOccurrences(of: ">", with: "&gt;")
+            let escaped = String(data: rtfData, encoding: .utf8) ?? ""
             textView.string = escaped
         }
         let scroll = NSScrollView()
@@ -635,7 +638,7 @@ struct RTFTextView: NSViewRepresentable {
 }
 
 struct PDFContent: View {
-    var data: Data? = nil
+    var data: Data?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("PDF").font(.headline)

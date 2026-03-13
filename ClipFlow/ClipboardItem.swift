@@ -62,6 +62,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         self.sourceApp = sourceApp
     }
     
+    // swiftlint:disable cyclomatic_complexity
     func preview() -> String {
         switch type {
         case .text:
@@ -94,6 +95,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
         }
         return "No preview"
     }
+    // swiftlint:enable cyclomatic_complexity
     
     static func == (lhs: ClipboardItem, rhs: ClipboardItem) -> Bool {
         lhs.contentHash == rhs.contentHash

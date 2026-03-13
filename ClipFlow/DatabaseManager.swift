@@ -105,7 +105,8 @@ final class DatabaseManager: ObservableObject {
         guard let connection = connection else { return false }
         do {
             let sql = """
-            INSERT OR REPLACE INTO clipboard_items (id, timestamp, type, content_hash, text_content, image_data, file_urls, url, rtf_data, pdf_data, html_content, raw_data, source_app, ocr_text)
+            INSERT OR REPLACE INTO clipboard_items 
+            (id, timestamp, type, content_hash, text_content, image_data, file_urls, url, rtf_data, pdf_data, html_content, raw_data, source_app, ocr_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             let stmt = try PreparedStatement(connection: connection, query: sql)
@@ -201,6 +202,7 @@ final class DatabaseManager: ObservableObject {
         }
     }
     
+    // swiftlint:disable function_body_length
     private func parseResult(_ result: ResultSet?) -> [ClipboardItem] {
         guard let result = result else { return [] }
         var items: [ClipboardItem] = []
@@ -221,26 +223,26 @@ final class DatabaseManager: ObservableObject {
         let appCol = result[12].cast(to: String.self)
         let ocrCol = result[13].cast(to: String.self)
         
-        for i in 0..<rowCount {
-            guard let idStr = idCol[i],
+        for index in 0..<rowCount {
+            guard let idStr = idCol[index],
                   let id = UUID(uuidString: idStr),
-                  let ts = tsCol[i],
-                  let typeStr = typeCol[i],
+                  let ts = tsCol[index],
+                  let typeStr = typeCol[index],
                   let type = ClipboardType(rawValue: typeStr),
-                  let hash = hashCol[i] else { continue }
+                  let hash = hashCol[index] else { continue }
             
-            let textContent = textCol[i]
-            let imageData = imageCol[i]
-            let fileURLsStr = filesCol[i]
+            let textContent = textCol[index]
+            let imageData = imageCol[index]
+            let fileURLsStr = filesCol[index]
             let fileURLs = fileURLsStr?.split(separator: "|").map { URL(fileURLWithPath: String($0)) }
-            let urlStr = urlCol[i]
-            let url = urlStr != nil ? URL(string: urlStr!) : nil
-            let rtfData = rtfCol[i]
-            let pdfData = pdfCol[i]
-            let htmlContent = htmlCol[i]
-            let rawData = rawCol[i]
-            let sourceApp = appCol[i]
-            let ocrText = ocrCol[i]
+            let urlStr = urlCol[index]
+            let url = urlStr.flatMap { URL(string: $0) }
+            let rtfData = rtfCol[index]
+            let pdfData = pdfCol[index]
+            let htmlContent = htmlCol[index]
+            let rawData = rawCol[index]
+            let sourceApp = appCol[index]
+            let ocrText = ocrCol[index]
             
             let item = ClipboardItem(
                 id: id,
@@ -262,4 +264,5 @@ final class DatabaseManager: ObservableObject {
         }
         return items
     }
+    // swiftlint:enable function_body_length
 }
