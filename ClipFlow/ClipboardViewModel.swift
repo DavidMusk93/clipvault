@@ -89,12 +89,8 @@ class ClipboardViewModel: ObservableObject {
                 self.log.debug("[OCR] 开始识别，id=\(item.id.uuidString)")
                 LogManager.shared.write("[OCR] start id=\(item.id.uuidString)")
                 let mgr = OCRManager.shared
-                guard let provider = mgr.resolveProviderWithLog() else {
-                    self.log.error("[OCR] 未找到 OCR 提供器（paddle 路径未配置或不可用）")
-                    LogManager.shared.write("[OCR] provider not found: check clipflow.paddle.path or PATH")
-                    DispatchQueue.main.async { self.errorMessage = "未找到 PaddleOCR，可在终端设置路径：defaults write com.clipflow.app clipflow.paddle.path '/path/to/paddleocr_cli'" }
-                    return
-                }
+                let provider = mgr.resolveProviderWithLog()
+                
                 if let text = provider.recognizeText(from: data), !text.isEmpty {
                     let updated = ClipboardItem(
                         id: item.id,
@@ -129,7 +125,7 @@ class ClipboardViewModel: ObservableObject {
                 } else {
                     self.log.warning("[OCR] 识别为空或失败，id=\(item.id.uuidString)")
                     LogManager.shared.write("[OCR] empty or failed id=\(item.id.uuidString)")
-                    DispatchQueue.main.async { self.errorMessage = "OCR 未识别到文本（请检查图片清晰度或 Paddle 配置）" }
+                    DispatchQueue.main.async { self.errorMessage = "OCR 未识别到文本（请检查图片清晰度）" }
                 }
             }
         }
@@ -335,13 +331,10 @@ class ClipboardViewModel: ObservableObject {
         guard item.type == .image, let data = item.imageData else { return }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-        let mgr = OCRManager.shared
-        guard let provider = mgr.resolveProviderWithLog() else {
-            DispatchQueue.main.async { self.errorMessage = "未找到 PaddleOCR（请配置 clipflow.paddle.path）" }
-            LogManager.shared.write("[OCR] manual: provider not found")
-            return
-        }
-        if let text = provider.recognizeText(from: data), !text.isEmpty {
+            let mgr = OCRManager.shared
+            let provider = mgr.resolveProviderWithLog()
+            
+            if let text = provider.recognizeText(from: data), !text.isEmpty {
                 let updated = ClipboardItem(
                     id: item.id,
                     timestamp: item.timestamp,
@@ -410,111 +403,20 @@ final class VisionOCRProvider: OCRProvider {
     }
 }
 
-final class PaddleOCROnPath: OCRProvider {
-    private let executablePath: String
-    init(executablePath: String) { self.executablePath = executablePath }
-    func recognizeText(from imageData: Data) -> String? {
-        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-        let imgURL = tmp.appendingPathComponent("clipflow_ocr_\(UUID().uuidString).png")
-        guard let nsImage = NSImage(data: imageData), let png = nsImage.pngData() else { return nil }
-        do { try png.write(to: imgURL) } catch { return nil }
-        let dir = imgURL.deletingLastPathComponent().path
-        // 支持附加参数（例如：--lang ch），通过 defaults 设置：clipflow.paddle.args
-        let extraArgs = UserDefaults.standard.string(forKey: "clipflow.paddle.args") ?? ""
-        // 优先尝试新式子命令；失败则回退旧式
-        // 新式（子命令）优先：直接指定单张图片路径；旧式作为回退
-        let subCmd = "\"\(executablePath)\" ocr -i '\(imgURL.path)' --device cpu"
-        let legacyCmd = "\"\(executablePath)\" --image_dir '\(dir)'"
-        func run(_ cmd: String) -> (Int32, String) {
-            let task = Process(); let pipe = Pipe(); task.standardOutput = pipe; task.standardError = pipe
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            let full = extraArgs.isEmpty ? cmd : cmd + " " + extraArgs
-            var env = ProcessInfo.processInfo.environment
-            env["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = env["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] ?? "True"
-            task.environment = env
-            task.arguments = ["bash", "-lc", full]
-            LogManager.shared.write("[OCR] exec=\(executablePath) cmd=\(full)")
-            do { try task.run() } catch { return (127, "spawn failed") }
-            task.waitUntilExit()
-            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            LogManager.shared.write("[OCR] exit=\(task.terminationStatus) output=\n\(out)")
-            return (task.terminationStatus, out)
-        }
-        var (code, out) = run(subCmd)
-        if code != 0 && out.contains("invalid choice") {
-            LogManager.shared.write("[OCR] fallback to legacy mode")
-            (code, out) = run(legacyCmd)
-        }
-        // 兼容多种输出格式（不同版本 PaddleOCR 的 CLI 文本格式不同）
-        var candidates: [String] = []
-        let lines = out.components(separatedBy: .newlines)
-        for line in lines {
-            let lower = line.lowercased()
-            // 1) "text:" 形式
-            if let r = lower.range(of: "text:") {
-                let v = String(line[r.upperBound...]).trimmingCharacters(in: .whitespaces)
-                if !v.isEmpty { candidates.append(v) }
-                continue
-            }
-            // 2) JSON 形式包含 "transcription" 或 "text"
-            if (lower.contains("\"transcription\"") || lower.contains("\"text\"")), line.contains("{") {
-                if let data = line.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let t = obj["transcription"] as? String, !t.isEmpty { candidates.append(t) }
-                    if let t = obj["text"] as? String, !t.isEmpty { candidates.append(t) }
-                }
-                continue
-            }
-            // 3) Python repr 形式：('内容', score)
-            if lower.contains("score") && line.contains("(") && line.contains(")") {
-                if let firstQuote = line.firstIndex(where: { $0 == "\"" || $0 == "'" }),
-                   let lastQuote = line[line.index(after: firstQuote)...].firstIndex(where: { $0 == line[firstQuote] }) {
-                    let t = String(line[line.index(after: firstQuote)..<lastQuote])
-                    if !t.isEmpty { candidates.append(t) }
-                }
-            }
-        }
-        let texts = candidates
-        return texts.isEmpty ? nil : texts.joined(separator: " ")
-    }
-}
-
 final class OCRManager {
     static let shared = OCRManager(); private init() {}
-    fileprivate func resolveProvider() -> OCRProvider? {
-        let engine = (UserDefaults.standard.string(forKey: "clipflow.ocr.engine") ?? "vision").lowercased()
-        if engine != "paddle" {
-            let langs = (UserDefaults.standard.string(forKey: "clipflow.ocr.langs") ?? "zh-Hans,en-US")
-                .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-            return VisionOCRProvider(languages: langs)
-        }
-        if let custom = UserDefaults.standard.string(forKey: "clipflow.paddle.path"), !custom.isEmpty {
-            return PaddleOCROnPath(executablePath: custom)
-        }
-        let pipe = Pipe(); let task = Process(); task.standardOutput = pipe
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env"); task.arguments = ["bash", "-lc", "which paddleocr || true"]
-        try? task.run(); task.waitUntilExit()
-        let path = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return path.isEmpty ? VisionOCRProvider(languages: ["zh-Hans","en-US"]) : PaddleOCROnPath(executablePath: path)
+    
+    func resolveProvider() -> OCRProvider {
+        let langs = (UserDefaults.standard.string(forKey: "clipflow.ocr.langs") ?? "zh-Hans,en-US")
+            .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        return VisionOCRProvider(languages: langs)
     }
-    func resolveProviderWithLog() -> OCRProvider? {
-        let engine = (UserDefaults.standard.string(forKey: "clipflow.ocr.engine") ?? "vision").lowercased()
-        if engine != "paddle" {
-            let langs = (UserDefaults.standard.string(forKey: "clipflow.ocr.langs") ?? "zh-Hans,en-US")
-                .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-            LogManager.shared.write("[OCR] using engine: vision langs=\(langs.joined(separator: ","))")
-            return VisionOCRProvider(languages: langs)
-        }
-        if let custom = UserDefaults.standard.string(forKey: "clipflow.paddle.path"), !custom.isEmpty {
-            LogManager.shared.write("[OCR] using custom path: \(custom)")
-            return PaddleOCROnPath(executablePath: custom)
-        }
-        let pipe = Pipe(); let task = Process(); task.standardOutput = pipe; task.standardError = pipe
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env"); task.arguments = ["bash", "-lc", "which paddleocr || true"]
-        try? task.run(); task.waitUntilExit()
-        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        LogManager.shared.write("[OCR] which paddleocr => \(out)")
-        return out.isEmpty ? VisionOCRProvider(languages: ["zh-Hans","en-US"]) : PaddleOCROnPath(executablePath: out)
+    
+    func resolveProviderWithLog() -> OCRProvider {
+        let langs = (UserDefaults.standard.string(forKey: "clipflow.ocr.langs") ?? "zh-Hans,en-US")
+            .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        LogManager.shared.write("[OCR] using engine: vision langs=\(langs.joined(separator: ","))")
+        return VisionOCRProvider(languages: langs)
     }
 }
 

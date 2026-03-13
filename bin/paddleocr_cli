@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
-source "${DIR}/../tools/paddleocr_venv/bin/activate"
-exec python3 -m paddleocr "$@"

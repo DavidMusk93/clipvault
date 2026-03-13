@@ -27,7 +27,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     let htmlContent: String?
     let rawData: Data?
     
-    // OCR 识别出的文本（例如由 PaddleOCR 得到）
+    // OCR 识别出的文本
     let ocrText: String?
     
     let sourceApp: String?
