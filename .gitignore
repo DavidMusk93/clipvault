@@ -38,3 +38,7 @@ tools/paddleocr_venv/
 *.duckdb.tmp
 Logs/
 test_write
+
+## Large Files
+Vendor/lib/libDuckDB.a
+
