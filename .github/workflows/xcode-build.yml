@@ -2,9 +2,9 @@ name: Xcode - Build and Analyze
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
 
 jobs:
   build:
@@ -29,32 +29,50 @@ jobs:
           path: Vendor/lib/libDuckDB.a
           key: ${{ runner.os }}-duckdb-lib-v1
 
-      - name: Download libDuckDB.a (if not cached)
+      - name: Build libDuckDB.a from Source (if not cached)
         if: steps.cache-duckdb.outputs.cache-hit != 'true'
         run: |
+          echo "Building libDuckDB.a from source..."
           mkdir -p Vendor/lib
-          # 注意：此处使用预编译的 DuckDB 静态库。
-          # 实际生产中应替换为官方 Release URL 或自行编译后的托管地址。
-          # 这里为了演示 CI 通过，暂时创建一个空的静态库占位，或者如果能找到下载链接最好。
-          # 由于 DuckDB 官方不直接提供 macOS 静态库，通常需要自行编译。
-          # 为了让 CI 跑通，我们这里尝试现场编译（耗时较长）或者 mock 一个。
-          # 鉴于 CI 资源限制，我们这里尝试下载一个预构建版本（假设存在）或 mock。
-          
-          echo "Mocking libDuckDB.a for CI analysis..."
-          # 创建一个空的静态库以通过链接器检查（仅用于 Analyze，运行时会挂，但编译能过）
-          touch empty.c
-          clang -c empty.c -o empty.o
-          ar rcs Vendor/lib/libDuckDB.a empty.o
-          rm empty.c empty.o
-          
-      - name: Install xcpretty
-        run: |
-          if ! command -v xcpretty &> /dev/null; then
-            gem install xcpretty
-          fi
+
+          # 确保 cmake 和 ninja 已安装
+          brew install cmake ninja
+
+          # 进入 duckdb 源码目录（位于 submodule 中）
+          cd Vendor/duckdb-swift/duckdb
+
+          # 创建构建目录
+          mkdir -p build
+          cd build
+
+          # 配置 CMake 构建静态库
+          # -DDUCKDB_EXTENSION_PARQUET=1: 启用 Parquet 支持（可选，根据需要）
+          # -DDUCKDB_EXTENSION_ICU=1: 启用 ICU 支持（可选，根据需要）
+          # -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64": 构建通用二进制（Universal Binary）
+          cmake -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_UNITTESTS=OFF \
+            -DENABLE_SANITIZER=OFF \
+            -DENABLE_UBSAN=OFF \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            ..
+            
+          # 开始编译
+          ninja
+
+          # 复制编译产物到项目目录
+          # 编译后的静态库通常位于 src/libduckdb_static.a
+          cp src/libduckdb_static.a ../../../lib/libDuckDB.a
+
+          echo "Build complete. libDuckDB.a size:"
+          ls -lh ../../../lib/libDuckDB.a
 
       - name: Build and Analyze
         run: |
+          if ! command -v xcpretty &> /dev/null; then
+             gem install xcpretty
+          fi
+
           # 显式指定 scheme 和 project，避免自动探测错误
           xcodebuild clean build analyze \
             -project ClipFlow.xcodeproj \
