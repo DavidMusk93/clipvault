@@ -29,43 +29,27 @@ jobs:
           path: Vendor/lib/libDuckDB.a
           key: ${{ runner.os }}-duckdb-lib-v1
 
-      - name: Build libDuckDB.a from Source (if not cached)
+      - name: Build libDuckDB.a (if not cached)
         if: steps.cache-duckdb.outputs.cache-hit != 'true'
         run: |
-          echo "Building libDuckDB.a from source..."
+          echo "Building libDuckDB.a using Swift Package Manager..."
           mkdir -p Vendor/lib
 
-          # 确保 cmake 和 ninja 已安装
-          brew install cmake ninja
+          # 进入 duckdb-swift 目录
+          cd Vendor/duckdb-swift
 
-          # 进入 duckdb 源码目录（位于 submodule 中）
-          cd Vendor/duckdb-swift/duckdb
+          # 使用 Swift PM 编译 Release 版本
+          # 这会编译 C++ 源码生成目标文件 (.o)
+          swift build -c release -Xswiftc -static-stdlib
 
-          # 创建构建目录
-          mkdir -p build
-          cd build
-
-          # 配置 CMake 构建静态库
-          # -DDUCKDB_EXTENSION_PARQUET=1: 启用 Parquet 支持（可选，根据需要）
-          # -DDUCKDB_EXTENSION_ICU=1: 启用 ICU 支持（可选，根据需要）
-          # -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64": 构建通用二进制（Universal Binary）
-          cmake -G "Ninja" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_UNITTESTS=OFF \
-            -DENABLE_SANITIZER=OFF \
-            -DENABLE_UBSAN=OFF \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
-            ..
-            
-          # 开始编译
-          ninja
-
-          # 复制编译产物到项目目录
-          # 编译后的静态库通常位于 src/libduckdb_static.a
-          cp src/libduckdb_static.a ../../../lib/libDuckDB.a
+          # 找到所有编译生成的 Cduckdb 目标文件 (.o)
+          # 注意：路径可能包含架构名 (x86_64 或 arm64)，使用通配符匹配
+          # 排除 Swift 模块的 .o 文件，只保留 C++ 对象
+          echo "Archiving object files..."
+          find .build -name "*.o" | grep "Cduckdb.build" | xargs ar rcs ../../Vendor/lib/libDuckDB.a
 
           echo "Build complete. libDuckDB.a size:"
-          ls -lh ../../../lib/libDuckDB.a
+          ls -lh ../../Vendor/lib/libDuckDB.a
 
       - name: Build and Analyze
         run: |
