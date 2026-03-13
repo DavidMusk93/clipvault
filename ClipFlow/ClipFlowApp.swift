@@ -18,12 +18,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover = NSPopover()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        LogManager.shared.write("[App] Start launching")
         setupStatusBarItem()
         setupPopover()
         // 使用 emoji 作为 Dock 应用图标
         NSApp.applicationIconImage = LogoRenderer.makeEmojiIcon("🐻")
-        // 首次落盘日志，便于用户定位文件
-        LogManager.shared.write("App launched")
+        let duration = CFAbsoluteTimeGetCurrent() - startTime
+        LogManager.shared.write("[App] Launch complete. Duration: \(String(format: "%.3f", duration))s")
     }
     
     private func setupStatusBarItem() {

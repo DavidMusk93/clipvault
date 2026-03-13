@@ -12,7 +12,7 @@ enum ClipboardType: String, Codable {
     case other
 }
 
-struct ClipboardItem: Identifiable, Codable, Equatable {
+struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     let timestamp: Date
     let type: ClipboardType
@@ -99,5 +99,9 @@ struct ClipboardItem: Identifiable, Codable, Equatable {
     
     static func == (lhs: ClipboardItem, rhs: ClipboardItem) -> Bool {
         lhs.contentHash == rhs.contentHash
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(contentHash)
     }
 }

@@ -34,6 +34,8 @@ class ClipboardViewModel: ObservableObject {
     
     init(monitor: ClipboardMonitor = ClipboardMonitor(),
          database: DatabaseManager = DatabaseManager()) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        LogManager.shared.write("[ViewModel] Start init")
         self.monitor = monitor
         self.database = database
         
@@ -43,6 +45,8 @@ class ClipboardViewModel: ObservableObject {
         if isICloudBackupEnabled {
             onICloudBackupToggle(true)
         }
+        let duration = CFAbsoluteTimeGetCurrent() - startTime
+        LogManager.shared.write("[ViewModel] Init complete. Duration: \(String(format: "%.3f", duration))s")
     }
     
     private func setupBindings() {
@@ -63,10 +67,21 @@ class ClipboardViewModel: ObservableObject {
     }
     
     private func loadInitialData() {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        LogManager.shared.write("[ViewModel] Start loading initial data")
         isLoading = true
         database.fetchItems(limit: 100) { [weak self] fetchedItems in
+            let fetchDuration = CFAbsoluteTimeGetCurrent() - startTime
+            LogManager.shared.write("[ViewModel] Database fetch returned. Duration: \(String(format: "%.3f", fetchDuration))s")
+            
+            let dedupStart = CFAbsoluteTimeGetCurrent()
             self?.items = Self.deduplicateByHashKeepingLatest(fetchedItems)
+            let dedupDuration = CFAbsoluteTimeGetCurrent() - dedupStart
+            
             self?.isLoading = false
+            
+            let totalDuration = CFAbsoluteTimeGetCurrent() - startTime
+            LogManager.shared.write("[ViewModel] Initial data loaded. Dedup: \(String(format: "%.3f", dedupDuration))s, Total: \(String(format: "%.3f", totalDuration))s")
         }
     }
     

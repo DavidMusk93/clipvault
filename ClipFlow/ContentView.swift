@@ -291,20 +291,18 @@ struct ContentView: View {
     }
     
     private var listView: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach(viewModel.items) { item in
-                    Button {
-                        selectedItem = item
-                    } label: {
-                        ItemRowView(item: item, isSelected: selectedItem?.id == item.id)
-                    }
-                    .buttonStyle(.plain)
+        List(selection: $selectedItem) {
+            ForEach(viewModel.items) { item in
+                ItemRowView(item: item, isSelected: selectedItem == item)
+                    .tag(item)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                     .contextMenu { contextMenu(for: item) }
-                }
             }
-            .padding()
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
     
     @ViewBuilder

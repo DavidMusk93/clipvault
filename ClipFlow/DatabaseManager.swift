@@ -33,13 +33,16 @@ final class DatabaseManager: ObservableObject {
     var dbFileURL: URL { dbPath }
     
     private func initializeDatabase() {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        LogManager.shared.write("[Database] Start initialization")
         do {
             LogManager.shared.write("[Database] Initializing DuckDB at \(dbPath.path)")
             database = try Database(store: .file(at: dbPath))
             connection = try database?.connect()
             try createTables()
             migrateFromJSON()
-            LogManager.shared.write("[Database] Initialization success")
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            LogManager.shared.write("[Database] Initialization success. Duration: \(String(format: "%.3f", duration))s")
         } catch {
             print("Failed to initialize DuckDB: \(error)")
             LogManager.shared.write("[Database] Failed to initialize: \(error)")
@@ -137,14 +140,19 @@ final class DatabaseManager: ObservableObject {
     }
     
     func fetchItems(limit: Int = 100, completion: @escaping ([ClipboardItem]) -> Void) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        LogManager.shared.write("[Database] Fetch items start. Limit: \(limit)")
         dbQueue.async { [weak self] in
             guard let self = self else { completion([]); return }
             do {
                 let result = try self.connection?.query("SELECT * FROM clipboard_items ORDER BY timestamp DESC LIMIT \(limit)")
                 let items = self.parseResult(result)
+                let duration = CFAbsoluteTimeGetCurrent() - startTime
+                LogManager.shared.write("[Database] Fetch items success. Count: \(items.count), Duration: \(String(format: "%.3f", duration))s")
                 DispatchQueue.main.async { completion(items) }
             } catch {
                 print("Fetch failed: \(error)")
+                LogManager.shared.write("[Database] Fetch items failed: \(error)")
                 DispatchQueue.main.async { completion([]) }
             }
         }
