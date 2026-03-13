@@ -1,0 +1,32 @@
+disabled_rules:
+  - trailing_whitespace
+  - todo
+
+line_length:
+  warning: 140
+  error: 200
+
+type_body_length:
+  warning: 400
+  error: 800
+
+file_length:
+  warning: 800
+  error: 2000
+
+identifier_name:
+  min_length: 2
+  excluded:
+    - id
+    - x
+    - y
+    - q
+
+opt_in_rules:
+  - empty_count
+  - explicit_init
+  - redundant_nil_coalescing
+  - force_unwrapping
+
+reporter: "xcode"
+
