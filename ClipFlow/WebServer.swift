@@ -98,7 +98,7 @@ class WebServer {
         
         if method == "OPTIONS" {
             handleOptionsRequest(connection: connection)
-        } else if method == "GET" {
+        } else if method == "GET" || method == "HEAD" {
             handleGetRequest(path: path, connection: connection)
         } else if method == "POST" && path == "/api/clips" {
             handlePostClip(data: data, connection: connection)
@@ -500,6 +500,9 @@ class WebServer {
                 if let text = item.textContent {
                     dict["textContent"] = text
                 }
+                if let ocr = item.ocrText {
+                    dict["ocrText"] = ocr
+                }
                 
                 return dict
             }
@@ -535,20 +538,27 @@ class WebServer {
         database.fetchItems(limit: 200) { [weak self] items in
             guard let self = self else { return }
             guard let item = items.first(where: { $0.id == uuid }),
-                  let data = item.imageData,
-                  let image = NSImage(data: data),
-                  let png = image.pngData() else {
+                  let data = item.imageData else {
                 self.sendErrorResponse(connection: connection, status: 404, message: "Not Found")
                 return
             }
+            
+            var pngData: Data = data
+            if let image = NSImage(data: data),
+               let tiff = image.tiffRepresentation,
+               let rep = NSBitmapImageRep(data: tiff),
+               let converted = rep.representation(using: .png, properties: [:]) {
+                pngData = converted
+            }
+            
             let header = """
             HTTP/1.1 200 OK
             Access-Control-Allow-Origin: *
             Content-Type: image/png
-            Content-Length: \(png.count)
+            Content-Length: \(pngData.count)
             
             """
-            let full = (header.data(using: .utf8) ?? Data()) + png
+            let full = (header.data(using: .utf8) ?? Data()) + pngData
             connection.send(content: full, completion: .contentProcessed { _ in
                 connection.cancel()
             })

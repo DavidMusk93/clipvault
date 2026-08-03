@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CommonCrypto
+import Vision
 
 class ClipboardMonitor: ObservableObject {
     @Published var lastItem: ClipboardItem?
@@ -82,11 +83,37 @@ class ClipboardMonitor: ObservableObject {
 
     private func createImageItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
         guard let image = getImage(), let imageData = image.tiffRepresentation else { return nil }
+        let ocrText = performOCR(on: imageData)
         let hash = computeHash(for: imageData)
         return ClipboardItem(
             timestamp: timestamp, type: .image, contentHash: hash,
-            imageData: imageData, sourceApp: sourceApp
+            imageData: imageData, ocrText: ocrText, sourceApp: sourceApp
         )
+    }
+
+    private func performOCR(on imageData: Data) -> String? {
+        guard let image = NSImage(data: imageData),
+              let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let cgImage = bitmap.cgImage else {
+            return nil
+        }
+        
+        let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        
+        do {
+            try requestHandler.perform([request])
+            guard let results = request.results else { return nil }
+            let recognizedStrings = results.compactMap { observation in
+                observation.topCandidates(1).first?.string
+            }
+            return recognizedStrings.isEmpty ? nil : recognizedStrings.joined(separator: "\n")
+        } catch {
+            return nil
+        }
     }
 
     private func createURLItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {

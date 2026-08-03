@@ -425,9 +425,10 @@
         let contentHtml = '';
 
         if (item.type === 'image') {
-          contentHtml = `<img class="card-image-preview" src="http://localhost:8080/api/image?id=${item.id}" loading="lazy" />`;
-          if (item.preview && item.preview !== 'Image') {
-            contentHtml += `<div style="margin-top: 10px; font-size: 12px; color: var(--md-sys-color-outline);"><span class="material-symbols-outlined" style="font-size: 15px; vertical-align: middle;">visibility</span> OCR: ${escapeHtml(item.preview)}</div>`;
+          contentHtml = `<img class="card-image-preview" src="http://localhost:8080/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" />`;
+          const ocrText = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
+          if (ocrText) {
+            contentHtml += `<div style="margin-top: 12px; font-size: 13px; color: var(--md-sys-color-on-primary-container); background: var(--md-sys-color-primary-container); padding: 10px 14px; border-radius: 12px; border: 1px solid var(--md-sys-color-outline-variant); word-break: break-word;"><span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle; margin-right: 4px;">find_in_page</span> <b>OCR 识别结果:</b><br>${escapeHtml(ocrText)}</div>`;
           }
         } else if (item.htmlContent) {
           contentHtml = `<div style="background: var(--md-sys-color-surface-container); color: #1c1b1f; padding: 14px; border-radius: 12px; max-height: 150px; overflow: hidden; border: 1px solid var(--md-sys-color-outline-variant);">${item.htmlContent}</div>`;
