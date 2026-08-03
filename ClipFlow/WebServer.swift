@@ -1,6 +1,8 @@
 import Foundation
 import Network
 import AppKit
+import ImageIO
+import CoreGraphics
 
 class WebServer {
     private var listener: NWListener?
@@ -33,6 +35,15 @@ class WebServer {
                 self?.handleNewConnection(connection)
             }
             listener?.start(queue: DispatchQueue.global(qos: .userInitiated))
+
+            // 剪贴板新增时推送 SSE，驱动前端实时刷新
+            NotificationCenter.default.addObserver(
+                forName: Notification.Name("ClipFlowItemAdded"),
+                object: nil,
+                queue: nil
+            ) { [weak self] _ in
+                self?.broadcastSSE(event: "update")
+            }
         } catch {
             print("Failed to start server: \(error)")
         }
@@ -136,21 +147,16 @@ class WebServer {
     }
 
     private func handleSSEEvents(connection: NWConnection) {
-        let headers = """
-        HTTP/1.1 200 OK
-        Content-Type: text/event-stream
-        Cache-Control: no-cache
-        Connection: keep-alive
-        Access-Control-Allow-Origin: *
-        
-        data: {"type":"connected"}
-        
-        
-        """
-        if let data = headers.data(using: .utf8) {
-            connection.send(content: data, completion: .idempotent)
-            sseConnections.append(connection)
-        }
+        let headers: [(String, String)] = [
+            ("Content-Type", "text/event-stream"),
+            ("Cache-Control", "no-cache"),
+            ("Connection", "keep-alive"),
+            ("Access-Control-Allow-Origin", "*")
+        ]
+        var payload = httpHeader(status: 200, reason: "OK", headers: headers)
+        payload.append(contentsOf: Data("data: {\"type\":\"connected\"}\n\n".utf8))
+        connection.send(content: payload, completion: .idempotent)
+        sseConnections.append(connection)
     }
 
     func broadcastSSE(event: String) {
@@ -561,6 +567,77 @@ class WebServer {
         }
     }
 
+    /// Build HTTP/1.1 headers with mandatory CRLF and blank line before body.
+    /// Swift multiline strings only emit LF, which breaks binary responses (e.g. PNG)
+    /// because clients cannot locate the end of headers once the body starts with 0x89.
+    private func httpHeader(status: Int, reason: String, headers: [(String, String)]) -> Data {
+        var lines: [String] = ["HTTP/1.1 \(status) \(reason)"]
+        lines.append(contentsOf: headers.map { "\($0.0): \($0.1)" })
+        let text = lines.joined(separator: "\r\n") + "\r\n\r\n"
+        return Data(text.utf8)
+    }
+
+    private func sendBinary(status: Int, reason: String, contentType: String, body: Data, connection: NWConnection, extraHeaders: [(String, String)] = []) {
+        var headers: [(String, String)] = [
+            ("Access-Control-Allow-Origin", "*"),
+            ("Content-Type", contentType),
+            ("Content-Length", "\(body.count)"),
+            ("Cache-Control", "private, max-age=60")
+        ]
+        headers.append(contentsOf: extraHeaders)
+        let payload = httpHeader(status: status, reason: reason, headers: headers) + body
+        connection.send(content: payload, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    private func detectImageContentType(_ data: Data) -> String {
+        if data.count >= 8, data[0] == 0x89, data[1] == 0x50, data[2] == 0x4E, data[3] == 0x47 {
+            return "image/png"
+        }
+        if data.count >= 3, data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF {
+            return "image/jpeg"
+        }
+        if data.count >= 6 {
+            let sig6 = String(data: data.prefix(6), encoding: .ascii) ?? ""
+            if sig6 == "GIF87a" || sig6 == "GIF89a" { return "image/gif" }
+        }
+        if data.count >= 2, data[0] == 0x49, data[1] == 0x49 { return "image/tiff" }
+        if data.count >= 2, data[0] == 0x4D, data[1] == 0x4D { return "image/tiff" }
+        if data.count >= 12 {
+            let brand = String(data: data[4..<8], encoding: .ascii) ?? ""
+            if brand == "ftyp" { return "image/heic" }
+        }
+        return "application/octet-stream"
+    }
+
+    private func convertToPNG(_ data: Data) -> Data? {
+        // Prefer ImageIO for fidelity
+        if let src = CGImageSourceCreateWithData(data as CFData, nil),
+           CGImageSourceGetCount(src) > 0 {
+            let uti = CGImageSourceGetType(src) as String?
+            // Already PNG — return original bytes
+            if uti == "public.png" { return data }
+            if let cgImage = CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCache: true] as CFDictionary) {
+                let out = NSMutableData()
+                if let dest = CGImageDestinationCreateWithData(out, "public.png" as CFString, 1, nil) {
+                    CGImageDestinationAddImage(dest, cgImage, nil)
+                    if CGImageDestinationFinalize(dest) {
+                        return out as Data
+                    }
+                }
+            }
+        }
+        // Fallback via NSBitmapImageRep
+        if let image = NSImage(data: data),
+           let tiff = image.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let converted = rep.representation(using: .png, properties: [:]) {
+            return converted
+        }
+        return nil
+    }
+
     private func sendImage(path: String, connection: NWConnection) {
         // 解析 URL 查询参数 id
         guard let comps = URLComponents(string: "http://localhost\(path)"),
@@ -574,26 +651,19 @@ class WebServer {
                 self?.sendErrorResponse(connection: connection, status: 404, message: "Not Found")
                 return
             }
-            
-            var pngData: Data = data
-            if let image = NSImage(data: data),
-               let tiff = image.tiffRepresentation,
-               let rep = NSBitmapImageRep(data: tiff),
-               let converted = rep.representation(using: .png, properties: [:]) {
-                pngData = converted
+
+            // Normalize to PNG when possible so browsers always get a decodable image/*
+            let body: Data
+            let contentType: String
+            if let png = self.convertToPNG(data) {
+                body = png
+                contentType = "image/png"
+            } else {
+                body = data
+                contentType = self.detectImageContentType(data)
             }
-            
-            let header = """
-            HTTP/1.1 200 OK
-            Access-Control-Allow-Origin: *
-            Content-Type: image/png
-            Content-Length: \(pngData.count)
-            
-            """
-            let full = (header.data(using: .utf8) ?? Data()) + pngData
-            connection.send(content: full, completion: .contentProcessed { _ in
-                connection.cancel()
-            })
+
+            self.sendBinary(status: 200, reason: "OK", contentType: contentType, body: body, connection: connection)
         }
     }
     
@@ -618,7 +688,21 @@ class WebServer {
     }
     
     private func sendResponse(_ response: String, connection: NWConnection) {
-        guard let data = response.data(using: .utf8) else {
+        // Normalize any LF-only HTTP headers (from Swift multiline strings) to CRLF
+        // so browsers and curl parse headers/body boundary correctly.
+        let normalized: String
+        if let range = response.range(of: "\n\n") {
+            let headerPart = String(response[..<range.lowerBound]).replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n")
+            let bodyPart = String(response[range.upperBound...])
+            normalized = headerPart + "\r\n\r\n" + bodyPart
+        } else if let range = response.range(of: "\r\n\r\n") {
+            normalized = response
+            _ = range
+        } else {
+            normalized = response.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n")
+        }
+
+        guard let data = normalized.data(using: .utf8) else {
             connection.cancel()
             return
         }

@@ -71,7 +71,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
             }
         case .image:
             if let ocr = ocrText, !ocr.isEmpty {
-                return String(ocr.prefix(100))
+                // Keep a longer preview so OCR is not mistaken as truncated in list UI
+                return String(ocr.prefix(500))
             }
             return "Image"
         case .file:

@@ -228,7 +228,7 @@
     }
 
     .card-content-area {
-      max-height: 200px;
+      max-height: 360px;
       overflow-y: auto;
       font-size: 14px;
       line-height: 1.6;
@@ -406,7 +406,7 @@
 
       const filtered = clips.filter(item => {
         const matchType = currentFilter === 'all' || item.type === currentFilter;
-        const text = (item.textContent || item.preview || '').toLowerCase();
+        const text = (item.textContent || item.ocrText || item.preview || '').toLowerCase();
         const matchQuery = !query || text.includes(query);
         return matchType && matchQuery;
       });
@@ -425,7 +425,7 @@
         let contentHtml = '';
 
         if (item.type === 'image') {
-          contentHtml = `<img class="card-image-preview" src="http://localhost:8080/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" />`;
+          contentHtml = `<img class="card-image-preview" src="/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" onerror="this.style.display=\'none\'" />`;
           const ocrText = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
           if (ocrText) {
             contentHtml += `<div style="margin-top: 12px; font-size: 13px; color: var(--md-sys-color-on-primary-container); background: var(--md-sys-color-primary-container); padding: 10px 14px; border-radius: 12px; border: 1px solid var(--md-sys-color-outline-variant); word-break: break-word;"><span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle; margin-right: 4px;">find_in_page</span> <b>OCR 识别结果:</b><br>${escapeHtml(ocrText)}</div>`;
