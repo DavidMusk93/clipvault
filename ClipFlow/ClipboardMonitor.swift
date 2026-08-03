@@ -9,10 +9,12 @@ class ClipboardMonitor: ObservableObject {
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private let pasteboard = NSPasteboard.general
+    private let database: DatabaseManager?
     
     private let monitorQueue = DispatchQueue(label: "com.clipflow.monitor", qos: .userInitiated)
     
-    init() {
+    init(database: DatabaseManager? = nil) {
+        self.database = database
         lastChangeCount = pasteboard.changeCount
     }
     
@@ -37,14 +39,15 @@ class ClipboardMonitor: ObservableObject {
         guard currentChangeCount != lastChangeCount else { return }
         
         lastChangeCount = currentChangeCount
-        LogManager.shared.write("[Monitor] Detected change. Count: \(currentChangeCount)")
         
         monitorQueue.async { [weak self] in
             guard let self = self, let item = self.createClipboardItem() else {
-                LogManager.shared.write("[Monitor] Failed to create item")
                 return
             }
-            LogManager.shared.write("[Monitor] Created item: \(item.type) from \(item.sourceApp ?? "unknown")")
+            
+            // 存入 DuckDB 数据库并触发 iCloud 同步
+            self.database?.saveItem(item)
+            iCloudSyncManager.shared.syncItemToCloud(item)
             
             DispatchQueue.main.async {
                 self.lastItem = item
