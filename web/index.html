@@ -3,142 +3,175 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ClipView - 现代剪切板 Web 服务</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css" />
+  <title>ClipView - Google Material 3 剪切板 Web 服务</title>
+  <!-- Google Fonts: Google Sans / Roboto & Material Symbols Outlined -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+  
+  <!-- Highlight.js for Syntax Highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/tokyo-night-dark.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+
   <style>
+    /* Google Material Design 3 (Material You) Design Tokens */
     :root {
-      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-      --card-bg: rgba(30, 41, 59, 0.7);
-      --card-hover-bg: rgba(45, 61, 88, 0.85);
-      --card-border: rgba(255, 255, 255, 0.1);
-      --text-primary: #f8fafc;
-      --text-secondary: #94a3b8;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
-      --accent-glow: rgba(99, 102, 241, 0.35);
-      --success: #10b981;
-      --danger: #ef4444;
-      --radius: 16px;
-      --glass-blur: blur(12px);
+      --md-sys-color-background: #141218;
+      --md-sys-color-on-background: #e6e1e5;
+      --md-sys-color-surface: #1d1b20;
+      --md-sys-color-surface-container: #2b2930;
+      --md-sys-color-surface-container-high: #36343b;
+      --md-sys-color-primary: #d0bcff;
+      --md-sys-color-on-primary: #381e72;
+      --md-sys-color-primary-container: #4f378b;
+      --md-sys-color-on-primary-container: #e8def8;
+      --md-sys-color-secondary: #ccc2dc;
+      --md-sys-color-secondary-container: #4a4458;
+      --md-sys-color-on-secondary-container: #e8def8;
+      --md-sys-color-error: #f2b8b5;
+      --md-sys-color-error-container: #8c1d18;
+      --md-sys-color-on-error-container: #f9dedc;
+      --md-sys-color-outline: #938f99;
+      --md-sys-color-outline-variant: #49454f;
+
+      --md-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.15), 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+      --md-elevation-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.15), 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+      --md-elevation-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.15), 0px 1px 3px 0px rgba(0, 0, 0, 0.3);
+
+      --md-shape-corner-full: 9999px;
+      --md-shape-corner-extra-large: 28px;
+      --md-shape-corner-large: 16px;
+      --md-shape-corner-medium: 12px;
+      --md-shape-corner-small: 8px;
     }
 
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
     body {
-      background: var(--bg-gradient);
-      color: var(--text-primary);
+      background-color: var(--md-sys-color-background);
+      color: var(--md-sys-color-on-background);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
     }
 
-    header {
+    /* Google Top App Bar & Search Container */
+    .top-app-bar {
       position: sticky;
       top: 0;
       z-index: 100;
-      background: rgba(15, 23, 42, 0.8);
-      backdrop-filter: var(--glass-blur);
-      border-bottom: 1px solid var(--card-border);
-      padding: 16px 32px;
+      background-color: var(--md-sys-color-surface);
+      padding: 16px 24px;
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      box-shadow: var(--md-elevation-1);
     }
 
-    .brand {
+    .brand-title {
       display: flex;
       align-items: center;
       gap: 12px;
     }
 
-    .brand-icon {
-      width: 40px;
-      height: 40px;
-      background: linear-gradient(135deg, #6366f1, #a855f7);
-      border-radius: 12px;
+    .brand-logo {
+      width: 44px;
+      height: 44px;
+      border-radius: var(--md-shape-corner-medium);
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
       display: flex;
       align-items: center;
       justify-content: center;
+    }
+
+    .brand-logo .material-symbols-outlined {
+      font-size: 26px;
+    }
+
+    .brand-title h1 {
       font-size: 20px;
-      box-shadow: 0 0 16px var(--accent-glow);
+      font-weight: 500;
+      color: var(--md-sys-color-on-background);
+      letter-spacing: -0.2px;
     }
 
-    .brand h1 {
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-    }
-
-    .search-bar {
-      position: relative;
-      width: 380px;
-    }
-
-    .search-bar input {
-      width: 100%;
-      padding: 12px 16px 12px 42px;
-      border-radius: 12px;
-      border: 1px solid var(--card-border);
-      background: rgba(30, 41, 59, 0.8);
-      color: var(--text-primary);
-      font-size: 14px;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .search-bar input:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 4px var(--accent-glow);
-      background: rgba(30, 41, 59, 1);
-    }
-
-    .search-bar i {
-      position: absolute;
-      left: 14px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-secondary);
-    }
-
-    .filters {
+    /* Google Material 3 Search Bar */
+    .m3-search-bar {
+      background-color: var(--md-sys-color-surface-container-high);
+      border-radius: var(--md-shape-corner-full);
+      padding: 8px 20px;
       display: flex;
-      gap: 8px;
-      padding: 16px 32px;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      max-width: 480px;
+      transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .m3-search-bar:focus-within {
+      background-color: var(--md-sys-color-surface-container);
+      box-shadow: 0 0 0 2px var(--md-sys-color-primary);
+    }
+
+    .m3-search-bar input {
+      border: none;
+      background: transparent;
+      outline: none;
+      color: var(--md-sys-color-on-background);
+      font-size: 15px;
+      width: 100%;
+    }
+
+    .m3-search-bar .material-symbols-outlined {
+      color: var(--md-sys-color-outline);
+    }
+
+    /* Material 3 Chips Container */
+    .chip-group {
+      padding: 16px 24px;
+      display: flex;
+      gap: 10px;
       overflow-x: auto;
     }
 
-    .filter-btn {
-      padding: 8px 16px;
-      border-radius: 20px;
-      border: 1px solid var(--card-border);
-      background: rgba(30, 41, 59, 0.5);
-      color: var(--text-secondary);
-      font-size: 13px;
+    .m3-chip {
+      height: 36px;
+      padding: 0 16px;
+      border-radius: var(--md-shape-corner-small);
+      border: 1px solid var(--md-sys-color-outline);
+      background-color: transparent;
+      color: var(--md-sys-color-on-background);
+      font-size: 14px;
       font-weight: 500;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 6px;
-      transition: all 0.2s;
+      gap: 8px;
+      transition: all 0.2s ease;
     }
 
-    .filter-btn.active, .filter-btn:hover {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
-      box-shadow: 0 2px 10px var(--accent-glow);
+    .m3-chip:hover {
+      background-color: rgba(232, 222, 248, 0.08);
     }
 
+    .m3-chip.active {
+      background-color: var(--md-sys-color-secondary-container);
+      color: var(--md-sys-color-on-secondary-container);
+      border-color: transparent;
+    }
+
+    /* Grid & Cards */
     main {
       flex: 1;
-      padding: 16px 32px 32px;
+      padding: 8px 24px 32px;
     }
 
     .grid {
@@ -147,201 +180,197 @@
       gap: 20px;
     }
 
-    .card {
-      background: var(--card-bg);
-      backdrop-filter: var(--glass-blur);
-      border: 1px solid var(--card-border);
-      border-radius: var(--radius);
-      padding: 18px;
+    /* Material 3 Card */
+    .m3-card {
+      background-color: var(--md-sys-color-surface-container);
+      border-radius: var(--md-shape-corner-extra-large);
+      padding: 20px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      gap: 12px;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      position: relative;
-      overflow: hidden;
+      gap: 16px;
+      transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1);
+      box-shadow: var(--md-elevation-1);
     }
 
-    .card:hover {
-      background: var(--card-hover-bg);
-      transform: translateY(-4px);
-      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
-      border-color: rgba(255, 255, 255, 0.2);
+    .m3-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--md-elevation-2);
+      background-color: var(--md-sys-color-surface-container-high);
     }
 
-    .card-meta {
+    .card-header-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
 
-    .badge {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      padding: 4px 10px;
-      border-radius: 8px;
-      background: rgba(99, 102, 241, 0.2);
-      color: #a5b4fc;
-      border: 1px solid rgba(99, 102, 241, 0.3);
-    }
-
-    .time {
+    .m3-badge {
       font-size: 12px;
-      color: var(--text-secondary);
+      font-weight: 500;
+      padding: 4px 12px;
+      border-radius: var(--md-shape-corner-small);
+      background-color: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
 
-    .card-body {
-      max-height: 200px;
+    .card-time {
+      font-size: 12px;
+      color: var(--md-sys-color-outline);
+    }
+
+    .card-content-area {
+      max-height: 180px;
       overflow-y: auto;
       font-size: 14px;
-      line-height: 1.6;
-      word-break: break-word;
+      line-height: 1.5;
     }
 
-    .card-body pre {
-      border-radius: 8px;
-      padding: 10px;
-      overflow-x: auto;
-      background: #1e1e1e !important;
+    .card-content-area pre code {
+      border-radius: var(--md-shape-corner-medium);
+      font-size: 13px;
+      padding: 12px;
     }
 
-    .card-img {
+    .card-image-preview {
       width: 100%;
-      border-radius: 10px;
-      max-height: 180px;
+      border-radius: var(--md-shape-corner-large);
+      max-height: 160px;
       object-fit: cover;
     }
 
-    .card-actions {
+    .card-actions-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      padding-top: 10px;
+      border-top: 1px solid var(--md-sys-color-outline-variant);
+      padding-top: 12px;
     }
 
-    .btn {
-      padding: 6px 14px;
-      border-radius: 8px;
-      border: 1px solid var(--card-border);
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text-primary);
+    .source-tag {
       font-size: 12px;
+      color: var(--md-sys-color-outline);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* M3 Button */
+    .m3-btn {
+      height: 36px;
+      padding: 0 16px;
+      border-radius: var(--md-shape-corner-full);
+      border: none;
       font-weight: 500;
+      font-size: 13px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s;
+      transition: background-color 0.2s;
     }
 
-    .btn:hover {
-      background: var(--accent);
-      color: white;
-      border-color: var(--accent);
+    .m3-btn-filled {
+      background-color: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
     }
 
-    .btn-danger:hover {
-      background: var(--danger);
-      border-color: var(--danger);
+    .m3-btn-filled:hover {
+      background-color: #e8def8;
     }
 
-    /* Modal Styling */
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.7);
-      backdrop-filter: var(--glass-blur);
-      display: none;
+    .m3-btn-icon-only {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border-radius: var(--md-shape-corner-full);
+      background: transparent;
+      color: var(--md-sys-color-error);
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      z-index: 1000;
     }
 
-    .modal-overlay.active {
-      display: flex;
+    .m3-btn-icon-only:hover {
+      background-color: rgba(242, 184, 181, 0.12);
     }
 
-    .modal {
-      background: #1e293b;
-      border: 1px solid var(--card-border);
-      border-radius: 20px;
-      width: 90%;
-      max-width: 700px;
-      max-height: 85vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-    }
-
-    .modal-header {
-      padding: 16px 24px;
-      border-bottom: 1px solid var(--card-border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .modal-body {
-      padding: 24px;
-      overflow-y: auto;
-      flex: 1;
-    }
-
-    .toast {
+    /* Google Snackbar (Toast) */
+    .m3-snackbar {
       position: fixed;
       bottom: 24px;
-      right: 24px;
-      background: #10b981;
-      color: white;
-      padding: 12px 24px;
-      border-radius: 12px;
+      left: 50%;
+      transform: translateX(-50%) translateY(40px);
+      background-color: var(--md-sys-color-surface-container-high);
+      color: var(--md-sys-color-on-background);
+      padding: 14px 24px;
+      border-radius: var(--md-shape-corner-medium);
+      box-shadow: var(--md-elevation-3);
+      display: flex;
+      align-items: center;
+      gap: 12px;
       font-size: 14px;
-      font-weight: 600;
-      box-shadow: 0 10px 25px rgba(16, 185, 129, 0.4);
       opacity: 0;
-      transform: translateY(20px);
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
       z-index: 2000;
     }
 
-    .toast.show {
+    .m3-snackbar.show {
       opacity: 1;
-      transform: translateY(0);
+      transform: translateX(-50%) translateY(0);
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <div class="brand-icon"><i class="fa-solid fa-clipboard-list"></i></div>
-      <h1>ClipView Web</h1>
+  <!-- Top App Bar -->
+  <header class="top-app-bar">
+    <div class="brand-title">
+      <div class="brand-logo">
+        <span class="material-symbols-outlined">content_paste</span>
+      </div>
+      <h1>ClipView</h1>
     </div>
-    <div class="search-bar">
-      <i class="fa-solid fa-magnifying-glass"></i>
-      <input type="text" id="searchInput" placeholder="搜索剪切板历史 (包含 OCR 文字)..." />
+
+    <div class="m3-search-bar">
+      <span class="material-symbols-outlined">search</span>
+      <input type="text" id="searchInput" placeholder="搜索剪贴板历史与 OCR 文本..." />
     </div>
   </header>
 
-  <div class="filters">
-    <button class="filter-btn active" data-type="all"><i class="fa-solid fa-globe"></i> 全部</button>
-    <button class="filter-btn" data-type="text"><i class="fa-solid fa-font"></i> 纯文本</button>
-    <button class="filter-btn" data-type="html"><i class="fa-solid fa-code"></i> 富文本/HTML</button>
-    <button class="filter-btn" data-type="image"><i class="fa-solid fa-image"></i> 图片 (OCR)</button>
+  <!-- Material 3 Filter Chips -->
+  <div class="chip-group">
+    <button class="m3-chip active" data-type="all">
+      <span class="material-symbols-outlined">grid_view</span> 全部
+    </button>
+    <button class="m3-chip" data-type="text">
+      <span class="material-symbols-outlined">description</span> 纯文本
+    </button>
+    <button class="m3-chip" data-type="html">
+      <span class="material-symbols-outlined">code</span> 富文本/HTML
+    </button>
+    <button class="m3-chip" data-type="image">
+      <span class="material-symbols-outlined">image</span> 图片 OCR
+    </button>
   </div>
 
+  <!-- Content Grid -->
   <main>
     <div id="grid" class="grid">
-      <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--text-secondary);">
-        <i class="fa-solid fa-circle-notch fa-spin fa-2x"></i>
-        <p style="margin-top: 12px;">正在加载剪切板历史...</p>
+      <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--md-sys-color-outline);">
+        <span class="material-symbols-outlined fa-spin" style="font-size: 36px;">progress_activity</span>
+        <p style="margin-top: 12px;">正在加载剪贴板内容...</p>
       </div>
     </div>
   </main>
 
-  <div id="toast" class="toast"><i class="fa-solid fa-check-circle"></i> 已复制到系统剪切板！</div>
+  <!-- Google Snackbar Notification -->
+  <div id="snackbar" class="m3-snackbar">
+    <span class="material-symbols-outlined" style="color: var(--md-sys-color-primary);">check_circle</span>
+    <span id="snackbarText">已拷贝至系统剪贴板</span>
+  </div>
 
   <script>
     let clips = [];
@@ -371,9 +400,9 @@
 
       if (filtered.length === 0) {
         grid.innerHTML = `
-          <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--text-secondary);">
-            <i class="fa-solid fa-inbox fa-3x" style="margin-bottom: 16px; opacity: 0.5;"></i>
-            <p>暂无符合条件的剪切板历史记录</p>
+          <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--md-sys-color-outline);">
+            <span class="material-symbols-outlined" style="font-size: 48px; opacity: 0.5;">inbox</span>
+            <p style="margin-top: 12px;">没有匹配的剪贴板历史记录</p>
           </div>`;
         return;
       }
@@ -383,33 +412,38 @@
         let contentHtml = '';
 
         if (item.type === 'image') {
-          contentHtml = `<img class="card-img" src="http://localhost:8080/api/image?id=${item.id}" loading="lazy" />`;
+          contentHtml = `<img class="card-image-preview" src="http://localhost:8080/api/image?id=${item.id}" loading="lazy" />`;
           if (item.preview && item.preview !== 'Image') {
-            contentHtml += `<div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);"><i class="fa-solid fa-eye"></i> OCR: ${escapeHtml(item.preview)}</div>`;
+            contentHtml += `<div style="margin-top: 8px; font-size: 12px; color: var(--md-sys-color-outline);"><span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">visibility</span> OCR: ${escapeHtml(item.preview)}</div>`;
           }
         } else if (item.htmlContent) {
-          contentHtml = `<div style="background: #fff; color: #000; padding: 10px; border-radius: 8px; max-height: 160px; overflow: hidden;">${item.htmlContent}</div>`;
+          contentHtml = `<div style="background: #ffffff; color: #1c1b1f; padding: 12px; border-radius: 12px; max-height: 140px; overflow: hidden;">${item.htmlContent}</div>`;
         } else {
           contentHtml = `<pre><code>${escapeHtml(item.textContent || item.preview || '')}</code></pre>`;
         }
 
         return `
-          <div class="card">
-            <div class="card-meta">
-              <span class="badge"><i class="fa-solid fa-tag"></i> ${item.type}</span>
-              <span class="time">${timeStr}</span>
+          <div class="m3-card">
+            <div class="card-header-row">
+              <span class="m3-badge">
+                <span class="material-symbols-outlined" style="font-size: 14px;">label</span>
+                ${item.type}
+              </span>
+              <span class="card-time">${timeStr}</span>
             </div>
-            <div class="card-body">
+            <div class="card-content-area">
               ${contentHtml}
             </div>
-            <div class="card-actions">
-              <span style="font-size: 11px; color: var(--text-secondary);">${item.sourceApp ? '📱 ' + escapeHtml(item.sourceApp) : ''}</span>
+            <div class="card-actions-row">
+              <div class="source-tag">
+                ${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size: 14px;">apps</span> ${escapeHtml(item.sourceApp)}` : ''}
+              </div>
               <div style="display: flex; gap: 8px;">
-                <button class="btn" onclick="copyClip('${escapeAttribute(item.textContent || item.preview || '')}')">
-                  <i class="fa-solid fa-copy"></i> 复制到 Mac
+                <button class="m3-btn m3-btn-filled" onclick="copyClip('${escapeAttribute(item.textContent || item.preview || '')}')">
+                  <span class="material-symbols-outlined" style="font-size: 16px;">content_copy</span> 复制到 Mac
                 </button>
-                <button class="btn btn-danger" onclick="deleteClip('${item.id}')">
-                  <i class="fa-solid fa-trash"></i>
+                <button class="m3-btn-icon-only" onclick="deleteClip('${item.id}')">
+                  <span class="material-symbols-outlined">delete</span>
                 </button>
               </div>
             </div>
@@ -429,27 +463,27 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: text, type: 'text' })
         });
-        showToast('已成功写入 macOS 系统剪切板！');
+        showSnackbar('已成功写入 macOS 系统剪贴板！');
       } catch (err) {
-        showToast('写入剪切板失败');
+        showSnackbar('写入剪贴板失败');
       }
     }
 
     async function deleteClip(id) {
       try {
         await fetch(`http://localhost:8080/api/clips?id=${id}`, { method: 'DELETE' });
-        showToast('已删除记录');
+        showSnackbar('已删除剪贴板记录');
         fetchClips();
       } catch (err) {
-        showToast('删除失败');
+        showSnackbar('删除失败');
       }
     }
 
-    function showToast(msg) {
-      const toast = document.getElementById('toast');
-      toast.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${msg}`;
-      toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 2500);
+    function showSnackbar(msg) {
+      const snackbar = document.getElementById('snackbar');
+      document.getElementById('snackbarText').textContent = msg;
+      snackbar.classList.add('show');
+      setTimeout(() => snackbar.classList.remove('show'), 2500);
     }
 
     function escapeHtml(str) {
@@ -460,9 +494,9 @@
       return (str || '').replace(/"/g, '&quot;').replace(/'/g, "&#039;");
     }
 
-    document.querySelectorAll('.filter-btn').forEach(btn => {
+    document.querySelectorAll('.m3-chip').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.m3-chip').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentFilter = btn.getAttribute('data-type');
         render();
