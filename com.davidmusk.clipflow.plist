@@ -6,11 +6,7 @@
     <string>com.davidmusk.clipflow</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>swift</string>
-        <string>run</string>
-        <string>--package-path</string>
-        <string>/Users/<user>/Documents/trae_projects/recallfs/projects/ClipView</string>
+        <string>/Users/<user>/Documents/trae_projects/recallfs/projects/ClipView/.build/debug/ClipFlowServer</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
