@@ -84,6 +84,18 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
                 return url.absoluteString
             }
         case .rtf:
+            if let text = textContent, !text.isEmpty {
+                return String(text.prefix(200))
+            }
+            if let html = htmlContent, !html.isEmpty {
+                let plain = html.replacingOccurrences(
+                    of: "<[^>]+>",
+                    with: "",
+                    options: .regularExpression
+                )
+                let trimmed = plain.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return String(trimmed.prefix(200)) }
+            }
             return "Rich Text"
         case .pdf:
             return "PDF"

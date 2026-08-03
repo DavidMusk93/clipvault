@@ -312,11 +312,43 @@ class ClipboardMonitor: ObservableObject {
     }
 
     private func createRTFItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
-        guard let rtfData = getRTFData() else { return nil }
+        guard let rtfData = getRTFData(), !rtfData.isEmpty else { return nil }
+
+        // Convert RTF → plain + HTML so Web UI can render without RTF binary
+        var plain: String?
+        var html: String?
+        if let attr = try? NSAttributedString(
+            data: rtfData,
+            options: [.documentType: NSAttributedString.DocumentType.rtf],
+            documentAttributes: nil
+        ) {
+            let s = attr.string
+            if !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                plain = s
+            }
+            let range = NSRange(location: 0, length: attr.length)
+            if let htmlData = try? attr.data(
+                from: range,
+                documentAttributes: [
+                    .documentType: NSAttributedString.DocumentType.html,
+                    .characterEncoding: NSNumber(value: String.Encoding.utf8.rawValue)
+                ]
+            ), let htmlStr = String(data: htmlData, encoding: .utf8), !htmlStr.isEmpty {
+                html = htmlStr
+            }
+        }
+        // Notes often also puts public.utf8-plain-text on the pasteboard
+        if plain == nil || plain?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            plain = pasteboard.string(forType: .string)
+        }
+
         let hash = computeHash(for: rtfData)
         return ClipboardItem(
             timestamp: timestamp, type: .rtf, contentHash: hash,
-            rtfData: rtfData, sourceApp: sourceApp
+            textContent: plain,
+            rtfData: rtfData,
+            htmlContent: html,
+            sourceApp: sourceApp
         )
     }
 

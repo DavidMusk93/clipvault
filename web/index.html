@@ -404,6 +404,10 @@
 
     function clientFilter(items) {
       if (currentFilter === 'all') return items;
+      // 「富文本/HTML」chip also includes RTF (Notes etc.)
+      if (currentFilter === 'html') {
+        return items.filter(i => i.type === 'html' || i.type === 'rtf');
+      }
       return items.filter(i => i.type === currentFilter);
     }
 
@@ -518,6 +522,10 @@
         const plain = item.htmlContent.replace(/<[^>]+>/g, '').trim();
         const tiny = plain.length <= 80 ? ' is-tiny' : '';
         body = `<div class="snippet-html${tiny}">${item.htmlContent}</div>`;
+      } else if (item.type === 'rtf') {
+        const text = item.textContent || (item.preview && item.preview !== 'Rich Text' ? item.preview : '') || '（富文本无正文，请重新复制）';
+        const tiny = text.length <= 80 && !text.includes('\n') ? ' is-tiny' : '';
+        body = `<pre><code class="${tiny}">${esc(text)}</code></pre>`;
       } else {
         const text = item.textContent || item.preview || '';
         const tiny = text.length <= 80 && !text.includes('\n') ? ' is-tiny' : '';

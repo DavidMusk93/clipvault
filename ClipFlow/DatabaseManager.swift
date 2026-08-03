@@ -118,8 +118,17 @@ final class DatabaseManager: ObservableObject {
                     sqlite3_bind_text(stmt, 8, (urlStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 } else { sqlite3_bind_null(stmt, 8) }
 
-                sqlite3_bind_null(stmt, 9)
-                sqlite3_bind_null(stmt, 10)
+                if let rtfData = item.rtfData {
+                    rtfData.withUnsafeBytes { ptr in
+                        sqlite3_bind_blob(stmt, 9, ptr.baseAddress, Int32(rtfData.count), SQLITE_TRANSIENT)
+                    }
+                } else { sqlite3_bind_null(stmt, 9) }
+
+                if let pdfData = item.pdfData {
+                    pdfData.withUnsafeBytes { ptr in
+                        sqlite3_bind_blob(stmt, 10, ptr.baseAddress, Int32(pdfData.count), SQLITE_TRANSIENT)
+                    }
+                } else { sqlite3_bind_null(stmt, 10) }
 
                 if let html = item.htmlContent {
                     sqlite3_bind_text(stmt, 11, (html as NSString).utf8String, -1, SQLITE_TRANSIENT)
