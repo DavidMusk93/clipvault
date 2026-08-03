@@ -520,7 +520,24 @@
     document.getElementById('searchInput').addEventListener('input', render);
 
     fetchClips();
-    setInterval(fetchClips, 2500);
+
+    // SSE 实时推送，无缝订阅新剪贴板事件（免优雅轮询）
+    function setupSSE() {
+      const evtSource = new EventSource('http://localhost:8080/api/events');
+      evtSource.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === 'update') {
+            fetchClips();
+          }
+        } catch (err) {}
+      };
+      evtSource.onerror = () => {
+        evtSource.close();
+        setTimeout(setupSSE, 3000);
+      };
+    }
+    setupSSE();
   </script>
 </body>
 </html>

@@ -49,6 +49,7 @@ class ClipboardMonitor: ObservableObject {
             // 存入 DuckDB 数据库并触发 iCloud 同步
             self.database?.saveItem(item)
             iCloudSyncManager.shared.syncItemToCloud(item)
+            NotificationCenter.default.post(name: Notification.Name("ClipFlowItemAdded"), object: nil)
             
             DispatchQueue.main.async {
                 self.lastItem = item
@@ -82,13 +83,32 @@ class ClipboardMonitor: ObservableObject {
     }
 
     private func createImageItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
-        guard let image = getImage(), let imageData = image.tiffRepresentation else { return nil }
+        guard let imageData = getImageData() else { return nil }
         let ocrText = performOCR(on: imageData)
         let hash = computeHash(for: imageData)
         return ClipboardItem(
             timestamp: timestamp, type: .image, contentHash: hash,
             imageData: imageData, ocrText: ocrText, sourceApp: sourceApp
         )
+    }
+
+    private func getImageData() -> Data? {
+        if let pngData = pasteboard.data(forType: .png), !pngData.isEmpty { return pngData }
+        if let tiffData = pasteboard.data(forType: .tiff), !tiffData.isEmpty { return tiffData }
+        let jpegType = NSPasteboard.PasteboardType("public.jpeg")
+        if let jpegData = pasteboard.data(forType: jpegType), !jpegData.isEmpty { return jpegData }
+        if let image = pasteboard.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage,
+           let tiff = image.tiffRepresentation {
+            return tiff
+        }
+        if let urls = getFileURLs(), let first = urls.first {
+            let ext = first.pathExtension.lowercased()
+            if ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff"].contains(ext),
+               let fileData = try? Data(contentsOf: first) {
+                return fileData
+            }
+        }
+        return nil
     }
 
     private func performOCR(on imageData: Data) -> String? {
@@ -103,13 +123,18 @@ class ClipboardMonitor: ObservableObject {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
+        request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
         
         do {
             try requestHandler.perform([request])
-            guard let results = request.results else { return nil }
-            let recognizedStrings = results.compactMap { observation in
+            guard let results = request.results, !results.isEmpty else { return nil }
+            
+            // 按由上至下 (y 坐标降序) 严格排版 OCR 识别结果，保证中英文行完整不丢失
+            let sortedResults = results.sorted { $0.boundingBox.origin.y > $1.boundingBox.origin.y }
+            let recognizedStrings = sortedResults.compactMap { observation in
                 observation.topCandidates(1).first?.string
-            }
+            }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            
             return recognizedStrings.isEmpty ? nil : recognizedStrings.joined(separator: "\n")
         } catch {
             return nil

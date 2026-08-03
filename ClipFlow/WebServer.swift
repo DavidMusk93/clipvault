@@ -6,6 +6,7 @@ class WebServer {
     private var listener: NWListener?
     private let port: UInt16
     private let database: DatabaseManager
+    private var sseConnections: [NWConnection] = []
     
     var isRunning: Bool {
         listener != nil
@@ -127,8 +128,41 @@ class WebServer {
             sendItemsJSON(connection: connection)
         } else if path.hasPrefix("/api/image") {
             sendImage(path: path, connection: connection)
+        } else if path == "/api/events" {
+            handleSSEEvents(connection: connection)
         } else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+        }
+    }
+
+    private func handleSSEEvents(connection: NWConnection) {
+        let headers = """
+        HTTP/1.1 200 OK
+        Content-Type: text/event-stream
+        Cache-Control: no-cache
+        Connection: keep-alive
+        Access-Control-Allow-Origin: *
+        
+        data: {"type":"connected"}
+        
+        
+        """
+        if let data = headers.data(using: .utf8) {
+            connection.send(content: data, completion: .idempotent)
+            sseConnections.append(connection)
+        }
+    }
+
+    func broadcastSSE(event: String) {
+        let payload = "data: {\"type\":\"\(event)\"}\n\n"
+        guard let data = payload.data(using: .utf8) else { return }
+        
+        sseConnections.removeAll { conn in
+            if conn.state == .cancelled || conn.state == .failed(NWError.posix(.ECANCELED)) {
+                return true
+            }
+            conn.send(content: data, completion: .contentProcessed { _ in })
+            return false
         }
     }
 
