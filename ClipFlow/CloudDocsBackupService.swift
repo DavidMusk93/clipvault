@@ -1,12 +1,19 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 /// Personal-machine SOTA backup to **iCloud Drive (CloudDocs)** — no App iCloud entitlements.
 ///
+/// ## Strategy (minute-level, sparse versions)
+/// - **latest/** — rolling head; updated about every minute when dirty (sqlite3_backup).
+/// - **snapshots/** — sparse history; only every `snapshotEverySeconds`, max `keepSnapshots`.
+/// - Unchanged content (SHA256) → skip write (true no-op for iCloud upload).
+/// - Snapshot copy prefers APFS `clonefile` (CoW / near-incremental on disk).
+///
 /// ```
-/// ~/Library/Mobile Documents/com~apple~CloudDocs/ClipFlow/backup/
-///   latest/{clipflow.db, MANIFEST.json}
-///   snapshots/YYYYMMDD-HHmmss/{clipflow.db, MANIFEST.json}
+/// …/CloudDocs/ClipFlow/backup/
+///   latest/{clipflow.db, MANIFEST.json}     # always newest
+///   snapshots/YYYYMMDD-HHmmss/…            # few, timed
 ///   STATUS.json
 /// ```
 /// Local config: `~/Documents/ClipFlow/config/backup.json`
@@ -25,12 +32,19 @@ final class CloudDocsBackupService {
         return s
     }
 
+    /// Minute-level cadence + tight version budget.
     struct Config: Codable, Equatable {
         var enabled: Bool = true
-        var keepSnapshots: Int = 20
-        var throttleSeconds: Double = 3
-        var minIntervalSeconds: Double = 30
-        var maxIntervalSeconds: Double = 900
+        /// Named history dirs under snapshots/ (not counting latest/)
+        var keepSnapshots: Int = 5
+        /// Coalesce bursty clip writes before starting a backup
+        var throttleSeconds: Double = 60
+        /// Min gap between successive **latest** updates
+        var minIntervalSeconds: Double = 60
+        /// If still dirty, force latest update at least this often
+        var maxIntervalSeconds: Double = 300
+        /// Min gap between **named snapshots** (sparse history)
+        var snapshotEverySeconds: Double = 600
         static let `default` = Config()
     }
 
@@ -73,6 +87,10 @@ final class CloudDocsBackupService {
         var config: Config
         var scheme: String = "CloudDocs"
         var requiresAppEntitlement: Bool = false
+        /// Human policy summary for UI
+        var policy: String = ""
+        var lastSnapshotAt: String? = nil
+        var snapshotCount: Int = 0
     }
 
     private let database: DatabaseManager
@@ -88,10 +106,13 @@ final class CloudDocsBackupService {
     private var throttleWorkItem: DispatchWorkItem?
     private var maxIntervalTimer: DispatchSourceTimer?
     private var lastContentFingerprint: String?
+    private var lastSnapshotUnix: Double?
 
     private init(database: DatabaseManager) {
         self.database = database
         self.config = Self.loadConfig()
+        self.migrateConfigIfNeeded()
+        self.lastSnapshotUnix = self.newestSnapshotUnix()
         NotificationCenter.default.addObserver(
             forName: Self.itemAddedNotification,
             object: nil,
@@ -100,12 +121,65 @@ final class CloudDocsBackupService {
             self?.markDirty(reason: "item_added")
         }
         startMaxIntervalWatchdog()
+        // Prune excess versions from older chatty defaults
+        queue.async { [weak self] in
+            self?.pruneSnapshots(keep: self?.config.keepSnapshots ?? 5)
+            self?.publishStatus()
+        }
         if config.enabled {
-            queue.asyncAfter(deadline: .now() + 2) { [weak self] in
+            queue.asyncAfter(deadline: .now() + 5) { [weak self] in
                 self?.markDirty(reason: "startup")
             }
         }
-        print("[Backup] CloudDocs service ready · enabled=\(config.enabled) · root=\(backupRootURL?.path ?? "nil")")
+        print("[Backup] CloudDocs ready · enabled=\(config.enabled) · keep=\(config.keepSnapshots) · latest≥\(Int(config.minIntervalSeconds))s · snap≥\(Int(config.snapshotEverySeconds))s · root=\(backupRootURL?.path ?? "nil")")
+    }
+
+    /// Tighten chatty early defaults (keep=20, throttle=3s) to minute-level policy.
+    private func migrateConfigIfNeeded() {
+        var c = config
+        var changed = false
+        // Old defaults were keep=20 / throttle=3 / min=30 / max=900
+        if c.keepSnapshots > 8 {
+            c.keepSnapshots = 5
+            changed = true
+        }
+        if c.throttleSeconds < 30 {
+            c.throttleSeconds = 60
+            changed = true
+        }
+        if c.minIntervalSeconds < 45 {
+            c.minIntervalSeconds = 60
+            changed = true
+        }
+        if c.maxIntervalSeconds > 600 || c.maxIntervalSeconds < c.minIntervalSeconds {
+            c.maxIntervalSeconds = 300
+            changed = true
+        }
+        // snapshotEverySeconds may be missing in old JSON → decode uses 0 for missing Double? 
+        // With default in struct, missing key gets 0 for non-optional without custom decode...
+        // Actually Codable synthesizes: missing key fails entire decode OR uses default only with init(from) 
+        // For synthesized Codable, missing keys cause decode failure → loadConfig falls back to default Config().
+        // If file exists with old keys only, decode succeeds and snapshotEverySeconds gets 0!
+        if c.snapshotEverySeconds < 120 {
+            c.snapshotEverySeconds = 600
+            changed = true
+        }
+        c = Self.clamp(c)
+        if changed {
+            config = c
+            saveConfig()
+            print("[Backup] migrated config → keep=\(c.keepSnapshots) min=\(Int(c.minIntervalSeconds))s snapEvery=\(Int(c.snapshotEverySeconds))s")
+        }
+    }
+
+    private static func clamp(_ c: Config) -> Config {
+        var x = c
+        x.keepSnapshots = max(2, min(x.keepSnapshots, 10))
+        x.throttleSeconds = max(30, min(x.throttleSeconds, 600))
+        x.minIntervalSeconds = max(30, min(x.minIntervalSeconds, 600))
+        x.maxIntervalSeconds = max(x.minIntervalSeconds, min(x.maxIntervalSeconds, 3600))
+        x.snapshotEverySeconds = max(x.minIntervalSeconds, min(x.snapshotEverySeconds, 86400))
+        return x
     }
 
     // MARK: Paths
@@ -177,11 +251,11 @@ final class CloudDocsBackupService {
             if let v = body["minIntervalSeconds"] as? NSNumber { self.config.minIntervalSeconds = v.doubleValue }
             if let v = body["maxIntervalSeconds"] as? NSNumber { self.config.maxIntervalSeconds = v.doubleValue }
 
-            self.config.keepSnapshots = max(3, min(self.config.keepSnapshots, 100))
-            self.config.throttleSeconds = max(1, self.config.throttleSeconds)
-            self.config.minIntervalSeconds = max(5, self.config.minIntervalSeconds)
-            self.config.maxIntervalSeconds = max(self.config.minIntervalSeconds, self.config.maxIntervalSeconds)
+            if let v = body["snapshotEverySeconds"] as? Double { self.config.snapshotEverySeconds = v }
+            if let v = body["snapshotEverySeconds"] as? NSNumber { self.config.snapshotEverySeconds = v.doubleValue }
+            self.config = Self.clamp(self.config)
             self.saveConfig()
+            self.pruneSnapshots(keep: self.config.keepSnapshots)
             if self.config.enabled { self.markDirtyLocked(reason: "config") }
             let c = self.config
             self.publishStatus()
@@ -192,7 +266,8 @@ final class CloudDocsBackupService {
     func runNow(completion: ((Bool, String) -> Void)? = nil) {
         queue.async {
             self.dirty = true
-            self.performBackup(force: true) { ok, msg in
+            // Manual: always refresh latest + take a named snapshot
+            self.performBackup(force: true, wantSnapshot: true) { ok, msg in
                 DispatchQueue.main.async { completion?(ok, msg) }
             }
         }
@@ -296,6 +371,7 @@ final class CloudDocsBackupService {
     private func performBackup(
         force: Bool,
         snapshotOverrideId: String? = nil,
+        wantSnapshot: Bool = false,
         completion: ((Bool, String) -> Void)?
     ) {
         if inProgress {
@@ -413,22 +489,33 @@ final class CloudDocsBackupService {
                             )
                             try? JSONEncoder.pretty.encode(manifest).write(to: latestManifest, options: .atomic)
 
-                            let snapId = snapshotOverrideId ?? Self.timestampId()
-                            let snapDir = snaps.appendingPathComponent(snapId, isDirectory: true)
-                            self.lastPhase = "snapshot:\(snapId)"
-                            do {
-                                try self.fm.createDirectory(at: snapDir, withIntermediateDirectories: true)
-                                let snapDB = snapDir.appendingPathComponent("clipflow.db")
-                                if self.fm.fileExists(atPath: snapDB.path) {
-                                    try self.fm.removeItem(at: snapDB)
+                            // Sparse named snapshots (not every latest update)
+                            var snapId: String? = nil
+                            let shouldSnap =
+                                snapshotOverrideId != nil
+                                || wantSnapshot
+                                || self.shouldCreateNamedSnapshot(now: created.timeIntervalSince1970)
+                            if shouldSnap {
+                                snapId = snapshotOverrideId ?? Self.timestampId()
+                                let snapDir = snaps.appendingPathComponent(snapId!, isDirectory: true)
+                                self.lastPhase = "snapshot:\(snapId!)"
+                                do {
+                                    try self.fm.createDirectory(at: snapDir, withIntermediateDirectories: true)
+                                    let snapDB = snapDir.appendingPathComponent("clipflow.db")
+                                    if self.fm.fileExists(atPath: snapDB.path) {
+                                        try self.fm.removeItem(at: snapDB)
+                                    }
+                                    // Prefer APFS clonefile (CoW) — cheap "incremental" on disk
+                                    try self.cloneOrCopy(from: latestDB, to: snapDB)
+                                    try JSONEncoder.pretty.encode(manifest).write(
+                                        to: snapDir.appendingPathComponent("MANIFEST.json"),
+                                        options: .atomic
+                                    )
+                                    self.lastSnapshotUnix = created.timeIntervalSince1970
+                                } catch {
+                                    self.lastError = "latest 成功，快照失败: \(error.localizedDescription)"
+                                    snapId = nil
                                 }
-                                try self.fm.copyItem(at: latestDB, to: snapDB)
-                                try JSONEncoder.pretty.encode(manifest).write(
-                                    to: snapDir.appendingPathComponent("MANIFEST.json"),
-                                    options: .atomic
-                                )
-                            } catch {
-                                self.lastError = "latest 成功，快照失败: \(error.localizedDescription)"
                             }
 
                             self.pruneSnapshots(keep: self.config.keepSnapshots)
@@ -442,7 +529,8 @@ final class CloudDocsBackupService {
                             }
                             self.writeStatusFile()
                             self.publishStatus()
-                            let msg = "已备份到 iCloud Drive · \(snapId) · \(Self.byteString(size))"
+                            let snapNote = snapId.map { "快照 \($0)" } ?? "仅 latest"
+                            let msg = "已备份 · \(snapNote) · \(Self.byteString(size))"
                             print("[Backup] \(msg)")
                             completion?(true, msg)
                         }
@@ -452,7 +540,40 @@ final class CloudDocsBackupService {
         }
     }
 
+    private func shouldCreateNamedSnapshot(now: Double) -> Bool {
+        guard let last = lastSnapshotUnix ?? newestSnapshotUnix() else {
+            return true // none yet
+        }
+        return now - last >= config.snapshotEverySeconds
+    }
+
+    private func newestSnapshotUnix() -> Double? {
+        guard let snaps = snapshotsDir else { return nil }
+        let dirs = ((try? fm.contentsOfDirectory(at: snaps, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])) ?? [])
+        var best: Double = 0
+        for dir in dirs {
+            let man = readManifest(dir.appendingPathComponent("MANIFEST.json"))
+            if let u = man?.createdAtUnix, u > best { best = u }
+            else if let d = (try? dir.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate {
+                best = max(best, d.timeIntervalSince1970)
+            }
+        }
+        return best > 0 ? best : nil
+    }
+
+    /// APFS clonefile when possible (block-level CoW ≈ incremental on same volume).
+    private func cloneOrCopy(from src: URL, to dst: URL) throws {
+        if fm.fileExists(atPath: dst.path) {
+            try fm.removeItem(at: dst)
+        }
+        let rc = clonefile(src.path, dst.path, 0)
+        if rc == 0 { return }
+        // Fallback full copy (iCloud will still delta-sync when possible)
+        try fm.copyItem(at: src, to: dst)
+    }
+
     private func pruneSnapshots(keep: Int) {
+
         guard let snaps = snapshotsDir else { return }
         let dirs = ((try? fm.contentsOfDirectory(
             at: snaps,
@@ -510,6 +631,10 @@ final class CloudDocsBackupService {
             }
         }
         let lastISO = lastSuccessUnix.map { ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: $0)) }
+        let lastSnapISO = (lastSnapshotUnix ?? newestSnapshotUnix()).map {
+            ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: $0))
+        }
+        let policy = "latest 约每 \(Int(config.minIntervalSeconds))s；命名快照 ≥\(Int(config.snapshotEverySeconds))s；最多保留 \(config.keepSnapshots) 个"
         return Status(
             enabled: config.enabled,
             cloudDocsAvailable: cloud != nil,
@@ -523,7 +648,10 @@ final class CloudDocsBackupService {
             dirty: dirty,
             latest: latestInfo,
             snapshots: snaps,
-            config: config
+            config: config,
+            policy: policy,
+            lastSnapshotAt: lastSnapISO,
+            snapshotCount: snaps.count
         )
     }
 

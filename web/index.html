@@ -274,8 +274,14 @@
     </header>
     <div class="backup-body">
       <p style="margin-bottom:12px;color:var(--md-outline)">
-        个人本机方案：写入 <b>iCloud 云盘 / ClipFlow / backup</b>，无需 App 签名。使用 SQLite 在线备份（sqlite3_backup），安全一致。
+        个人本机 · <b>iCloud 云盘 / ClipFlow / backup</b>。无需 App 签名。
+        <br><b>latest</b> 约每分钟滚动更新（内容未变则跳过）；
+        <b>命名快照</b> 稀疏保留（默认 ≥10 分钟一个、最多 5 个）。
+        底层 <code>sqlite3_backup</code>；快照优先 APFS clonefile（写时复制）。
       </p>
+      <div class="backup-row"><span class="backup-label">策略</span><span class="backup-value" id="bkPolicy">—</span></div>
+      <div class="backup-row"><span class="backup-label">命名快照数</span><span class="backup-value" id="bkSnapCount">—</span></div>
+      <div class="backup-row"><span class="backup-label">上次命名快照</span><span class="backup-value" id="bkLastSnap">—</span></div>
       <div class="backup-row">
         <div>
           <div style="font-weight:600">启用自动备份</div>
@@ -292,7 +298,7 @@
         <button type="button" id="bkRunNow">立即备份</button>
         <button type="button" class="secondary" id="bkRefresh">刷新状态</button>
       </div>
-      <h3 style="font-size:14px;font-weight:600;margin-top:8px">快照</h3>
+      <h3 style="font-size:14px;font-weight:600;margin-top:8px">命名快照（稀疏历史）</h3><p class="backup-label" style="margin:4px 0 8px">日常恢复优先用 latest；命名快照用于回滚到更早时间点。</p>
       <ul class="snap-list" id="bkSnaps"></ul>
     </div>
   </aside>
@@ -758,6 +764,12 @@
           ? '<span class="pill ok">可用</span>' : '<span class="pill bad">不可用</span>';
         document.getElementById('bkRoot').textContent = s.backupRootPath || '—';
         document.getElementById('bkLast').textContent = s.lastSuccessAt || '尚未成功';
+        const pol = document.getElementById('bkPolicy');
+        if (pol) pol.textContent = s.policy || '—';
+        const sc = document.getElementById('bkSnapCount');
+        if (sc) sc.textContent = (s.snapshotCount != null ? s.snapshotCount : (s.snapshots||[]).length) + ' / keep ' + (s.config && s.config.keepSnapshots != null ? s.config.keepSnapshots : '—');
+        const ls = document.getElementById('bkLastSnap');
+        if (ls) ls.textContent = s.lastSnapshotAt || '—';
         let phase = s.lastPhase || '—';
         if (s.inProgress) phase = '进行中 · ' + phase;
         if (s.dirty) phase += ' · dirty';
