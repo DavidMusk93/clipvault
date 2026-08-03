@@ -4,18 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ClipView - Google Material 3 剪切板 Web 服务</title>
-  <!-- Google Fonts: Roboto & Material Symbols Outlined -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
-  
-  <!-- Highlight.js for Light Theme -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
 
   <style>
-    /* Google Material Design 3 Light Design Tokens */
     :root {
       --md-sys-color-background: #f8f9ff;
       --md-sys-color-on-background: #191c20;
@@ -40,10 +36,14 @@
       --md-elevation-3: 0px 4px 16px 4px rgba(0, 0, 0, 0.12), 0px 2px 4px 0px rgba(0, 0, 0, 0.08);
 
       --md-shape-corner-full: 9999px;
-      --md-shape-corner-extra-large: 24px;
-      --md-shape-corner-large: 16px;
+      --md-shape-corner-extra-large: 20px;
+      --md-shape-corner-large: 14px;
       --md-shape-corner-medium: 12px;
       --md-shape-corner-small: 8px;
+
+      --masonry-gap: 16px;
+      --card-pad: 14px 16px;
+      --col-min: 280px;
     }
 
     * {
@@ -61,17 +61,16 @@
       flex-direction: column;
     }
 
-    /* Google Top App Bar */
     .top-app-bar {
       position: sticky;
       top: 0;
       z-index: 100;
       background-color: var(--md-sys-color-surface);
-      padding: 16px 32px;
+      padding: 14px 28px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 24px;
+      gap: 20px;
       border-bottom: 1px solid var(--md-sys-color-outline-variant);
       box-shadow: var(--md-elevation-1);
     }
@@ -80,11 +79,12 @@
       display: flex;
       align-items: center;
       gap: 12px;
+      flex-shrink: 0;
     }
 
     .brand-logo {
-      width: 44px;
-      height: 44px;
+      width: 40px;
+      height: 40px;
       border-radius: var(--md-shape-corner-medium);
       background: var(--md-sys-color-primary-container);
       color: var(--md-sys-color-on-primary-container);
@@ -93,25 +93,21 @@
       justify-content: center;
     }
 
-    .brand-logo .material-symbols-outlined {
-      font-size: 26px;
-    }
+    .brand-logo .material-symbols-outlined { font-size: 24px; }
 
     .brand-title h1 {
-      font-size: 22px;
+      font-size: 20px;
       font-weight: 500;
-      color: var(--md-sys-color-on-background);
       letter-spacing: -0.2px;
     }
 
-    /* Google Material 3 Search Bar */
     .m3-search-bar {
       background-color: var(--md-sys-color-surface-container);
       border-radius: var(--md-shape-corner-full);
-      padding: 10px 24px;
+      padding: 9px 20px;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       width: 100%;
       max-width: 520px;
       border: 1px solid transparent;
@@ -137,33 +133,31 @@
       color: var(--md-sys-color-outline);
     }
 
-    /* Material 3 Chips Group */
     .chip-group {
-      padding: 20px 32px 12px;
+      padding: 14px 28px 8px;
       display: flex;
-      gap: 12px;
+      gap: 10px;
       overflow-x: auto;
     }
 
     .m3-chip {
-      height: 38px;
-      padding: 0 20px;
+      height: 36px;
+      padding: 0 16px;
       border-radius: var(--md-shape-corner-full);
       border: 1px solid var(--md-sys-color-outline-variant);
       background-color: var(--md-sys-color-surface);
       color: var(--md-sys-color-on-background);
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 500;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       transition: all 0.2s ease;
+      white-space: nowrap;
     }
 
-    .m3-chip:hover {
-      background-color: var(--md-sys-color-surface-container);
-    }
+    .m3-chip:hover { background-color: var(--md-sys-color-surface-container); }
 
     .m3-chip.active {
       background-color: var(--md-sys-color-primary-container);
@@ -172,114 +166,247 @@
       font-weight: 600;
     }
 
-    /* Grid & Cards */
     main {
       flex: 1;
-      padding: 12px 32px 40px;
+      padding: 8px 28px 36px;
     }
 
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-      gap: 24px;
+    /* ===== Masonry: multi-column packer (shortest-column) ===== */
+    .masonry {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--masonry-gap);
+      width: 100%;
     }
 
-    /* Google Light Material 3 Card */
+    .masonry-col {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--masonry-gap);
+    }
+
+    .masonry-empty {
+      width: 100%;
+      text-align: center;
+      padding: 56px 20px;
+      color: var(--md-sys-color-outline);
+    }
+
+    /* Staging area: measure cards off-screen before packing */
+    .masonry-measure {
+      position: absolute;
+      left: -99999px;
+      top: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    /* Card: height = content only. Never stretch. */
     .m3-card {
       background-color: var(--md-sys-color-surface);
       border: 1px solid var(--md-sys-color-outline-variant);
       border-radius: var(--md-shape-corner-extra-large);
-      padding: 24px;
+      padding: var(--card-pad);
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-      gap: 16px;
-      transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s cubic-bezier(0.2, 0, 0, 1);
+      justify-content: flex-start;
+      gap: 10px;
+      height: auto;
+      width: 100%;
       box-shadow: var(--md-elevation-1);
+      transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.18s cubic-bezier(0.2, 0, 0, 1);
+      contain: layout style;
     }
 
     .m3-card:hover {
-      transform: translateY(-3px);
+      transform: translateY(-2px);
       box-shadow: var(--md-elevation-2);
-      border-color: rgba(11, 87, 208, 0.3);
+      border-color: rgba(11, 87, 208, 0.28);
+    }
+
+    /* Compact cards (short text/html snippets) */
+    .m3-card.is-compact {
+      padding: 12px 14px;
+      gap: 8px;
+    }
+
+    .m3-card.is-compact .card-actions-row {
+      padding-top: 10px;
+    }
+
+    .m3-card.is-compact .m3-btn {
+      height: 34px;
+      padding: 0 14px;
+      font-size: 13px;
     }
 
     .card-header-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
     }
 
     .m3-badge {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
-      padding: 6px 14px;
+      padding: 4px 10px;
       border-radius: var(--md-shape-corner-small);
       background-color: var(--md-sys-color-primary-container);
       color: var(--md-sys-color-on-primary-container);
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
+      text-transform: lowercase;
     }
 
     .card-time {
-      font-size: 13px;
+      font-size: 12px;
       color: var(--md-sys-color-outline);
+      white-space: nowrap;
     }
 
     .card-content-area {
-      max-height: 360px;
-      overflow-y: auto;
       font-size: 14px;
-      line-height: 1.6;
+      line-height: 1.55;
       color: #2c2c2c;
+      min-width: 0;
+      /* no fixed max-height by default — content drives height */
+    }
+
+    .card-content-area pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
     .card-content-area pre code {
+      display: block;
       border-radius: var(--md-shape-corner-medium);
-      font-size: 13px;
-      padding: 14px;
+      font-size: 12.5px;
+      padding: 10px 12px;
       border: 1px solid var(--md-sys-color-outline-variant);
+      background: var(--md-sys-color-surface-container);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .snippet-html {
+      background: var(--md-sys-color-surface-container);
+      color: #1c1b1f;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--md-sys-color-outline-variant);
+      max-height: 160px;
+      overflow: auto;
+      word-break: break-word;
+    }
+
+    .snippet-html:empty { display: none; }
+
+    /* Short pure snippets stay tight */
+    .snippet-html.is-tiny,
+    .card-content-area pre code.is-tiny {
+      max-height: none;
+      overflow: visible;
     }
 
     .card-image-preview {
+      display: block;
       width: 100%;
+      height: auto;
+      max-height: 220px;
+      object-fit: contain;
+      object-position: top center;
       border-radius: var(--md-shape-corner-large);
-      max-height: 180px;
-      object-fit: cover;
       border: 1px solid var(--md-sys-color-outline-variant);
+      background: var(--md-sys-color-surface-container);
+    }
+
+    .ocr-panel {
+      margin-top: 8px;
+      font-size: 12.5px;
+      color: var(--md-sys-color-on-primary-container);
+      background: var(--md-sys-color-primary-container);
+      padding: 0;
+      border-radius: 12px;
+      border: 1px solid var(--md-sys-color-outline-variant);
+      overflow: hidden;
+    }
+
+    .ocr-panel summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+    }
+
+    .ocr-panel summary::-webkit-details-marker { display: none; }
+
+    .ocr-panel summary .material-symbols-outlined {
+      font-size: 16px;
+    }
+
+    .ocr-panel .ocr-body {
+      padding: 0 12px 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 200px;
+      overflow: auto;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+
+    .ocr-panel[open] summary {
+      border-bottom: 1px solid rgba(4, 30, 73, 0.08);
+      margin-bottom: 0;
     }
 
     .card-actions-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
       border-top: 1px solid var(--md-sys-color-outline-variant);
-      padding-top: 16px;
+      padding-top: 10px;
+      flex-shrink: 0;
     }
 
     .source-tag {
-      font-size: 12px;
+      font-size: 11.5px;
       color: var(--md-sys-color-outline);
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 3px;
       font-weight: 500;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    /* M3 Google Button */
     .m3-btn {
-      height: 40px;
-      padding: 0 20px;
+      height: 36px;
+      padding: 0 14px;
       border-radius: var(--md-shape-corner-full);
       border: none;
       font-weight: 500;
-      font-size: 14px;
+      font-size: 13px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       transition: all 0.2s ease;
+      flex-shrink: 0;
     }
 
     .m3-btn-filled {
@@ -294,51 +421,60 @@
     }
 
     .m3-btn-icon-only {
-      width: 40px;
-      height: 40px;
+      width: 36px;
+      height: 36px;
       padding: 0;
       border-radius: var(--md-shape-corner-full);
       background: transparent;
+      border: none;
       color: var(--md-sys-color-error);
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      cursor: pointer;
       transition: background-color 0.2s;
+      flex-shrink: 0;
     }
 
     .m3-btn-icon-only:hover {
       background-color: var(--md-sys-color-error-container);
     }
 
-    /* Google Snackbar Toast */
     .m3-snackbar {
       position: fixed;
-      bottom: 32px;
+      bottom: 28px;
       left: 50%;
       transform: translateX(-50%) translateY(40px);
       background-color: #303030;
       color: #f5f5f5;
-      padding: 14px 28px;
+      padding: 12px 24px;
       border-radius: var(--md-shape-corner-medium);
       box-shadow: var(--md-elevation-3);
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       font-size: 14px;
       font-weight: 500;
       opacity: 0;
       transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
       z-index: 2000;
+      pointer-events: none;
     }
 
     .m3-snackbar.show {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
+
+    @media (max-width: 720px) {
+      .top-app-bar { padding: 12px 16px; flex-wrap: wrap; }
+      main { padding: 8px 14px 28px; }
+      .chip-group { padding: 12px 14px 6px; }
+      :root { --col-min: 100%; }
+    }
   </style>
 </head>
 <body>
-  <!-- Top App Bar -->
   <header class="top-app-bar">
     <div class="brand-title">
       <div class="brand-logo">
@@ -353,7 +489,6 @@
     </div>
   </header>
 
-  <!-- Material 3 Light Filter Chips -->
   <div class="chip-group">
     <button class="m3-chip active" data-type="all">
       <span class="material-symbols-outlined">grid_view</span> 全部
@@ -369,17 +504,15 @@
     </button>
   </div>
 
-  <!-- Content Grid -->
   <main>
-    <div id="grid" class="grid">
-      <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--md-sys-color-outline);">
-        <span class="material-symbols-outlined fa-spin" style="font-size: 36px;">progress_activity</span>
+    <div id="grid" class="masonry" aria-live="polite">
+      <div class="masonry-empty">
+        <span class="material-symbols-outlined" style="font-size: 36px;">progress_activity</span>
         <p style="margin-top: 12px;">正在加载剪贴板内容...</p>
       </div>
     </div>
   </main>
 
-  <!-- Google Snackbar Notification -->
   <div id="snackbar" class="m3-snackbar">
     <span class="material-symbols-outlined" style="color: #a8c7fa;">check_circle</span>
     <span id="snackbarText">已拷贝至系统剪贴板</span>
@@ -388,10 +521,22 @@
   <script>
     let clips = [];
     let currentFilter = 'all';
+    let resizeTimer = null;
+    let lastColCount = 0;
+
+    const API = ''; // same-origin when served from :8080
+
+    function columnCountForWidth(w) {
+      if (w < 560) return 1;
+      if (w < 900) return 2;
+      if (w < 1280) return 3;
+      if (w < 1680) return 4;
+      return 5;
+    }
 
     async function fetchClips() {
       try {
-        const res = await fetch('http://localhost:8080/api/clips');
+        const res = await fetch(API + '/api/clips');
         if (!res.ok) throw new Error('API Error');
         clips = await res.json();
         render();
@@ -400,79 +545,200 @@
       }
     }
 
-    function render() {
-      const grid = document.getElementById('grid');
+    function filteredClips() {
       const query = document.getElementById('searchInput').value.toLowerCase();
-
-      const filtered = clips.filter(item => {
+      return clips.filter(item => {
         const matchType = currentFilter === 'all' || item.type === currentFilter;
-        const text = (item.textContent || item.ocrText || item.preview || '').toLowerCase();
-        const matchQuery = !query || text.includes(query);
+        const text = (item.textContent || item.ocrText || item.preview || item.htmlContent || '').toLowerCase();
+        const matchQuery = !query || text.includes(query) || (item.sourceApp || '').toLowerCase().includes(query);
         return matchType && matchQuery;
       });
+    }
 
-      if (filtered.length === 0) {
-        grid.innerHTML = `
-          <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--md-sys-color-outline);">
+    function isCompactItem(item) {
+      if (item.type === 'image') return false;
+      const raw = item.textContent || item.preview || '';
+      const html = item.htmlContent || '';
+      // strip tags for length estimate
+      const plain = (html ? html.replace(/<[^>]+>/g, '') : raw).trim();
+      return plain.length > 0 && plain.length <= 80 && !plain.includes('\n');
+    }
+
+    function buildCardElement(item) {
+      const timeStr = new Date(item.timestamp * 1000).toLocaleString();
+      const compact = isCompactItem(item);
+      const card = document.createElement('article');
+      card.className = 'm3-card' + (compact ? ' is-compact' : '');
+      card.dataset.type = item.type;
+      card.dataset.id = item.id;
+
+      let contentInner = '';
+      if (item.type === 'image') {
+        contentInner = `<img class="card-image-preview" src="${API}/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" />`;
+        const ocrText = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
+        if (ocrText) {
+          const openAttr = ocrText.length < 120 ? ' open' : '';
+          contentInner += `
+            <details class="ocr-panel"${openAttr}>
+              <summary>
+                <span class="material-symbols-outlined">find_in_page</span>
+                OCR 识别结果
+              </summary>
+              <div class="ocr-body">${escapeHtml(ocrText)}</div>
+            </details>`;
+        }
+      } else if (item.htmlContent) {
+        const plainLen = item.htmlContent.replace(/<[^>]+>/g, '').trim().length;
+        const tiny = plainLen <= 80 ? ' is-tiny' : '';
+        contentInner = `<div class="snippet-html${tiny}">${item.htmlContent}</div>`;
+      } else {
+        const text = item.textContent || item.preview || '';
+        const tiny = text.length <= 80 && !text.includes('\n') ? ' is-tiny' : '';
+        contentInner = `<pre><code class="${tiny}">${escapeHtml(text)}</code></pre>`;
+      }
+
+      const copyPayload = escapeAttribute(item.textContent || item.ocrText || item.preview || '');
+
+      card.innerHTML = `
+        <div class="card-header-row">
+          <span class="m3-badge">
+            <span class="material-symbols-outlined" style="font-size: 14px;">label</span>
+            ${escapeHtml(item.type)}
+          </span>
+          <span class="card-time">${timeStr}</span>
+        </div>
+        <div class="card-content-area">${contentInner}</div>
+        <div class="card-actions-row">
+          <div class="source-tag">
+            ${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size: 14px;">apps</span> ${escapeHtml(item.sourceApp)}` : ''}
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <button class="m3-btn m3-btn-filled" type="button" data-copy="${copyPayload}">
+              <span class="material-symbols-outlined" style="font-size: 17px;">content_copy</span> 复制
+            </button>
+            <button class="m3-btn-icon-only" type="button" data-delete="${item.id}" title="删除">
+              <span class="material-symbols-outlined">delete</span>
+            </button>
+          </div>
+        </div>`;
+
+      card.querySelector('[data-copy]')?.addEventListener('click', (e) => {
+        const t = e.currentTarget.getAttribute('data-copy') || '';
+        copyClip(t);
+      });
+      card.querySelector('[data-delete]')?.addEventListener('click', (e) => {
+        deleteClip(e.currentTarget.getAttribute('data-delete'));
+      });
+
+      // When image loads, reflow masonry so column heights stay correct
+      const img = card.querySelector('img.card-image-preview');
+      if (img) {
+        img.addEventListener('load', scheduleReflow, { once: true });
+        img.addEventListener('error', () => { img.style.display = 'none'; scheduleReflow(); }, { once: true });
+      }
+
+      // OCR expand/collapse changes height
+      card.querySelectorAll('details.ocr-panel').forEach(d => {
+        d.addEventListener('toggle', scheduleReflow);
+      });
+
+      return card;
+    }
+
+    function render() {
+      const host = document.getElementById('grid');
+      const items = filteredClips();
+
+      if (items.length === 0) {
+        host.className = 'masonry';
+        host.innerHTML = `
+          <div class="masonry-empty">
             <span class="material-symbols-outlined" style="font-size: 48px; opacity: 0.5;">inbox</span>
             <p style="margin-top: 12px;">没有匹配的剪贴板历史记录</p>
           </div>`;
+        lastColCount = 0;
         return;
       }
 
-      grid.innerHTML = filtered.map(item => {
-        const timeStr = new Date(item.timestamp * 1000).toLocaleString();
-        let contentHtml = '';
+      // Build cards once
+      const cards = items.map(buildCardElement);
 
-        if (item.type === 'image') {
-          contentHtml = `<img class="card-image-preview" src="/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" onerror="this.style.display=\'none\'" />`;
-          const ocrText = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
-          if (ocrText) {
-            contentHtml += `<div style="margin-top: 12px; font-size: 13px; color: var(--md-sys-color-on-primary-container); background: var(--md-sys-color-primary-container); padding: 10px 14px; border-radius: 12px; border: 1px solid var(--md-sys-color-outline-variant); word-break: break-word;"><span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle; margin-right: 4px;">find_in_page</span> <b>OCR 识别结果:</b><br>${escapeHtml(ocrText)}</div>`;
-          }
-        } else if (item.htmlContent) {
-          contentHtml = `<div style="background: var(--md-sys-color-surface-container); color: #1c1b1f; padding: 14px; border-radius: 12px; max-height: 150px; overflow: hidden; border: 1px solid var(--md-sys-color-outline-variant);">${item.htmlContent}</div>`;
-        } else {
-          contentHtml = `<pre><code>${escapeHtml(item.textContent || item.preview || '')}</code></pre>`;
-        }
+      // Highlight code blocks after attach
+      packMasonry(host, cards);
 
-        return `
-          <div class="m3-card">
-            <div class="card-header-row">
-              <span class="m3-badge">
-                <span class="material-symbols-outlined" style="font-size: 15px;">label</span>
-                ${item.type}
-              </span>
-              <span class="card-time">${timeStr}</span>
-            </div>
-            <div class="card-content-area">
-              ${contentHtml}
-            </div>
-            <div class="card-actions-row">
-              <div class="source-tag">
-                ${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size: 15px;">apps</span> ${escapeHtml(item.sourceApp)}` : ''}
-              </div>
-              <div style="display: flex; gap: 8px;">
-                <button class="m3-btn m3-btn-filled" onclick="copyClip('${escapeAttribute(item.textContent || item.preview || '')}')">
-                  <span class="material-symbols-outlined" style="font-size: 18px;">content_copy</span> 复制到 Mac
-                </button>
-                <button class="m3-btn-icon-only" onclick="deleteClip('${item.id}')">
-                  <span class="material-symbols-outlined">delete</span>
-                </button>
-              </div>
-            </div>
-          </div>`;
-      }).join('');
-
-      document.querySelectorAll('pre code').forEach((block) => {
-        hljs.highlightElement(block);
+      host.querySelectorAll('pre code').forEach((block) => {
+        try { hljs.highlightElement(block); } catch (_) {}
       });
     }
+
+    /**
+     * Shortest-column masonry packer.
+     * Preserves chronological order (left→right, top→bottom fill into shortest col).
+     * Cards keep intrinsic height — zero forced blank space.
+     */
+    function packMasonry(host, cards) {
+      const cols = columnCountForWidth(host.clientWidth || window.innerWidth);
+      lastColCount = cols;
+
+      host.className = 'masonry';
+      host.innerHTML = '';
+
+      const colEls = [];
+      const heights = [];
+      for (let i = 0; i < cols; i++) {
+        const col = document.createElement('div');
+        col.className = 'masonry-col';
+        host.appendChild(col);
+        colEls.push(col);
+        heights.push(0);
+      }
+
+      // Measure stage width ≈ one column
+      const colWidth = colEls[0].clientWidth || Math.floor((host.clientWidth - (cols - 1) * 16) / cols);
+
+      // Offscreen measure to get accurate heights including images that already have dimensions
+      const measureRoot = document.createElement('div');
+      measureRoot.className = 'masonry-measure';
+      measureRoot.style.width = colWidth + 'px';
+      document.body.appendChild(measureRoot);
+
+      for (const card of cards) {
+        // Find shortest column
+        let best = 0;
+        for (let i = 1; i < cols; i++) {
+          if (heights[i] < heights[best]) best = i;
+        }
+
+        // Append for live layout
+        colEls[best].appendChild(card);
+
+        // Approximate height: use offsetHeight after append (more accurate once in column)
+        // First paint may be incomplete for images; load handlers reflow later.
+        const h = card.offsetHeight || 120;
+        heights[best] += h + 16;
+      }
+
+      measureRoot.remove();
+    }
+
+    function scheduleReflow() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        // Only re-pack if we still have cards
+        if (!clips.length) return;
+        render();
+      }, 80);
+    }
+
+    window.addEventListener('resize', () => {
+      const next = columnCountForWidth(document.getElementById('grid').clientWidth || window.innerWidth);
+      if (next !== lastColCount) scheduleReflow();
+    });
 
     async function copyClip(text) {
       if (!text) return;
       try {
-        await fetch('http://localhost:8080/api/clips', {
+        await fetch(API + '/api/clips', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: text, type: 'text' })
@@ -485,7 +751,7 @@
 
     async function deleteClip(id) {
       try {
-        await fetch(`http://localhost:8080/api/clips?id=${id}`, { method: 'DELETE' });
+        await fetch(API + `/api/clips?id=${id}`, { method: 'DELETE' });
         showSnackbar('已删除剪贴板记录');
         fetchClips();
       } catch (err) {
@@ -501,15 +767,22 @@
     }
 
     function escapeHtml(str) {
-      return (str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
 
     function escapeAttribute(str) {
-      return (str || '').replace(/"/g, '&quot;').replace(/'/g, "&#039;");
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
 
     document.querySelectorAll('.m3-chip').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', () => {
         document.querySelectorAll('.m3-chip').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentFilter = btn.getAttribute('data-type');
@@ -521,16 +794,13 @@
 
     fetchClips();
 
-    // SSE 实时推送，无缝订阅新剪贴板事件（免优雅轮询）
     function setupSSE() {
-      const evtSource = new EventSource('http://localhost:8080/api/events');
+      const evtSource = new EventSource(API + '/api/events');
       evtSource.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data.type === 'update') {
-            fetchClips();
-          }
-        } catch (err) {}
+          if (data.type === 'update') fetchClips();
+        } catch (_) {}
       };
       evtSource.onerror = () => {
         evtSource.close();
