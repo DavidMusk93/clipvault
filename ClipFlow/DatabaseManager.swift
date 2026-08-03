@@ -211,6 +211,32 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    func fetchImageData(id: UUID, completion: @escaping (Data?) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else { completion(nil); return }
+            let sql = "SELECT image_data FROM clipboard_items WHERE id = ?;"
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+                sqlite3_bind_text(stmt, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    if let blobPtr = sqlite3_column_blob(stmt, 0) {
+                        let size = sqlite3_column_bytes(stmt, 0)
+                        if size > 0 {
+                            let data = Data(bytes: blobPtr, count: Int(size))
+                            sqlite3_finalize(stmt)
+                            DispatchQueue.main.async { completion(data) }
+                            return
+                        }
+                    }
+                }
+                sqlite3_finalize(stmt)
+            }
+            DispatchQueue.main.async { completion(nil) }
+        }
+    }
+
     func clearAll(completion: ((Bool) -> Void)? = nil) {
         dbQueue.async { [weak self] in
             guard let self = self, let db = self.db else { completion?(false); return }

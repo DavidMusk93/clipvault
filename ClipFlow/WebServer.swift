@@ -569,11 +569,9 @@ class WebServer {
             sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
             return
         }
-        database.fetchItems(limit: 200) { [weak self] items in
-            guard let self = self else { return }
-            guard let item = items.first(where: { $0.id == uuid }),
-                  let data = item.imageData else {
-                self.sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+        database.fetchImageData(id: uuid) { [weak self] imageData in
+            guard let self = self, let data = imageData, !data.isEmpty else {
+                self?.sendErrorResponse(connection: connection, status: 404, message: "Not Found")
                 return
             }
             
