@@ -1,106 +1,139 @@
-# ClipFlow - 现代高性能剪切板管理工具
+# Keepsake
 
-ClipFlow 是一个遵循《软件设计的哲学》原则构建的 macOS 剪切板历史管理应用。它采用 **DuckDB** 作为底层存储引擎，提供高性能的数据读写能力，并配备了现代化的原生 GUI 和 Web 管理界面。
+**你的剪贴板记忆。**
 
-## 🚀 项目亮点
+Keepsake 是面向个人 Mac 的剪贴板历史产品：本机守护进程静默捕获，浏览器里检索与预览，图片 OCR 可检索，备份进 iCloud 云盘（CloudDocs）——**无需 App 签名、无第三方云。**
 
-- **🦆 DuckDB 驱动**: 内置高性能嵌入式数据库 DuckDB，轻松处理海量剪切板历史，支持复杂查询。
-- **⚡️ 极致性能**: 
-  - 启动速度优化（~0.3s 冷启动）。
-  - 采用 SwiftUI 虚拟列表（Virtual List）技术，流畅渲染成千上万条记录。
-- **🌐 现代化 Web 界面**: 
-  - 内置 HTTP 服务器，局域网内通过浏览器访问。
-  - 响应式卡片布局，支持深色模式。
-  - 富文本预览（HTML、图片 OCR、RTF）。
-  - **一键拷贝**功能，手机也能轻松获取电脑剪贴板内容。
-- **🛡️ 隐私安全**: 所有数据存储在用户本地文档目录 (`~/Documents/ClipFlow`)，完全掌控数据所有权。
-- **⌨️ 原生体验**: 支持键盘导航（上下键选择，回车复制，Delete 删除）。
-
-## 🛠 技术架构
-
-本项目严格遵循《软件设计的哲学》(A Philosophy of Software Design) 原则：
-
-### 核心模块
-
-```
-ClipFlow/
-├── ClipboardMonitor.swift    # [深度模块] 负责底层剪切板监听与去重
-├── DatabaseManager.swift     # [深度模块] 封装 DuckDB C-API，处理高性能存储
-├── WebServer.swift           # [深度模块] 集成 Web 服务与前端资源（HTML/CSS/JS）
-├── ClipboardViewModel.swift  # [协调层] 连通数据流与 UI，处理业务逻辑
-└── ContentView.swift         # [UI 层] 声明式 SwiftUI 界面，虚拟列表优化
-```
-
-### 技术栈
-
-- **语言**: Swift 5.9
-- **UI 框架**: SwiftUI (macOS 13+)
-- **数据库**: DuckDB (通过 C-API 静态链接 `libDuckDB.a`)
-- **网络**: Network.framework (原生高性能网络栈)
-- **OCR**: Vision Framework (离线文字识别)
-
-## 📦 快速开始
-
-### 环境要求
-
-- macOS 13.0 (Ventura) 或更高版本
-- Xcode 14+
-
-### 安装步骤
-
-1. **克隆仓库**
-   ```bash
-   git clone https://github.com/DavidMusk93/ClipView.git
-   cd ClipView
-   ```
-
-2. **初始化子模块**
-   项目依赖 `duckdb-swift`，请确保子模块已下载：
-   ```bash
-   git submodule update --init --recursive
-   ```
-
-3. **构建准备**
-   由于 DuckDB 需要通过静态库链接以绕过 App Sandbox 的部分限制（同时保持高性能），项目已配置为手动管理 `libDuckDB.a`。
-   
-   *注意：`Vendor/lib/libDuckDB.a` 文件较大，未包含在 git 仓库中。您可能需要根据 `Vendor/duckdb-swift` 的说明手动编译或下载该静态库并放置在 `Vendor/lib/` 目录下。*
-
-4. **运行**
-   - 双击打开 `ClipFlow.xcodeproj`
-   - 确保证书签名配置正确（Sign to Run Locally）
-   - 点击 Xcode 运行按钮 (Cmd + R)
-
-## 📖 使用指南
-
-### 主界面功能
-- **监控开关**: 开启/暂停剪切板监听。
-- **Web Server**: 开启后，在浏览器访问 `http://localhost:8080`（或局域网 IP）。
-- **OCR**: 自动识别图片中的文本（需在设置中开启）。
-- **搜索**: 顶部搜索框支持实时过滤历史记录。
-
-### 数据存储
-所有数据默认存储于：
-```
-~/Documents/ClipFlow/
-├── clipflow.duckdb          # 主数据库文件
-└── Logs/                    # 运行日志
-```
-
-## 📝 开发手记
-
-### DuckDB 集成挑战
-为了在 macOS Sandbox 环境下获得最佳性能，我们摒弃了传统的 SPM 依赖方式，转而采用 **手动静态链接 (Manual Static Linking)** 方案。通过直接链接 `libDuckDB.a` 并通过 C-API 交互，我们成功绕过了 Swift Package Manager 在沙盒环境下的部分网络和编译限制，同时确保了数据库操作的原子性和速度。
-
-### Web 界面现代化
-Web 界面不再是简单的文本列表。我们重写了前端代码，实现了：
-- **卡片式设计**: 类似原生应用的视觉体验。
-- **富文本渲染**: 能够解析并展示 HTML 片段。
-- **交互优化**: 引入 Toast 提示和异步剪贴板写入 API。
-
-## 📄 许可证
-
-MIT License
+> 仓库目录与部分可执行文件名仍可能显示历史代号 `ClipView` / `ClipFlow`。**产品品牌统一为 Keepsake。**
 
 ---
 
-**ClipFlow** - 让剪切板管理如水般流畅。 🌊
+## 它是什么
+
+| 你感知到的 | 背后 |
+| --- | --- |
+| 复制即归档 | `ClipFlowServer` 守护进程监听系统剪贴板 |
+| 浏览器打开即用 | 本机 Web UI · `http://localhost:8080` |
+| 图里的字也能搜 | Apple Vision 离线 OCR |
+| 换机/重装不丢 | iCloud Drive · CloudDocs 在线 SQLite 备份 |
+
+**不是** 又一个 ClipXxx 工具列表；**是** 个人剪贴板的记忆层。
+
+---
+
+## 能力一览
+
+- **捕获**：文本 / HTML / 图片等；变更即入库  
+- **浏览**：Material 3 风格瀑布流；类型筛选；服务端搜索  
+- **图片**：列表缩略图（`size=thumb`）；点击 lightbox 看原图（`size=full`）  
+- **OCR**：中英识别，限高可滚动展示，写入可检索字段  
+- **实时**：SSE 推送新条目，增量合并而非整表重刷  
+- **规模**：游标分页 + 列表不拉 BLOB + `content-visibility`  
+- **备份**：CloudDocs · `sqlite3_backup` · latest + 滚动快照 · Web 侧栏控制 / 恢复  
+- **隐私**：数据默认在 `~/Documents/ClipFlow/`；备份在你的 iCloud 云盘目录下  
+
+---
+
+## 架构（当前真源）
+
+```text
+Keepsake (product)
+├── ClipFlowServer          # headless daemon (SPM product)
+│   ├── ClipboardMonitor    # pasteboard + OCR
+│   ├── DatabaseManager     # SQLite3 · cursor pages · online backup API
+│   ├── WebServer           # :8080 · REST + SSE + static UI
+│   └── CloudDocsBackupService
+├── web/index.html          # 浏览器控制面
+└── LaunchAgent             # 登录自启（可选）
+```
+
+| 层 | 选择 |
+| --- | --- |
+| 语言 | Swift 5.9 · macOS 13+ |
+| 存储 | 原生 SQLite3（**非** DuckDB） |
+| 网络 | Network.framework · 自研 HTTP/1.1 |
+| OCR | Vision |
+| 备份 | iCloud Drive CloudDocs（**无** App iCloud entitlement） |
+| CI | `swift build` + `node --test tests/masonry.test.mjs` |
+
+历史文档若仍写 DuckDB / 仅 Xcode App，以本 README 与 `Package.swift` 为准。
+
+---
+
+## 快速开始
+
+### 要求
+
+- macOS 13+  
+- Xcode / Command Line Tools（`swift`）  
+
+### 构建并运行守护进程
+
+```bash
+git clone https://github.com/DavidMusk93/ClipView.git
+cd ClipView
+
+swift build -c release --product ClipFlowServer
+./.build/release/ClipFlowServer
+```
+
+浏览器打开：**http://localhost:8080**
+
+### 登录自启（可选）
+
+仓库内 `com.davidmusk.clipflow.plist` 可装到 `~/Library/LaunchAgents/`（路径按本机 `.build` 调整）。  
+安装后用 Web UI 或 API 管理备份，无需再开 Xcode。
+
+### 开发调试
+
+```bash
+swift build --product ClipFlowServer
+node --test tests/masonry.test.mjs
+```
+
+---
+
+## 数据与备份位置
+
+```text
+~/Documents/ClipFlow/
+├── clipflow.db                 # 主库
+├── config/backup.json          # 备份开关与策略
+└── Logs/                       # 可选日志
+
+~/Library/Mobile Documents/com~apple~CloudDocs/ClipFlow/backup/
+├── latest/{clipflow.db, MANIFEST.json}
+├── snapshots/YYYYMMDD-HHmmss/
+└── STATUS.json
+```
+
+Finder：**iCloud 云盘 → ClipFlow → backup**
+
+Web：右上角 **备份** 侧栏 → 开关 / 立即备份 / 从快照恢复。
+
+---
+
+## HTTP 摘要
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/` | Web UI |
+| GET | `/api/clips?limit&cursor&q` | 游标分页 · `{ items, nextCursor }` |
+| GET | `/api/image?id=&size=thumb\|medium\|full` | 多档图片 |
+| GET | `/api/events` | SSE |
+| GET | `/api/backup/status` | 备份状态 |
+| POST | `/api/backup/config` | `{ "enabled": true }` |
+| POST | `/api/backup/run` | 立即备份 |
+| POST | `/api/backup/restore` | `{ "id": "latest" \| snapId }` |
+
+---
+
+## 产品与协作
+
+- 产品名：**Keepsake**  
+- 品味与 agent 约定：见仓库根目录 **[AGENTS.md](./AGENTS.md)**  
+- 许可证：MIT  
+
+---
+
+**Keepsake** — 剪贴板会忘；记忆不必。
