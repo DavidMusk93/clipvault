@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipView - 现代剪切板 Web 服务</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --card-hover-bg: rgba(45, 61, 88, 0.85);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --accent-glow: rgba(99, 102, 241, 0.35);
+      --success: #10b981;
+      --danger: #ef4444;
+      --radius: 16px;
+      --glass-blur: blur(12px);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    body {
+      background: var(--bg-gradient);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: var(--glass-blur);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+
+    .brand h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .search-bar {
+      position: relative;
+      width: 380px;
+    }
+
+    .search-bar input {
+      width: 100%;
+      padding: 12px 16px 12px 42px;
+      border-radius: 12px;
+      border: 1px solid var(--card-border);
+      background: rgba(30, 41, 59, 0.8);
+      color: var(--text-primary);
+      font-size: 14px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .search-bar input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-glow);
+      background: rgba(30, 41, 59, 1);
+    }
+
+    .search-bar i {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-secondary);
+    }
+
+    .filters {
+      display: flex;
+      gap: 8px;
+      padding: 16px 32px;
+      overflow-x: auto;
+    }
+
+    .filter-btn {
+      padding: 8px 16px;
+      border-radius: 20px;
+      border: 1px solid var(--card-border);
+      background: rgba(30, 41, 59, 0.5);
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .filter-btn.active, .filter-btn:hover {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      box-shadow: 0 2px 10px var(--accent-glow);
+    }
+
+    main {
+      flex: 1;
+      padding: 16px 32px 32px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card:hover {
+      background: var(--card-hover-bg);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 8px;
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .time {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .card-body {
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 14px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    .card-body pre {
+      border-radius: 8px;
+      padding: 10px;
+      overflow-x: auto;
+      background: #1e1e1e !important;
+    }
+
+    .card-img {
+      width: 100%;
+      border-radius: 10px;
+      max-height: 180px;
+      object-fit: cover;
+    }
+
+    .card-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 10px;
+    }
+
+    .btn {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .btn:hover {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    .btn-danger:hover {
+      background: var(--danger);
+      border-color: var(--danger);
+    }
+
+    /* Modal Styling */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: var(--glass-blur);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal {
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      width: 90%;
+      max-width: 700px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-body {
+      padding: 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #10b981;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      box-shadow: 0 10px 25px rgba(16, 185, 129, 0.4);
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 2000;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon"><i class="fa-solid fa-clipboard-list"></i></div>
+      <h1>ClipView Web</h1>
+    </div>
+    <div class="search-bar">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input type="text" id="searchInput" placeholder="搜索剪切板历史 (包含 OCR 文字)..." />
+    </div>
+  </header>
+
+  <div class="filters">
+    <button class="filter-btn active" data-type="all"><i class="fa-solid fa-globe"></i> 全部</button>
+    <button class="filter-btn" data-type="text"><i class="fa-solid fa-font"></i> 纯文本</button>
+    <button class="filter-btn" data-type="html"><i class="fa-solid fa-code"></i> 富文本/HTML</button>
+    <button class="filter-btn" data-type="image"><i class="fa-solid fa-image"></i> 图片 (OCR)</button>
+  </div>
+
+  <main>
+    <div id="grid" class="grid">
+      <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--text-secondary);">
+        <i class="fa-solid fa-circle-notch fa-spin fa-2x"></i>
+        <p style="margin-top: 12px;">正在加载剪切板历史...</p>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast"><i class="fa-solid fa-check-circle"></i> 已复制到系统剪切板！</div>
+
+  <script>
+    let clips = [];
+    let currentFilter = 'all';
+
+    async function fetchClips() {
+      try {
+        const res = await fetch('http://localhost:8080/api/clips');
+        if (!res.ok) throw new Error('API Error');
+        clips = await res.json();
+        render();
+      } catch (e) {
+        console.error('Failed to load clips:', e);
+      }
+    }
+
+    function render() {
+      const grid = document.getElementById('grid');
+      const query = document.getElementById('searchInput').value.toLowerCase();
+
+      const filtered = clips.filter(item => {
+        const matchType = currentFilter === 'all' || item.type === currentFilter;
+        const text = (item.textContent || item.preview || '').toLowerCase();
+        const matchQuery = !query || text.includes(query);
+        return matchType && matchQuery;
+      });
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `
+          <div style="grid-column: 1/-1; text-align: center; padding: 60px; color: var(--text-secondary);">
+            <i class="fa-solid fa-inbox fa-3x" style="margin-bottom: 16px; opacity: 0.5;"></i>
+            <p>暂无符合条件的剪切板历史记录</p>
+          </div>`;
+        return;
+      }
+
+      grid.innerHTML = filtered.map(item => {
+        const timeStr = new Date(item.timestamp * 1000).toLocaleString();
+        let contentHtml = '';
+
+        if (item.type === 'image') {
+          contentHtml = `<img class="card-img" src="http://localhost:8080/api/image?id=${item.id}" loading="lazy" />`;
+          if (item.preview && item.preview !== 'Image') {
+            contentHtml += `<div style="margin-top: 8px; font-size: 12px; color: var(--text-secondary);"><i class="fa-solid fa-eye"></i> OCR: ${escapeHtml(item.preview)}</div>`;
+          }
+        } else if (item.htmlContent) {
+          contentHtml = `<div style="background: #fff; color: #000; padding: 10px; border-radius: 8px; max-height: 160px; overflow: hidden;">${item.htmlContent}</div>`;
+        } else {
+          contentHtml = `<pre><code>${escapeHtml(item.textContent || item.preview || '')}</code></pre>`;
+        }
+
+        return `
+          <div class="card">
+            <div class="card-meta">
+              <span class="badge"><i class="fa-solid fa-tag"></i> ${item.type}</span>
+              <span class="time">${timeStr}</span>
+            </div>
+            <div class="card-body">
+              ${contentHtml}
+            </div>
+            <div class="card-actions">
+              <span style="font-size: 11px; color: var(--text-secondary);">${item.sourceApp ? '📱 ' + escapeHtml(item.sourceApp) : ''}</span>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn" onclick="copyClip('${escapeAttribute(item.textContent || item.preview || '')}')">
+                  <i class="fa-solid fa-copy"></i> 复制到 Mac
+                </button>
+                <button class="btn btn-danger" onclick="deleteClip('${item.id}')">
+                  <i class="fa-solid fa-trash"></i>
+                </button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+
+      document.querySelectorAll('pre code').forEach((block) => {
+        hljs.highlightElement(block);
+      });
+    }
+
+    async function copyClip(text) {
+      if (!text) return;
+      try {
+        await fetch('http://localhost:8080/api/clips', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text, type: 'text' })
+        });
+        showToast('已成功写入 macOS 系统剪切板！');
+      } catch (err) {
+        showToast('写入剪切板失败');
+      }
+    }
+
+    async function deleteClip(id) {
+      try {
+        await fetch(`http://localhost:8080/api/clips?id=${id}`, { method: 'DELETE' });
+        showToast('已删除记录');
+        fetchClips();
+      } catch (err) {
+        showToast('删除失败');
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${msg}`;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+
+    function escapeHtml(str) {
+      return (str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function escapeAttribute(str) {
+      return (str || '').replace(/"/g, '&quot;').replace(/'/g, "&#039;");
+    }
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFilter = btn.getAttribute('data-type');
+        render();
+      });
+    });
+
+    document.getElementById('searchInput').addEventListener('input', render);
+
+    fetchClips();
+    setInterval(fetchClips, 4000);
+  </script>
+</body>
+</html>

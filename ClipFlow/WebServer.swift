@@ -96,17 +96,34 @@ class WebServer {
         let method = parts[0]
         let path = parts[1]
         
-        if method == "GET" {
+        if method == "OPTIONS" {
+            handleOptionsRequest(connection: connection)
+        } else if method == "GET" {
             handleGetRequest(path: path, connection: connection)
+        } else if method == "POST" && path == "/api/clips" {
+            handlePostClip(data: data, connection: connection)
+        } else if method == "DELETE" && path.hasPrefix("/api/clips") {
+            handleDeleteClip(path: path, connection: connection)
         } else {
             sendErrorResponse(connection: connection, status: 405, message: "Method Not Allowed")
         }
     }
     
+    private func handleOptionsRequest(connection: NWConnection) {
+        let response = """
+        HTTP/1.1 204 No Content
+        Access-Control-Allow-Origin: *
+        Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS
+        Access-Control-Allow-Headers: Content-Type
+        
+        """
+        sendResponse(response, connection: connection)
+    }
+
     private func handleGetRequest(path: String, connection: NWConnection) {
         if path == "/" || path == "/index.html" {
             sendHTMLResponse(connection: connection)
-        } else if path == "/api/items" {
+        } else if path == "/api/items" || path == "/api/clips" {
             sendItemsJSON(connection: connection)
         } else if path.hasPrefix("/api/image") {
             sendImage(path: path, connection: connection)
@@ -114,11 +131,66 @@ class WebServer {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
         }
     }
+
+    private func handlePostClip(data: Data, connection: NWConnection) {
+        // Find body in HTTP request
+        let requestString = String(data: data, encoding: .utf8) ?? ""
+        if let bodyRange = requestString.range(of: "\r\n\r\n") {
+            let bodyString = String(requestString[bodyRange.upperBound...])
+            if let bodyData = bodyString.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+               let text = json["text"] as? String {
+                DispatchQueue.main.async {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                }
+                let resp = """
+                HTTP/1.1 200 OK
+                Access-Control-Allow-Origin: *
+                Content-Type: application/json
+                
+                {"status":"success"}
+                """
+                sendResponse(resp, connection: connection)
+                return
+            }
+        }
+        sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+    }
+
+    private func handleDeleteClip(path: String, connection: NWConnection) {
+        guard let comps = URLComponents(string: "http://localhost\(path)"),
+              let idValue = comps.queryItems?.first(where: { $0.name == "id" })?.value,
+              let uuid = UUID(uuidString: idValue) else {
+            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+            return
+        }
+        database.deleteItem(id: uuid) { [weak self] success in
+            guard let self = self else { return }
+            if success {
+                let resp = """
+                HTTP/1.1 200 OK
+                Access-Control-Allow-Origin: *
+                Content-Type: application/json
+                
+                {"status":"deleted"}
+                """
+                self.sendResponse(resp, connection: connection)
+            } else {
+                self.sendErrorResponse(connection: connection, status: 500, message: "Failed to delete")
+            }
+        }
+    }
     
     private func sendHTMLResponse(connection: NWConnection) {
-        let html = WebServer.indexHTML
+        var html = WebServer.indexHTML
+        let webPath = FileManager.default.currentDirectoryPath + "/web/index.html"
+        if let customHTML = try? String(contentsOfFile: webPath, encoding: .utf8) {
+            html = customHTML
+        }
         let response = """
         HTTP/1.1 200 OK
+        Access-Control-Allow-Origin: *
         Content-Type: text/html; charset=utf-8
         Content-Length: \(html.utf8.count)
         
@@ -438,6 +510,7 @@ class WebServer {
                 
                 let response = """
                 HTTP/1.1 200 OK
+                Access-Control-Allow-Origin: *
                 Content-Type: application/json; charset=utf-8
                 Content-Length: \(jsonString.utf8.count)
                 
@@ -470,6 +543,7 @@ class WebServer {
             }
             let header = """
             HTTP/1.1 200 OK
+            Access-Control-Allow-Origin: *
             Content-Type: image/png
             Content-Length: \(png.count)
             
