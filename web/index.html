@@ -315,43 +315,62 @@
       background: var(--md-sys-color-surface-container);
     }
 
+    /* OCR: fixed-height viewport, scroll both axes — no expand/collapse reflow */
     .ocr-panel {
       margin-top: 8px;
       font-size: 12.5px;
       color: var(--md-sys-color-on-primary-container);
       background: var(--md-sys-color-primary-container);
-      padding: 0;
       border-radius: 12px;
       border: 1px solid var(--md-sys-color-outline-variant);
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      max-height: 168px;
       overflow: hidden;
     }
 
-    .ocr-panel summary {
-      list-style: none;
-      cursor: pointer;
+    .ocr-panel-header {
+      flex-shrink: 0;
       padding: 8px 12px;
       font-weight: 600;
       display: flex;
       align-items: center;
       gap: 6px;
+      border-bottom: 1px solid rgba(4, 30, 73, 0.08);
       user-select: none;
     }
 
-    .ocr-panel summary::-webkit-details-marker { display: none; }
-    .ocr-panel summary .material-symbols-outlined { font-size: 16px; }
+    .ocr-panel-header .material-symbols-outlined { font-size: 16px; }
 
     .ocr-panel .ocr-body {
-      padding: 0 12px 10px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 200px;
-      overflow: auto;
+      flex: 1 1 auto;
+      min-height: 0;
+      min-width: 0;
+      max-height: 128px;
+      overflow: auto;              /* vertical + horizontal when needed */
+      overflow-x: auto;
+      overflow-y: auto;
+      overscroll-behavior: contain; /* don't chain-scroll the page */
+      -webkit-overflow-scrolling: touch;
+      padding: 8px 12px 10px;
       font-weight: 400;
       line-height: 1.5;
+      white-space: pre;            /* preserve layout; enable horizontal scroll */
+      word-break: normal;
+      tab-size: 2;
     }
 
-    .ocr-panel[open] summary {
-      border-bottom: 1px solid rgba(4, 30, 73, 0.08);
+    .ocr-panel .ocr-body::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .ocr-panel .ocr-body::-webkit-scrollbar-thumb {
+      background: rgba(4, 30, 73, 0.22);
+      border-radius: 8px;
+    }
+    .ocr-panel .ocr-body::-webkit-scrollbar-track {
+      background: transparent;
     }
 
     .card-actions-row {
@@ -607,15 +626,14 @@
         contentInner = `<img class="card-image-preview" src="${API}/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" decoding="async" />`;
         const ocrText = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
         if (ocrText) {
-          const openAttr = ocrText.length < 120 ? ' open' : '';
           contentInner += `
-            <details class="ocr-panel"${openAttr}>
-              <summary>
+            <div class="ocr-panel">
+              <div class="ocr-panel-header">
                 <span class="material-symbols-outlined">find_in_page</span>
                 OCR 识别结果
-              </summary>
+              </div>
               <div class="ocr-body">${escapeHtml(ocrText)}</div>
-            </details>`;
+            </div>`;
         }
       } else if (item.htmlContent) {
         const plainLen = item.htmlContent.replace(/<[^>]+>/g, '').trim().length;
@@ -659,7 +677,7 @@
         deleteClip(e.currentTarget.getAttribute('data-delete'));
       });
 
-      // Image load / OCR toggle: rebalance nodes only — never rebuild cards
+      // Image load: rebalance nodes only — never rebuild cards
       const img = card.querySelector('img.card-image-preview');
       if (img) {
         if (!img.complete) {
@@ -670,10 +688,7 @@
           scheduleRebalance();
         }, { once: true });
       }
-      card.querySelectorAll('details.ocr-panel').forEach(d => {
-        d.addEventListener('toggle', () => scheduleRebalance());
-      });
-
+      // OCR is fixed-height scroll panel — no toggle, no rebalance on click
       return card;
     }
 
@@ -729,7 +744,7 @@
 
     /**
      * Re-pack existing card elements into columns without destroying them.
-     * Safe to call on image load / OCR toggle / resize.
+     * Safe to call on image load / resize.
      */
     function rebalance(orderedCards) {
       const host = document.getElementById('grid');
