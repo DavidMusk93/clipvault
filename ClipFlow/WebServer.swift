@@ -8,15 +8,17 @@ class WebServer {
     private var listener: NWListener?
     private let port: UInt16
     private let database: DatabaseManager
+    private let backup: CloudDocsBackupService?
     private var sseConnections: [NWConnection] = []
     
     var isRunning: Bool {
         listener != nil
     }
 
-    init(port: UInt16 = 8080, database: DatabaseManager = DatabaseManager()) {
+    init(port: UInt16 = 8080, database: DatabaseManager = DatabaseManager(), backup: CloudDocsBackupService? = nil) {
         self.port = port
         self.database = database
+        self.backup = backup
     }
     
     func start() {
@@ -108,13 +110,20 @@ class WebServer {
         let method = parts[0]
         let path = parts[1]
         
+        let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
         if method == "OPTIONS" {
             handleOptionsRequest(connection: connection)
         } else if method == "GET" || method == "HEAD" {
             handleGetRequest(path: path, connection: connection)
-        } else if method == "POST" && path == "/api/clips" {
+        } else if method == "POST" && pathOnly == "/api/clips" {
             handlePostClip(data: data, connection: connection)
-        } else if method == "DELETE" && path.hasPrefix("/api/clips") {
+        } else if method == "POST" && pathOnly == "/api/backup/config" {
+            handleBackupConfig(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/backup/run" {
+            handleBackupRun(connection: connection)
+        } else if method == "POST" && pathOnly == "/api/backup/restore" {
+            handleBackupRestore(data: data, connection: connection)
+        } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
             handleDeleteClip(path: path, connection: connection)
         } else {
             sendErrorResponse(connection: connection, status: 405, message: "Method Not Allowed")
@@ -143,6 +152,10 @@ class WebServer {
             sendImage(path: path, connection: connection)
         } else if pathOnly == "/api/events" {
             handleSSEEvents(connection: connection)
+        } else if pathOnly == "/api/backup/status" {
+            sendBackupStatus(connection: connection)
+        } else if pathOnly == "/api/backup/snapshots" {
+            sendBackupStatus(connection: connection) // same payload includes snapshots
         } else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
         }
@@ -739,6 +752,107 @@ class WebServer {
         }
     }
     
+
+    // MARK: - CloudDocs backup API
+
+    private func jsonBody(from data: Data) -> [String: Any]? {
+        let requestString = String(data: data, encoding: .utf8) ?? ""
+        let bodyString: String
+        if let r = requestString.range(of: "\r\n\r\n") {
+            bodyString = String(requestString[r.upperBound...])
+        } else if let r = requestString.range(of: "\n\n") {
+            bodyString = String(requestString[r.upperBound...])
+        } else {
+            bodyString = requestString
+        }
+        guard let bodyData = bodyString.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
+    private func sendJSONObject(_ obj: [String: Any], connection: NWConnection) {
+        guard let data = try? JSONSerialization.data(withJSONObject: obj, options: []),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            sendErrorResponse(connection: connection, status: 500, message: "JSON encode failed")
+            return
+        }
+        let response = """
+        HTTP/1.1 200 OK
+        Access-Control-Allow-Origin: *
+        Content-Type: application/json; charset=utf-8
+        Content-Length: \(jsonString.utf8.count)
+
+        \(jsonString)
+        """
+        sendResponse(response, connection: connection)
+    }
+
+    private func sendBackupStatus(connection: NWConnection) {
+        guard let backup = backup ?? CloudDocsBackupService.shared else {
+            sendJSONObject([
+                "enabled": false,
+                "cloudDocsAvailable": false,
+                "error": "backup service not started",
+                "scheme": "CloudDocs"
+            ], connection: connection)
+            return
+        }
+        backup.statusSnapshot { status in
+            // Encode via JSONEncoder for nested Codable
+            if let data = try? JSONEncoder().encode(status),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                self.sendJSONObject(obj, connection: connection)
+            } else {
+                self.sendErrorResponse(connection: connection, status: 500, message: "status encode failed")
+            }
+        }
+    }
+
+    private func handleBackupConfig(data: Data, connection: NWConnection) {
+        guard let backup = backup ?? CloudDocsBackupService.shared else {
+            sendErrorResponse(connection: connection, status: 503, message: "backup unavailable")
+            return
+        }
+        guard let json = jsonBody(from: data) else {
+            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+            return
+        }
+        backup.updateConfig(json) { _ in
+            backup.statusSnapshot { status in
+                if let data = try? JSONEncoder().encode(status),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    self.sendJSONObject(obj, connection: connection)
+                } else {
+                    self.sendJSONObject(["ok": true], connection: connection)
+                }
+            }
+        }
+    }
+
+    private func handleBackupRun(connection: NWConnection) {
+        guard let backup = backup ?? CloudDocsBackupService.shared else {
+            sendErrorResponse(connection: connection, status: 503, message: "backup unavailable")
+            return
+        }
+        backup.runNow { ok, msg in
+            self.sendJSONObject(["ok": ok, "message": msg], connection: connection)
+        }
+    }
+
+    private func handleBackupRestore(data: Data, connection: NWConnection) {
+        guard let backup = backup ?? CloudDocsBackupService.shared else {
+            sendErrorResponse(connection: connection, status: 503, message: "backup unavailable")
+            return
+        }
+        let json = jsonBody(from: data) ?? [:]
+        let id = (json["id"] as? String) ?? (json["snapshot"] as? String) ?? "latest"
+        backup.restore(snapshotId: id) { ok, msg in
+            self.sendJSONObject(["ok": ok, "message": msg, "id": id], connection: connection)
+        }
+    }
+
     private func sendErrorResponse(connection: NWConnection, status: Int, message: String) {
         let html = """
         <!DOCTYPE html>

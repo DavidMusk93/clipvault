@@ -184,6 +184,70 @@
       main { padding: 8px 12px 32px; }
       .chips { padding: 10px 14px 4px; }
     }
+  
+    /* CloudDocs backup panel */
+    .backup-btn {
+      height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--md-outline-v);
+      background: #fff; font-size: 13px; font-weight: 500; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+    }
+    .backup-btn:hover { background: var(--md-surface-c); }
+    .backup-btn.on { background: #e6f4ea; border-color: #34a853; color: #137333; }
+    .backup-btn.warn { background: #fce8e6; border-color: #d93025; color: #c5221f; }
+    .backup-drawer {
+      position: fixed; top: 0; right: 0; width: min(400px, 100vw); height: 100vh; z-index: 2500;
+      background: #fff; box-shadow: -8px 0 32px rgba(0,0,0,.12); transform: translateX(100%);
+      transition: transform .25s cubic-bezier(.2,0,0,1); display: flex; flex-direction: column;
+    }
+    .backup-drawer.open { transform: translateX(0); }
+    .backup-scrim {
+      position: fixed; inset: 0; background: rgba(0,0,0,.28); z-index: 2499; display: none;
+    }
+    .backup-scrim.open { display: block; }
+    .backup-drawer header {
+      padding: 18px 20px; border-bottom: 1px solid var(--md-outline-v);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .backup-drawer header h2 { font-size: 18px; font-weight: 500; }
+    .backup-body { padding: 16px 20px 32px; overflow-y: auto; flex: 1; font-size: 13px; line-height: 1.5; }
+    .backup-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 12px 0; }
+    .backup-label { color: var(--md-outline); font-size: 12px; }
+    .backup-value { font-weight: 500; text-align: right; word-break: break-all; max-width: 60%; }
+    .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+    .backup-actions button {
+      height: 36px; padding: 0 14px; border-radius: 999px; border: 0; font-weight: 500; font-size: 13px;
+      cursor: pointer; background: var(--md-primary); color: #fff;
+    }
+    .backup-actions button.secondary { background: var(--md-surface-c); color: var(--md-on-bg); border: 1px solid var(--md-outline-v); }
+    .backup-actions button.danger { background: var(--md-error); }
+    .snap-list { list-style: none; margin-top: 12px; }
+    .snap-list li {
+      border: 1px solid var(--md-outline-v); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .snap-list .snap-meta { color: var(--md-outline); font-size: 11px; }
+    .snap-list .snap-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .switch {
+      position: relative; width: 44px; height: 26px; flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch span {
+      position: absolute; inset: 0; background: #c4c7c5; border-radius: 999px; cursor: pointer; transition: .2s;
+    }
+    .switch span:before {
+      content: ""; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: .2s;
+    }
+    .switch input:checked + span { background: #34a853; }
+    .switch input:checked + span:before { transform: translateX(18px); }
+    .pill {
+      display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 600;
+    }
+    .pill.ok { background: #e6f4ea; color: #137333; }
+    .pill.bad { background: #fce8e6; color: #c5221f; }
+    .pill.muted { background: var(--md-surface-c); color: var(--md-outline); }
+
   </style>
 </head>
 <body>
@@ -196,7 +260,43 @@
       <span class="material-symbols-outlined">search</span>
       <input type="search" id="searchInput" placeholder="搜索文本 / OCR / 来源…" autocomplete="off" />
     </div>
+    <button type="button" class="backup-btn" id="backupOpenBtn" title="iCloud Drive 备份">
+      <span class="material-symbols-outlined" style="font-size:18px">cloud_upload</span>
+      <span id="backupBtnLabel">备份</span>
+    </button>
   </header>
+
+  <div class="backup-scrim" id="backupScrim"></div>
+  <aside class="backup-drawer" id="backupDrawer" aria-label="iCloud Drive 备份">
+    <header>
+      <h2>iCloud Drive 备份</h2>
+      <button type="button" class="btn-icon" id="backupCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
+    </header>
+    <div class="backup-body">
+      <p style="margin-bottom:12px;color:var(--md-outline)">
+        个人本机方案：写入 <b>iCloud 云盘 / ClipFlow / backup</b>，无需 App 签名。使用 SQLite 在线备份（sqlite3_backup），安全一致。
+      </p>
+      <div class="backup-row">
+        <div>
+          <div style="font-weight:600">启用自动备份</div>
+          <div class="backup-label">剪贴板变更后节流备份 · 内容未变则跳过</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="backupEnabled"/><span></span></label>
+      </div>
+      <div class="backup-row"><span class="backup-label">CloudDocs</span><span class="backup-value" id="bkCloud">—</span></div>
+      <div class="backup-row"><span class="backup-label">备份根目录</span><span class="backup-value" id="bkRoot">—</span></div>
+      <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
+      <div class="backup-row"><span class="backup-label">状态</span><span class="backup-value" id="bkPhase">—</span></div>
+      <div class="backup-row"><span class="backup-label">错误</span><span class="backup-value" id="bkErr">—</span></div>
+      <div class="backup-actions">
+        <button type="button" id="bkRunNow">立即备份</button>
+        <button type="button" class="secondary" id="bkRefresh">刷新状态</button>
+      </div>
+      <h3 style="font-size:14px;font-weight:600;margin-top:8px">快照</h3>
+      <ul class="snap-list" id="bkSnaps"></ul>
+    </div>
+  </aside>
+
 
   <div class="chips">
     <button class="chip active" data-type="all"><span class="material-symbols-outlined">grid_view</span>全部</button>
@@ -622,6 +722,110 @@
       };
       es.onerror = () => { es.close(); setTimeout(setupSSE, 3000); };
     }
+
+
+    // ===== CloudDocs backup panel =====
+    const bkOpen = document.getElementById('backupOpenBtn');
+    const bkDrawer = document.getElementById('backupDrawer');
+    const bkScrim = document.getElementById('backupScrim');
+    function openBackup() { bkDrawer.classList.add('open'); bkScrim.classList.add('open'); refreshBackupStatus(); }
+    function closeBackup() { bkDrawer.classList.remove('open'); bkScrim.classList.remove('open'); }
+    bkOpen?.addEventListener('click', openBackup);
+    document.getElementById('backupCloseBtn')?.addEventListener('click', closeBackup);
+    bkScrim?.addEventListener('click', closeBackup);
+
+    function fmtBytes(n) {
+      if (n == null) return '—';
+      if (n < 1024) return n + ' B';
+      if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+      return (n/1048576).toFixed(2) + ' MB';
+    }
+
+    async function refreshBackupStatus() {
+      try {
+        const res = await fetch(API + '/api/backup/status');
+        if (!res.ok) throw new Error('status ' + res.status);
+        const s = await res.json();
+        const btn = document.getElementById('backupOpenBtn');
+        const label = document.getElementById('backupBtnLabel');
+        btn.classList.remove('on', 'warn');
+        if (!s.cloudDocsAvailable) { btn.classList.add('warn'); label.textContent = '无盘不可用'; }
+        else if (s.enabled) { btn.classList.add('on'); label.textContent = s.inProgress ? '备份中…' : '已备份'; }
+        else { label.textContent = '备份'; }
+
+        document.getElementById('backupEnabled').checked = !!s.enabled;
+        document.getElementById('bkCloud').innerHTML = s.cloudDocsAvailable
+          ? '<span class="pill ok">可用</span>' : '<span class="pill bad">不可用</span>';
+        document.getElementById('bkRoot').textContent = s.backupRootPath || '—';
+        document.getElementById('bkLast').textContent = s.lastSuccessAt || '尚未成功';
+        let phase = s.lastPhase || '—';
+        if (s.inProgress) phase = '进行中 · ' + phase;
+        if (s.dirty) phase += ' · dirty';
+        document.getElementById('bkPhase').textContent = phase;
+        document.getElementById('bkErr').textContent = s.lastError || '—';
+
+        const ul = document.getElementById('bkSnaps');
+        ul.innerHTML = '';
+        const list = [];
+        if (s.latest) list.push(s.latest);
+        (s.snapshots || []).forEach(x => list.push(x));
+        if (!list.length) {
+          ul.innerHTML = '<li class="snap-meta">暂无快照。开启备份或点「立即备份」。</li>';
+        } else {
+          list.forEach(snap => {
+            const li = document.createElement('li');
+            li.innerHTML = `
+              <div class="snap-row">
+                <strong>${snap.isLatest ? 'latest' : snap.id}</strong>
+                <button type="button" class="secondary" data-restore="${snap.id}" style="height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--md-outline-v);background:var(--md-surface-c);cursor:pointer;font-size:12px">恢复</button>
+              </div>
+              <div class="snap-meta">${snap.createdAt || ''} · ${fmtBytes(snap.byteSize)} · items ${snap.itemCount ?? '—'}</div>
+              <div class="snap-meta" style="word-break:break-all">${(snap.sha256||'').slice(0,16)}…</div>`;
+            li.querySelector('[data-restore]')?.addEventListener('click', async (e) => {
+              const id = e.currentTarget.getAttribute('data-restore');
+              if (!confirm('从快照恢复将替换当前数据库。\\n恢复前会自动再备份一份安全快照。\\n\\n确认恢复: ' + id + ' ?')) return;
+              const r = await fetch(API + '/api/backup/restore', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ id })
+              });
+              const j = await r.json();
+              toast(j.message || (j.ok ? '恢复完成' : '恢复失败'));
+              if (j.ok) { await fetchPage({ reset: true }); refreshBackupStatus(); }
+            });
+            ul.appendChild(li);
+          });
+        }
+      } catch (e) {
+        console.error(e);
+        document.getElementById('backupBtnLabel').textContent = '备份?';
+      }
+    }
+
+    document.getElementById('backupEnabled')?.addEventListener('change', async (e) => {
+      const enabled = e.target.checked;
+      await fetch(API + '/api/backup/config', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ enabled })
+      });
+      toast(enabled ? '已开启 CloudDocs 自动备份' : '已关闭自动备份');
+      refreshBackupStatus();
+    });
+    document.getElementById('bkRunNow')?.addEventListener('click', async () => {
+      toast('开始备份…');
+      const r = await fetch(API + '/api/backup/run', { method: 'POST' });
+      const j = await r.json();
+      toast(j.message || (j.ok ? '备份完成' : '备份失败'));
+      refreshBackupStatus();
+    });
+    document.getElementById('bkRefresh')?.addEventListener('click', refreshBackupStatus);
+
+    // poll badge lightly
+    setInterval(() => {
+      if (!document.getElementById('backupDrawer')?.classList.contains('open')) {
+        refreshBackupStatus();
+      }
+    }, 30000);
+    refreshBackupStatus();
 
     fetchPage({ reset: true });
     setupSSE();

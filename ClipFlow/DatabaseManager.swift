@@ -326,9 +326,151 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+
+    // MARK: - Online backup / restore (sqlite3_backup)
+
+    enum DBFileError: LocalizedError {
+        case notOpen
+        case openFailed(String)
+        case backupFailed(String)
+        case replaceFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notOpen: return "数据库未打开"
+            case .openFailed(let s): return "打开失败: \(s)"
+            case .backupFailed(let s): return "备份失败: \(s)"
+            case .replaceFailed(let s): return "替换失败: \(s)"
+            }
+        }
+    }
+
+    /// Consistent online backup via sqlite3_backup API (safe while readers/writers active).
+    func onlineBackup(to destURL: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let src = self.db else {
+                completion(.failure(DBFileError.notOpen))
+                return
+            }
+            try? FileManager.default.createDirectory(
+                at: destURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if FileManager.default.fileExists(atPath: destURL.path) {
+                try? FileManager.default.removeItem(at: destURL)
+            }
+
+            var dest: OpaquePointer?
+            if sqlite3_open(destURL.path, &dest) != SQLITE_OK {
+                let msg = dest.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+                if let dest { sqlite3_close(dest) }
+                completion(.failure(DBFileError.openFailed(msg)))
+                return
+            }
+            guard let destDB = dest else {
+                completion(.failure(DBFileError.openFailed("nil handle")))
+                return
+            }
+
+            guard let backup = sqlite3_backup_init(destDB, "main", src, "main") else {
+                let msg = String(cString: sqlite3_errmsg(destDB))
+                sqlite3_close(destDB)
+                completion(.failure(DBFileError.backupFailed(msg)))
+                return
+            }
+
+            var rc: Int32 = SQLITE_OK
+            repeat {
+                rc = sqlite3_backup_step(backup, 64)
+                if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {
+                    sqlite3_sleep(25)
+                    continue
+                }
+            } while rc == SQLITE_OK || rc == SQLITE_BUSY || rc == SQLITE_LOCKED
+
+            let finishRC = sqlite3_backup_finish(backup)
+            if rc != SQLITE_DONE {
+                let msg = String(cString: sqlite3_errmsg(destDB))
+                sqlite3_close(destDB)
+                try? FileManager.default.removeItem(at: destURL)
+                completion(.failure(DBFileError.backupFailed("step=\(rc) finish=\(finishRC) \(msg)")))
+                return
+            }
+            sqlite3_exec(destDB, "PRAGMA wal_checkpoint(FULL);", nil, nil, nil)
+            sqlite3_close(destDB)
+            completion(.success(()))
+        }
+    }
+
+    func itemCount(completion: @escaping (Int) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                completion(0)
+                return
+            }
+            var stmt: OpaquePointer?
+            var count = 0
+            if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM clipboard_items;", -1, &stmt, nil) == SQLITE_OK {
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    count = Int(sqlite3_column_int64(stmt, 0))
+                }
+                sqlite3_finalize(stmt)
+            }
+            completion(count)
+        }
+    }
+
+    /// Close live handle, replace file, reopen. Used by CloudDocs restore.
+    func replaceDatabaseFile(with sourceURL: URL, completion: @escaping (Result<Void, Error>) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self else {
+                completion(.failure(DBFileError.notOpen))
+                return
+            }
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+                completion(.failure(DBFileError.replaceFailed("source missing")))
+                return
+            }
+
+            if let db = self.db {
+                sqlite3_close(db)
+                self.db = nil
+            }
+
+            let dest = self.dbPath
+            let bak = dest.deletingLastPathComponent().appendingPathComponent("clipflow.pre-restore.db")
+            do {
+                if FileManager.default.fileExists(atPath: bak.path) {
+                    try FileManager.default.removeItem(at: bak)
+                }
+                if FileManager.default.fileExists(atPath: dest.path) {
+                    try FileManager.default.moveItem(at: dest, to: bak)
+                }
+                for ext in ["-wal", "-shm"] {
+                    let side = URL(fileURLWithPath: dest.path + ext)
+                    try? FileManager.default.removeItem(at: side)
+                }
+                try FileManager.default.copyItem(at: sourceURL, to: dest)
+            } catch {
+                _ = sqlite3_open(dest.path, &self.db)
+                completion(.failure(DBFileError.replaceFailed(error.localizedDescription)))
+                return
+            }
+
+            if sqlite3_open(dest.path, &self.db) != SQLITE_OK {
+                let msg = self.db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "reopen failed"
+                completion(.failure(DBFileError.openFailed(msg)))
+                return
+            }
+            self.createTables()
+            completion(.success(()))
+        }
+    }
+
     deinit {
         if let db = db {
             sqlite3_close(db)
         }
     }
 }
+
