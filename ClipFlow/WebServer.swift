@@ -156,6 +156,8 @@ class WebServer {
             sendBackupStatus(connection: connection)
         } else if pathOnly == "/api/backup/snapshots" {
             sendBackupStatus(connection: connection) // same payload includes snapshots
+        } else if pathOnly.hasPrefix("/assets/") {
+            sendStaticAsset(pathOnly: pathOnly, connection: connection)
         } else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
         }
@@ -237,6 +239,42 @@ class WebServer {
         }
     }
     
+    /// Serve files from ./web/assets (logo, favicon, etc.)
+    private func sendStaticAsset(pathOnly: String, connection: NWConnection) {
+        // pathOnly like /assets/keepsake-logo.jpg — prevent path traversal
+        let name = pathOnly
+            .replacingOccurrences(of: "/assets/", with: "")
+            .replacingOccurrences(of: "..", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !name.isEmpty, !name.contains("/") else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        let filePath = FileManager.default.currentDirectoryPath + "/web/assets/" + name
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)), !data.isEmpty else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        let ext = (name as NSString).pathExtension.lowercased()
+        let ctype: String
+        switch ext {
+        case "jpg", "jpeg": ctype = "image/jpeg"
+        case "png": ctype = "image/png"
+        case "webp": ctype = "image/webp"
+        case "svg": ctype = "image/svg+xml"
+        case "ico": ctype = "image/x-icon"
+        default: ctype = "application/octet-stream"
+        }
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: ctype,
+            body: data,
+            connection: connection,
+            extraHeaders: [("Cache-Control", "public, max-age=86400")]
+        )
+    }
+
     private func sendHTMLResponse(connection: NWConnection) {
         var html = WebServer.indexHTML
         let webPath = FileManager.default.currentDirectoryPath + "/web/index.html"
