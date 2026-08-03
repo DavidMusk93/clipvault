@@ -3,527 +3,243 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ClipView - Google Material 3 剪切板 Web 服务</title>
+  <title>ClipView</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
-
   <style>
     :root {
-      --md-sys-color-background: #f8f9ff;
-      --md-sys-color-on-background: #191c20;
-      --md-sys-color-surface: #ffffff;
-      --md-sys-color-surface-container: #f0f4f9;
-      --md-sys-color-surface-container-high: #e9eef6;
-      --md-sys-color-primary: #0b57d0;
-      --md-sys-color-on-primary: #ffffff;
-      --md-sys-color-primary-container: #d3e3fd;
-      --md-sys-color-on-primary-container: #041e49;
-      --md-sys-color-secondary: #575e71;
-      --md-sys-color-secondary-container: #dbe2f9;
-      --md-sys-color-on-secondary-container: #141b2c;
-      --md-sys-color-error: #ba1a1a;
-      --md-sys-color-error-container: #ffdad6;
-      --md-sys-color-on-error-container: #410002;
-      --md-sys-color-outline: #74777f;
-      --md-sys-color-outline-variant: #e1e3e1;
-
-      --md-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.06), 0px 1px 2px 0px rgba(0, 0, 0, 0.08);
-      --md-elevation-2: 0px 4px 12px 2px rgba(11, 87, 208, 0.12), 0px 2px 4px 0px rgba(0, 0, 0, 0.08);
-      --md-elevation-3: 0px 4px 16px 4px rgba(0, 0, 0, 0.12), 0px 2px 4px 0px rgba(0, 0, 0, 0.08);
-
-      --md-shape-corner-full: 9999px;
-      --md-shape-corner-extra-large: 20px;
-      --md-shape-corner-large: 14px;
-      --md-shape-corner-medium: 12px;
-      --md-shape-corner-small: 8px;
-
-      --masonry-gap: 16px;
-      --card-pad: 14px 16px;
+      --md-bg: #f8f9ff;
+      --md-on-bg: #191c20;
+      --md-surface: #ffffff;
+      --md-surface-c: #f0f4f9;
+      --md-primary: #0b57d0;
+      --md-on-primary: #fff;
+      --md-primary-c: #d3e3fd;
+      --md-on-primary-c: #041e49;
+      --md-outline: #74777f;
+      --md-outline-v: #e1e3e1;
+      --md-error: #ba1a1a;
+      --md-error-c: #ffdad6;
+      --elev-1: 0 1px 3px 1px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.08);
+      --elev-2: 0 4px 12px 2px rgba(11,87,208,.12), 0 2px 4px rgba(0,0,0,.08);
+      --elev-3: 0 8px 24px rgba(0,0,0,.2);
+      --gap: 16px;
+      --radius: 20px;
     }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Roboto, -apple-system, BlinkMacSystemFont, sans-serif; }
+    body { background: var(--md-bg); color: var(--md-on-bg); min-height: 100vh; display: flex; flex-direction: column; }
+    .top-bar {
+      position: sticky; top: 0; z-index: 100; background: var(--md-surface);
+      padding: 14px 28px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      border-bottom: 1px solid var(--md-outline-v); box-shadow: var(--elev-1);
     }
-
-    body {
-      background-color: var(--md-sys-color-background);
-      color: var(--md-sys-color-on-background);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .top-app-bar {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background-color: var(--md-sys-color-surface);
-      padding: 14px 28px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-      border-bottom: 1px solid var(--md-sys-color-outline-variant);
-      box-shadow: var(--md-elevation-1);
-    }
-
-    .brand-title {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-    }
-
+    .brand { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
     .brand-logo {
-      width: 40px;
-      height: 40px;
-      border-radius: var(--md-shape-corner-medium);
-      background: var(--md-sys-color-primary-container);
-      color: var(--md-sys-color-on-primary-container);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      width: 40px; height: 40px; border-radius: 12px; background: var(--md-primary-c); color: var(--md-on-primary-c);
+      display: flex; align-items: center; justify-content: center;
     }
-
-    .brand-logo .material-symbols-outlined { font-size: 24px; }
-
-    .brand-title h1 {
-      font-size: 20px;
-      font-weight: 500;
-      letter-spacing: -0.2px;
+    .brand h1 { font-size: 20px; font-weight: 500; }
+    .search {
+      flex: 1; max-width: 520px; background: var(--md-surface-c); border-radius: 999px; padding: 9px 18px;
+      display: flex; align-items: center; gap: 10px; border: 1px solid transparent;
     }
-
-    .m3-search-bar {
-      background-color: var(--md-sys-color-surface-container);
-      border-radius: var(--md-shape-corner-full);
-      padding: 9px 20px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      width: 100%;
-      max-width: 520px;
-      border: 1px solid transparent;
-      transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
-    }
-
-    .m3-search-bar:focus-within {
-      background-color: var(--md-sys-color-surface);
-      border-color: var(--md-sys-color-primary);
-      box-shadow: 0 0 0 3px rgba(11, 87, 208, 0.15);
-    }
-
-    .m3-search-bar input {
-      border: none;
-      background: transparent;
-      outline: none;
-      color: var(--md-sys-color-on-background);
-      font-size: 15px;
-      width: 100%;
-    }
-
-    .m3-search-bar .material-symbols-outlined {
-      color: var(--md-sys-color-outline);
-    }
-
-    .chip-group {
-      padding: 14px 28px 8px;
-      display: flex;
-      gap: 10px;
-      overflow-x: auto;
-    }
-
-    .m3-chip {
-      height: 36px;
-      padding: 0 16px;
-      border-radius: var(--md-shape-corner-full);
-      border: 1px solid var(--md-sys-color-outline-variant);
-      background-color: var(--md-sys-color-surface);
-      color: var(--md-sys-color-on-background);
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+    .search:focus-within { background: #fff; border-color: var(--md-primary); box-shadow: 0 0 0 3px rgba(11,87,208,.15); }
+    .search input { border: 0; outline: 0; background: transparent; width: 100%; font-size: 15px; color: var(--md-on-bg); }
+    .search .material-symbols-outlined { color: var(--md-outline); }
+    .chips { padding: 12px 28px 6px; display: flex; gap: 10px; overflow-x: auto; }
+    .chip {
+      height: 36px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--md-outline-v);
+      background: #fff; font-size: 13px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
       white-space: nowrap;
     }
+    .chip.active { background: var(--md-primary-c); color: var(--md-on-primary-c); border-color: transparent; font-weight: 600; }
+    main { flex: 1; padding: 8px 28px 40px; }
+    .masonry { display: flex; align-items: flex-start; gap: var(--gap); width: 100%; }
+    .masonry-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--gap); }
+    .empty { width: 100%; text-align: center; padding: 56px 20px; color: var(--md-outline); }
+    .sentinel { height: 1px; width: 100%; }
+    .loading-more { text-align: center; padding: 16px; color: var(--md-outline); font-size: 13px; }
 
-    .m3-chip:hover { background-color: var(--md-sys-color-surface-container); }
-
-    .m3-chip.active {
-      background-color: var(--md-sys-color-primary-container);
-      color: var(--md-sys-color-on-primary-container);
-      border-color: transparent;
-      font-weight: 600;
-    }
-
-    main {
-      flex: 1;
-      padding: 8px 28px 36px;
-    }
-
-    .masonry {
-      display: flex;
-      align-items: flex-start;
-      gap: var(--masonry-gap);
-      width: 100%;
-    }
-
-    .masonry-col {
-      flex: 1 1 0;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: var(--masonry-gap);
-    }
-
-    .masonry-empty {
-      width: 100%;
-      text-align: center;
-      padding: 56px 20px;
-      color: var(--md-sys-color-outline);
-    }
-
-    /*
-     * Hover must be compositor-only (shadow / filter / opacity).
-     * Never change transform/top/margin/height on hover — that reflows
-     * shortest-column masonry and causes jitter under the cursor.
-     */
+    /* content-visibility: browser-level virtualization for offscreen cards */
     .m3-card {
-      background-color: var(--md-sys-color-surface);
-      border: 1px solid var(--md-sys-color-outline-variant);
-      border-radius: var(--md-shape-corner-extra-large);
-      padding: var(--card-pad);
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
-      gap: 10px;
-      height: auto;
-      width: 100%;
-      box-shadow: var(--md-elevation-1);
-      transition: box-shadow 0.18s ease, border-color 0.18s ease;
-      position: relative;
-      z-index: 0;
+      background: #fff; border: 1px solid var(--md-outline-v); border-radius: var(--radius);
+      padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; width: 100%;
+      box-shadow: var(--elev-1); transition: box-shadow .18s, border-color .18s;
+      content-visibility: auto;
+      contain-intrinsic-size: auto 180px;
+      position: relative; z-index: 0;
     }
-
-    .m3-card:hover {
-      box-shadow: var(--md-elevation-2);
-      border-color: rgba(11, 87, 208, 0.35);
-      z-index: 1;
-      /* NO transform — avoids geometry thrash + hover enter/leave loop */
-    }
-
-    .m3-card.is-compact {
-      padding: 12px 14px;
-      gap: 8px;
-    }
-
-    .m3-card.is-compact .card-actions-row { padding-top: 10px; }
-    .m3-card.is-compact .m3-btn {
-      height: 34px;
-      padding: 0 14px;
-      font-size: 13px;
-    }
-
-    .card-header-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-
-    .m3-badge {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 4px 10px;
-      border-radius: var(--md-shape-corner-small);
-      background-color: var(--md-sys-color-primary-container);
-      color: var(--md-sys-color-on-primary-container);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
+    .m3-card:hover { box-shadow: var(--elev-2); border-color: rgba(11,87,208,.35); z-index: 1; }
+    .m3-card.is-compact { padding: 12px 14px; gap: 8px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .badge {
+      font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 8px;
+      background: var(--md-primary-c); color: var(--md-on-primary-c); display: inline-flex; align-items: center; gap: 4px;
       text-transform: lowercase;
     }
-
-    .card-time {
-      font-size: 12px;
-      color: var(--md-sys-color-outline);
-      white-space: nowrap;
+    .time { font-size: 12px; color: var(--md-outline); white-space: nowrap; }
+    .card-body { font-size: 14px; line-height: 1.55; color: #2c2c2c; min-width: 0; }
+    .card-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+    .card-body pre code {
+      display: block; border-radius: 12px; font-size: 12.5px; padding: 10px 12px;
+      border: 1px solid var(--md-outline-v); background: var(--md-surface-c);
+      max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-word;
     }
-
-    .card-content-area {
-      font-size: 14px;
-      line-height: 1.55;
-      color: #2c2c2c;
-      min-width: 0;
-    }
-
-    .card-content-area pre {
-      margin: 0;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .card-content-area pre code {
-      display: block;
-      border-radius: var(--md-shape-corner-medium);
-      font-size: 12.5px;
-      padding: 10px 12px;
-      border: 1px solid var(--md-sys-color-outline-variant);
-      background: var(--md-sys-color-surface-container);
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 220px;
-      overflow: auto;
-    }
-
+    .card-body pre code.is-tiny { max-height: none; }
     .snippet-html {
-      background: var(--md-sys-color-surface-container);
-      color: #1c1b1f;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid var(--md-sys-color-outline-variant);
-      max-height: 160px;
-      overflow: auto;
-      word-break: break-word;
+      background: var(--md-surface-c); padding: 10px 12px; border-radius: 12px;
+      border: 1px solid var(--md-outline-v); max-height: 140px; overflow: auto; word-break: break-word;
     }
+    .snippet-html.is-tiny { max-height: none; }
 
-    .snippet-html.is-tiny,
-    .card-content-area pre code.is-tiny {
-      max-height: none;
-      overflow: visible;
+    .thumb-wrap {
+      position: relative; border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--md-outline-v); background: var(--md-surface-c);
+      cursor: zoom-in; aspect-ratio: 4 / 3; max-height: 200px;
     }
-
-    .card-image-preview {
-      display: block;
-      width: 100%;
-      height: auto;
-      max-height: 220px;
-      object-fit: contain;
-      object-position: top center;
-      border-radius: var(--md-shape-corner-large);
-      border: 1px solid var(--md-sys-color-outline-variant);
-      background: var(--md-sys-color-surface-container);
+    .thumb-wrap img {
+      display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center;
     }
-
-    /* OCR: fixed-height viewport, scroll both axes — no expand/collapse reflow */
-    .ocr-panel {
-      margin-top: 8px;
-      font-size: 12.5px;
-      color: var(--md-sys-color-on-primary-container);
-      background: var(--md-sys-color-primary-container);
-      border-radius: 12px;
-      border: 1px solid var(--md-sys-color-outline-variant);
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      max-height: 168px;
-      overflow: hidden;
-    }
-
-    .ocr-panel-header {
-      flex-shrink: 0;
-      padding: 8px 12px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      border-bottom: 1px solid rgba(4, 30, 73, 0.08);
-      user-select: none;
-    }
-
-    .ocr-panel-header .material-symbols-outlined { font-size: 16px; }
-
-    .ocr-panel .ocr-body {
-      flex: 1 1 auto;
-      min-height: 0;
-      min-width: 0;
-      max-height: 128px;
-      overflow: auto;              /* vertical + horizontal when needed */
-      overflow-x: auto;
-      overflow-y: auto;
-      overscroll-behavior: contain; /* don't chain-scroll the page */
-      -webkit-overflow-scrolling: touch;
-      padding: 8px 12px 10px;
-      font-weight: 400;
-      line-height: 1.5;
-      white-space: pre;            /* preserve layout; enable horizontal scroll */
-      word-break: normal;
-      tab-size: 2;
-    }
-
-    .ocr-panel .ocr-body::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    .ocr-panel .ocr-body::-webkit-scrollbar-thumb {
-      background: rgba(4, 30, 73, 0.22);
-      border-radius: 8px;
-    }
-    .ocr-panel .ocr-body::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    .card-actions-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      border-top: 1px solid var(--md-sys-color-outline-variant);
-      padding-top: 10px;
-      flex-shrink: 0;
-    }
-
-    .source-tag {
-      font-size: 11.5px;
-      color: var(--md-sys-color-outline);
-      display: flex;
-      align-items: center;
-      gap: 3px;
-      font-weight: 500;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .m3-btn {
-      height: 36px;
-      padding: 0 14px;
-      border-radius: var(--md-shape-corner-full);
-      border: none;
-      font-weight: 500;
-      font-size: 13px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: background-color 0.2s, box-shadow 0.2s;
-      flex-shrink: 0;
-    }
-
-    .m3-btn-filled {
-      background-color: var(--md-sys-color-primary);
-      color: var(--md-sys-color-on-primary);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-    }
-
-    .m3-btn-filled:hover {
-      background-color: #0b4ab5;
-      box-shadow: 0 4px 8px rgba(11, 87, 208, 0.25);
-    }
-
-    .m3-btn-icon-only {
-      width: 36px;
-      height: 36px;
-      padding: 0;
-      border-radius: var(--md-shape-corner-full);
-      background: transparent;
-      border: none;
-      color: var(--md-sys-color-error);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: background-color 0.2s;
-      flex-shrink: 0;
-    }
-
-    .m3-btn-icon-only:hover {
-      background-color: var(--md-sys-color-error-container);
-    }
-
-    .m3-snackbar {
-      position: fixed;
-      bottom: 28px;
-      left: 50%;
-      transform: translateX(-50%) translateY(40px);
-      background-color: #303030;
-      color: #f5f5f5;
-      padding: 12px 24px;
-      border-radius: var(--md-shape-corner-medium);
-      box-shadow: var(--md-elevation-3);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-      font-weight: 500;
-      opacity: 0;
-      transition: opacity 0.3s, transform 0.3s;
-      z-index: 2000;
+    .thumb-wrap .zoom-hint {
+      position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.55); color: #fff;
+      border-radius: 999px; padding: 4px 8px; font-size: 11px; display: flex; align-items: center; gap: 2px;
       pointer-events: none;
     }
 
-    .m3-snackbar.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
+    .ocr-panel {
+      margin-top: 8px; font-size: 12.5px; color: var(--md-on-primary-c); background: var(--md-primary-c);
+      border-radius: 12px; border: 1px solid var(--md-outline-v); display: flex; flex-direction: column;
+      max-height: 160px; overflow: hidden; min-width: 0;
+    }
+    .ocr-panel-header {
+      flex-shrink: 0; padding: 8px 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;
+      border-bottom: 1px solid rgba(4,30,73,.08);
+    }
+    .ocr-body {
+      flex: 1; min-height: 0; max-height: 120px; overflow: auto; overscroll-behavior: contain;
+      padding: 8px 12px 10px; white-space: pre; line-height: 1.5; font-weight: 400;
     }
 
+    .card-actions {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      border-top: 1px solid var(--md-outline-v); padding-top: 10px;
+    }
+    .source { font-size: 11.5px; color: var(--md-outline); display: flex; align-items: center; gap: 3px;
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .btn {
+      height: 36px; padding: 0 14px; border-radius: 999px; border: 0; font-weight: 500; font-size: 13px;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 6px; background: var(--md-primary); color: #fff;
+    }
+    .btn:hover { background: #0b4ab5; }
+    .btn-icon {
+      width: 36px; height: 36px; border: 0; border-radius: 999px; background: transparent;
+      color: var(--md-error); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    }
+    .btn-icon:hover { background: var(--md-error-c); }
+
+    /* Lightbox */
+    .lightbox {
+      position: fixed; inset: 0; z-index: 3000; background: rgba(15, 18, 25, .88);
+      display: none; align-items: center; justify-content: center; padding: 24px;
+      backdrop-filter: blur(6px);
+    }
+    .lightbox.open { display: flex; }
+    .lightbox-inner {
+      position: relative; max-width: min(96vw, 1400px); max-height: 92vh;
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+    }
+    .lightbox-inner img {
+      max-width: 96vw; max-height: 82vh; object-fit: contain; border-radius: 12px;
+      box-shadow: var(--elev-3); background: #111; cursor: default;
+    }
+    .lightbox-toolbar {
+      display: flex; gap: 10px; align-items: center; color: #eee; font-size: 13px;
+    }
+    .lightbox-close, .lightbox-btn {
+      border: 0; background: rgba(255,255,255,.12); color: #fff; border-radius: 999px;
+      height: 40px; padding: 0 16px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 500;
+    }
+    .lightbox-close:hover, .lightbox-btn:hover { background: rgba(255,255,255,.22); }
+    .lightbox-x {
+      position: absolute; top: -8px; right: -8px; width: 40px; height: 40px; border-radius: 999px;
+      border: 0; background: rgba(0,0,0,.5); color: #fff; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .snackbar {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(40px);
+      background: #303030; color: #f5f5f5; padding: 12px 24px; border-radius: 12px;
+      box-shadow: var(--elev-3); opacity: 0; transition: .3s; z-index: 4000; pointer-events: none;
+      font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px;
+    }
+    .snackbar.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
     @media (max-width: 720px) {
-      .top-app-bar { padding: 12px 16px; flex-wrap: wrap; }
-      main { padding: 8px 14px 28px; }
-      .chip-group { padding: 12px 14px 6px; }
+      .top-bar { padding: 12px 14px; flex-wrap: wrap; }
+      main { padding: 8px 12px 32px; }
+      .chips { padding: 10px 14px 4px; }
     }
   </style>
 </head>
 <body>
-  <header class="top-app-bar">
-    <div class="brand-title">
-      <div class="brand-logo">
-        <span class="material-symbols-outlined">content_paste</span>
-      </div>
+  <header class="top-bar">
+    <div class="brand">
+      <div class="brand-logo"><span class="material-symbols-outlined">content_paste</span></div>
       <h1>ClipView</h1>
     </div>
-
-    <div class="m3-search-bar">
+    <div class="search">
       <span class="material-symbols-outlined">search</span>
-      <input type="text" id="searchInput" placeholder="搜索剪贴板历史与 OCR 文字..." />
+      <input type="search" id="searchInput" placeholder="搜索文本 / OCR / 来源…" autocomplete="off" />
     </div>
   </header>
 
-  <div class="chip-group">
-    <button class="m3-chip active" data-type="all">
-      <span class="material-symbols-outlined">grid_view</span> 全部
-    </button>
-    <button class="m3-chip" data-type="text">
-      <span class="material-symbols-outlined">description</span> 纯文本
-    </button>
-    <button class="m3-chip" data-type="html">
-      <span class="material-symbols-outlined">code</span> 富文本/HTML
-    </button>
-    <button class="m3-chip" data-type="image">
-      <span class="material-symbols-outlined">image</span> 图片 OCR
-    </button>
+  <div class="chips">
+    <button class="chip active" data-type="all"><span class="material-symbols-outlined">grid_view</span>全部</button>
+    <button class="chip" data-type="text"><span class="material-symbols-outlined">description</span>纯文本</button>
+    <button class="chip" data-type="html"><span class="material-symbols-outlined">code</span>富文本/HTML</button>
+    <button class="chip" data-type="image"><span class="material-symbols-outlined">image</span>图片 OCR</button>
   </div>
 
   <main>
     <div id="grid" class="masonry" aria-live="polite">
-      <div class="masonry-empty">
-        <span class="material-symbols-outlined" style="font-size: 36px;">progress_activity</span>
-        <p style="margin-top: 12px;">正在加载剪贴板内容...</p>
-      </div>
+      <div class="empty"><span class="material-symbols-outlined" style="font-size:36px">progress_activity</span>
+        <p style="margin-top:12px">加载中…</p></div>
     </div>
+    <div id="sentinel" class="sentinel" aria-hidden="true"></div>
+    <div id="loadingMore" class="loading-more" hidden>加载更多…</div>
   </main>
 
-  <div id="snackbar" class="m3-snackbar">
-    <span class="material-symbols-outlined" style="color: #a8c7fa;">check_circle</span>
-    <span id="snackbarText">已拷贝至系统剪贴板</span>
+  <!-- Image lightbox / preview -->
+  <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="图片预览">
+    <div class="lightbox-inner">
+      <button type="button" class="lightbox-x" id="lightboxCloseX" aria-label="关闭">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+      <img id="lightboxImg" alt="预览" />
+      <div class="lightbox-toolbar">
+        <button type="button" class="lightbox-btn" id="lightboxOpenTab">
+          <span class="material-symbols-outlined">open_in_new</span> 原图
+        </button>
+        <button type="button" class="lightbox-close" id="lightboxClose">关闭 · Esc</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="snackbar" class="snackbar">
+    <span class="material-symbols-outlined" style="color:#a8c7fa">check_circle</span>
+    <span id="snackbarText">ok</span>
   </div>
 
   <script>
-    /**
-     * Pure masonry helpers (mirrored in tests/masonry.test.mjs for regression).
-     * Keep in sync when changing packing rules.
-     */
+    const API = '';
+    const PAGE_SIZE = 30;
+    const CLIENT_CAP = 300; // soft cap in memory — drop oldest (tail) when exceeded
+
     const Masonry = {
       columnCountForWidth(w) {
         if (w < 560) return 1;
@@ -532,29 +248,18 @@
         if (w < 1680) return 4;
         return 5;
       },
-
-      /**
-       * Shortest-column assignment.
-       * @param {number[]} heights item heights in order
-       * @param {number} cols
-       * @param {number} gap
-       * @returns {{ colOf: number[], colHeights: number[] }}
-       */
       pack(heights, cols, gap = 16) {
         const colOf = new Array(heights.length);
         const colHeights = new Array(cols).fill(0);
         for (let i = 0; i < heights.length; i++) {
           let best = 0;
-          for (let c = 1; c < cols; c++) {
-            if (colHeights[c] < colHeights[best]) best = c;
-          }
+          for (let c = 1; c < cols; c++) if (colHeights[c] < colHeights[best]) best = c;
           colOf[i] = best;
           colHeights[best] += heights[i] + (colHeights[best] > 0 ? gap : 0);
         }
         return { colOf, colHeights };
       },
-
-      isCompactItem(item) {
+      isCompact(item) {
         if (!item || item.type === 'image') return false;
         const raw = item.textContent || item.preview || '';
         const html = item.htmlContent || '';
@@ -562,157 +267,205 @@
         return plain.length > 0 && plain.length <= 80 && !plain.includes('\n');
       }
     };
-
-    // Expose for manual console / future test harness
     window.ClipViewMasonry = Masonry;
 
+    /** @type {Array<object>} */
     let clips = [];
+    let nextCursor = null;
+    let loading = false;
+    let exhausted = false;
     let currentFilter = 'all';
-    /** @type {Map<string, HTMLElement>} stable card nodes keyed by item id */
+    let searchQuery = '';
+    let searchTimer = null;
     const cardCache = new Map();
     let lastColCount = 0;
     let rebalanceTimer = null;
-    let dataEpoch = 0;
+    let fullUrlForLightbox = null;
 
-    const API = '';
+    function esc(s) {
+      return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function escAttr(s) {
+      return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
 
-    async function fetchClips() {
+    function toast(msg) {
+      const el = document.getElementById('snackbar');
+      document.getElementById('snackbarText').textContent = msg;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 2400);
+    }
+
+    function clientFilter(items) {
+      if (currentFilter === 'all') return items;
+      return items.filter(i => i.type === currentFilter);
+    }
+
+    async function fetchPage({ reset = false } = {}) {
+      if (loading) return;
+      if (!reset && exhausted) return;
+      loading = true;
+      document.getElementById('loadingMore').hidden = reset;
+
+      const params = new URLSearchParams();
+      params.set('limit', String(PAGE_SIZE));
+      if (!reset && nextCursor) params.set('cursor', nextCursor);
+      if (searchQuery) params.set('q', searchQuery);
+
       try {
-        const res = await fetch(API + '/api/clips');
-        if (!res.ok) throw new Error('API Error');
-        clips = await res.json();
-        dataEpoch++;
+        const res = await fetch(`${API}/api/clips?${params}`);
+        if (!res.ok) throw new Error('API ' + res.status);
+        const data = await res.json();
+        // Support both envelope and legacy array
+        const items = Array.isArray(data) ? data : (data.items || []);
+        const cursor = Array.isArray(data) ? null : (data.nextCursor || null);
+
+        if (reset) {
+          clips = items;
+          cardCache.clear();
+          exhausted = false;
+        } else {
+          const seen = new Set(clips.map(c => c.id));
+          for (const it of items) {
+            if (!seen.has(it.id)) clips.push(it);
+          }
+        }
+        nextCursor = cursor;
+        if (!cursor || items.length === 0) exhausted = true;
+
+        // Soft cap memory
+        if (clips.length > CLIENT_CAP) {
+          const drop = clips.length - CLIENT_CAP;
+          const removed = clips.splice(-drop, drop); // drop oldest at tail (list is newest-first)
+          removed.forEach(r => {
+            cardCache.get(r.id)?.remove();
+            cardCache.delete(r.id);
+          });
+        }
+
         rebuildFromData();
       } catch (e) {
-        console.error('Failed to load clips:', e);
+        console.error(e);
+        if (reset) {
+          document.getElementById('grid').innerHTML =
+            `<div class="empty"><p>加载失败，请刷新</p></div>`;
+        }
+      } finally {
+        loading = false;
+        document.getElementById('loadingMore').hidden = true;
       }
     }
 
-    function filteredClips() {
-      const query = document.getElementById('searchInput').value.toLowerCase();
-      return clips.filter(item => {
-        const matchType = currentFilter === 'all' || item.type === currentFilter;
-        const text = (item.textContent || item.ocrText || item.preview || item.htmlContent || '').toLowerCase();
-        const matchQuery = !query || text.includes(query) || (item.sourceApp || '').toLowerCase().includes(query);
-        return matchType && matchQuery;
-      });
+    /** SSE: only pull the newest page and merge by id — no full history reload */
+    async function mergeHead() {
+      try {
+        const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+        if (searchQuery) params.set('q', searchQuery);
+        const res = await fetch(`${API}/api/clips?${params}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.items || []);
+        if (!items.length) return;
+        const seen = new Set(clips.map(c => c.id));
+        const fresh = items.filter(i => !seen.has(i.id));
+        if (!fresh.length) return;
+        clips = [...fresh, ...clips];
+        if (clips.length > CLIENT_CAP) {
+          const removed = clips.splice(CLIENT_CAP);
+          removed.forEach(r => { cardCache.get(r.id)?.remove(); cardCache.delete(r.id); });
+        }
+        rebuildFromData();
+      } catch (_) {}
     }
 
-    function escapeHtml(str) {
-      return (str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+    function thumbSrc(item) {
+      if (item.thumbUrl) return item.thumbUrl;
+      return `/api/image?id=${item.id}&size=thumb`;
+    }
+    function fullSrc(item) {
+      if (item.fullUrl) return item.fullUrl;
+      return `/api/image?id=${item.id}&size=full`;
     }
 
-    function escapeAttribute(str) {
-      return (str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-    }
-
-    function buildCardElement(item) {
-      const timeStr = new Date(item.timestamp * 1000).toLocaleString();
-      const compact = Masonry.isCompactItem(item);
+    function buildCard(item) {
       const card = document.createElement('article');
-      card.className = 'm3-card' + (compact ? ' is-compact' : '');
-      card.dataset.type = item.type;
+      card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
       card.dataset.id = item.id;
+      card.dataset.type = item.type;
+      const timeStr = new Date(item.timestamp * 1000).toLocaleString();
 
-      let contentInner = '';
+      let body = '';
       if (item.type === 'image') {
-        contentInner = `<img class="card-image-preview" src="${API}/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" decoding="async" />`;
-        const ocrText = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
-        if (ocrText) {
-          contentInner += `
-            <div class="ocr-panel">
-              <div class="ocr-panel-header">
-                <span class="material-symbols-outlined">find_in_page</span>
-                OCR 识别结果
-              </div>
-              <div class="ocr-body">${escapeHtml(ocrText)}</div>
-            </div>`;
+        body = `
+          <div class="thumb-wrap" data-preview="${escAttr(fullSrc(item))}" title="点击预览">
+            <img src="${escAttr(thumbSrc(item))}" alt="clipboard" loading="lazy" decoding="async" />
+            <span class="zoom-hint"><span class="material-symbols-outlined" style="font-size:14px">zoom_in</span></span>
+          </div>`;
+        const ocr = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
+        if (ocr) {
+          body += `<div class="ocr-panel">
+            <div class="ocr-panel-header"><span class="material-symbols-outlined" style="font-size:16px">find_in_page</span>OCR 识别结果</div>
+            <div class="ocr-body">${esc(ocr)}</div>
+          </div>`;
         }
       } else if (item.htmlContent) {
-        const plainLen = item.htmlContent.replace(/<[^>]+>/g, '').trim().length;
-        const tiny = plainLen <= 80 ? ' is-tiny' : '';
-        contentInner = `<div class="snippet-html${tiny}">${item.htmlContent}</div>`;
+        const plain = item.htmlContent.replace(/<[^>]+>/g, '').trim();
+        const tiny = plain.length <= 80 ? ' is-tiny' : '';
+        body = `<div class="snippet-html${tiny}">${item.htmlContent}</div>`;
       } else {
         const text = item.textContent || item.preview || '';
         const tiny = text.length <= 80 && !text.includes('\n') ? ' is-tiny' : '';
-        contentInner = `<pre><code class="${tiny}">${escapeHtml(text)}</code></pre>`;
+        body = `<pre><code class="${tiny}">${esc(text)}</code></pre>`;
       }
 
-      const copyPayload = escapeAttribute(item.textContent || item.ocrText || item.preview || '');
-
+      const copyText = escAttr(item.textContent || item.ocrText || item.preview || '');
       card.innerHTML = `
-        <div class="card-header-row">
-          <span class="m3-badge">
-            <span class="material-symbols-outlined" style="font-size: 14px;">label</span>
-            ${escapeHtml(item.type)}
-          </span>
-          <span class="card-time">${timeStr}</span>
+        <div class="card-header">
+          <span class="badge"><span class="material-symbols-outlined" style="font-size:14px">label</span>${esc(item.type)}</span>
+          <span class="time">${timeStr}</span>
         </div>
-        <div class="card-content-area">${contentInner}</div>
-        <div class="card-actions-row">
-          <div class="source-tag">
-            ${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size: 14px;">apps</span> ${escapeHtml(item.sourceApp)}` : ''}
-          </div>
-          <div style="display: flex; gap: 6px;">
-            <button class="m3-btn m3-btn-filled" type="button" data-copy="${copyPayload}">
-              <span class="material-symbols-outlined" style="font-size: 17px;">content_copy</span> 复制
+        <div class="card-body">${body}</div>
+        <div class="card-actions">
+          <div class="source">${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size:14px">apps</span>${esc(item.sourceApp)}` : ''}</div>
+          <div style="display:flex;gap:6px">
+            <button type="button" class="btn" data-copy="${copyText}">
+              <span class="material-symbols-outlined" style="font-size:17px">content_copy</span>复制
             </button>
-            <button class="m3-btn-icon-only" type="button" data-delete="${item.id}" title="删除">
+            <button type="button" class="btn-icon" data-del="${item.id}" title="删除">
               <span class="material-symbols-outlined">delete</span>
             </button>
           </div>
         </div>`;
 
-      card.querySelector('[data-copy]')?.addEventListener('click', (e) => {
+      card.querySelector('[data-copy]')?.addEventListener('click', e => {
         copyClip(e.currentTarget.getAttribute('data-copy') || '');
       });
-      card.querySelector('[data-delete]')?.addEventListener('click', (e) => {
-        deleteClip(e.currentTarget.getAttribute('data-delete'));
+      card.querySelector('[data-del]')?.addEventListener('click', e => {
+        deleteClip(e.currentTarget.getAttribute('data-del'));
       });
-
-      // Image load: rebalance nodes only — never rebuild cards
-      const img = card.querySelector('img.card-image-preview');
-      if (img) {
-        if (!img.complete) {
-          img.addEventListener('load', () => scheduleRebalance(), { once: true });
-        }
-        img.addEventListener('error', () => {
-          img.style.display = 'none';
-          scheduleRebalance();
-        }, { once: true });
+      const wrap = card.querySelector('.thumb-wrap');
+      if (wrap) {
+        wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview')));
+        const img = wrap.querySelector('img');
+        if (img && !img.complete) img.addEventListener('load', () => scheduleRebalance(), { once: true });
+        img?.addEventListener('error', () => { wrap.style.display = 'none'; scheduleRebalance(); }, { once: true });
       }
-      // OCR is fixed-height scroll panel — no toggle, no rebalance on click
       return card;
     }
 
-    /**
-     * Data/filter changed: create or drop card nodes, then pack.
-     * Existing nodes for the same id are reused (stable identity → no hover thrash).
-     */
     function rebuildFromData() {
       const host = document.getElementById('grid');
-      const items = filteredClips();
+      const view = clientFilter(clips);
 
-      if (items.length === 0) {
+      if (!view.length) {
         cardCache.clear();
-        host.className = 'masonry';
-        host.innerHTML = `
-          <div class="masonry-empty">
-            <span class="material-symbols-outlined" style="font-size: 48px; opacity: 0.5;">inbox</span>
-            <p style="margin-top: 12px;">没有匹配的剪贴板历史记录</p>
-          </div>`;
+        host.innerHTML = `<div class="empty"><span class="material-symbols-outlined" style="font-size:48px;opacity:.5">inbox</span>
+          <p style="margin-top:12px">${loading ? '加载中…' : '没有匹配的记录'}</p></div>`;
         lastColCount = 0;
         return;
       }
 
-      const nextIds = new Set(items.map(i => i.id));
+      const nextIds = new Set(view.map(i => i.id));
       for (const id of [...cardCache.keys()]) {
         if (!nextIds.has(id)) {
           cardCache.get(id)?.remove();
@@ -720,80 +473,52 @@
         }
       }
 
-      const orderedCards = items.map(item => {
-        let card = cardCache.get(item.id);
-        if (!card) {
-          card = buildCardElement(item);
-          cardCache.set(item.id, card);
+      const cards = view.map(item => {
+        let c = cardCache.get(item.id);
+        if (!c) {
+          c = buildCard(item);
+          cardCache.set(item.id, c);
         }
-        return card;
+        return c;
       });
 
-      // Highlight only new code blocks
-      orderedCards.forEach(card => {
+      cards.forEach(card => {
         card.querySelectorAll('pre code:not([data-hljs])').forEach(block => {
-          try {
-            hljs.highlightElement(block);
-            block.setAttribute('data-hljs', '1');
-          } catch (_) {}
+          try { hljs.highlightElement(block); block.setAttribute('data-hljs', '1'); } catch (_) {}
         });
       });
 
-      rebalance(orderedCards);
+      rebalance(cards);
     }
 
-    /**
-     * Re-pack existing card elements into columns without destroying them.
-     * Safe to call on image load / resize.
-     */
     function rebalance(orderedCards) {
       const host = document.getElementById('grid');
       if (!orderedCards) {
-        const items = filteredClips();
-        orderedCards = items.map(i => cardCache.get(i.id)).filter(Boolean);
+        orderedCards = clientFilter(clips).map(i => cardCache.get(i.id)).filter(Boolean);
       }
       if (!orderedCards.length) return;
 
       const cols = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
       lastColCount = cols;
 
-      // Measure heights while cards are still in (or out of) DOM
-      // Temporarily place in a single off-flow measure column for accurate width
-      const measureWidth = Math.max(
-        200,
-        Math.floor((host.clientWidth - (cols - 1) * 16) / cols)
-      );
-
-      // Ensure host has column structure
+      orderedCards.forEach(c => c.remove());
       host.className = 'masonry';
-      // Keep structure: clear only columns, not cards (cards move via appendChild)
-      const existingCols = [...host.querySelectorAll(':scope > .masonry-col')];
-      let colEls = existingCols;
-      if (colEls.length !== cols) {
-        // Detach all cards first
-        orderedCards.forEach(c => c.remove());
-        host.innerHTML = '';
-        colEls = [];
-        for (let i = 0; i < cols; i++) {
-          const col = document.createElement('div');
-          col.className = 'masonry-col';
-          host.appendChild(col);
-          colEls.push(col);
-        }
-      } else {
-        // Detach cards from columns before reassignment
-        orderedCards.forEach(c => c.remove());
+      host.innerHTML = '';
+      const colEls = [];
+      for (let i = 0; i < cols; i++) {
+        const col = document.createElement('div');
+        col.className = 'masonry-col';
+        host.appendChild(col);
+        colEls.push(col);
       }
 
-      // Measure: append to first col temporarily at correct width
+      // Measure then pack
       const heights = orderedCards.map(card => {
         colEls[0].appendChild(card);
-        // force width context
-        const h = card.getBoundingClientRect().height || card.offsetHeight || 120;
+        const h = card.getBoundingClientRect().height || 120;
         card.remove();
         return h;
       });
-
       const { colOf } = Masonry.pack(heights, cols, 16);
       for (let i = 0; i < orderedCards.length; i++) {
         colEls[colOf[i]].appendChild(orderedCards[i]);
@@ -802,17 +527,36 @@
 
     function scheduleRebalance() {
       clearTimeout(rebalanceTimer);
-      rebalanceTimer = setTimeout(() => {
-        // rAF batches with paint; no full rebuild
-        requestAnimationFrame(() => rebalance());
-      }, 48);
+      rebalanceTimer = setTimeout(() => requestAnimationFrame(() => rebalance()), 48);
     }
 
-    window.addEventListener('resize', () => {
-      const host = document.getElementById('grid');
-      const next = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
-      if (next !== lastColCount) scheduleRebalance();
-      else scheduleRebalance();
+    // --- Lightbox ---
+    function openLightbox(url) {
+      if (!url) return;
+      fullUrlForLightbox = url;
+      const lb = document.getElementById('lightbox');
+      const img = document.getElementById('lightboxImg');
+      img.src = url;
+      lb.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeLightbox() {
+      const lb = document.getElementById('lightbox');
+      lb.classList.remove('open');
+      document.getElementById('lightboxImg').removeAttribute('src');
+      fullUrlForLightbox = null;
+      document.body.style.overflow = '';
+    }
+    document.getElementById('lightboxClose').onclick = closeLightbox;
+    document.getElementById('lightboxCloseX').onclick = closeLightbox;
+    document.getElementById('lightbox').addEventListener('click', e => {
+      if (e.target.id === 'lightbox') closeLightbox();
+    });
+    document.getElementById('lightboxOpenTab').onclick = () => {
+      if (fullUrlForLightbox) window.open(fullUrlForLightbox, '_blank');
+    };
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeLightbox();
     });
 
     async function copyClip(text) {
@@ -821,59 +565,65 @@
         await fetch(API + '/api/clips', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: text, type: 'text' })
+          body: JSON.stringify({ text, type: 'text' })
         });
-        showSnackbar('已成功写入 macOS 系统剪贴板！');
-      } catch (err) {
-        showSnackbar('写入剪贴板失败');
-      }
+        toast('已写入 macOS 剪贴板');
+      } catch (_) { toast('复制失败'); }
     }
 
     async function deleteClip(id) {
       try {
-        await fetch(API + `/api/clips?id=${id}`, { method: 'DELETE' });
-        showSnackbar('已删除剪贴板记录');
-        fetchClips();
-      } catch (err) {
-        showSnackbar('删除失败');
-      }
+        await fetch(`${API}/api/clips?id=${id}`, { method: 'DELETE' });
+        clips = clips.filter(c => c.id !== id);
+        cardCache.get(id)?.remove();
+        cardCache.delete(id);
+        toast('已删除');
+        rebuildFromData();
+      } catch (_) { toast('删除失败'); }
     }
 
-    function showSnackbar(msg) {
-      const snackbar = document.getElementById('snackbar');
-      document.getElementById('snackbarText').textContent = msg;
-      snackbar.classList.add('show');
-      setTimeout(() => snackbar.classList.remove('show'), 2500);
-    }
-
-    document.querySelectorAll('.m3-chip').forEach(btn => {
+    // Filters
+    document.querySelectorAll('.chip').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.m3-chip').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.chip').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        currentFilter = btn.getAttribute('data-type');
+        currentFilter = btn.dataset.type;
         rebuildFromData();
       });
     });
 
-    document.getElementById('searchInput').addEventListener('input', () => {
-      rebuildFromData();
+    // Server-side search (debounced) — full history capable via SQL LIKE
+    document.getElementById('searchInput').addEventListener('input', e => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        searchQuery = e.target.value.trim();
+        nextCursor = null;
+        exhausted = false;
+        fetchPage({ reset: true });
+      }, 280);
     });
 
-    fetchClips();
+    // Infinite scroll
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(en => en.isIntersecting)) fetchPage({ reset: false });
+    }, { rootMargin: '600px 0px' });
+    io.observe(document.getElementById('sentinel'));
 
+    window.addEventListener('resize', () => scheduleRebalance());
+
+    // SSE incremental
     function setupSSE() {
-      const evtSource = new EventSource(API + '/api/events');
-      evtSource.onmessage = (e) => {
+      const es = new EventSource(API + '/api/events');
+      es.onmessage = e => {
         try {
-          const data = JSON.parse(e.data);
-          if (data.type === 'update') fetchClips();
+          const d = JSON.parse(e.data);
+          if (d.type === 'update') mergeHead();
         } catch (_) {}
       };
-      evtSource.onerror = () => {
-        evtSource.close();
-        setTimeout(setupSSE, 3000);
-      };
+      es.onerror = () => { es.close(); setTimeout(setupSSE, 3000); };
     }
+
+    fetchPage({ reset: true });
     setupSSE();
   </script>
 </body>

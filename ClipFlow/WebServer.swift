@@ -133,13 +133,15 @@ class WebServer {
     }
 
     private func handleGetRequest(path: String, connection: NWConnection) {
-        if path == "/" || path == "/index.html" {
+        // path may include query string, e.g. /api/clips?cursor=...
+        let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
+        if pathOnly == "/" || pathOnly == "/index.html" {
             sendHTMLResponse(connection: connection)
-        } else if path == "/api/items" || path == "/api/clips" {
-            sendItemsJSON(connection: connection)
-        } else if path.hasPrefix("/api/image") {
+        } else if pathOnly == "/api/items" || pathOnly == "/api/clips" {
+            sendItemsJSON(path: path, connection: connection)
+        } else if pathOnly.hasPrefix("/api/image") {
             sendImage(path: path, connection: connection)
-        } else if path == "/api/events" {
+        } else if pathOnly == "/api/events" {
             handleSSEEvents(connection: connection)
         } else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
@@ -520,46 +522,60 @@ class WebServer {
         """
     }
     
-    private func sendItemsJSON(connection: NWConnection) {
-        database.fetchItems(limit: 100) { [weak self] items in
+    private func itemToJSON(_ item: ClipboardItem) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": item.id.uuidString,
+            "timestamp": item.timestamp.timeIntervalSince1970,
+            "type": item.type.rawValue,
+            "preview": item.preview(),
+            "sourceApp": item.sourceApp ?? ""
+        ]
+        if let html = item.htmlContent { dict["htmlContent"] = html }
+        if let text = item.textContent { dict["textContent"] = text }
+        if let ocr = item.ocrText { dict["ocrText"] = ocr }
+        // Thumb URL for image types — client never loads full blob in feed
+        if item.type == .image {
+            dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb"
+            dict["fullUrl"] = "/api/image?id=\(item.id.uuidString)&size=full"
+        }
+        return dict
+    }
+
+    /// Paginated list. Supports:
+    ///   /api/clips?limit=30&cursor={ts}:{id}&q=keyword
+    /// Response envelope (always object for new clients):
+    ///   { "items": [...], "nextCursor": "..." | null }
+    /// Legacy: still works when limit/cursor omitted (returns first page).
+    private func sendItemsJSON(path: String, connection: NWConnection) {
+        let comps = URLComponents(string: "http://localhost\(path)")
+        let items = comps?.queryItems ?? []
+        let limit = items.first(where: { $0.name == "limit" }).flatMap { Int($0.value ?? "") } ?? 30
+        let cursorRaw = items.first(where: { $0.name == "cursor" })?.value
+        let cursor = cursorRaw.flatMap { ClipCursor.decode($0) }
+        let q = items.first(where: { $0.name == "q" })?.value
+
+        database.fetchPage(limit: limit, cursor: cursor, query: q) { [weak self] page in
             guard let self = self else { return }
-            
-            let jsonItems = items.map { item -> [String: Any] in
-                var dict: [String: Any] = [
-                    "id": item.id.uuidString,
-                    "timestamp": item.timestamp.timeIntervalSince1970,
-                    "type": item.type.rawValue,
-                    "preview": item.preview(),
-                    "sourceApp": item.sourceApp ?? ""
-                ]
-                
-                // 注入富文本内容
-                if let html = item.htmlContent {
-                    dict["htmlContent"] = html
-                }
-                if let text = item.textContent {
-                    dict["textContent"] = text
-                }
-                if let ocr = item.ocrText {
-                    dict["ocrText"] = ocr
-                }
-                
-                return dict
-            }
-            
+            let jsonItems = page.items.map { self.itemToJSON($0) }
+            var payload: [String: Any] = [
+                "items": jsonItems,
+                "nextCursor": page.nextCursor?.encode() as Any
+            ]
+            // Keep flat array under "legacy" optional? No — clients updated.
+            // Also expose count for debugging
+            payload["count"] = jsonItems.count
+
             do {
-                let jsonData = try JSONSerialization.data(withJSONObject: jsonItems, options: [])
-                let jsonString = String(data: jsonData, encoding: .utf8) ?? "[]"
-                
+                let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [])
+                let jsonString = String(data: jsonData, encoding: .utf8) ?? "{\"items\":[]}"
                 let response = """
                 HTTP/1.1 200 OK
                 Access-Control-Allow-Origin: *
                 Content-Type: application/json; charset=utf-8
                 Content-Length: \(jsonString.utf8.count)
-                
+
                 \(jsonString)
                 """
-                
                 self.sendResponse(response, connection: connection)
             } catch {
                 self.sendErrorResponse(connection: connection, status: 500, message: "Internal Server Error")
@@ -581,10 +597,16 @@ class WebServer {
         var headers: [(String, String)] = [
             ("Access-Control-Allow-Origin", "*"),
             ("Content-Type", contentType),
-            ("Content-Length", "\(body.count)"),
-            ("Cache-Control", "private, max-age=60")
+            ("Content-Length", "\(body.count)")
         ]
-        headers.append(contentsOf: extraHeaders)
+        var hasCache = false
+        for h in extraHeaders {
+            if h.0.lowercased() == "cache-control" { hasCache = true }
+            headers.append(h)
+        }
+        if !hasCache {
+            headers.append(("Cache-Control", "private, max-age=60"))
+        }
         let payload = httpHeader(status: status, reason: reason, headers: headers) + body
         connection.send(content: payload, completion: .contentProcessed { _ in
             connection.cancel()
@@ -611,24 +633,33 @@ class WebServer {
         return "application/octet-stream"
     }
 
+    private enum ImageSizeTier: String {
+        case thumb   // feed card
+        case medium  // optional mid
+        case full    // lightbox / download
+
+        var maxPixel: CGFloat {
+            switch self {
+            case .thumb: return 360
+            case .medium: return 1200
+            case .full: return 0 // original
+            }
+        }
+    }
+
     private func convertToPNG(_ data: Data) -> Data? {
-        // Prefer ImageIO for fidelity
         if let src = CGImageSourceCreateWithData(data as CFData, nil),
            CGImageSourceGetCount(src) > 0 {
             let uti = CGImageSourceGetType(src) as String?
-            // Already PNG — return original bytes
             if uti == "public.png" { return data }
             if let cgImage = CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCache: true] as CFDictionary) {
                 let out = NSMutableData()
                 if let dest = CGImageDestinationCreateWithData(out, "public.png" as CFString, 1, nil) {
                     CGImageDestinationAddImage(dest, cgImage, nil)
-                    if CGImageDestinationFinalize(dest) {
-                        return out as Data
-                    }
+                    if CGImageDestinationFinalize(dest) { return out as Data }
                 }
             }
         }
-        // Fallback via NSBitmapImageRep
         if let image = NSImage(data: data),
            let tiff = image.tiffRepresentation,
            let rep = NSBitmapImageRep(data: tiff),
@@ -638,32 +669,73 @@ class WebServer {
         return nil
     }
 
+    /// Downscale with ImageIO thumbnail API (fast, stream-friendly).
+    private func encodeImage(_ data: Data, tier: ImageSizeTier) -> (Data, String)? {
+        if tier == .full {
+            if let png = convertToPNG(data) { return (png, "image/png") }
+            return (data, detectImageContentType(data))
+        }
+
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(src) > 0 else {
+            return convertToPNG(data).map { ($0, "image/png") }
+        }
+
+        let maxPx = tier.maxPixel
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPx,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let cgThumb = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else {
+            return convertToPNG(data).map { ($0, "image/png") }
+        }
+
+        // Feed thumbs: JPEG for size; medium: JPEG too; full: PNG above
+        let out = NSMutableData()
+        let uti = "public.jpeg" as CFString
+        guard let dest = CGImageDestinationCreateWithData(out, uti, 1, nil) else {
+            return nil
+        }
+        let quality: CGFloat = tier == .thumb ? 0.72 : 0.85
+        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
+        CGImageDestinationAddImage(dest, cgThumb, props as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return (out as Data, "image/jpeg")
+    }
+
     private func sendImage(path: String, connection: NWConnection) {
-        // 解析 URL 查询参数 id
         guard let comps = URLComponents(string: "http://localhost\(path)"),
               let idValue = comps.queryItems?.first(where: { $0.name == "id" })?.value,
               let uuid = UUID(uuidString: idValue) else {
             sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
             return
         }
+        let sizeRaw = comps.queryItems?.first(where: { $0.name == "size" })?.value ?? "full"
+        let tier = ImageSizeTier(rawValue: sizeRaw) ?? .full
+
         database.fetchImageData(id: uuid) { [weak self] imageData in
             guard let self = self, let data = imageData, !data.isEmpty else {
                 self?.sendErrorResponse(connection: connection, status: 404, message: "Not Found")
                 return
             }
 
-            // Normalize to PNG when possible so browsers always get a decodable image/*
-            let body: Data
-            let contentType: String
-            if let png = self.convertToPNG(data) {
-                body = png
-                contentType = "image/png"
-            } else {
-                body = data
-                contentType = self.detectImageContentType(data)
+            // Resize off main-ish path (already on callback queue)
+            guard let (body, contentType) = self.encodeImage(data, tier: tier) else {
+                self.sendErrorResponse(connection: connection, status: 500, message: "Encode Failed")
+                return
             }
 
-            self.sendBinary(status: 200, reason: "OK", contentType: contentType, body: body, connection: connection)
+            let cache = tier == .full ? "private, max-age=120" : "private, max-age=86400"
+            self.sendBinary(
+                status: 200,
+                reason: "OK",
+                contentType: contentType,
+                body: body,
+                connection: connection,
+                extraHeaders: [("Cache-Control", cache), ("X-Image-Size", tier.rawValue)]
+            )
         }
     }
     
