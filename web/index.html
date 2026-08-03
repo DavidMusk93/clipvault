@@ -32,7 +32,7 @@
       --md-sys-color-outline-variant: #e1e3e1;
 
       --md-elevation-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.06), 0px 1px 2px 0px rgba(0, 0, 0, 0.08);
-      --md-elevation-2: 0px 2px 8px 2px rgba(0, 0, 0, 0.08), 0px 1px 3px 0px rgba(0, 0, 0, 0.1);
+      --md-elevation-2: 0px 4px 12px 2px rgba(11, 87, 208, 0.12), 0px 2px 4px 0px rgba(0, 0, 0, 0.08);
       --md-elevation-3: 0px 4px 16px 4px rgba(0, 0, 0, 0.12), 0px 2px 4px 0px rgba(0, 0, 0, 0.08);
 
       --md-shape-corner-full: 9999px;
@@ -43,7 +43,6 @@
 
       --masonry-gap: 16px;
       --card-pad: 14px 16px;
-      --col-min: 280px;
     }
 
     * {
@@ -111,7 +110,7 @@
       width: 100%;
       max-width: 520px;
       border: 1px solid transparent;
-      transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+      transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
     }
 
     .m3-search-bar:focus-within {
@@ -153,7 +152,7 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s ease;
+      transition: background-color 0.2s, border-color 0.2s, color 0.2s;
       white-space: nowrap;
     }
 
@@ -171,7 +170,6 @@
       padding: 8px 28px 36px;
     }
 
-    /* ===== Masonry: multi-column packer (shortest-column) ===== */
     .masonry {
       display: flex;
       align-items: flex-start;
@@ -194,16 +192,11 @@
       color: var(--md-sys-color-outline);
     }
 
-    /* Staging area: measure cards off-screen before packing */
-    .masonry-measure {
-      position: absolute;
-      left: -99999px;
-      top: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-
-    /* Card: height = content only. Never stretch. */
+    /*
+     * Hover must be compositor-only (shadow / filter / opacity).
+     * Never change transform/top/margin/height on hover — that reflows
+     * shortest-column masonry and causes jitter under the cursor.
+     */
     .m3-card {
       background-color: var(--md-sys-color-surface);
       border: 1px solid var(--md-sys-color-outline-variant);
@@ -216,26 +209,24 @@
       height: auto;
       width: 100%;
       box-shadow: var(--md-elevation-1);
-      transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.18s cubic-bezier(0.2, 0, 0, 1);
-      contain: layout style;
+      transition: box-shadow 0.18s ease, border-color 0.18s ease;
+      position: relative;
+      z-index: 0;
     }
 
     .m3-card:hover {
-      transform: translateY(-2px);
       box-shadow: var(--md-elevation-2);
-      border-color: rgba(11, 87, 208, 0.28);
+      border-color: rgba(11, 87, 208, 0.35);
+      z-index: 1;
+      /* NO transform — avoids geometry thrash + hover enter/leave loop */
     }
 
-    /* Compact cards (short text/html snippets) */
     .m3-card.is-compact {
       padding: 12px 14px;
       gap: 8px;
     }
 
-    .m3-card.is-compact .card-actions-row {
-      padding-top: 10px;
-    }
-
+    .m3-card.is-compact .card-actions-row { padding-top: 10px; }
     .m3-card.is-compact .m3-btn {
       height: 34px;
       padding: 0 14px;
@@ -274,7 +265,6 @@
       line-height: 1.55;
       color: #2c2c2c;
       min-width: 0;
-      /* no fixed max-height by default — content drives height */
     }
 
     .card-content-area pre {
@@ -307,9 +297,6 @@
       word-break: break-word;
     }
 
-    .snippet-html:empty { display: none; }
-
-    /* Short pure snippets stay tight */
     .snippet-html.is-tiny,
     .card-content-area pre code.is-tiny {
       max-height: none;
@@ -351,10 +338,7 @@
     }
 
     .ocr-panel summary::-webkit-details-marker { display: none; }
-
-    .ocr-panel summary .material-symbols-outlined {
-      font-size: 16px;
-    }
+    .ocr-panel summary .material-symbols-outlined { font-size: 16px; }
 
     .ocr-panel .ocr-body {
       padding: 0 12px 10px;
@@ -368,7 +352,6 @@
 
     .ocr-panel[open] summary {
       border-bottom: 1px solid rgba(4, 30, 73, 0.08);
-      margin-bottom: 0;
     }
 
     .card-actions-row {
@@ -405,7 +388,7 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s ease;
+      transition: background-color 0.2s, box-shadow 0.2s;
       flex-shrink: 0;
     }
 
@@ -456,7 +439,7 @@
       font-size: 14px;
       font-weight: 500;
       opacity: 0;
-      transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+      transition: opacity 0.3s, transform 0.3s;
       z-index: 2000;
       pointer-events: none;
     }
@@ -470,7 +453,6 @@
       .top-app-bar { padding: 12px 16px; flex-wrap: wrap; }
       main { padding: 8px 14px 28px; }
       .chip-group { padding: 12px 14px 6px; }
-      :root { --col-min: 100%; }
     }
   </style>
 </head>
@@ -519,27 +501,69 @@
   </div>
 
   <script>
+    /**
+     * Pure masonry helpers (mirrored in tests/masonry.test.mjs for regression).
+     * Keep in sync when changing packing rules.
+     */
+    const Masonry = {
+      columnCountForWidth(w) {
+        if (w < 560) return 1;
+        if (w < 900) return 2;
+        if (w < 1280) return 3;
+        if (w < 1680) return 4;
+        return 5;
+      },
+
+      /**
+       * Shortest-column assignment.
+       * @param {number[]} heights item heights in order
+       * @param {number} cols
+       * @param {number} gap
+       * @returns {{ colOf: number[], colHeights: number[] }}
+       */
+      pack(heights, cols, gap = 16) {
+        const colOf = new Array(heights.length);
+        const colHeights = new Array(cols).fill(0);
+        for (let i = 0; i < heights.length; i++) {
+          let best = 0;
+          for (let c = 1; c < cols; c++) {
+            if (colHeights[c] < colHeights[best]) best = c;
+          }
+          colOf[i] = best;
+          colHeights[best] += heights[i] + (colHeights[best] > 0 ? gap : 0);
+        }
+        return { colOf, colHeights };
+      },
+
+      isCompactItem(item) {
+        if (!item || item.type === 'image') return false;
+        const raw = item.textContent || item.preview || '';
+        const html = item.htmlContent || '';
+        const plain = (html ? html.replace(/<[^>]+>/g, '') : raw).trim();
+        return plain.length > 0 && plain.length <= 80 && !plain.includes('\n');
+      }
+    };
+
+    // Expose for manual console / future test harness
+    window.ClipViewMasonry = Masonry;
+
     let clips = [];
     let currentFilter = 'all';
-    let resizeTimer = null;
+    /** @type {Map<string, HTMLElement>} stable card nodes keyed by item id */
+    const cardCache = new Map();
     let lastColCount = 0;
+    let rebalanceTimer = null;
+    let dataEpoch = 0;
 
-    const API = ''; // same-origin when served from :8080
-
-    function columnCountForWidth(w) {
-      if (w < 560) return 1;
-      if (w < 900) return 2;
-      if (w < 1280) return 3;
-      if (w < 1680) return 4;
-      return 5;
-    }
+    const API = '';
 
     async function fetchClips() {
       try {
         const res = await fetch(API + '/api/clips');
         if (!res.ok) throw new Error('API Error');
         clips = await res.json();
-        render();
+        dataEpoch++;
+        rebuildFromData();
       } catch (e) {
         console.error('Failed to load clips:', e);
       }
@@ -555,18 +579,24 @@
       });
     }
 
-    function isCompactItem(item) {
-      if (item.type === 'image') return false;
-      const raw = item.textContent || item.preview || '';
-      const html = item.htmlContent || '';
-      // strip tags for length estimate
-      const plain = (html ? html.replace(/<[^>]+>/g, '') : raw).trim();
-      return plain.length > 0 && plain.length <= 80 && !plain.includes('\n');
+    function escapeHtml(str) {
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function escapeAttribute(str) {
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
 
     function buildCardElement(item) {
       const timeStr = new Date(item.timestamp * 1000).toLocaleString();
-      const compact = isCompactItem(item);
+      const compact = Masonry.isCompactItem(item);
       const card = document.createElement('article');
       card.className = 'm3-card' + (compact ? ' is-compact' : '');
       card.dataset.type = item.type;
@@ -574,7 +604,7 @@
 
       let contentInner = '';
       if (item.type === 'image') {
-        contentInner = `<img class="card-image-preview" src="${API}/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" />`;
+        contentInner = `<img class="card-image-preview" src="${API}/api/image?id=${item.id}" loading="lazy" alt="Clipboard Image" decoding="async" />`;
         const ocrText = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
         if (ocrText) {
           const openAttr = ocrText.length < 120 ? ' open' : '';
@@ -623,33 +653,40 @@
         </div>`;
 
       card.querySelector('[data-copy]')?.addEventListener('click', (e) => {
-        const t = e.currentTarget.getAttribute('data-copy') || '';
-        copyClip(t);
+        copyClip(e.currentTarget.getAttribute('data-copy') || '');
       });
       card.querySelector('[data-delete]')?.addEventListener('click', (e) => {
         deleteClip(e.currentTarget.getAttribute('data-delete'));
       });
 
-      // When image loads, reflow masonry so column heights stay correct
+      // Image load / OCR toggle: rebalance nodes only — never rebuild cards
       const img = card.querySelector('img.card-image-preview');
       if (img) {
-        img.addEventListener('load', scheduleReflow, { once: true });
-        img.addEventListener('error', () => { img.style.display = 'none'; scheduleReflow(); }, { once: true });
+        if (!img.complete) {
+          img.addEventListener('load', () => scheduleRebalance(), { once: true });
+        }
+        img.addEventListener('error', () => {
+          img.style.display = 'none';
+          scheduleRebalance();
+        }, { once: true });
       }
-
-      // OCR expand/collapse changes height
       card.querySelectorAll('details.ocr-panel').forEach(d => {
-        d.addEventListener('toggle', scheduleReflow);
+        d.addEventListener('toggle', () => scheduleRebalance());
       });
 
       return card;
     }
 
-    function render() {
+    /**
+     * Data/filter changed: create or drop card nodes, then pack.
+     * Existing nodes for the same id are reused (stable identity → no hover thrash).
+     */
+    function rebuildFromData() {
       const host = document.getElementById('grid');
       const items = filteredClips();
 
       if (items.length === 0) {
+        cardCache.clear();
         host.className = 'masonry';
         host.innerHTML = `
           <div class="masonry-empty">
@@ -660,79 +697,107 @@
         return;
       }
 
-      // Build cards once
-      const cards = items.map(buildCardElement);
+      const nextIds = new Set(items.map(i => i.id));
+      for (const id of [...cardCache.keys()]) {
+        if (!nextIds.has(id)) {
+          cardCache.get(id)?.remove();
+          cardCache.delete(id);
+        }
+      }
 
-      // Highlight code blocks after attach
-      packMasonry(host, cards);
-
-      host.querySelectorAll('pre code').forEach((block) => {
-        try { hljs.highlightElement(block); } catch (_) {}
+      const orderedCards = items.map(item => {
+        let card = cardCache.get(item.id);
+        if (!card) {
+          card = buildCardElement(item);
+          cardCache.set(item.id, card);
+        }
+        return card;
       });
+
+      // Highlight only new code blocks
+      orderedCards.forEach(card => {
+        card.querySelectorAll('pre code:not([data-hljs])').forEach(block => {
+          try {
+            hljs.highlightElement(block);
+            block.setAttribute('data-hljs', '1');
+          } catch (_) {}
+        });
+      });
+
+      rebalance(orderedCards);
     }
 
     /**
-     * Shortest-column masonry packer.
-     * Preserves chronological order (left→right, top→bottom fill into shortest col).
-     * Cards keep intrinsic height — zero forced blank space.
+     * Re-pack existing card elements into columns without destroying them.
+     * Safe to call on image load / OCR toggle / resize.
      */
-    function packMasonry(host, cards) {
-      const cols = columnCountForWidth(host.clientWidth || window.innerWidth);
+    function rebalance(orderedCards) {
+      const host = document.getElementById('grid');
+      if (!orderedCards) {
+        const items = filteredClips();
+        orderedCards = items.map(i => cardCache.get(i.id)).filter(Boolean);
+      }
+      if (!orderedCards.length) return;
+
+      const cols = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
       lastColCount = cols;
 
+      // Measure heights while cards are still in (or out of) DOM
+      // Temporarily place in a single off-flow measure column for accurate width
+      const measureWidth = Math.max(
+        200,
+        Math.floor((host.clientWidth - (cols - 1) * 16) / cols)
+      );
+
+      // Ensure host has column structure
       host.className = 'masonry';
-      host.innerHTML = '';
-
-      const colEls = [];
-      const heights = [];
-      for (let i = 0; i < cols; i++) {
-        const col = document.createElement('div');
-        col.className = 'masonry-col';
-        host.appendChild(col);
-        colEls.push(col);
-        heights.push(0);
-      }
-
-      // Measure stage width ≈ one column
-      const colWidth = colEls[0].clientWidth || Math.floor((host.clientWidth - (cols - 1) * 16) / cols);
-
-      // Offscreen measure to get accurate heights including images that already have dimensions
-      const measureRoot = document.createElement('div');
-      measureRoot.className = 'masonry-measure';
-      measureRoot.style.width = colWidth + 'px';
-      document.body.appendChild(measureRoot);
-
-      for (const card of cards) {
-        // Find shortest column
-        let best = 0;
-        for (let i = 1; i < cols; i++) {
-          if (heights[i] < heights[best]) best = i;
+      // Keep structure: clear only columns, not cards (cards move via appendChild)
+      const existingCols = [...host.querySelectorAll(':scope > .masonry-col')];
+      let colEls = existingCols;
+      if (colEls.length !== cols) {
+        // Detach all cards first
+        orderedCards.forEach(c => c.remove());
+        host.innerHTML = '';
+        colEls = [];
+        for (let i = 0; i < cols; i++) {
+          const col = document.createElement('div');
+          col.className = 'masonry-col';
+          host.appendChild(col);
+          colEls.push(col);
         }
-
-        // Append for live layout
-        colEls[best].appendChild(card);
-
-        // Approximate height: use offsetHeight after append (more accurate once in column)
-        // First paint may be incomplete for images; load handlers reflow later.
-        const h = card.offsetHeight || 120;
-        heights[best] += h + 16;
+      } else {
+        // Detach cards from columns before reassignment
+        orderedCards.forEach(c => c.remove());
       }
 
-      measureRoot.remove();
+      // Measure: append to first col temporarily at correct width
+      const heights = orderedCards.map(card => {
+        colEls[0].appendChild(card);
+        // force width context
+        const h = card.getBoundingClientRect().height || card.offsetHeight || 120;
+        card.remove();
+        return h;
+      });
+
+      const { colOf } = Masonry.pack(heights, cols, 16);
+      for (let i = 0; i < orderedCards.length; i++) {
+        colEls[colOf[i]].appendChild(orderedCards[i]);
+      }
     }
 
-    function scheduleReflow() {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        // Only re-pack if we still have cards
-        if (!clips.length) return;
-        render();
-      }, 80);
+    function scheduleRebalance() {
+      clearTimeout(rebalanceTimer);
+      rebalanceTimer = setTimeout(() => {
+        // rAF batches with paint; no full rebuild
+        requestAnimationFrame(() => rebalance());
+      }, 48);
     }
 
     window.addEventListener('resize', () => {
-      const next = columnCountForWidth(document.getElementById('grid').clientWidth || window.innerWidth);
-      if (next !== lastColCount) scheduleReflow();
+      const host = document.getElementById('grid');
+      const next = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
+      if (next !== lastColCount) scheduleRebalance();
+      else scheduleRebalance();
     });
 
     async function copyClip(text) {
@@ -766,31 +831,18 @@
       setTimeout(() => snackbar.classList.remove('show'), 2500);
     }
 
-    function escapeHtml(str) {
-      return (str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
-
-    function escapeAttribute(str) {
-      return (str || '')
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-    }
-
     document.querySelectorAll('.m3-chip').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.m3-chip').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentFilter = btn.getAttribute('data-type');
-        render();
+        rebuildFromData();
       });
     });
 
-    document.getElementById('searchInput').addEventListener('input', render);
+    document.getElementById('searchInput').addEventListener('input', () => {
+      rebuildFromData();
+    });
 
     fetchClips();
 
