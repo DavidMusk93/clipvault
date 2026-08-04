@@ -2,15 +2,18 @@ package com.davidmusk.keepsake
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import com.davidmusk.keepsake.data.DriveTreePicker
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -126,7 +129,24 @@ private fun KeepsakeRoot(
     var endReached by remember { mutableStateOf(false) }
 
     val openTree = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
+        // Custom contract: prefer Google Drive as INITIAL_URI so MIUI doesn't stick on local storage.
+        object : ActivityResultContracts.OpenDocumentTree() {
+            override fun createIntent(context: android.content.Context, input: Uri?): Intent {
+                val intent = super.createIntent(context, input)
+                intent.addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+                )
+                // Always try to open inside Drive when installed (input may already be a Drive URI).
+                val initial = input ?: DriveTreePicker.bestInitialUri(context)
+                if (initial != null) {
+                    intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initial)
+                }
+                return intent
+            }
+        }
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -140,6 +160,30 @@ private fun KeepsakeRoot(
             items = app.backupRepo.queryItems(limit = 80, offset = 0, q = query.ifBlank { null })
             loading = false
         }
+    }
+
+    fun launchDriveFolderPicker() {
+        if (!DriveTreePicker.isDriveInstalled(ctx.applicationContext)) {
+            Toast.makeText(ctx, "请先安装 Google 云端硬盘", Toast.LENGTH_LONG).show()
+            // Open Play Store listing
+            try {
+                ctx.startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("market://details?id=com.google.android.apps.docs")
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (_: Exception) {
+                ctx.startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.apps.docs")
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            return
+        }
+        openTree.launch(DriveTreePicker.bestInitialUri(ctx.applicationContext))
     }
 
     suspend fun refreshList(reset: Boolean) {
@@ -207,7 +251,7 @@ private fun KeepsakeRoot(
                     }) {
                         Icon(Icons.Default.ContentPaste, contentDescription = "粘贴并记下")
                     }
-                    IconButton(onClick = { openTree.launch(null) }) {
+                    IconButton(onClick = { launchDriveFolderPicker() }) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "选择云端文件夹")
                     }
                     IconButton(onClick = { scope.launch { syncAndLoad() } }) {
@@ -227,7 +271,7 @@ private fun KeepsakeRoot(
                 .padding(horizontal = 16.dp),
         ) {
             if (!hasRoot) {
-                SetupCard(onPick = { openTree.launch(null) })
+                SetupCard(onPick = { launchDriveFolderPicker() })
                 Spacer(Modifier.height(12.dp))
             }
 
@@ -360,14 +404,14 @@ private fun SetupCard(onPick: () -> Unit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("打开云端记忆", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "电脑端 Keepsake 会把记忆同步到 Google 云端硬盘。手机需先安装并登录「云端硬盘」App，再点下方按钮：在系统文件页左上角菜单切换到「云端硬盘 / Drive」，进入 My Drive → Keepsake → backup 后点使用此文件夹。若只看到本地目录，说明还没装 Drive 或没在侧栏切换存储源。",
+                "电脑端 Keepsake 会把记忆同步到 Google 云端硬盘。点下方按钮将直接打开云端硬盘（需已安装并登录同一账号）。进入 Keepsake → backup 后点「使用此文件夹」。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
             )
             Button(onClick = onPick) {
                 Icon(Icons.Default.FolderOpen, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("选择文件夹")
+                Text("从 Google 云端硬盘选择")
             }
         }
     }
