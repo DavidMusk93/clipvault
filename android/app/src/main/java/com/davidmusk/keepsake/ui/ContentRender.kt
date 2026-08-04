@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -140,40 +139,47 @@ fun ListItemBody(
     when (row.type.lowercase()) {
         "image" -> {
             val (bmp, loading) = rememberPayloadBitmap(row, repo)
-            Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(
-                    Modifier
+                    modifier = Modifier
                         .size(72.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
-                        loading -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        loading -> CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                        )
                         bmp != null -> Image(
                             bitmap = bmp,
                             contentDescription = "图片预览",
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f),
                             contentScale = ContentScale.Crop,
                         )
                         else -> Icon(
-                            Icons.Default.Image,
-                            null,
+                            imageVector = Icons.Default.Image,
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier = Modifier.weight(1f)) {
-                    val caption = row.ocrText?.takeIf { it.isNotBlank() }
-                        ?: "图片 · 点开查看大图"
-                    Text(
-                        caption.replace("\n", " ").trim(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Spacer(modifier = Modifier.width(12.dp))
+                val caption = row.ocrText?.takeIf { it.isNotBlank() }
+                    ?: "图片 · 点开查看大图"
+                Text(
+                    text = caption.replace("\n", " ").trim(),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         "url" -> {

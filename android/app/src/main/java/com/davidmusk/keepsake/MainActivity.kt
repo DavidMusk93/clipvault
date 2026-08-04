@@ -1,9 +1,8 @@
 package com.davidmusk.keepsake
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Intent
-import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
