@@ -103,10 +103,10 @@ object DriveTreePicker {
     ): String? {
         val rootsUri = DocumentsContract.buildRootsUri(authority)
         resolver.query(rootsUri, null, null, null, null)?.use { c ->
-            val idCol = c.columnIndex(DocumentsContract.Root.COLUMN_DOCUMENT_ID)
-            val titleCol = c.columnIndex(DocumentsContract.Root.COLUMN_TITLE)
-            val flagsCol = c.columnIndex(DocumentsContract.Root.COLUMN_FLAGS)
-            val summaryCol = c.columnIndex(DocumentsContract.Root.COLUMN_SUMMARY)
+            val idCol = c.getColumnIndex(DocumentsContract.Root.COLUMN_DOCUMENT_ID)
+            val titleCol = c.getColumnIndex(DocumentsContract.Root.COLUMN_TITLE)
+            val flagsCol = c.getColumnIndex(DocumentsContract.Root.COLUMN_FLAGS)
+            val summaryCol = c.getColumnIndex(DocumentsContract.Root.COLUMN_SUMMARY)
             while (c.moveToNext()) {
                 val docId = c.str(idCol) ?: continue
                 val title = c.str(titleCol).orEmpty()
