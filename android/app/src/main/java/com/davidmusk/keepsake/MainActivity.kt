@@ -134,19 +134,11 @@ private fun KeepsakeRoot(
         // Custom contract: prefer Google Drive as INITIAL_URI so MIUI doesn't stick on local storage.
         object : ActivityResultContracts.OpenDocumentTree() {
             override fun createIntent(context: android.content.Context, input: Uri?): Intent {
-                val intent = super.createIntent(context, input)
-                intent.addFlags(
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
-                        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+                // Prefer Drive-resolved INITIAL_URI + pin Google DocumentsUI (avoid MIUI hijack).
+                return DriveTreePicker.openTreeIntent(
+                    context,
+                    initial = input ?: DriveTreePicker.bestInitialUri(context),
                 )
-                // Always try to open inside Drive when installed (input may already be a Drive URI).
-                val initial = input ?: DriveTreePicker.bestInitialUri(context)
-                if (initial != null) {
-                    intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initial)
-                }
-                return intent
             }
         }
     ) { uri: Uri? ->

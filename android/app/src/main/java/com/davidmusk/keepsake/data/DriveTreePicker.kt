@@ -60,6 +60,12 @@ object DriveTreePicker {
         }
     }
 
+    /** Prefer AOSP/Google DocumentsUI — MIUI often hijacks OPEN_DOCUMENT_TREE with search apps. */
+    private val DOCUMENTS_UI_CANDIDATES = listOf(
+        "com.google.android.documentsui",
+        "com.android.documentsui",
+    )
+
     fun openTreeIntent(context: Context, initial: Uri? = null): Intent {
         return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(
@@ -71,6 +77,17 @@ object DriveTreePicker {
             val uri = initial ?: bestInitialUri(context)
             if (uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
+            }
+            // Pin handler so "Complete action using Baidu/…" never steals the pick.
+            for (pkg in DOCUMENTS_UI_CANDIDATES) {
+                try {
+                    context.packageManager.getPackageInfo(pkg, 0)
+                    setPackage(pkg)
+                    Log.i(TAG, "pin DocumentsUI package=$pkg")
+                    break
+                } catch (_: PackageManager.NameNotFoundException) {
+                    // try next
+                }
             }
         }
     }
