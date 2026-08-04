@@ -3,6 +3,7 @@ package com.davidmusk.keepsake.data
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
@@ -62,16 +63,27 @@ class BackupRepository(
     }
 
     suspend fun syncFromBackup(): SyncResult = withContext(Dispatchers.IO) {
-        val root = treeRoot() ?: return@withContext SyncResult(0, null, null, null, "尚未选择云端文件夹")
-        val latest = root.findFile("latest")
-            ?: return@withContext SyncResult(0, null, null, null, "文件夹不对：请选中 Keepsake/backup（内含 latest）")
-        val dbDoc = latest.findFile("clipflow.db")
-            ?: return@withContext SyncResult(0, null, null, null, "未找到记忆库，请确认选中了 backup 文件夹")
+        val treeUri = prefs.backupTreeUri
+            ?: return@withContext SyncResult(0, null, null, null, "尚未选择云端文件夹")
 
-        copyDocumentToFile(dbDoc.uri, cacheDb)
+        // Drive SAF: DocumentFile.findFile is unreliable. Use DocumentsContract children query.
+        val latestId = findChildDocumentId(treeUri, parentDocId = null, displayName = "latest")
+            ?: return@withContext SyncResult(
+                0, null, null, null,
+                "文件夹不对：请选中 Keepsake/backup（内含 latest）",
+            )
+        val dbUri = findChildDocumentUri(treeUri, parentDocId = latestId, displayName = "clipflow.db")
+            ?: return@withContext SyncResult(
+                0, null, null, null,
+                "未找到记忆库 clipflow.db（latest/ 下）",
+            )
 
-        val manifest = latest.findFile("MANIFEST.json")?.let { readJsonDoc<BackupManifest>(it.uri) }
-        val status = root.findFile("STATUS.json")?.let { readJsonDoc<BackupStatusFile>(it.uri) }
+        copyDocumentToFile(dbUri, cacheDb)
+
+        val manifestUri = findChildDocumentUri(treeUri, parentDocId = latestId, displayName = "MANIFEST.json")
+        val manifest = manifestUri?.let { readJsonDoc<BackupManifest>(it) }
+        val statusUri = findChildDocumentUri(treeUri, parentDocId = null, displayName = "STATUS.json")
+        val status = statusUri?.let { readJsonDoc<BackupStatusFile>(it) }
         val count = openDb()?.use { db ->
             db.rawQuery("SELECT COUNT(*) FROM clipboard_items", null).use { c ->
                 if (c.moveToFirst()) c.getInt(0) else 0
@@ -84,8 +96,81 @@ class BackupRepository(
             sha256 = manifest?.sha256,
             manifest = manifest,
             status = status,
-            message = "已载入 $count 条"
+            message = "已载入 $count 条（Google Drive）"
         )
+    }
+
+    /**
+     * List direct children of [parentDocId] inside a granted tree.
+     * [parentDocId] null = tree root document.
+     */
+    private fun findChildDocumentId(
+        treeUri: Uri,
+        parentDocId: String?,
+        displayName: String,
+    ): String? {
+        val treeDocId = try {
+            DocumentsContract.getTreeDocumentId(treeUri)
+        } catch (e: Exception) {
+            Log.w(TAG, "not a tree uri: $treeUri", e)
+            return null
+        }
+        val parentId = parentDocId ?: treeDocId
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
+        return try {
+            context.contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                ),
+                null,
+                null,
+                null,
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(1) ?: continue
+                    val id = c.getString(0) ?: continue
+                    Log.d(TAG, "child name=$name id=$id")
+                    if (name.equals(displayName, ignoreCase = true)) return@use id
+                }
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "list children failed parent=$parentId", e)
+            // Fallback DocumentFile
+            val root = DocumentFile.fromTreeUri(context, treeUri) ?: return null
+            val parent = if (parentDocId == null) {
+                root
+            } else {
+                // Walk is hard without ids; try root only
+                root
+            }
+            parent.findFile(displayName)?.uri?.let {
+                try {
+                    DocumentsContract.getDocumentId(it)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
+
+    private fun findChildDocumentUri(
+        treeUri: Uri,
+        parentDocId: String?,
+        displayName: String,
+    ): Uri? {
+        val childId = findChildDocumentId(treeUri, parentDocId, displayName) ?: return null
+        return DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+    }
+
+    /** Resolve blobs/{name} under tree root for image payload. */
+    fun findBlobUri(fileName: String): Uri? {
+        val treeUri = prefs.backupTreeUri ?: return null
+        val blobsId = findChildDocumentId(treeUri, parentDocId = null, displayName = "blobs")
+            ?: return null
+        return findChildDocumentUri(treeUri, parentDocId = blobsId, displayName = fileName)
     }
 
     suspend fun queryItems(limit: Int = 80, offset: Int = 0, q: String? = null): List<ClipboardRow> =
@@ -140,20 +225,17 @@ class BackupRepository(
      * Load image/pdf/rtf bytes: prefer CAS under blobs/, fall back to inline BLOB columns.
      */
     suspend fun loadPayload(row: ClipboardRow): ByteArray? = withContext(Dispatchers.IO) {
-        val root = treeRoot()
-        val blobs = root?.findFile("blobs")
         val candidates = when (row.type) {
             "image" -> listOf("${row.contentHash}.bin")
             "rtf" -> listOf("${row.contentHash}.rtf.bin", "${row.contentHash}.bin")
             "pdf" -> listOf("${row.contentHash}.pdf.bin", "${row.contentHash}.bin")
             else -> listOf("${row.contentHash}.bin")
         }
-        if (blobs != null) {
-            for (name in candidates) {
-                val f = blobs.findFile(name)
-                if (f != null && f.exists()) {
-                    return@withContext readAllBytes(f.uri)
-                }
+        for (name in candidates) {
+            val uri = findBlobUri(name)
+            if (uri != null) {
+                val bytes = readAllBytes(uri)
+                if (bytes != null && bytes.isNotEmpty()) return@withContext bytes
             }
         }
         // Inline legacy columns
