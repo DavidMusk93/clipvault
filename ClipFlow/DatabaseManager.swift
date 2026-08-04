@@ -125,13 +125,14 @@ final class DatabaseManager: ObservableObject {
             createTables()
             migrateSchema()
             bootstrapFTSIfNeeded()
-            // Extract in-row BLOBs → CAS files, then VACUUM once (shrink ~40MB image rows).
-            migrateInlineBlobsToFiles(maxBatches: 200)
-            maybeVacuumAfterBlobMigration()
             runAnalyze()
-            // Drain residual dups after boot in short batches (not one giant DELETE).
-            dbQueue.asyncAfter(deadline: .now() + 3) { [weak self] in
-                self?.drainDuplicates(maxBatches: 40)
+            // Blob peel + VACUUM off critical path (VACUUM on 40MB+ can block boot for minutes).
+            dbQueue.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self = self else { return }
+                self.migrateInlineBlobsToFiles(maxBatches: 200)
+                self.maybeVacuumAfterBlobMigration()
+                self.drainDuplicates(maxBatches: 40)
+                self.runAnalyze()
             }
         } else {
             print("Failed to open SQLite database at \(dbPath.path)")
