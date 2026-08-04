@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContract
@@ -247,209 +248,222 @@ private fun KeepsakeRoot(
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    if (selected != null) {
-        DetailScreen(
-            row = selected!!,
-            repo = app.backupRepo,
-            onBack = { selected = null },
-            onCopy = { text -> onCopyText(text); selected = null },
-        )
-        return
+    // Detail as overlay: keep list/tab/scroll composition alive so back returns to
+    // the same place (not a recreated "首页" at scroll 0). Early-return used to dispose
+    // LazyStaggeredGridState and forced users to the top every time.
+    val gridState = rememberLazyStaggeredGridState()
+
+    BackHandler(enabled = selected != null) {
+        selected = null
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painter = painterResource(R.drawable.keepsake_logo),
-                            contentDescription = "Keepsake",
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .border(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                                    CircleShape,
-                                ),
-                            contentScale = ContentScale.Crop,
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("Keepsake", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "你的剪贴板记忆",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(R.drawable.keepsake_logo),
+                                contentDescription = "Keepsake",
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .border(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                        CircleShape,
+                                    ),
+                                contentScale = ContentScale.Crop,
                             )
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text("Keepsake", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "你的剪贴板记忆",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                )
+                            }
                         }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        scope.launch {
-                            val text = onPasteFromClipboard() ?: return@launch
-                            app.captures.insertText(text, source = "paste")
-                            captures = app.captures.list()
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            scope.launch {
+                                val text = onPasteFromClipboard() ?: return@launch
+                                app.captures.insertText(text, source = "paste")
+                                captures = app.captures.list()
+                                tab = Tab.Captures
+                                Toast.makeText(ctx, "已记下", Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Default.ContentPaste, contentDescription = "粘贴并记下")
+                        }
+                        IconButton(onClick = { launchDriveFolderPicker() }) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = "选择云端文件夹")
+                        }
+                        IconButton(onClick = {
+                            scope.launch { syncAndLoad(force = true, quiet = false) }
+                        }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                    ),
+                )
+            },
+        ) { padding ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp),
+            ) {
+                if (!hasRoot) {
+                    SetupCard(onPick = { launchDriveFolderPicker() })
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = tab == Tab.Backup,
+                        onClick = { tab = Tab.Backup },
+                        label = { Text("历史") },
+                    )
+                    FilterChip(
+                        selected = tab == Tab.Captures,
+                        onClick = {
                             tab = Tab.Captures
-                            Toast.makeText(ctx, "已记下", Toast.LENGTH_SHORT).show()
-                        }
-                    }) {
-                        Icon(Icons.Default.ContentPaste, contentDescription = "粘贴并记下")
-                    }
-                    IconButton(onClick = { launchDriveFolderPicker() }) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = "选择云端文件夹")
-                    }
-                    IconButton(onClick = {
-                        scope.launch { syncAndLoad(force = true, quiet = false) }
-                    }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-            )
-        },
-    ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp),
-        ) {
-            if (!hasRoot) {
-                SetupCard(onPick = { launchDriveFolderPicker() })
-                Spacer(Modifier.height(12.dp))
-            }
+                            scope.launch { captures = app.captures.list() }
+                        },
+                        label = { Text("随手记") },
+                    )
+                }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = tab == Tab.Backup,
-                    onClick = { tab = Tab.Backup },
-                    label = { Text("历史") },
-                )
-                FilterChip(
-                    selected = tab == Tab.Captures,
-                    onClick = {
-                        tab = Tab.Captures
-                        scope.launch { captures = app.captures.list() }
-                    },
-                    label = { Text("随手记") },
-                )
-            }
+                Spacer(Modifier.height(8.dp))
 
-            Spacer(Modifier.height(8.dp))
-
-            if (tab == Tab.Backup) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
-                    placeholder = { Text("搜索文本 / OCR / 来源…") },
-                    trailingIcon = {
+                if (tab == Tab.Backup) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        placeholder = { Text("搜索文本 / OCR / 来源…") },
+                        trailingIcon = {
+                            Text(
+                                "搜索",
+                                modifier = Modifier
+                                    .padding(end = 12.dp)
+                                    .clickable {
+                                        scope.launch {
+                                            loading = true
+                                            refreshList(true)
+                                            loading = false
+                                        }
+                                    },
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        },
+                    )
+                    statusMsg?.let {
                         Text(
-                            "搜索",
-                            modifier = Modifier
-                                .padding(end = 12.dp)
-                                .clickable {
-                                    scope.launch {
-                                        loading = true
-                                        refreshList(true)
-                                        loading = false
-                                    }
-                                },
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium,
+                            it,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            modifier = Modifier.padding(vertical = 6.dp),
                         )
-                    },
-                )
-                statusMsg?.let {
+                    }
+                } else {
                     Text(
-                        it,
+                        "顶栏粘贴，或从其他 App 分享到这里。先保存在本机。",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         modifier = Modifier.padding(vertical = 6.dp),
                     )
                 }
-            } else {
-                Text(
-                    "顶栏粘贴，或从其他 App 分享到这里。先保存在本机。",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                    modifier = Modifier.padding(vertical = 6.dp),
-                )
-            }
 
-            if (loading && items.isEmpty() && captures.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (tab == Tab.Backup) {
-                // Mature masonry: official LazyVerticalStaggeredGrid (Compose foundation).
-                val gridState = rememberLazyStaggeredGridState()
-                LaunchedEffect(gridState, endReached, loading) {
-                    snapshotFlow {
-                        val info = gridState.layoutInfo
-                        val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-                        last >= info.totalItemsCount - 4
-                    }.distinctUntilChanged().collect { nearEnd ->
-                        if (nearEnd && !endReached && !loading && hasRoot) {
-                            loading = true
-                            refreshList(reset = false)
-                            loading = false
+                if (loading && items.isEmpty() && captures.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else if (tab == Tab.Backup) {
+                    // Mature masonry: official LazyVerticalStaggeredGrid (Compose foundation).
+                    // gridState is hoisted above so detail overlay does not reset scroll.
+                    LaunchedEffect(gridState, endReached, loading) {
+                        snapshotFlow {
+                            val info = gridState.layoutInfo
+                            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                            last >= info.totalItemsCount - 4
+                        }.distinctUntilChanged().collect { nearEnd ->
+                            if (nearEnd && !endReached && !loading && hasRoot) {
+                                loading = true
+                                refreshList(reset = false)
+                                loading = false
+                            }
                         }
                     }
-                }
-                if (items.isEmpty() && hasRoot) {
-                    Text(
-                        "这里还没有条目。回到前台或联网后会自动同步；也可点右上角强制刷新。",
-                        modifier = Modifier.padding(24.dp),
-                    )
+                    if (items.isEmpty() && hasRoot) {
+                        Text(
+                            "这里还没有条目。回到前台或联网后会自动同步；也可点右上角强制刷新。",
+                            modifier = Modifier.padding(24.dp),
+                        )
+                    } else {
+                        LazyVerticalStaggeredGrid(
+                            columns = StaggeredGridCells.Adaptive(minSize = 160.dp),
+                            state = gridState,
+                            contentPadding = PaddingValues(bottom = 24.dp, top = 4.dp),
+                            verticalItemSpacing = 10.dp,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(items, key = { it.id }) { row ->
+                                ItemCard(
+                                    row = row,
+                                    repo = app.backupRepo,
+                                    onClick = { selected = row },
+                                )
+                            }
+                        }
+                    }
                 } else {
-                    LazyVerticalStaggeredGrid(
-                        columns = StaggeredGridCells.Adaptive(minSize = 160.dp),
-                        state = gridState,
-                        contentPadding = PaddingValues(bottom = 24.dp, top = 4.dp),
-                        verticalItemSpacing = 10.dp,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    LazyColumn(
+                        contentPadding = PaddingValues(bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(items, key = { it.id }) { row ->
-                            ItemCard(
-                                row = row,
-                                repo = app.backupRepo,
-                                onClick = { selected = row },
-                            )
+                        items(captures, key = { it.id }) { cap ->
+                            CaptureCard(cap = cap, onCopy = {
+                                cap.text?.let(onCopyText)
+                            })
                         }
-                    }
-                }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(captures, key = { it.id }) { cap ->
-                        CaptureCard(cap = cap, onCopy = {
-                            cap.text?.let(onCopyText)
-                        })
-                    }
-                    if (captures.isEmpty()) {
-                        item {
-                            Text(
-                                "还没有随手记。点顶栏粘贴，或从其他 App 分享到 Keepsake。",
-                                modifier = Modifier.padding(24.dp),
-                            )
+                        if (captures.isEmpty()) {
+                            item {
+                                Text(
+                                    "还没有随手记。点顶栏粘贴，或从其他 App 分享到 Keepsake。",
+                                    modifier = Modifier.padding(24.dp),
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+
+        // Full-screen detail over the still-alive home surface.
+        selected?.let { row ->
+            DetailScreen(
+                row = row,
+                repo = app.backupRepo,
+                onBack = { selected = null },
+                // Stay on detail after copy — leave via back / system back.
+                onCopy = { text -> onCopyText(text) },
+            )
+        }
     }
+
 }
 
 @Composable
@@ -564,6 +578,8 @@ private fun DetailScreen(
     }
 
     Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
