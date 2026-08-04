@@ -12,7 +12,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
+import android.app.Activity
+import androidx.activity.result.contract.ActivityResultContract
 import com.davidmusk.keepsake.data.DriveTreePicker
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -130,15 +131,15 @@ private fun KeepsakeRoot(
     var offset by remember { mutableIntStateOf(0) }
     var endReached by remember { mutableStateOf(false) }
 
+    // Fully custom contract — subclassing OpenDocumentTree still got MIUI intent-hijack.
     val openTree = rememberLauncherForActivityResult(
-        // Custom contract: prefer Google Drive as INITIAL_URI so MIUI doesn't stick on local storage.
-        object : ActivityResultContracts.OpenDocumentTree() {
+        object : ActivityResultContract<Uri?, Uri?>() {
             override fun createIntent(context: android.content.Context, input: Uri?): Intent {
-                // Prefer Drive-resolved INITIAL_URI + pin Google DocumentsUI (avoid MIUI hijack).
-                return DriveTreePicker.openTreeIntent(
-                    context,
-                    initial = input ?: DriveTreePicker.bestInitialUri(context),
-                )
+                return DriveTreePicker.openTreeIntent(context, initial = input)
+            }
+
+            override fun parseResult(resultCode: Int, intent: Intent?): Uri? {
+                return if (resultCode == Activity.RESULT_OK) intent?.data else null
             }
         }
     ) { uri: Uri? ->
@@ -176,21 +177,14 @@ private fun KeepsakeRoot(
             }
             return
         }
-        // Resolve Drive → Keepsake/backup on IO thread, then open tree picker there.
+        // Open DocumentsUI PickActivity (Show roots → Drive). Discovery URI is optional.
         scope.launch {
             loading = true
-            statusMsg = "正在定位 Google 云端硬盘中的 Keepsake…"
+            statusMsg = "打开系统文件页，点左上角「显示根目录」→ Drive…"
             val initial = withContext(Dispatchers.IO) {
                 DriveTreePicker.bestInitialUri(ctx.applicationContext)
             }
             loading = false
-            if (initial == null) {
-                Toast.makeText(
-                    ctx,
-                    "无法访问云端硬盘目录。请打开一次 Google Drive 后再试。",
-                    Toast.LENGTH_LONG,
-                ).show()
-            }
             openTree.launch(initial)
         }
     }

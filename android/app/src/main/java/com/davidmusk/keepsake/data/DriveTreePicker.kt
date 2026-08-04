@@ -68,7 +68,10 @@ object DriveTreePicker {
     )
 
     fun openTreeIntent(context: Context, initial: Uri? = null): Intent {
-        return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+        // NOTE: Do NOT put Drive content:// into Intent.data — MIUI turns that into a
+        // "Complete action using Baidu/Search" chooser. Only EXTRA_INITIAL_URI is safe,
+        // and even that can confuse some builds; prefer Show-roots path when unsure.
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addCategory(Intent.CATEGORY_DEFAULT)
             addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
@@ -76,19 +79,26 @@ object DriveTreePicker {
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
                     Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
             )
-            val uri = initial ?: bestInitialUri(context)
-            if (uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
-                Log.i(TAG, "EXTRA_INITIAL_URI=$uri")
-            }
-            // Hard-pin Google/AOSP DocumentsUI PickActivity.
-            // MIUI may otherwise show a broken "Complete action using Baidu/Search" chooser.
+            // Hard-pin PickActivity so roots drawer ("Show roots") is available.
             component = ComponentName(
                 "com.google.android.documentsui",
                 "com.android.documentsui.picker.PickActivity",
             )
-            Log.i(TAG, "component=$component")
         }
+        // Prefer landing on Keepsake/backup when discovery works; never set as data URI.
+        val uri = initial
+        if (uri != null &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            uri.authority?.contains("docs.storage") == true
+        ) {
+            // Only set INITIAL_URI for Drive doc URIs we resolved ourselves.
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
+            Log.i(TAG, "EXTRA_INITIAL_URI=$uri")
+        } else {
+            Log.i(TAG, "open tree without INITIAL_URI (use Show roots → Drive)")
+        }
+        Log.i(TAG, "component=${intent.component}")
+        return intent
     }
 
     // ---- discovery ----
