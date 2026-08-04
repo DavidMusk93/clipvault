@@ -1,5 +1,6 @@
 package com.davidmusk.keepsake.data
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -68,6 +69,7 @@ object DriveTreePicker {
 
     fun openTreeIntent(context: Context, initial: Uri? = null): Intent {
         return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addCategory(Intent.CATEGORY_DEFAULT)
             addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
@@ -77,18 +79,15 @@ object DriveTreePicker {
             val uri = initial ?: bestInitialUri(context)
             if (uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
+                Log.i(TAG, "EXTRA_INITIAL_URI=$uri")
             }
-            // Pin handler so "Complete action using Baidu/…" never steals the pick.
-            for (pkg in DOCUMENTS_UI_CANDIDATES) {
-                try {
-                    context.packageManager.getPackageInfo(pkg, 0)
-                    setPackage(pkg)
-                    Log.i(TAG, "pin DocumentsUI package=$pkg")
-                    break
-                } catch (_: PackageManager.NameNotFoundException) {
-                    // try next
-                }
-            }
+            // Hard-pin Google/AOSP DocumentsUI PickActivity.
+            // MIUI may otherwise show a broken "Complete action using Baidu/Search" chooser.
+            component = ComponentName(
+                "com.google.android.documentsui",
+                "com.android.documentsui.picker.PickActivity",
+            )
+            Log.i(TAG, "component=$component")
         }
     }
 
