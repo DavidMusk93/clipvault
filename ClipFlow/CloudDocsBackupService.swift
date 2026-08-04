@@ -54,7 +54,7 @@ final class CloudDocsBackupService {
     }
 
     struct Manifest: Codable {
-        var version: Int = 2
+        var version: Int = 3
         var createdAt: String
         var createdAtUnix: Double
         var sourcePath: String
@@ -66,6 +66,11 @@ final class CloudDocsBackupService {
         var note: String?
         var blobCount: Int? = nil
         var blobBytes: Int? = nil
+        /// CAS filenames present under `blobs/` when this manifest was published.
+        /// Clients use this to detect incomplete Drive listings (count/names).
+        var blobFiles: [String]? = nil
+        /// True only after local dest blob sizes were verified against source CAS.
+        var blobsVerified: Bool? = nil
     }
 
     struct SnapshotInfo: Codable {
@@ -537,10 +542,30 @@ final class CloudDocsBackupService {
                                     try self.ensureCloudDir(blobs)
                                     self.scrubLatestTmpFiles(in: latest)
 
-                                    let (blobCount, blobBytes, blobNew) = self.syncBlobsToCAS(destRoot: blobs)
-                                    lastBlobCount = blobCount
-                                    lastBlobBytes = blobBytes
-                                    totalBlobNew += blobNew
+                                    // GDrive File Provider: APFS clonefile often "succeeds" locally but
+                                    // does not upload real bytes → Android SAF sees incomplete blobs/.
+                                    // Always full-copy to cloud destinations.
+                                    let forceFull = (dest.type == "gdrive" || dest.type == "icloud")
+                                    let cas = self.syncBlobsToCAS(destRoot: blobs, forceFullCopy: forceFull)
+                                    lastBlobCount = cas.total
+                                    lastBlobBytes = cas.bytes
+                                    totalBlobNew += cas.copied + cas.repaired
+
+                                    // Refuse to publish this dest if CAS is incomplete on the mount.
+                                    let verified = try self.verifyCASMirror(
+                                        local: self.database.blobsDirectoryURL,
+                                        dest: blobs
+                                    )
+                                    if !verified.ok {
+                                        throw NSError(
+                                            domain: "ClipFlow.Backup",
+                                            code: 2,
+                                            userInfo: [
+                                                NSLocalizedDescriptionKey:
+                                                    "blobs 校验失败 missing=\(verified.missing) sizeMismatch=\(verified.sizeMismatch)",
+                                            ]
+                                        )
+                                    }
 
                                     let latestDB = latest.appendingPathComponent("clipflow.db")
                                     let latestManifest = latest.appendingPathComponent("MANIFEST.json")
@@ -548,8 +573,10 @@ final class CloudDocsBackupService {
 
                                     if snapshotOverrideId == nil,
                                        prevMan?.sha256 == sha,
+                                       prevMan?.blobsVerified == true,
                                        self.fm.fileExists(atPath: latestDB.path),
-                                       blobNew == 0 {
+                                       cas.copied == 0,
+                                       cas.repaired == 0 {
                                         self.destLastPhase[dest.id] = "skip:unchanged"
                                         self.destLastError[dest.id] = nil
                                         messages.append("\(BackupDestinationResolver.displayLabel(dest)): 未变")
@@ -558,14 +585,10 @@ final class CloudDocsBackupService {
                                     }
                                     allSkip = false
 
-                                    // Promote db copy into dest latest
-                                    let destTmp = latest.appendingPathComponent(".tmp_promote_\(UUID().uuidString).db")
-                                    try self.fm.copyItem(at: artifact, to: destTmp)
-                                    if self.fm.fileExists(atPath: latestDB.path) {
-                                        try self.fm.removeItem(at: latestDB)
-                                    }
-                                    try self.fm.moveItem(at: destTmp, to: latestDB)
+                                    // Promote db: full copy + fsync (never clone into File Provider).
+                                    try self.publishFileFullCopy(from: artifact, to: latestDB)
 
+                                    let blobNames = self.listBinNames(in: blobs)
                                     let manifest = Manifest(
                                         createdAt: iso,
                                         createdAtUnix: created.timeIntervalSince1970,
@@ -575,26 +598,24 @@ final class CloudDocsBackupService {
                                         itemCount: count,
                                         host: host,
                                         note: "dest:\(dest.id)" + (snapId.map { " snap:\($0)" } ?? ""),
-                                        blobCount: blobCount,
-                                        blobBytes: blobBytes
+                                        blobCount: blobNames.count,
+                                        blobBytes: cas.bytes,
+                                        blobFiles: blobNames,
+                                        blobsVerified: true
                                     )
-                                    try JSONEncoder.pretty.encode(manifest).write(to: latestManifest, options: .atomic)
-
-                                    // Mobile-friendly: one zip of recent CAS blobs under latest/
-                                    // (Drive SAF is unreliable listing large blobs/ trees on Android).
-                                    self.writeCasPack(into: latest, localBlobs: self.database.blobsDirectoryURL)
+                                    try self.writeJSONAtomic(manifest, to: latestManifest)
+                                    // fsync db + manifest so File Provider sees durable close
+                                    self.fullFsync(latestDB)
+                                    self.fullFsync(latestManifest)
 
                                     if let snapId = snapId {
                                         let snapDir = snaps.appendingPathComponent(snapId, isDirectory: true)
                                         try self.fm.createDirectory(at: snapDir, withIntermediateDirectories: true)
                                         let snapDB = snapDir.appendingPathComponent("clipflow.db")
-                                        if self.fm.fileExists(atPath: snapDB.path) {
-                                            try self.fm.removeItem(at: snapDB)
-                                        }
-                                        try self.cloneOrCopy(from: latestDB, to: snapDB)
-                                        try JSONEncoder.pretty.encode(manifest).write(
-                                            to: snapDir.appendingPathComponent("MANIFEST.json"),
-                                            options: .atomic
+                                        try self.publishFileFullCopy(from: latestDB, to: snapDB)
+                                        try self.writeJSONAtomic(
+                                            manifest,
+                                            to: snapDir.appendingPathComponent("MANIFEST.json")
                                         )
                                         snapIdGlobal = snapId
                                     }
@@ -604,8 +625,14 @@ final class CloudDocsBackupService {
                                     self.destLastError[dest.id] = nil
                                     self.destLastPhase[dest.id] = "ok"
                                     anyOk = true
-                                    messages.append("\(BackupDestinationResolver.displayLabel(dest)): ok")
-                                    print("[Backup] dest=\(dest.id) ok db=\(Self.byteString(size)) blobs+\(blobNew)")
+                                    let repairedNote = cas.repaired > 0 ? " repair=\(cas.repaired)" : ""
+                                    messages.append(
+                                        "\(BackupDestinationResolver.displayLabel(dest)): ok blobs=\(blobNames.count)\(repairedNote)"
+                                    )
+                                    print(
+                                        "[Backup] dest=\(dest.id) ok db=\(Self.byteString(size)) "
+                                            + "blobs=\(blobNames.count) +\(cas.copied)/repair\(cas.repaired) fullCopy=\(forceFull)"
+                                    )
                                 } catch {
                                     allSkip = false
                                     self.destLastError[dest.id] = error.localizedDescription
@@ -679,91 +706,147 @@ final class CloudDocsBackupService {
         return fm.fileExists(atPath: dest.path)
     }
 
-    /// Copy local CAS blobs that are missing from a destination blobs dir.
-    /// - returns: (totalLocal, totalBytes, newlyCopied)
-    private func syncBlobsToCAS(destRoot: URL) -> (Int, Int, Int) {
+    private struct CASSyncResult {
+        var total: Int
+        var bytes: Int
+        var copied: Int
+        var repaired: Int
+    }
+
+    private struct CASVerifyResult {
+        var ok: Bool
+        var missing: Int
+        var sizeMismatch: Int
+    }
+
+    /// Mirror local CAS into destination `blobs/`.
+    /// - Parameter forceFullCopy: **required for Google Drive / iCloud File Providers**.
+    ///   `clonefile` creates APFS clones that often never upload real payload bytes.
+    private func syncBlobsToCAS(destRoot: URL, forceFullCopy: Bool) -> CASSyncResult {
         try? fm.createDirectory(at: destRoot, withIntermediateDirectories: true)
         let local = database.blobsDirectoryURL
-        guard let files = try? fm.contentsOfDirectory(at: local, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) else {
-            return (0, 0, 0)
+        guard let files = try? fm.contentsOfDirectory(
+            at: local,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return CASSyncResult(total: 0, bytes: 0, copied: 0, repaired: 0)
         }
         var total = 0
         var bytes = 0
         var copied = 0
+        var repaired = 0
         for src in files where src.pathExtension == "bin" {
             total += 1
             let size = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             bytes += size
             let dest = destRoot.appendingPathComponent(src.lastPathComponent)
-            if fm.fileExists(atPath: dest.path) { continue }
+            let existed = fm.fileExists(atPath: dest.path)
+            if existed && !forceFullCopy {
+                let destSize = (try? dest.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+                if destSize == size, size > 0 {
+                    continue
+                }
+            }
+            // Cloud File Providers: always full rewrite (clonefile stubs upload as empty/partial).
+            // Local disk: skip when size matches (above).
             do {
-                try cloneOrCopy(from: src, to: dest)
-                copied += 1
+                if existed { try? fm.removeItem(at: dest) }
+                try publishFileFullCopy(from: src, to: dest, allowClone: !forceFullCopy)
+                fullFsync(dest)
+                if existed { repaired += 1 } else { copied += 1 }
             } catch {
-                try? fm.copyItem(at: src, to: dest)
-                if fm.fileExists(atPath: dest.path) { copied += 1 }
+                print("[Backup] blob copy failed \(src.lastPathComponent): \(error)")
             }
         }
-        return (total, bytes, copied)
+        return CASSyncResult(total: total, bytes: bytes, copied: copied, repaired: repaired)
     }
 
-    /// Pack recent image CAS files into `latest/cas_pack.zip` for Android (single SAF download).
-    /// Caps: ≤40 files, ≤12 MB total, skip rtf/pdf suffixes and huge frames.
-    private func writeCasPack(into latest: URL, localBlobs: URL) {
-        let dest = latest.appendingPathComponent("cas_pack.zip")
-        let tmp = latest.appendingPathComponent(".tmp_cas_pack_\(UUID().uuidString).zip")
-        defer { try? fm.removeItem(at: tmp) }
-
-        guard let files = try? fm.contentsOfDirectory(
-            at: localBlobs,
-            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+    /// Ensure every local CAS file exists on dest with identical size.
+    private func verifyCASMirror(local: URL, dest: URL) throws -> CASVerifyResult {
+        let localFiles = (try? fm.contentsOfDirectory(
+            at: local,
+            includingPropertiesForKeys: [.fileSizeKey],
             options: [.skipsHiddenFiles]
-        ) else { return }
-
-        // Prefer plain `hash.bin` (images) over `hash.rtf.bin` / `hash.pdf.bin`.
-        let imageBins = files.filter { url in
-            let n = url.lastPathComponent
-            return n.hasSuffix(".bin") && !n.contains(".rtf.") && !n.contains(".pdf.")
-        }
-        let sorted = imageBins.sorted { a, b in
-            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return da > db
-        }
-
-        var chosen: [URL] = []
-        var totalBytes = 0
-        let maxFiles = 40
-        let maxBytes = 12 * 1024 * 1024
-        for u in sorted {
-            let sz = (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            if sz <= 0 || sz > 2_500_000 { continue } // skip empty / huge
-            if totalBytes + sz > maxBytes { break }
-            chosen.append(u)
-            totalBytes += sz
-            if chosen.count >= maxFiles { break }
-        }
-        guard !chosen.isEmpty else { return }
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        // -j: junk paths (store basename only) · -q quiet · -0 store (CAS already compressed images)
-        proc.arguments = ["-j", "-q", "-0", tmp.path] + chosen.map(\.path)
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            guard proc.terminationStatus == 0, fm.fileExists(atPath: tmp.path) else {
-                print("[Backup] cas_pack zip failed status=\(proc.terminationStatus)")
-                return
+        )) ?? []
+        var missing = 0
+        var sizeMismatch = 0
+        for src in localFiles where src.pathExtension == "bin" {
+            let name = src.lastPathComponent
+            let d = dest.appendingPathComponent(name)
+            guard fm.fileExists(atPath: d.path) else {
+                missing += 1
+                continue
             }
-            if fm.fileExists(atPath: dest.path) { try? fm.removeItem(at: dest) }
-            try fm.moveItem(at: tmp, to: dest)
-            print("[Backup] cas_pack.zip files=\(chosen.count) bytes=\(totalBytes)")
-        } catch {
-            print("[Backup] cas_pack zip error \(error)")
+            let srcSize = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+            let destSize = (try? d.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -2
+            if srcSize != destSize || srcSize <= 0 {
+                sizeMismatch += 1
+            }
         }
+        return CASVerifyResult(
+            ok: missing == 0 && sizeMismatch == 0,
+            missing: missing,
+            sizeMismatch: sizeMismatch
+        )
+    }
+
+    private func listBinNames(in dir: URL) -> [String] {
+        let files = (try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        return files
+            .map(\.lastPathComponent)
+            .filter { $0.hasSuffix(".bin") }
+            .sorted()
+    }
+
+    /// Full byte copy into cloud mounts. Prefer copyItem; optional clone only for local disks.
+    private func publishFileFullCopy(from src: URL, to dst: URL, allowClone: Bool = false) throws {
+        if fm.fileExists(atPath: dst.path) {
+            try fm.removeItem(at: dst)
+        }
+        if allowClone {
+            let rc = clonefile(src.path, dst.path, 0)
+            if rc == 0 { return }
+        }
+        // Stage to sibling temp then rename — File Provider sees a closed file.
+        let tmp = dst.deletingLastPathComponent()
+            .appendingPathComponent(".tmp_\(UUID().uuidString)_\(dst.lastPathComponent)")
+        try fm.copyItem(at: src, to: tmp)
+        fullFsync(tmp)
+        if fm.fileExists(atPath: dst.path) {
+            try fm.removeItem(at: dst)
+        }
+        try fm.moveItem(at: tmp, to: dst)
+        fullFsync(dst)
+    }
+
+    private func writeJSONAtomic<T: Encodable>(_ value: T, to url: URL) throws {
+        let data = try JSONEncoder.pretty.encode(value)
+        let tmp = url.deletingLastPathComponent()
+            .appendingPathComponent(".tmp_\(UUID().uuidString)_\(url.lastPathComponent)")
+        try data.write(to: tmp, options: .atomic)
+        fullFsync(tmp)
+        if fm.fileExists(atPath: url.path) {
+            try fm.removeItem(at: url)
+        }
+        try fm.moveItem(at: tmp, to: url)
+        fullFsync(url)
+    }
+
+    /// Request durable write (helps File Providers observe closed, complete files).
+    private func fullFsync(_ url: URL) {
+        let path = url.path
+        let fd = open(path, O_RDONLY)
+        guard fd >= 0 else { return }
+        // F_FULLFSYNC is the durable form on APFS; fall back to fsync.
+        if fcntl(fd, F_FULLFSYNC) == -1 {
+            _ = fsync(fd)
+        }
+        close(fd)
     }
 
     private func scrubLatestTmpFiles(in latest: URL) {
@@ -839,13 +922,8 @@ final class CloudDocsBackupService {
 
     /// APFS clonefile when possible (block-level CoW ≈ incremental on same volume).
     private func cloneOrCopy(from src: URL, to dst: URL) throws {
-        if fm.fileExists(atPath: dst.path) {
-            try fm.removeItem(at: dst)
-        }
-        let rc = clonefile(src.path, dst.path, 0)
-        if rc == 0 { return }
-        // Fallback full copy (iCloud will still delta-sync when possible)
-        try fm.copyItem(at: src, to: dst)
+        // Local-only convenience. Cloud dests must use publishFileFullCopy.
+        try publishFileFullCopy(from: src, to: dst, allowClone: true)
     }
 
     /// File Provider (Google Drive) often fails multi-level createDirectory in one call.

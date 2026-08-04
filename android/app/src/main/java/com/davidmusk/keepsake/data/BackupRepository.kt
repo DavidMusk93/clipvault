@@ -118,12 +118,7 @@ class BackupRepository(
             )
         }
 
-        // Prefer single-file pack of recent images (reliable vs listing blobs/* on Drive SAF).
-        val packUri = findChildDocumentUri(treeUri, parentDocId = latestId, displayName = "cas_pack.zip")
-        val packCount = packUri?.let { ingestCasPack(it) } ?: 0
-
-        // New items may reference blobs not yet in our index (Drive lag).
-        // Keep on-disk CAS cache; only drop name→id map so next image lookup rescan.
+        // New items may reference blobs not yet listed by Drive SAF.
         blobsFolderDocId = null
         blobNameToDocId.clear()
         indexTreeKey = treeUri.toString()
@@ -138,14 +133,48 @@ class BackupRepository(
             }
         } ?: 0
 
-        // Warm remaining recent hashes from blobs/ (best-effort; pack already covered many).
-        val warmed = prefetchRecentBlobs(limit = 24)
+        // Drive completeness: Mac publishes blobFiles[] after full-copy verify.
+        // Rescan blobs/ until listed count catches expected (or give up after a few tries).
+        val expectedBlobs = manifest?.blobCount
+            ?: manifest?.blobFiles?.size
+        var listed = 0
+        if (expectedBlobs != null && expectedBlobs > 0) {
+            repeat(4) { attempt ->
+                scanBlobsFolder(treeUri, force = true)
+                listed = blobNameToDocId.size
+                if (listed >= expectedBlobs) return@repeat
+                Log.w(TAG, "Drive blobs incomplete listed=$listed expected=$expectedBlobs try=${attempt + 1}")
+                try {
+                    Thread.sleep(800L * (attempt + 1))
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+        } else {
+            scanBlobsFolder(treeUri, force = true)
+            listed = blobNameToDocId.size
+        }
 
-        prefs.lastSyncedSha = manifest?.sha256 ?: status?.latest?.sha256
+        // Pull recent image/pdf/rtf payloads into local CAS cache from blobs/.
+        val warmed = prefetchRecentBlobs(limit = 40)
+
+        val incomplete = expectedBlobs != null && listed < expectedBlobs
+        // Only stamp sha when Drive listing looks complete — otherwise keep retrying on resume.
+        if (!incomplete) {
+            prefs.lastSyncedSha = manifest?.sha256 ?: status?.latest?.sha256
+        } else {
+            // Force next auto-sync to re-pull (don't treat partial Drive as latest).
+            prefs.lastSyncedSha = null
+        }
         prefs.lastAutoSyncAtMs = System.currentTimeMillis()
-        val packNote = if (packCount > 0) "· 图包 $packCount" else ""
-        val warmNote = if (warmed > 0) "· 预取 $warmed" else ""
-        val msg = "已载入 $count 条（Google Drive）$packNote $warmNote".trim()
+        val warmNote = if (warmed > 0) "· 缓存 $warmed" else ""
+        val driveNote = when {
+            incomplete -> "· 云端附件 $listed/${expectedBlobs}（同步中，下拉刷新）"
+            expectedBlobs != null -> "· 附件 $listed"
+            listed > 0 -> "· 附件 $listed"
+            else -> ""
+        }
+        val msg = "已载入 $count 条$driveNote $warmNote".trim()
         prefs.lastAutoSyncMessage = msg
         SyncResult(
             itemCount = count,

@@ -57,6 +57,9 @@ data class BackupManifest(
     val engine: String? = null,
     val host: String? = null,
     val note: String? = null,
+    /** Filenames under blobs/ when Mac published this snapshot (Drive completeness check). */
+    val blobFiles: List<String>? = null,
+    val blobsVerified: Boolean? = null,
 )
 
 @Serializable
