@@ -357,6 +357,48 @@
     const PAGE_SIZE = 30;
     const CLIENT_CAP = 300; // soft cap in memory — drop oldest (tail) when exceeded
 
+    /**
+     * Pure pagination helpers — keep in sync with tests/pagination.test.mjs
+     * (exported on window for regression tests / debugging).
+     */
+    const Pagination = {
+      /** Merge a fetched page into the client list (newest-first). Always dedupe by id. */
+      mergePage(clips, items, { reset = false } = {}) {
+        const incoming = Array.isArray(items) ? items : [];
+        if (reset) {
+          const seen = new Set();
+          const out = [];
+          for (const it of incoming) {
+            if (!it || it.id == null || seen.has(it.id)) continue;
+            seen.add(it.id);
+            out.push(it);
+          }
+          return out;
+        }
+        const seen = new Set((clips || []).map(c => c.id));
+        const out = (clips || []).slice();
+        for (const it of incoming) {
+          if (!it || it.id == null || seen.has(it.id)) continue;
+          seen.add(it.id);
+          out.push(it);
+        }
+        return out;
+      },
+      /** Load-more is only valid when we have a keyset cursor from a prior page. */
+      canLoadMore({ loading, exhausted, nextCursor }) {
+        if (loading || exhausted) return false;
+        if (nextCursor == null || nextCursor === '') return false;
+        return true;
+      },
+      /** Soft cap: drop oldest (tail) when newest-first list exceeds cap. */
+      applyCap(clips, cap) {
+        if (!clips || clips.length <= cap) return { clips: clips || [], removed: [] };
+        const removed = clips.slice(cap);
+        return { clips: clips.slice(0, cap), removed };
+      }
+    };
+    window.ClipViewPagination = Pagination;
+
     const Masonry = {
       columnCountForWidth(w) {
         if (w < 560) return 1;
@@ -391,6 +433,8 @@
     let nextCursor = null;
     let loading = false;
     let exhausted = false;
+    /** Bumps on reset so late load-more responses cannot append into a fresh list. */
+    let fetchGen = 0;
     let currentFilter = 'all';
     let searchQuery = '';
     let searchTimer = null;
@@ -398,6 +442,7 @@
     let lastColCount = 0;
     let rebalanceTimer = null;
     let fullUrlForLightbox = null;
+    let sentinelObserved = false;
 
     function esc(s) {
       return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -424,13 +469,23 @@
 
     async function fetchPage({ reset = false } = {}) {
       if (loading) return;
-      if (!reset && exhausted) return;
+      // Load-more without a keyset cursor re-fetches page 1 and used to paint duplicates
+      // after refresh when IntersectionObserver fired before nextCursor was set.
+      if (!reset && !Pagination.canLoadMore({ loading, exhausted, nextCursor })) return;
+
+      if (reset) {
+        fetchGen += 1;
+        exhausted = false;
+      }
+      const gen = fetchGen;
+      const cursorForRequest = reset ? null : nextCursor;
+
       loading = true;
       document.getElementById('loadingMore').hidden = reset;
 
       const params = new URLSearchParams();
       params.set('limit', String(PAGE_SIZE));
-      if (!reset && nextCursor) params.set('cursor', nextCursor);
+      if (cursorForRequest) params.set('cursor', cursorForRequest);
       if (searchQuery) params.set('q', searchQuery);
 
       try {
@@ -441,39 +496,34 @@
         const items = Array.isArray(data) ? data : (data.items || []);
         const cursor = Array.isArray(data) ? null : (data.nextCursor || null);
 
-        if (reset) {
-          clips = items;
-          cardCache.clear();
-          exhausted = false;
-        } else {
-          const seen = new Set(clips.map(c => c.id));
-          for (const it of items) {
-            if (!seen.has(it.id)) clips.push(it);
-          }
-        }
+        // Stale response (a newer reset happened while we were in flight)
+        if (gen !== fetchGen) return;
+
+        clips = Pagination.mergePage(clips, items, { reset });
+        if (reset) cardCache.clear();
         nextCursor = cursor;
         if (!cursor || items.length === 0) exhausted = true;
 
-        // Soft cap memory
-        if (clips.length > CLIENT_CAP) {
-          const drop = clips.length - CLIENT_CAP;
-          const removed = clips.splice(-drop, drop); // drop oldest at tail (list is newest-first)
-          removed.forEach(r => {
-            cardCache.get(r.id)?.remove();
-            cardCache.delete(r.id);
-          });
-        }
+        const capped = Pagination.applyCap(clips, CLIENT_CAP);
+        clips = capped.clips;
+        capped.removed.forEach(r => {
+          cardCache.get(r.id)?.remove();
+          cardCache.delete(r.id);
+        });
 
         rebuildFromData();
+        ensureSentinelObserved();
       } catch (e) {
         console.error(e);
-        if (reset) {
+        if (reset && gen === fetchGen) {
           document.getElementById('grid').innerHTML =
             `<div class="empty"><p>加载失败，请刷新</p></div>`;
         }
       } finally {
-        loading = false;
-        document.getElementById('loadingMore').hidden = true;
+        if (gen === fetchGen) {
+          loading = false;
+          document.getElementById('loadingMore').hidden = true;
+        }
       }
     }
 
@@ -728,11 +778,18 @@
       }, 280);
     });
 
-    // Infinite scroll
+    // Infinite scroll — observe only after first page so we never fire load-more
+    // with a null cursor during the initial paint (rootMargin would always hit).
     const io = new IntersectionObserver(entries => {
       if (entries.some(en => en.isIntersecting)) fetchPage({ reset: false });
-    }, { rootMargin: '600px 0px' });
-    io.observe(document.getElementById('sentinel'));
+    }, { rootMargin: '240px 0px' });
+    function ensureSentinelObserved() {
+      if (sentinelObserved) return;
+      const el = document.getElementById('sentinel');
+      if (!el) return;
+      io.observe(el);
+      sentinelObserved = true;
+    }
 
     window.addEventListener('resize', () => scheduleRebalance());
 

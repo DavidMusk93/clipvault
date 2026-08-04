@@ -7,17 +7,31 @@ enum DatabaseError: Error {
     case queryFailed(String)
 }
 
-/// Cursor for keyset pagination: (timestamp DESC, id DESC)
+/// Cursor for keyset pagination: (timestamp DESC, id DESC).
+///
+/// Wire format: `{hex(Double.bitPattern)}:{uuid}` so the timestamp round-trips **bit-exact**
+/// through JSON/URL. Default `"\(double)"` / short decimal forms can round **up** and make
+/// `timestamp < ?` re-include the previous page's last row (first-scroll duplicates).
 struct ClipCursor: Equatable {
     let timestamp: Double
     let id: String
 
-    func encode() -> String { "\(timestamp):\(id)" }
+    func encode() -> String {
+        let bits = String(timestamp.bitPattern, radix: 16)
+        return "\(bits):\(id)"
+    }
 
     static func decode(_ raw: String) -> ClipCursor? {
         let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let ts = Double(parts[0]), !parts[1].isEmpty else { return nil }
-        return ClipCursor(timestamp: ts, id: parts[1])
+        guard parts.count == 2, !parts[1].isEmpty else { return nil }
+        let id = parts[1]
+        // Preferred: hex IEEE-754 bits
+        if let bits = UInt64(parts[0], radix: 16) {
+            return ClipCursor(timestamp: Double(bitPattern: bits), id: id)
+        }
+        // Backward compat: legacy decimal timestamp strings
+        guard let ts = Double(parts[0]) else { return nil }
+        return ClipCursor(timestamp: ts, id: id)
     }
 }
 
@@ -630,13 +644,28 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Exclusive keyset: strictly older than (timestamp, id) in DESC order.
+    private func bindKeysetCursor(_ stmt: OpaquePointer?, startBind: Int, cursor: ClipCursor) -> Int {
+        var bind = startBind
+        sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
+        sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
+        bindText(stmt, Int32(bind), cursor.id); bind += 1
+        // Extra guard: never re-emit the boundary row even if float compare glitches.
+        bindText(stmt, Int32(bind), cursor.id); bind += 1
+        return bind
+    }
+
+    private static let keysetSQL =
+        "(timestamp < ? OR (timestamp = ? AND id < ?)) AND id != ?"
+    private static let keysetSQLAliased =
+        "(c.timestamp < ? OR (c.timestamp = ? AND c.id < ?)) AND c.id != ?"
+
     private func runSearchFTS(
         db: OpaquePointer,
         match: String,
         cursor: ClipCursor?,
         fetchLimit: Int
     ) -> [ClipboardItem] {
-        // bm25 rank when available; stable secondary sort by time.
         var sql = """
         SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, c.html_content, c.source_app, c.ocr_text
         FROM clipboard_fts f
@@ -644,8 +673,9 @@ final class DatabaseManager: ObservableObject {
         WHERE clipboard_fts MATCH ?
         """
         if cursor != nil {
-            sql += " AND (c.timestamp < ? OR (c.timestamp = ? AND c.id < ?))"
+            sql += " AND \(Self.keysetSQLAliased)"
         }
+        // Rank within page; keyset still on (timestamp, id) for stable scroll.
         sql += " ORDER BY bm25(clipboard_fts), c.timestamp DESC, c.id DESC LIMIT ?;"
 
         var stmt: OpaquePointer?
@@ -658,9 +688,7 @@ final class DatabaseManager: ObservableObject {
         var bind = 1
         bindText(stmt, Int32(bind), match); bind += 1
         if let cursor = cursor {
-            sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
-            sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
-            bindText(stmt, Int32(bind), cursor.id); bind += 1
+            bind = bindKeysetCursor(stmt, startBind: bind, cursor: cursor)
         }
         sqlite3_bind_int(stmt, Int32(bind), Int32(fetchLimit))
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -682,7 +710,7 @@ final class DatabaseManager: ObservableObject {
         WHERE (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ?)
         """
         if cursor != nil {
-            sql += " AND (timestamp < ? OR (timestamp = ? AND id < ?))"
+            sql += " AND \(Self.keysetSQL)"
         }
         sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
 
@@ -695,9 +723,7 @@ final class DatabaseManager: ObservableObject {
             bindText(stmt, Int32(bind), like); bind += 1
         }
         if let cursor = cursor {
-            sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
-            sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
-            bindText(stmt, Int32(bind), cursor.id); bind += 1
+            bind = bindKeysetCursor(stmt, startBind: bind, cursor: cursor)
         }
         sqlite3_bind_int(stmt, Int32(bind), Int32(fetchLimit))
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -713,7 +739,7 @@ final class DatabaseManager: ObservableObject {
         FROM clipboard_items
         """
         if cursor != nil {
-            sql += " WHERE (timestamp < ? OR (timestamp = ? AND id < ?))"
+            sql += " WHERE \(Self.keysetSQL)"
         }
         sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
 
@@ -722,9 +748,7 @@ final class DatabaseManager: ObservableObject {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         var bind = 1
         if let cursor = cursor {
-            sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
-            sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
-            bindText(stmt, Int32(bind), cursor.id); bind += 1
+            bind = bindKeysetCursor(stmt, startBind: bind, cursor: cursor)
         }
         sqlite3_bind_int(stmt, Int32(bind), Int32(fetchLimit))
         while sqlite3_step(stmt) == SQLITE_ROW {
