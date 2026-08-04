@@ -253,6 +253,64 @@ class BackupRepository(
         }
     }
 
+    /**
+     * Decode image for UI without loading full multi‑MB bitmap into heap twice.
+     * Prefers ContentResolver stream + inSampleSize.
+     */
+    suspend fun loadImageBitmap(
+        row: ClipboardRow,
+        maxSidePx: Int = 1600,
+    ): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        val candidates = listOf("${row.contentHash}.bin")
+        for (name in candidates) {
+            val uri = findBlobUri(name)
+            if (uri != null) {
+                decodeSampledFromUri(uri, maxSidePx)?.let { return@withContext it }
+            }
+        }
+        // inline BLOB fallback
+        val bytes = loadPayload(row) ?: return@withContext null
+        decodeSampledFromBytes(bytes, maxSidePx)
+    }
+
+    private fun decodeSampledFromUri(uri: Uri, maxSidePx: Int): android.graphics.Bitmap? {
+        return try {
+            // bounds
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+            val sample = sampleSizeFor(bounds.outWidth, bounds.outHeight, maxSidePx)
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, opts)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "decode uri failed $uri", e)
+            null
+        }
+    }
+
+    private fun decodeSampledFromBytes(bytes: ByteArray, maxSidePx: Int): android.graphics.Bitmap? {
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            val sample = sampleSizeFor(bounds.outWidth, bounds.outHeight, maxSidePx)
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        } catch (e: Exception) {
+            Log.e(TAG, "decode bytes failed", e)
+            null
+        }
+    }
+
+    private fun sampleSizeFor(w: Int, h: Int, maxSide: Int): Int {
+        if (w <= 0 || h <= 0) return 1
+        var sample = 1
+        while (w / sample > maxSide || h / sample > maxSide) sample *= 2
+        return sample.coerceAtLeast(1)
+    }
+
     private fun openDb(): SQLiteDatabase? {
         if (!cacheDb.exists() || cacheDb.length() == 0L) return null
         return try {

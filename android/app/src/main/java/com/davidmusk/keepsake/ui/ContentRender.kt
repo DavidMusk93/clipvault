@@ -106,25 +106,23 @@ fun TypeBadge(type: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Async load blob → ImageBitmap; cancels when leave composition. */
+/** Async load blob → ImageBitmap (sampled); cancels when leave composition. */
 @Composable
 fun rememberPayloadBitmap(
     row: ClipboardRow,
     repo: BackupRepository,
     enabled: Boolean = row.type == "image",
+    maxSidePx: Int = 1600,
 ): Pair<androidx.compose.ui.graphics.ImageBitmap?, Boolean> {
     var bmp by remember(row.id) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var loading by remember(row.id) { mutableStateOf(enabled) }
-    LaunchedEffect(row.id, enabled) {
+    LaunchedEffect(row.id, enabled, maxSidePx) {
         if (!enabled) {
             loading = false
             return@LaunchedEffect
         }
         loading = true
-        val bytes = repo.loadPayload(row)
-        bmp = bytes?.let {
-            BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
-        }
+        bmp = repo.loadImageBitmap(row, maxSidePx)?.asImageBitmap()
         loading = false
     }
     return bmp to loading
@@ -273,7 +271,7 @@ fun DetailContent(
 
 @Composable
 private fun DetailImage(row: ClipboardRow, repo: BackupRepository) {
-    val (bmp, loading) = rememberPayloadBitmap(row, repo, enabled = true)
+    val (bmp, loading) = rememberPayloadBitmap(row, repo, enabled = true, maxSidePx = 2048)
     if (loading) {
         Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
