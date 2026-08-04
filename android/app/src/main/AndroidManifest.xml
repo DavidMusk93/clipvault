@@ -3,6 +3,22 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      Android 11+ package visibility: without <queries>, getPackageInfo("…docs")
+      always throws NameNotFoundException → false "Drive not installed".
+    -->
+    <queries>
+        <package android:name="com.google.android.apps.docs" />
+        <package android:name="com.android.vending" />
+        <package android:name="com.google.android.documentsui" />
+        <package android:name="com.android.documentsui" />
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT_TREE" />
+        </intent>
+        <provider android:authorities="com.google.android.apps.docs.storage" />
+        <provider android:authorities="com.google.android.apps.docs.storage.legacy" />
+    </queries>
+
     <application
         android:name=".KeepsakeApp"
         android:allowBackup="true"

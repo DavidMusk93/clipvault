@@ -158,29 +158,20 @@ private fun KeepsakeRoot(
     }
 
     fun launchDriveFolderPicker() {
-        if (!DriveTreePicker.isDriveInstalled(ctx.applicationContext)) {
-            Toast.makeText(ctx, "请先安装 Google 云端硬盘", Toast.LENGTH_LONG).show()
-            try {
-                ctx.startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("market://details?id=com.google.android.apps.docs")
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            } catch (_: Exception) {
-                ctx.startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.apps.docs")
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }
-            return
+        // Always open DocumentsUI. Do NOT hard-fail on package visibility checks
+        // (Android 11+ returns "not installed" without <queries> — already fixed in manifest).
+        val driveOk = DriveTreePicker.isDriveInstalled(ctx.applicationContext)
+        if (!driveOk) {
+            // Soft warning only — still try the picker (roots may still list Drive).
+            Toast.makeText(
+                ctx,
+                "若列表里没有 Drive，请先安装并登录 Google 云端硬盘",
+                Toast.LENGTH_SHORT,
+            ).show()
         }
-        // Open DocumentsUI PickActivity (Show roots → Drive). Discovery URI is optional.
         scope.launch {
             loading = true
-            statusMsg = "打开系统文件页，点左上角「显示根目录」→ Drive…"
+            statusMsg = "打开文件页 → 左上角显示根目录 → Drive → Keepsake → backup"
             val initial = withContext(Dispatchers.IO) {
                 DriveTreePicker.bestInitialUri(ctx.applicationContext)
             }

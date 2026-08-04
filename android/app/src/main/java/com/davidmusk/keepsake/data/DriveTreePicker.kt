@@ -24,11 +24,25 @@ object DriveTreePicker {
     private const val TAG = "DriveTreePicker"
 
     fun isDriveInstalled(context: Context): Boolean {
+        val pm = context.packageManager
+        // Prefer resolve with MATCH_ALL so Android 11+ package visibility is explicit.
         return try {
-            context.packageManager.getPackageInfo(DRIVE_PKG, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(DRIVE_PKG, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(DRIVE_PKG, 0)
+            }
             true
         } catch (_: PackageManager.NameNotFoundException) {
-            false
+            // Also treat a resolvable Drive document root query as "present".
+            try {
+                context.contentResolver
+                    .query(DocumentsContract.buildRootsUri(DRIVE_AUTHORITY), null, null, null, null)
+                    ?.use { it.count >= 0 } == true
+            } catch (_: Exception) {
+                false
+            }
         }
     }
 
