@@ -280,7 +280,6 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func maybeVacuumAfterBlobMigration() {
-        guard metaGet("blob_vacuum_v1") != "1" else { return }
         let remaining = scalarInt64("""
             SELECT COUNT(*) FROM clipboard_items
             WHERE (image_data IS NOT NULL AND length(image_data)>0)
@@ -288,10 +287,19 @@ final class DatabaseManager: ObservableObject {
                OR (pdf_data IS NOT NULL AND length(pdf_data)>0);
             """) ?? 0
         guard remaining == 0 else { return }
-        print("[DatabaseManager] VACUUM after blob externalization…")
+
+        // Re-VACUUM if file still fat (interrupted vacuum / freelist not reclaimed).
+        let pages = scalarInt64("PRAGMA page_count;") ?? 0
+        let pageSize = scalarInt64("PRAGMA page_size;") ?? 4096
+        let bytes = pages * pageSize
+        let already = metaGet("blob_vacuum_v1") == "1"
+        if already && bytes < 2_000_000 { return }
+
+        print("[DatabaseManager] VACUUM after blob externalization (pages=\(pages) ~\(bytes / 1024)KB)…")
         if execQuiet("VACUUM;") {
             metaSet("blob_vacuum_v1", "1")
-            print("[DatabaseManager] VACUUM done")
+            let pages2 = scalarInt64("PRAGMA page_count;") ?? 0
+            print("[DatabaseManager] VACUUM done pages=\(pages2)")
         }
     }
 

@@ -168,7 +168,8 @@ final class CloudDocsBackupService {
         // Actually Codable synthesizes: missing key fails entire decode OR uses default only with init(from) 
         // For synthesized Codable, missing keys cause decode failure → loadConfig falls back to default Config().
         // If file exists with old keys only, decode succeeds and snapshotEverySeconds gets 0!
-        if c.snapshotEverySeconds < 120 {
+        // Prefer ≥30min sparse snaps (was 600s in older defaults).
+        if c.snapshotEverySeconds < 1800 {
             c.snapshotEverySeconds = 1800
             changed = true
         }
@@ -722,8 +723,28 @@ final class CloudDocsBackupService {
         }
         .sorted { $0.lastPathComponent > $1.lastPathComponent }
 
-        if dirs.count > keep {
-            for url in dirs.suffix(from: keep) {
+        // Drop legacy fat snapshots (pre blob-externalization full-db copies > 5MB).
+        for dir in dirs {
+            let db = dir.appendingPathComponent("clipflow.db")
+            let sz = fileSize(db) ?? 0
+            if sz > 5 * 1024 * 1024 {
+                try? fm.removeItem(at: dir)
+                print("[Backup] pruned fat legacy snapshot \(dir.lastPathComponent) (\(sz) bytes)")
+            }
+        }
+
+        let dirs2 = ((try? fm.contentsOfDirectory(
+            at: snaps,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []).filter { url in
+            var isDir: ObjCBool = false
+            return fm.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+        }
+        .sorted { $0.lastPathComponent > $1.lastPathComponent }
+
+        if dirs2.count > keep {
+            for url in dirs2.suffix(from: keep) {
                 try? fm.removeItem(at: url)
             }
         }
