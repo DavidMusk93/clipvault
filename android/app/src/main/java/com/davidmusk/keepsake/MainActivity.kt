@@ -28,7 +28,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -56,6 +59,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -72,8 +76,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.davidmusk.keepsake.R
 import com.davidmusk.keepsake.data.BackupRepository
+import com.davidmusk.keepsake.data.BackupSyncWorker
 import com.davidmusk.keepsake.data.ClipboardRow
 import com.davidmusk.keepsake.data.DriveTreePicker
 import com.davidmusk.keepsake.data.LocalCapture
@@ -85,6 +93,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 
 class MainActivity : ComponentActivity() {
@@ -154,6 +165,7 @@ private fun KeepsakeRoot(
             loading = true
             app.backupRepo.persistTreeUri(uri)
             hasRoot = true
+            BackupSyncWorker.ensureScheduled(ctx.applicationContext)
             val r = app.backupRepo.syncFromBackup()
             statusMsg = r.message
             offset = 0
@@ -201,19 +213,37 @@ private fun KeepsakeRoot(
         if (page.size < 80) endReached = true
     }
 
-    suspend fun syncAndLoad() {
-        loading = true
+    suspend fun syncAndLoad(force: Boolean = false, quiet: Boolean = false) {
+        if (!quiet) loading = true
         if (app.backupRepo.hasBackupRoot()) {
-            val r = app.backupRepo.syncFromBackup()
-            statusMsg = r.message
+            BackupSyncWorker.ensureScheduled(ctx.applicationContext)
+            val r = if (force) {
+                app.backupRepo.syncFromBackup()
+            } else {
+                app.backupRepo.syncIfChanged(force = false)
+            }
+            statusMsg = formatSyncStatus(r.message, app.prefs.lastAutoSyncAtMs)
             refreshList(reset = true)
         }
         captures = app.captures.list()
-        loading = false
+        if (!quiet) loading = false
     }
 
+    // First open + every resume: cheap fingerprint check, pull only when Drive changed.
     LaunchedEffect(Unit) {
-        syncAndLoad()
+        syncAndLoad(force = false)
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, hasRoot) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && hasRoot) {
+                scope.launch {
+                    syncAndLoad(force = false, quiet = true)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
     if (selected != null) {
@@ -265,7 +295,9 @@ private fun KeepsakeRoot(
                     IconButton(onClick = { launchDriveFolderPicker() }) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "选择云端文件夹")
                     }
-                    IconButton(onClick = { scope.launch { syncAndLoad() } }) {
+                    IconButton(onClick = {
+                        scope.launch { syncAndLoad(force = true, quiet = false) }
+                    }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 },
@@ -351,10 +383,11 @@ private fun KeepsakeRoot(
                     CircularProgressIndicator()
                 }
             } else if (tab == Tab.Backup) {
-                val listState = rememberLazyListState()
-                LaunchedEffect(listState, endReached, loading) {
+                // Mature masonry: official LazyVerticalStaggeredGrid (Compose foundation).
+                val gridState = rememberLazyStaggeredGridState()
+                LaunchedEffect(gridState, endReached, loading) {
                     snapshotFlow {
-                        val info = listState.layoutInfo
+                        val info = gridState.layoutInfo
                         val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
                         last >= info.totalItemsCount - 4
                     }.distinctUntilChanged().collect { nearEnd ->
@@ -365,22 +398,26 @@ private fun KeepsakeRoot(
                         }
                     }
                 }
-                LazyColumn(
-                    state = listState,
-                    contentPadding = PaddingValues(bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(items, key = { it.id }) { row ->
-                        ItemCard(
-                            row = row,
-                            repo = app.backupRepo,
-                            onClick = { selected = row },
-                        )
-                    }
-                    if (items.isEmpty() && hasRoot) {
-                        item {
-                            Text("这里还没有条目。点右上角刷新，或确认云端文件夹选对了。", modifier = Modifier.padding(24.dp))
+                if (items.isEmpty() && hasRoot) {
+                    Text(
+                        "这里还没有条目。回到前台或联网后会自动同步；也可点右上角强制刷新。",
+                        modifier = Modifier.padding(24.dp),
+                    )
+                } else {
+                    LazyVerticalStaggeredGrid(
+                        columns = StaggeredGridCells.Adaptive(minSize = 160.dp),
+                        state = gridState,
+                        contentPadding = PaddingValues(bottom = 24.dp, top = 4.dp),
+                        verticalItemSpacing = 10.dp,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(items, key = { it.id }) { row ->
+                            ItemCard(
+                                row = row,
+                                repo = app.backupRepo,
+                                onClick = { selected = row },
+                            )
                         }
                     }
                 }
@@ -440,33 +477,41 @@ private fun ItemCard(
 ) {
     Card(
         onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(1.dp),
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TypeBadge(row.type)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    row.displayTime,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                )
+                Spacer(Modifier.width(6.dp))
                 Spacer(Modifier.weight(1f))
-                row.sourceApp?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                    )
-                }
+                Text(
+                    row.displayTime.substringAfter(' '), // HH:mm on card to save space
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                )
             }
-            Spacer(Modifier.height(10.dp))
+            row.sourceApp?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
             ListItemBody(row = row, repo = repo)
         }
     }
+}
+
+private fun formatSyncStatus(message: String, atMs: Long): String {
+    if (atMs <= 0L) return message
+    val t = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(atMs))
+    return "$message · 自动 $t"
 }
 
 @Composable

@@ -136,14 +136,13 @@ fun ListItemBody(
 ) {
     when (row.type.lowercase()) {
         "image" -> {
-            val (bmp, loading) = rememberPayloadBitmap(row, repo)
-            Row(
-                modifier = modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            // Masonry-friendly: full-width thumb + optional OCR caption below.
+            val (bmp, loading) = rememberPayloadBitmap(row, repo, maxSidePx = 720)
+            Column(modifier = modifier.fillMaxWidth()) {
                 Box(
                     modifier = Modifier
-                        .size(72.dp)
+                        .fillMaxWidth()
+                        .aspectRatio(0.85f)
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center,
@@ -156,9 +155,7 @@ fun ListItemBody(
                         bmp != null -> Image(
                             bitmap = bmp,
                             contentDescription = "图片预览",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             contentScale = ContentScale.Crop,
                         )
                         else -> Icon(
@@ -168,16 +165,16 @@ fun ListItemBody(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.width(12.dp))
                 val caption = row.ocrText?.takeIf { it.isNotBlank() }
-                    ?: "图片 · 点开查看大图"
-                Text(
-                    text = caption.replace("\n", " ").trim(),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (caption != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = caption.replace("\n", " ").trim(),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
         "url" -> {

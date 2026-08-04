@@ -92,13 +92,54 @@ class BackupRepository(
         } ?: 0
 
         prefs.lastSyncedSha = manifest?.sha256
+        prefs.lastAutoSyncAtMs = System.currentTimeMillis()
+        val msg = "已载入 $count 条（Google Drive）"
+        prefs.lastAutoSyncMessage = msg
         SyncResult(
             itemCount = count,
             sha256 = manifest?.sha256,
             manifest = manifest,
             status = status,
-            message = "已载入 $count 条（Google Drive）"
+            message = msg,
         )
+    }
+
+    /**
+     * Cheap fingerprint from STATUS.json / MANIFEST.json — no db download.
+     * Used for change detection (auto-sync).
+     */
+    suspend fun peekRemoteFingerprint(): String? = withContext(Dispatchers.IO) {
+        val treeUri = prefs.backupTreeUri ?: return@withContext null
+        val statusUri = findChildDocumentUri(treeUri, parentDocId = null, displayName = "STATUS.json")
+        statusUri?.let { readJsonDoc<BackupStatusFile>(it) }?.latest?.sha256?.let { return@withContext it }
+        val latestId = findChildDocumentId(treeUri, parentDocId = null, displayName = "latest")
+            ?: return@withContext null
+        val manifestUri = findChildDocumentUri(treeUri, parentDocId = latestId, displayName = "MANIFEST.json")
+        manifestUri?.let { readJsonDoc<BackupManifest>(it) }?.sha256
+    }
+
+    /**
+     * Skip full db copy when remote sha matches [Prefs.lastSyncedSha].
+     * Mature pattern for cloud folder readers (etag / content hash).
+     */
+    suspend fun syncIfChanged(force: Boolean = false): SyncResult = withContext(Dispatchers.IO) {
+        if (!hasBackupRoot()) {
+            return@withContext SyncResult(0, null, null, null, "尚未选择云端文件夹")
+        }
+        val remote = peekRemoteFingerprint()
+        val local = prefs.lastSyncedSha
+        if (!force && remote != null && remote == local && cacheDb.exists() && cacheDb.length() > 0) {
+            val count = openDb()?.use { db ->
+                db.rawQuery("SELECT COUNT(*) FROM clipboard_items", null).use { c ->
+                    if (c.moveToFirst()) c.getInt(0) else 0
+                }
+            } ?: 0
+            prefs.lastAutoSyncAtMs = System.currentTimeMillis()
+            val msg = "已是最新 · $count 条"
+            prefs.lastAutoSyncMessage = msg
+            return@withContext SyncResult(count, remote, null, null, msg)
+        }
+        syncFromBackup()
     }
 
     /**
