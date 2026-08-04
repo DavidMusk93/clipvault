@@ -70,9 +70,9 @@ final class DatabaseManager: ObservableObject {
             migrateSchema()
             bootstrapFTSIfNeeded()
             runAnalyze()
-            // First light dedupe soon after boot (not a full one-shot wipe).
-            dbQueue.asyncAfter(deadline: .now() + 15) { [weak self] in
-                self?.runMaintenanceTick(forceOptimize: false)
+            // Drain residual dups after boot in short batches (not one giant DELETE).
+            dbQueue.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.drainDuplicates(maxBatches: 40)
             }
         } else {
             print("Failed to open SQLite database at \(dbPath.path)")
@@ -276,10 +276,9 @@ final class DatabaseManager: ObservableObject {
         guard db != nil else { return }
         maintenanceTicks += 1
 
-        let removed = dedupeStaleBatch(limit: Self.dedupeBatchSize)
-        let orphans = pruneOrphanFTS(limit: Self.dedupeBatchSize)
-        if removed > 0 || orphans > 0 {
-            print("[DatabaseManager] maintenance: dedupe_removed=\(removed) fts_orphans=\(orphans)")
+        let removed = drainDuplicates(maxBatches: 4)
+        if removed > 0 {
+            print("[DatabaseManager] maintenance: dedupe_removed=\(removed)")
         }
 
         // Passive WAL checkpoint every tick (cheap).
@@ -291,6 +290,23 @@ final class DatabaseManager: ObservableObject {
             execQuiet("INSERT INTO clipboard_fts(clipboard_fts) VALUES('optimize');")
             runAnalyze()
         }
+    }
+
+    /// Run up to `maxBatches` short DELETE batches until no more stale dups.
+    @discardableResult
+    private func drainDuplicates(maxBatches: Int) -> Int {
+        var total = 0
+        for _ in 0..<maxBatches {
+            let n = dedupeStaleBatch(limit: Self.dedupeBatchSize)
+            total += n
+            if n == 0 { break }
+            // FTS orphans for this batch
+            _ = pruneOrphanFTS(limit: Self.dedupeBatchSize)
+        }
+        if total > 0 {
+            print("[DatabaseManager] drainDuplicates total=\(total)")
+        }
+        return total
     }
 
     /// Keep only the newest row per content_hash; delete up to `limit` losers this tick.
