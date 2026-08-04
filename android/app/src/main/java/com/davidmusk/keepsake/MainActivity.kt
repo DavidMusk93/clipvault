@@ -3,18 +3,16 @@ package com.davidmusk.keepsake
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
-import android.graphics.BitmapFactory
+import android.app.Activity
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import android.app.Activity
 import androidx.activity.result.contract.ActivityResultContract
-import com.davidmusk.keepsake.data.DriveTreePicker
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,14 +30,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -49,6 +50,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -65,15 +67,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.davidmusk.keepsake.R
 import com.davidmusk.keepsake.data.BackupRepository
 import com.davidmusk.keepsake.data.ClipboardRow
+import com.davidmusk.keepsake.data.DriveTreePicker
 import com.davidmusk.keepsake.data.LocalCapture
+import com.davidmusk.keepsake.ui.DetailContent
+import com.davidmusk.keepsake.ui.ListItemBody
+import com.davidmusk.keepsake.ui.TypeBadge
 import com.davidmusk.keepsake.ui.theme.KeepsakeTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -224,13 +231,24 @@ private fun KeepsakeRoot(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Keepsake", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "你的剪贴板记忆",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(R.drawable.keepsake_logo),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop,
                         )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("Keepsake", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "你的剪贴板记忆",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            )
+                        }
                     }
                 },
                 actions = {
@@ -355,7 +373,11 @@ private fun KeepsakeRoot(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(items, key = { it.id }) { row ->
-                        ItemCard(row = row, onClick = { selected = row })
+                        ItemCard(
+                            row = row,
+                            repo = app.backupRepo,
+                            onClick = { selected = row },
+                        )
                     }
                     if (items.isEmpty() && hasRoot) {
                         item {
@@ -412,7 +434,11 @@ private fun SetupCard(onPick: () -> Unit) {
 }
 
 @Composable
-private fun ItemCard(row: ClipboardRow, onClick: () -> Unit) {
+private fun ItemCard(
+    row: ClipboardRow,
+    repo: BackupRepository,
+    onClick: () -> Unit,
+) {
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
@@ -421,12 +447,7 @@ private fun ItemCard(row: ClipboardRow, onClick: () -> Unit) {
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    row.type.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                )
+                TypeBadge(row.type)
                 Spacer(Modifier.width(8.dp))
                 Text(
                     row.displayTime,
@@ -439,18 +460,12 @@ private fun ItemCard(row: ClipboardRow, onClick: () -> Unit) {
                         it,
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
                     )
                 }
             }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                row.preview,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Spacer(Modifier.height(10.dp))
+            ListItemBody(row = row, repo = repo)
         }
     }
 }
@@ -491,23 +506,27 @@ private fun DetailScreen(
     onBack: () -> Unit,
     onCopy: (String) -> Unit,
 ) {
-    var bytes by remember { mutableStateOf<ByteArray?>(null) }
-    var loading by remember { mutableStateOf(row.type == "image") }
-
-    LaunchedEffect(row.id) {
-        if (row.type == "image" || row.type == "pdf" || row.type == "rtf") {
-            loading = true
-            bytes = repo.loadPayload(row)
-            loading = false
-        }
+    val ctx = LocalContext.current
+    val textBody = row.textContent ?: row.url ?: row.ocrText
+        ?: row.htmlContent?.let { com.davidmusk.keepsake.ui.stripHtml(it) }
+    val openUrl = row.url ?: row.textContent?.takeIf {
+        it.startsWith("http://") || it.startsWith("https://")
     }
-
-    val textBody = row.textContent ?: row.url ?: row.ocrText ?: row.htmlContent
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(row.type) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TypeBadge(row.type)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            row.sourceApp ?: "详情",
+                            maxLines = 1,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -519,6 +538,17 @@ private fun DetailScreen(
                             Icon(Icons.Default.ContentCopy, contentDescription = "复制")
                         }
                     }
+                    if (!textBody.isNullOrBlank()) {
+                        IconButton(onClick = {
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, textBody)
+                            }
+                            ctx.startActivity(Intent.createChooser(send, "分享"))
+                        }) {
+                            Icon(Icons.Default.Share, contentDescription = "分享")
+                        }
+                    }
                 },
             )
         },
@@ -527,7 +557,7 @@ private fun DetailScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             Text(
                 "${row.displayTime} · ${row.sourceApp ?: "未知来源"}",
@@ -535,39 +565,38 @@ private fun DetailScreen(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
             )
             Spacer(Modifier.height(12.dp))
-            if (loading) {
-                CircularProgressIndicator()
-            } else if (row.type == "image" && bytes != null) {
-                val bmp = remember(bytes) {
-                    bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
-                }
-                if (bmp != null) {
-                    Image(
-                        bitmap = bmp,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
-                row.ocrText?.takeIf { it.isNotBlank() }?.let {
-                    Spacer(Modifier.height(12.dp))
-                    Text("OCR", fontWeight = FontWeight.SemiBold)
-                    Text(it)
-                }
-            } else {
-                Text(
-                    textBody ?: "（无文本内容）",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+            Box(Modifier.weight(1f, fill = true).fillMaxWidth()) {
+                DetailContent(row = row, repo = repo, modifier = Modifier.fillMaxWidth())
             }
-            if (!textBody.isNullOrBlank()) {
-                Spacer(Modifier.height(16.dp))
-                Button(onClick = { onCopy(textBody) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.ContentCopy, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("复制到剪贴板")
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!textBody.isNullOrBlank()) {
+                    Button(
+                        onClick = { onCopy(textBody) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.ContentCopy, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("复制")
+                    }
+                }
+                if (!openUrl.isNullOrBlank()) {
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                ctx.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(openUrl))
+                                )
+                            } catch (_: Exception) {
+                                Toast.makeText(ctx, "无法打开链接", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.OpenInBrowser, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("打开")
+                    }
                 }
             }
         }
