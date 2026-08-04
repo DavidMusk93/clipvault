@@ -8,11 +8,14 @@ import android.provider.DocumentsContract
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.util.Collections
+import java.util.LinkedHashMap
 
 /**
  * Read Mac Keepsake backup layout via SAF tree URI:
@@ -21,6 +24,12 @@ import java.security.MessageDigest
  *   {tree}/latest/MANIFEST.json
  *   {tree}/blobs/{hash}.bin | {hash}.rtf.bin | {hash}.pdf.bin
  *   {tree}/STATUS.json
+ *
+ * Google Drive SAF is flaky for large `blobs/` listings and stream reopen.
+ * Reliability stack:
+ *  1) local disk CAS cache (filesDir/blob_cache)
+ *  2) in-memory name→documentId index (one scan / session, rebuild on miss)
+ *  3) download with retries; decode from local file (not live Drive stream)
  */
 class BackupRepository(
     private val context: Context,
@@ -28,6 +37,20 @@ class BackupRepository(
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val cacheDb: File get() = File(context.cacheDir, "clipflow_backup.db")
+    private val blobCacheDir: File
+        get() = File(context.filesDir, "blob_cache").also { it.mkdirs() }
+
+    /** Tree URI string this index belongs to. */
+    @Volatile private var indexTreeKey: String? = null
+    @Volatile private var blobsFolderDocId: String? = null
+    /** displayName → documentId under blobs/ (access-order LRU cap). */
+    private val blobNameToDocId: MutableMap<String, String> =
+        Collections.synchronizedMap(
+            object : LinkedHashMap<String, String>(256, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+                    size > BLOB_INDEX_MAX
+            },
+        )
 
     data class SyncResult(
         val itemCount: Int,
@@ -60,7 +83,11 @@ class BackupRepository(
                 Log.w(TAG, "persist uri failed", e2)
             }
         }
+        val prev = prefs.backupTreeUri
         prefs.backupTreeUri = uri
+        if (prev?.toString() != uri.toString()) {
+            invalidateBlobIndex()
+        }
     }
 
     suspend fun syncFromBackup(): SyncResult = withContext(Dispatchers.IO) {
@@ -79,7 +106,21 @@ class BackupRepository(
                 "未找到记忆库 clipflow.db（latest/ 下）",
             )
 
-        copyDocumentToFile(dbUri, cacheDb)
+        try {
+            copyDocumentAtomic(dbUri, cacheDb)
+        } catch (e: Exception) {
+            Log.e(TAG, "db download failed", e)
+            return@withContext SyncResult(
+                0, null, null, null,
+                "下载记忆库失败：${e.message ?: "网络/权限"}，请稍后重试",
+            )
+        }
+
+        // New items may reference blobs not yet in our index (Drive lag).
+        // Keep on-disk CAS cache; only drop name→id map so next image lookup rescan.
+        blobsFolderDocId = null
+        blobNameToDocId.clear()
+        indexTreeKey = treeUri.toString()
 
         val manifestUri = findChildDocumentUri(treeUri, parentDocId = latestId, displayName = "MANIFEST.json")
         val manifest = manifestUri?.let { readJsonDoc<BackupManifest>(it) }
@@ -91,7 +132,7 @@ class BackupRepository(
             }
         } ?: 0
 
-        prefs.lastSyncedSha = manifest?.sha256
+        prefs.lastSyncedSha = manifest?.sha256 ?: status?.latest?.sha256
         prefs.lastAutoSyncAtMs = System.currentTimeMillis()
         val msg = "已载入 $count 条（Google Drive）"
         prefs.lastAutoSyncMessage = msg
@@ -102,6 +143,12 @@ class BackupRepository(
             status = status,
             message = msg,
         )
+    }
+
+    private fun invalidateBlobIndex() {
+        indexTreeKey = null
+        blobsFolderDocId = null
+        blobNameToDocId.clear()
     }
 
     /**
@@ -173,22 +220,16 @@ class BackupRepository(
                 while (c.moveToNext()) {
                     val name = c.getString(1) ?: continue
                     val id = c.getString(0) ?: continue
-                    Log.d(TAG, "child name=$name id=$id")
                     if (name.equals(displayName, ignoreCase = true)) return@use id
                 }
                 null
             }
         } catch (e: Exception) {
             Log.e(TAG, "list children failed parent=$parentId", e)
-            // Fallback DocumentFile
+            // Fallback DocumentFile (root-level only; Drive often fails nested findFile)
             val root = DocumentFile.fromTreeUri(context, treeUri) ?: return null
-            val parent = if (parentDocId == null) {
-                root
-            } else {
-                // Walk is hard without ids; try root only
-                root
-            }
-            parent.findFile(displayName)?.uri?.let {
+            if (parentDocId != null) return null
+            root.findFile(displayName)?.uri?.let {
                 try {
                     DocumentsContract.getDocumentId(it)
                 } catch (_: Exception) {
@@ -207,12 +248,133 @@ class BackupRepository(
         return DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
     }
 
-    /** Resolve blobs/{name} under tree root for image payload. */
-    fun findBlobUri(fileName: String): Uri? {
+    private fun ensureTreeIndex(treeUri: Uri) {
+        val key = treeUri.toString()
+        if (indexTreeKey != key) {
+            invalidateBlobIndex()
+            indexTreeKey = key
+        }
+    }
+
+    private fun ensureBlobsFolderId(treeUri: Uri): String? {
+        ensureTreeIndex(treeUri)
+        blobsFolderDocId?.let { return it }
+        val id = findChildDocumentId(treeUri, parentDocId = null, displayName = "blobs")
+        blobsFolderDocId = id
+        return id
+    }
+
+    /**
+     * Fill [blobNameToDocId] by listing blobs/ once.
+     * Drive SAF is expensive — call only on cold start or lookup miss.
+     */
+    private fun scanBlobsFolder(treeUri: Uri, force: Boolean = false): Boolean {
+        val blobsId = ensureBlobsFolderId(treeUri) ?: return false
+        if (!force && blobNameToDocId.isNotEmpty()) return true
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, blobsId)
+        return try {
+            var n = 0
+            context.contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                ),
+                null,
+                null,
+                null,
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getString(0) ?: continue
+                    val name = c.getString(1) ?: continue
+                    blobNameToDocId[name] = id
+                    n++
+                }
+            }
+            Log.i(TAG, "blob index size=$n (force=$force)")
+            n > 0 || blobNameToDocId.isNotEmpty()
+        } catch (e: Exception) {
+            Log.e(TAG, "scan blobs/ failed", e)
+            false
+        }
+    }
+
+    private fun resolveBlobDocumentUri(fileName: String, forceRescan: Boolean = false): Uri? {
         val treeUri = prefs.backupTreeUri ?: return null
-        val blobsId = findChildDocumentId(treeUri, parentDocId = null, displayName = "blobs")
-            ?: return null
-        return findChildDocumentUri(treeUri, parentDocId = blobsId, displayName = fileName)
+        ensureTreeIndex(treeUri)
+        if (!forceRescan) {
+            blobNameToDocId[fileName]?.let { docId ->
+                return DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+            }
+        }
+        scanBlobsFolder(treeUri, force = forceRescan || blobNameToDocId.isEmpty())
+        blobNameToDocId[fileName]?.let { docId ->
+            return DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+        }
+        // Last chance: single-name walk without relying on full map (provider may paginate oddly)
+        val blobsId = ensureBlobsFolderId(treeUri) ?: return null
+        val id = findChildDocumentId(treeUri, parentDocId = blobsId, displayName = fileName)
+        if (id != null) {
+            blobNameToDocId[fileName] = id
+            return DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
+        }
+        return null
+    }
+
+    /** Resolve blobs/{name} under tree root for image payload. */
+    fun findBlobUri(fileName: String): Uri? = resolveBlobDocumentUri(fileName, forceRescan = false)
+
+    /**
+     * Ensure blob bytes are on local disk (CAS cache). Retries Drive open on transient fail.
+     * Returns local file or null.
+     */
+    suspend fun materializeBlob(fileName: String): File? = withContext(Dispatchers.IO) {
+        val safe = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val local = File(blobCacheDir, safe)
+        if (local.isFile && local.length() > 0L) return@withContext local
+
+        var lastError: Exception? = null
+        repeat(BLOB_FETCH_ATTEMPTS) { attempt ->
+            try {
+                val uri = resolveBlobDocumentUri(
+                    fileName,
+                    forceRescan = attempt > 0,
+                )
+                if (uri == null) {
+                    // Cloud lag: db may list a hash before Drive lists the blob.
+                    delay(BLOB_RETRY_BASE_MS * (attempt + 1))
+                    if (attempt == 1) {
+                        // Hard refresh folder id + index
+                        blobsFolderDocId = null
+                        blobNameToDocId.clear()
+                    }
+                    return@repeat
+                }
+                val bytes = readAllBytesWithRetry(uri) ?: run {
+                    delay(BLOB_RETRY_BASE_MS * (attempt + 1))
+                    return@repeat
+                }
+                if (bytes.isEmpty()) return@repeat
+                val tmp = File(blobCacheDir, "$safe.tmp")
+                FileOutputStream(tmp).use { it.write(bytes) }
+                if (local.exists()) local.delete()
+                if (!tmp.renameTo(local)) {
+                    tmp.copyTo(local, overwrite = true)
+                    tmp.delete()
+                }
+                if (local.isFile && local.length() > 0L) return@withContext local
+            } catch (e: Exception) {
+                lastError = e
+                Log.w(TAG, "materialize attempt ${attempt + 1} failed for $fileName", e)
+                delay(BLOB_RETRY_BASE_MS * (attempt + 1))
+            }
+        }
+        if (lastError != null) {
+            Log.e(TAG, "materialize gave up $fileName", lastError)
+        } else {
+            Log.w(TAG, "blob not found after retries: $fileName")
+        }
+        null
     }
 
     suspend fun queryItems(limit: Int = 80, offset: Int = 0, q: String? = null): List<ClipboardRow> =
@@ -263,25 +425,30 @@ class BackupRepository(
         }
     }
 
+    private fun blobCandidateNames(row: ClipboardRow): List<String> = when (row.type.lowercase()) {
+        "image" -> listOf("${row.contentHash}.bin")
+        "rtf" -> listOf("${row.contentHash}.rtf.bin", "${row.contentHash}.bin")
+        "pdf" -> listOf("${row.contentHash}.pdf.bin", "${row.contentHash}.bin")
+        else -> listOf("${row.contentHash}.bin")
+    }
+
     /**
-     * Load image/pdf/rtf bytes: prefer CAS under blobs/, fall back to inline BLOB columns.
+     * Load image/pdf/rtf bytes: local CAS cache → Drive blobs/ (retry) → inline BLOB columns.
      */
     suspend fun loadPayload(row: ClipboardRow): ByteArray? = withContext(Dispatchers.IO) {
-        val candidates = when (row.type) {
-            "image" -> listOf("${row.contentHash}.bin")
-            "rtf" -> listOf("${row.contentHash}.rtf.bin", "${row.contentHash}.bin")
-            "pdf" -> listOf("${row.contentHash}.pdf.bin", "${row.contentHash}.bin")
-            else -> listOf("${row.contentHash}.bin")
-        }
-        for (name in candidates) {
-            val uri = findBlobUri(name)
-            if (uri != null) {
-                val bytes = readAllBytes(uri)
-                if (bytes != null && bytes.isNotEmpty()) return@withContext bytes
+        for (name in blobCandidateNames(row)) {
+            val file = materializeBlob(name)
+            if (file != null) {
+                return@withContext try {
+                    file.readBytes()
+                } catch (e: Exception) {
+                    Log.e(TAG, "read cache $name", e)
+                    null
+                }
             }
         }
         // Inline legacy columns
-        val col = when (row.type) {
+        val col = when (row.type.lowercase()) {
             "image" -> "image_data"
             "rtf" -> "rtf_data"
             "pdf" -> "pdf_data"
@@ -297,41 +464,46 @@ class BackupRepository(
 
     /**
      * Decode image for UI without OOM.
-     * Pipeline: bounds → power-of-2 inSampleSize (fast) → filtered exact downscale
-     * so list thumbs are not soft/aliased when Compose scales them.
+     * Prefers local blob file (stable mark/reset) over live Drive streams.
      */
     suspend fun loadImageBitmap(
         row: ClipboardRow,
         maxSidePx: Int = 1600,
     ): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
         val target = maxSidePx.coerceIn(64, 4096)
-        val candidates = listOf("${row.contentHash}.bin")
-        for (name in candidates) {
-            val uri = findBlobUri(name)
-            if (uri != null) {
-                decodeSampledFromUri(uri, target)?.let { return@withContext it }
+        for (name in blobCandidateNames(row)) {
+            val file = materializeBlob(name)
+            if (file != null) {
+                decodeSampledFromFile(file, target)?.let { return@withContext it }
             }
         }
         val bytes = loadPayload(row) ?: return@withContext null
         decodeSampledFromBytes(bytes, target)
     }
 
-    private fun decodeSampledFromUri(uri: Uri, maxSidePx: Int): android.graphics.Bitmap? {
+    private fun decodeSampledFromFile(file: File, maxSidePx: Int): android.graphics.Bitmap? {
         return try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, bounds)
-            }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
             val sample = sampleSizeFor(bounds.outWidth, bounds.outHeight, maxSidePx)
             val opts = BitmapFactory.Options().apply {
                 inSampleSize = sample
                 inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
                 inScaled = false
             }
-            val raw = context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, opts)
-            } ?: return null
+            val raw = BitmapFactory.decodeFile(file.absolutePath, opts) ?: return null
             scaleDownIfNeeded(raw, maxSidePx)
+        } catch (e: Exception) {
+            Log.e(TAG, "decode file failed ${file.name}", e)
+            null
+        }
+    }
+
+    private fun decodeSampledFromUri(uri: Uri, maxSidePx: Int): android.graphics.Bitmap? {
+        // Prefer single-read: Drive streams often fail on second open.
+        return try {
+            val bytes = readAllBytesWithRetry(uri) ?: return null
+            decodeSampledFromBytes(bytes, maxSidePx)
         } catch (e: Exception) {
             Log.e(TAG, "decode uri failed $uri", e)
             null
@@ -410,6 +582,32 @@ class BackupRepository(
         }
     }
 
+    /** Download to temp then rename so a partial db never replaces a good cache. */
+    private fun copyDocumentAtomic(uri: Uri, dest: File) {
+        dest.parentFile?.mkdirs()
+        val tmp = File(dest.absolutePath + ".downloading")
+        if (tmp.exists()) tmp.delete()
+        context.contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "无法打开 $uri" }
+            FileOutputStream(tmp).use { output -> input.copyTo(output) }
+        }
+        require(tmp.length() > 0L) { "空文件: $uri" }
+        // Quick SQLite header check (db) or generic non-empty
+        if (dest.name.endsWith(".db", ignoreCase = true)) {
+            val hdr = ByteArray(16)
+            val n = tmp.inputStream().use { it.read(hdr) }
+            val ok = n >= 15 && String(hdr, 0, n.coerceAtLeast(0), Charsets.UTF_8)
+                .startsWith("SQLite format 3")
+            require(ok) { "不是有效的 SQLite 库" }
+            SQLiteDatabase.openDatabase(tmp.absolutePath, null, SQLiteDatabase.OPEN_READONLY).close()
+        }
+        if (dest.exists()) dest.delete()
+        if (!tmp.renameTo(dest)) {
+            tmp.copyTo(dest, overwrite = true)
+            tmp.delete()
+        }
+    }
+
     private fun readAllBytes(uri: Uri): ByteArray? {
         return try {
             context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
@@ -417,6 +615,27 @@ class BackupRepository(
             Log.e(TAG, "read blob failed", e)
             null
         }
+    }
+
+    private fun readAllBytesWithRetry(uri: Uri, attempts: Int = 3): ByteArray? {
+        var last: Exception? = null
+        repeat(attempts) { i ->
+            try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null && bytes.isNotEmpty()) return bytes
+            } catch (e: Exception) {
+                last = e
+                Log.w(TAG, "read attempt ${i + 1} failed $uri", e)
+            }
+            try {
+                Thread.sleep(BLOB_RETRY_BASE_MS * (i + 1L))
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return null
+            }
+        }
+        if (last != null) Log.e(TAG, "read gave up $uri", last)
+        return null
     }
 
     private inline fun <reified T> readJsonDoc(uri: Uri): T? {
@@ -453,6 +672,9 @@ class BackupRepository(
 
     companion object {
         private const val TAG = "BackupRepository"
+        private const val BLOB_INDEX_MAX = 8000
+        private const val BLOB_FETCH_ATTEMPTS = 3
+        private const val BLOB_RETRY_BASE_MS = 350L
 
         fun sha256Hex(bytes: ByteArray): String {
             val dig = MessageDigest.getInstance("SHA-256").digest(bytes)

@@ -28,12 +28,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -43,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -108,9 +111,18 @@ fun TypeBadge(type: String, modifier: Modifier = Modifier) {
     }
 }
 
+/** Result of async image load: bitmap, loading flag, failed flag, and retry trigger. */
+data class PayloadBitmapState(
+    val bitmap: androidx.compose.ui.graphics.ImageBitmap?,
+    val loading: Boolean,
+    val failed: Boolean,
+    val retry: () -> Unit,
+)
+
 /**
- * Async load blob → ImageBitmap.
- * [maxSideDp] is converted with density so xxhdpi/xxxhdpi stay sharp (not upscaled soft).
+ * Async load blob → ImageBitmap with retry.
+ * [maxSideDp] is density-aware so xxhdpi/xxxhdpi stay sharp.
+ * Drive lag / SAF blips surface as [PayloadBitmapState.failed] instead of silent empty.
  */
 @Composable
 fun rememberPayloadBitmap(
@@ -118,21 +130,32 @@ fun rememberPayloadBitmap(
     repo: BackupRepository,
     enabled: Boolean = row.type == "image",
     maxSideDp: Dp = 360.dp,
-): Pair<androidx.compose.ui.graphics.ImageBitmap?, Boolean> {
+): PayloadBitmapState {
     val density = LocalDensity.current
     val maxSidePx = with(density) { maxSideDp.roundToPx() }.coerceIn(128, 4096)
     var bmp by remember(row.id) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var loading by remember(row.id) { mutableStateOf(enabled) }
-    LaunchedEffect(row.id, enabled, maxSidePx) {
+    var failed by remember(row.id) { mutableStateOf(false) }
+    var retryToken by remember(row.id) { mutableIntStateOf(0) }
+    LaunchedEffect(row.id, enabled, maxSidePx, retryToken) {
         if (!enabled) {
             loading = false
+            failed = false
             return@LaunchedEffect
         }
         loading = true
-        bmp = repo.loadImageBitmap(row, maxSidePx)?.asImageBitmap()
+        failed = false
+        val decoded = repo.loadImageBitmap(row, maxSidePx)?.asImageBitmap()
+        bmp = decoded
+        failed = decoded == null
         loading = false
     }
-    return bmp to loading
+    return PayloadBitmapState(
+        bitmap = bmp,
+        loading = loading,
+        failed = failed,
+        retry = { retryToken += 1 },
+    )
 }
 
 /** Keep masonry heights sane for extreme panoramic / ultra-tall shots. */
@@ -149,8 +172,9 @@ fun ListItemBody(
 ) {
     when (row.type.lowercase()) {
         "image" -> {
-            // Natural aspect (no fixed 0.85 crop box) + density-aware decode.
-            val (bmp, loading) = rememberPayloadBitmap(row, repo, maxSideDp = 280.dp)
+            // Natural aspect + density-aware decode; tap to retry on Drive lag.
+            val state = rememberPayloadBitmap(row, repo, maxSideDp = 280.dp)
+            val bmp = state.bitmap
             Column(modifier = modifier.fillMaxWidth()) {
                 Box(
                     modifier = Modifier
@@ -163,11 +187,18 @@ fun ListItemBody(
                             },
                         )
                         .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .then(
+                            if (state.failed && !state.loading) {
+                                Modifier.clickable { state.retry() }
+                            } else {
+                                Modifier
+                            },
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
-                        loading -> CircularProgressIndicator(
+                        state.loading -> CircularProgressIndicator(
                             modifier = Modifier.size(22.dp),
                             strokeWidth = 2.dp,
                         )
@@ -178,12 +209,20 @@ fun ListItemBody(
                             contentScale = ContentScale.Crop,
                             filterQuality = FilterQuality.High,
                         )
-                        else -> Icon(
-                            imageVector = Icons.Default.Image,
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                        )
+                        else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "重试加载",
+                                modifier = Modifier.size(26.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "点按重试",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                            )
+                        }
                     }
                 }
                 val caption = row.ocrText?.takeIf { it.isNotBlank() }
@@ -290,8 +329,9 @@ fun DetailContent(
 @Composable
 private fun DetailImage(row: ClipboardRow, repo: BackupRepository) {
     // Full-width decode ≈ screen width * density (sharp on 3x/4x panels).
-    val (bmp, loading) = rememberPayloadBitmap(row, repo, enabled = true, maxSideDp = 720.dp)
-    if (loading) {
+    val state = rememberPayloadBitmap(row, repo, enabled = true, maxSideDp = 720.dp)
+    val bmp = state.bitmap
+    if (state.loading) {
         Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
@@ -317,7 +357,30 @@ private fun DetailImage(row: ClipboardRow, repo: BackupRepository) {
             )
         }
     } else {
-        Text("图片加载失败", color = MaterialTheme.colorScheme.error)
+        Column {
+            Text("图片加载失败", color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "云端可能还在同步，或网络中断。点下方重试。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+            )
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                modifier = Modifier.clickable { state.retry() },
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(6.dp))
+                    Text("重新加载", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
     }
     row.ocrText?.takeIf { it.isNotBlank() }?.let { ocr ->
         Spacer(Modifier.height(16.dp))
