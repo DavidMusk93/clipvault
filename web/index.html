@@ -285,10 +285,8 @@
     </header>
     <div class="backup-body">
       <p style="margin-bottom:12px;color:var(--md-outline)">
-        个人本机 · <b>iCloud 云盘 / ClipFlow / backup</b>。无需 App 签名。
-        <br><b>latest</b> 约每分钟滚动更新（内容未变则跳过）；
-        <b>命名快照</b> 稀疏保留（默认 ≥10 分钟一个、最多 5 个）。
-        底层 <code>sqlite3_backup</code>；快照优先 APFS clonefile（写时复制）。
+        多备份源 fan-out：一次 <code>sqlite3_backup</code> 制品 → iCloud / Google Drive。
+        瘦库 + blobs CAS；latest 分钟级；命名快照默认 ≥30 分钟 ×3。
       </p>
       <div class="backup-row"><span class="backup-label">策略</span><span class="backup-value" id="bkPolicy">—</span></div>
       <div class="backup-row"><span class="backup-label">命名快照数</span><span class="backup-value" id="bkSnapCount">—</span></div>
@@ -296,12 +294,13 @@
       <div class="backup-row">
         <div>
           <div style="font-weight:600">启用自动备份</div>
-          <div class="backup-label">剪贴板变更后节流备份 · 内容未变则跳过</div>
+          <div class="backup-label">剪贴板变更后节流 · 未变跳过 · 多源并行写入</div>
         </div>
         <label class="switch"><input type="checkbox" id="backupEnabled"/><span></span></label>
       </div>
-      <div class="backup-row"><span class="backup-label">CloudDocs</span><span class="backup-value" id="bkCloud">—</span></div>
-      <div class="backup-row"><span class="backup-label">备份根目录</span><span class="backup-value" id="bkRoot">—</span></div>
+      <h3 style="font-size:14px;font-weight:600;margin:12px 0 6px">备份源</h3>
+      <div id="bkDestList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+      <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>
       <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
       <div class="backup-row"><span class="backup-label">状态</span><span class="backup-value" id="bkPhase">—</span></div>
       <div class="backup-row"><span class="backup-label">错误</span><span class="backup-value" id="bkErr">—</span></div>
@@ -939,15 +938,17 @@
         const s = await res.json();
         const btn = document.getElementById('backupOpenBtn');
         const label = document.getElementById('backupBtnLabel');
+        const dests = s.destinations || [];
+        const anyAvail = dests.some(d => d.enabled && d.available)
+          || s.cloudDocsAvailable || s.googleDriveAvailable;
         btn.classList.remove('on', 'warn');
-        if (!s.cloudDocsAvailable) { btn.classList.add('warn'); label.textContent = '无盘不可用'; }
+        if (!anyAvail) { btn.classList.add('warn'); label.textContent = '无备份源'; }
         else if (s.enabled) { btn.classList.add('on'); label.textContent = s.inProgress ? '备份中…' : '已备份'; }
         else { label.textContent = '备份'; }
 
         document.getElementById('backupEnabled').checked = !!s.enabled;
-        document.getElementById('bkCloud').innerHTML = s.cloudDocsAvailable
-          ? '<span class="pill ok">可用</span>' : '<span class="pill bad">不可用</span>';
-        document.getElementById('bkRoot').textContent = s.backupRootPath || '—';
+        const bkRootEl = document.getElementById('bkRoot');
+        if (bkRootEl) bkRootEl.textContent = s.backupRootPath || '—';
         document.getElementById('bkLast').textContent = s.lastSuccessAt || '尚未成功';
         const pol = document.getElementById('bkPolicy');
         if (pol) pol.textContent = s.policy || '—';
@@ -960,6 +961,41 @@
         if (s.dirty) phase += ' · dirty';
         document.getElementById('bkPhase').textContent = phase;
         document.getElementById('bkErr').textContent = s.lastError || '—';
+
+        const destHost = document.getElementById('bkDestList');
+        if (destHost) {
+          destHost.innerHTML = '';
+          const dlist = dests.length ? dests : [
+            { id: 'icloud', label: 'iCloud Drive', enabled: true, available: !!s.cloudDocsAvailable, rootPath: s.cloudDocsPath, hint: s.cloudDocsAvailable ? null : '请开启 iCloud 云盘' },
+            { id: 'gdrive', label: 'Google Drive', enabled: true, available: !!s.googleDriveAvailable, rootPath: s.googleDrivePath, hint: s.googleDriveAvailable ? null : '请安装并登录 Google Drive for Desktop' }
+          ];
+          dlist.forEach(d => {
+            const row = document.createElement('div');
+            row.className = 'backup-row';
+            row.style.alignItems = 'flex-start';
+            const pill = d.available ? '<span class="pill ok">可用</span>' : '<span class="pill bad">未就绪</span>';
+            row.innerHTML =
+              '<div style="min-width:0;flex:1">' +
+              '<div style="font-weight:600;display:flex;gap:8px;align-items:center">' + esc(d.label || d.id) + ' ' + pill + '</div>' +
+              '<div class="backup-label" style="word-break:break-all;margin-top:4px">' + esc(d.rootPath || d.hint || '—') + '</div>' +
+              '<div class="backup-label">' + (d.lastPhase ? 'phase: ' + esc(d.lastPhase) : '') + (d.lastError ? ' · ' + esc(d.lastError) : '') + '</div>' +
+              '</div>' +
+              '<label class="switch" title="启用此备份源">' +
+              '<input type="checkbox" data-dest="' + escAttr(d.id) + '" ' + (d.enabled ? 'checked' : '') + '/><span></span>' +
+              '</label>';
+            row.querySelector('input[data-dest]')?.addEventListener('change', async (e) => {
+              const id = e.currentTarget.getAttribute('data-dest');
+              const on = e.currentTarget.checked;
+              await fetch(API + '/api/backup/config', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ destinationId: id, destinationEnabled: on })
+              });
+              toast((on ? '已启用 ' : '已关闭 ') + (d.label || id));
+              refreshBackupStatus();
+            });
+            destHost.appendChild(row);
+          });
+        }
 
         const ul = document.getElementById('bkSnaps');
         ul.innerHTML = '';
@@ -1004,7 +1040,7 @@
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ enabled })
       });
-      toast(enabled ? '已开启 CloudDocs 自动备份' : '已关闭自动备份');
+      toast(enabled ? '已开启自动备份（多源）' : '已关闭自动备份');
       refreshBackupStatus();
     });
     document.getElementById('bkRunNow')?.addEventListener('click', async () => {

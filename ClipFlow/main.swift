@@ -15,9 +15,14 @@ webServer.start()
 print("✅ ClipFlow Web 服务已成功运行：")
 print("👉 本地 Web UI 访问地址: http://localhost:8080")
 if let root = backup.backupRootURL {
-    print("☁️  iCloud Drive 备份目录: \(root.path)")
+    print("☁️  备份主目录: \(root.path)")
 } else {
-    print("⚠️  未检测到 iCloud Drive (CloudDocs)；备份将在可用后自动写入")
+    print("⚠️  暂无可用备份目标（iCloud / Google Drive）；登录后自动生效")
+}
+if let gd = CloudDocsBackupService.googleDriveMyDriveURL() {
+    print("📂 Google Drive: \(gd.appendingPathComponent("Keepsake/backup").path)")
+} else {
+    print("ℹ️  Google Drive 未挂载 — 安装并登录 Desktop 后启用 gdrive 目标")
 }
 
 RunLoop.main.run()

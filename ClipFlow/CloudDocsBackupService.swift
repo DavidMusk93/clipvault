@@ -35,7 +35,7 @@ final class CloudDocsBackupService {
         return s
     }
 
-    /// Minute-level cadence + tight version budget.
+    /// Minute-level cadence + tight version budget + multi-destination fan-out.
     struct Config: Codable, Equatable {
         var enabled: Bool = true
         /// Named history dirs under snapshots/ (not counting latest/) — keep small: each is full db.
@@ -48,6 +48,8 @@ final class CloudDocsBackupService {
         var maxIntervalSeconds: Double = 300
         /// Min gap between **named snapshots** (sparse history) — default 30min
         var snapshotEverySeconds: Double = 1800
+        /// Fan-out targets (iCloud / Google Drive / custom folder).
+        var destinations: [BackupDestinationConfig] = BackupDestinationConfig.defaultList
         static let `default` = Config()
     }
 
@@ -90,12 +92,16 @@ final class CloudDocsBackupService {
         var latest: SnapshotInfo?
         var snapshots: [SnapshotInfo]
         var config: Config
-        var scheme: String = "CloudDocs"
+        var scheme: String = "multi"
         var requiresAppEntitlement: Bool = false
         /// Human policy summary for UI
         var policy: String = ""
         var lastSnapshotAt: String? = nil
         var snapshotCount: Int = 0
+        /// Per-destination health (iCloud / Google Drive / …)
+        var destinations: [BackupDestinationStatus] = []
+        var googleDriveAvailable: Bool = false
+        var googleDrivePath: String? = nil
     }
 
     private let database: DatabaseManager
@@ -112,11 +118,16 @@ final class CloudDocsBackupService {
     private var maxIntervalTimer: DispatchSourceTimer?
     private var lastContentFingerprint: String?
     private var lastSnapshotUnix: Double?
+    /// Per-destination last outcome (in-memory; also mirrored into STATUS.json).
+    private var destLastSuccessUnix: [String: Double] = [:]
+    private var destLastError: [String: String] = [:]
+    private var destLastPhase: [String: String] = [:]
 
     private init(database: DatabaseManager) {
         self.database = database
         self.config = Self.loadConfig()
         self.migrateConfigIfNeeded()
+        self.config.destinations = BackupDestinationResolver.normalizeDestinations(self.config.destinations)
         self.lastSnapshotUnix = self.newestSnapshotUnix()
         NotificationCenter.default.addObserver(
             forName: Self.itemAddedNotification,
@@ -178,11 +189,14 @@ final class CloudDocsBackupService {
             c.keepSnapshots = 3
             changed = true
         }
+        let beforeDest = c.destinations
+        c.destinations = BackupDestinationResolver.normalizeDestinations(c.destinations)
+        if c.destinations != beforeDest { changed = true }
         c = Self.clamp(c)
         if changed {
             config = c
             saveConfig()
-            print("[Backup] migrated config → keep=\(c.keepSnapshots) min=\(Int(c.minIntervalSeconds))s snapEvery=\(Int(c.snapshotEverySeconds))s")
+            print("[Backup] migrated config → keep=\(c.keepSnapshots) min=\(Int(c.minIntervalSeconds))s snapEvery=\(Int(c.snapshotEverySeconds))s dests=\(c.destinations.map{$0.id})")
         }
     }
 
@@ -198,25 +212,40 @@ final class CloudDocsBackupService {
 
     // MARK: Paths
 
-    static func cloudDocsURL() -> URL? {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let url = home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-            return url.standardizedFileURL
-        }
-        return nil
-    }
+    static func cloudDocsURL() -> URL? { BackupDestinationResolver.cloudDocsURL() }
+    static func googleDriveMyDriveURL() -> URL? { BackupDestinationResolver.googleDriveMyDriveURL() }
 
+    /// Primary root for status display (first available enabled destination).
     var backupRootURL: URL? {
-        Self.cloudDocsURL()?.appendingPathComponent("ClipFlow/backup", isDirectory: true)
+        for d in config.destinations where d.enabled {
+            if let r = BackupDestinationResolver.backupRoot(for: d) { return r }
+        }
+        return BackupDestinationResolver.backupRoot(for: .icloudDefault)
+            ?? BackupDestinationResolver.backupRoot(for: .gdriveDefault)
     }
 
-    private var latestDir: URL? { backupRootURL?.appendingPathComponent("latest", isDirectory: true) }
-    private var snapshotsDir: URL? { backupRootURL?.appendingPathComponent("snapshots", isDirectory: true) }
-    /// Shared content-addressed blob mirror (not per-snapshot) — skill §6.
-    private var backupBlobsDir: URL? { backupRootURL?.appendingPathComponent("blobs", isDirectory: true) }
-    private var statusFile: URL? { backupRootURL?.appendingPathComponent("STATUS.json") }
+    private var localWorkDir: URL {
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? fm.temporaryDirectory
+        let dir = docs.appendingPathComponent("ClipFlow/.backup_work", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func latestDir(in root: URL) -> URL { root.appendingPathComponent("latest", isDirectory: true) }
+    private func snapshotsDir(in root: URL) -> URL { root.appendingPathComponent("snapshots", isDirectory: true) }
+    private func blobsDir(in root: URL) -> URL { root.appendingPathComponent("blobs", isDirectory: true) }
+    private func statusFile(in root: URL) -> URL { root.appendingPathComponent("STATUS.json") }
+
+    /// Legacy single-root helpers (primary available dest).
+    private var latestDir: URL? { backupRootURL.map { latestDir(in: $0) } }
+    private var snapshotsDir: URL? { backupRootURL.map { snapshotsDir(in: $0) } }
+    private var backupBlobsDir: URL? { backupRootURL.map { blobsDir(in: $0) } }
+    private var statusFile: URL? { backupRootURL.map { statusFile(in: $0) } }
+
+    private var enabledDestinations: [BackupDestinationConfig] {
+        config.destinations.filter(\.enabled)
+    }
 
     private static var localConfigURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
@@ -269,6 +298,15 @@ final class CloudDocsBackupService {
 
             if let v = body["snapshotEverySeconds"] as? Double { self.config.snapshotEverySeconds = v }
             if let v = body["snapshotEverySeconds"] as? NSNumber { self.config.snapshotEverySeconds = v.doubleValue }
+            // Toggle destinations: { "destinationId": "gdrive", "destinationEnabled": true }
+            if let destId = body["destinationId"] as? String {
+                let en: Bool? = (body["destinationEnabled"] as? Bool)
+                    ?? (body["destinationEnabled"] as? NSNumber).map { $0.boolValue }
+                if let en = en, let idx = self.config.destinations.firstIndex(where: { $0.id == destId }) {
+                    self.config.destinations[idx].enabled = en
+                }
+            }
+            self.config.destinations = BackupDestinationResolver.normalizeDestinations(self.config.destinations)
             self.config = Self.clamp(self.config)
             self.saveConfig()
             self.pruneSnapshots(keep: self.config.keepSnapshots)
@@ -412,41 +450,27 @@ final class CloudDocsBackupService {
             return
         }
 
-        guard let root = backupRootURL, let latest = latestDir, let snaps = snapshotsDir else {
-            lastError = "iCloud Drive (CloudDocs) 不可用。请登录 iCloud 并启用「iCloud 云盘」。"
-            lastPhase = "error:no_clouddocs"
+        // Resolve destinations up front
+        let dests = enabledDestinations.compactMap { d -> (BackupDestinationConfig, URL)? in
+            guard let root = BackupDestinationResolver.backupRoot(for: d) else { return nil }
+            return (d, root)
+        }
+        if dests.isEmpty {
+            lastError = "没有可用的备份目标。请启用 iCloud 云盘或登录 Google Drive for Desktop。"
+            lastPhase = "error:no_destination"
             publishStatus()
             completion?(false, lastError!)
             return
         }
-        _ = root
 
         inProgress = true
         lastPhase = "prepare"
         lastError = nil
         publishStatus()
 
-        do {
-            try fm.createDirectory(at: latest, withIntermediateDirectories: true)
-            try fm.createDirectory(at: snaps, withIntermediateDirectories: true)
-            if let bb = backupBlobsDir {
-                try fm.createDirectory(at: bb, withIntermediateDirectories: true)
-            }
-        } catch {
-            inProgress = false
-            lastError = "无法创建备份目录: \(error.localizedDescription)"
-            lastPhase = "error:mkdir"
-            publishStatus()
-            completion?(false, lastError!)
-            return
-        }
-
-        // Scrub leftover tmp shards from interrupted backups (can pile up on iCloud).
-        scrubLatestTmpFiles(in: latest)
-
-        let tmpURL = latest.appendingPathComponent(".tmp_\(UUID().uuidString).db")
-        let latestDB = latest.appendingPathComponent("clipflow.db")
-        let latestManifest = latest.appendingPathComponent("MANIFEST.json")
+        // Produce artifact once in local work dir (sqlite skill: one backup API call).
+        let work = localWorkDir
+        let tmpURL = work.appendingPathComponent("artifact_\(UUID().uuidString).db")
 
         lastPhase = "sqlite3_backup"
         publishStatus()
@@ -464,118 +488,162 @@ final class CloudDocsBackupService {
                     completion?(false, err.localizedDescription)
 
                 case .success:
-                    // Prefer compact single-file artifact for cloud (skill: VACUUM INTO style).
-                    let compactURL = latest.appendingPathComponent(".tmp_compact_\(UUID().uuidString).db")
-                    let finalTmp: URL
+                    let compactURL = work.appendingPathComponent("compact_\(UUID().uuidString).db")
+                    let artifact: URL
                     if self.compactBackupFile(from: tmpURL, to: compactURL) {
                         try? self.fm.removeItem(at: tmpURL)
-                        finalTmp = compactURL
+                        artifact = compactURL
                     } else {
                         try? self.fm.removeItem(at: compactURL)
-                        finalTmp = tmpURL
+                        artifact = tmpURL
                     }
 
-                    let sha = (try? Self.sha256File(finalTmp)) ?? ""
-                    let size = (try? self.fm.attributesOfItem(atPath: finalTmp.path)[.size] as? NSNumber)?.intValue ?? 0
-
-                    // Sync content-addressed blobs (only missing hashes) — not full re-upload.
-                    self.lastPhase = "sync_blobs"
-                    let (blobCount, blobBytes, blobNew) = self.syncBlobsToBackupCAS()
-
-                    if snapshotOverrideId == nil,
-                       let prev = self.lastContentFingerprint,
-                       prev == sha,
-                       self.fm.fileExists(atPath: latestDB.path),
-                       blobNew == 0 {
-                        try? self.fm.removeItem(at: finalTmp)
-                        self.dirty = false
-                        self.inProgress = false
-                        self.lastPhase = "skip:unchanged"
-                        self.publishStatus()
-                        completion?(true, "内容未变，跳过")
-                        return
-                    }
-
-                    self.lastPhase = "promote_latest"
-                    do {
-                        if self.fm.fileExists(atPath: latestDB.path) {
-                            try self.fm.removeItem(at: latestDB)
-                        }
-                        try self.fm.moveItem(at: finalTmp, to: latestDB)
-                    } catch {
-                        try? self.fm.removeItem(at: finalTmp)
-                        self.inProgress = false
-                        self.lastError = error.localizedDescription
-                        self.lastPhase = "error:promote"
-                        self.publishStatus()
-                        completion?(false, error.localizedDescription)
-                        return
-                    }
-
+                    let sha = (try? Self.sha256File(artifact)) ?? ""
+                    let size = (try? self.fm.attributesOfItem(atPath: artifact.path)[.size] as? NSNumber)?.intValue ?? 0
                     let host = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
                     let created = Date()
                     let iso = ISO8601DateFormatter().string(from: created)
 
                     self.database.itemCount { count in
                         self.queue.async {
-                            let manifest = Manifest(
-                                createdAt: iso,
-                                createdAtUnix: created.timeIntervalSince1970,
-                                sourcePath: self.database.dbFileURL.path,
-                                byteSize: size,
-                                sha256: sha,
-                                itemCount: count,
-                                host: host,
-                                note: snapshotOverrideId.map { "id:\($0)" },
-                                blobCount: blobCount,
-                                blobBytes: blobBytes
-                            )
-                            try? JSONEncoder.pretty.encode(manifest).write(to: latestManifest, options: .atomic)
+                            var anyOk = false
+                            var messages: [String] = []
+                            var totalBlobNew = 0
+                            var lastBlobCount = 0
+                            var lastBlobBytes = 0
+                            var snapIdGlobal: String? = nil
 
-                            // Sparse named snapshots: **db only** (blobs shared in CAS).
-                            var snapId: String? = nil
                             let shouldSnap =
                                 snapshotOverrideId != nil
                                 || wantSnapshot
                                 || self.shouldCreateNamedSnapshot(now: created.timeIntervalSince1970)
-                            if shouldSnap {
-                                snapId = snapshotOverrideId ?? Self.timestampId()
-                                let snapDir = snaps.appendingPathComponent(snapId!, isDirectory: true)
-                                self.lastPhase = "snapshot:\(snapId!)"
+                            let snapId = shouldSnap ? (snapshotOverrideId ?? Self.timestampId()) : nil
+
+                            // Unchanged skip: only if ALL available dests already have this sha and no new blobs.
+                            var allSkip = true
+
+                            for (dest, root) in dests {
+                                self.lastPhase = "push:\(dest.id)"
+                                self.destLastPhase[dest.id] = "push"
                                 do {
-                                    try self.fm.createDirectory(at: snapDir, withIntermediateDirectories: true)
-                                    let snapDB = snapDir.appendingPathComponent("clipflow.db")
-                                    if self.fm.fileExists(atPath: snapDB.path) {
-                                        try self.fm.removeItem(at: snapDB)
+                                    let latest = self.latestDir(in: root)
+                                    let snaps = self.snapshotsDir(in: root)
+                                    let blobs = self.blobsDir(in: root)
+                                    try self.fm.createDirectory(at: latest, withIntermediateDirectories: true)
+                                    try self.fm.createDirectory(at: snaps, withIntermediateDirectories: true)
+                                    try self.fm.createDirectory(at: blobs, withIntermediateDirectories: true)
+                                    self.scrubLatestTmpFiles(in: latest)
+
+                                    let (blobCount, blobBytes, blobNew) = self.syncBlobsToCAS(destRoot: blobs)
+                                    lastBlobCount = blobCount
+                                    lastBlobBytes = blobBytes
+                                    totalBlobNew += blobNew
+
+                                    let latestDB = latest.appendingPathComponent("clipflow.db")
+                                    let latestManifest = latest.appendingPathComponent("MANIFEST.json")
+                                    let prevMan = self.readManifest(latestManifest)
+
+                                    if snapshotOverrideId == nil,
+                                       prevMan?.sha256 == sha,
+                                       self.fm.fileExists(atPath: latestDB.path),
+                                       blobNew == 0 {
+                                        self.destLastPhase[dest.id] = "skip:unchanged"
+                                        self.destLastError[dest.id] = nil
+                                        messages.append("\(BackupDestinationResolver.displayLabel(dest)): 未变")
+                                        anyOk = true
+                                        continue
                                     }
-                                    try self.cloneOrCopy(from: latestDB, to: snapDB)
-                                    try JSONEncoder.pretty.encode(manifest).write(
-                                        to: snapDir.appendingPathComponent("MANIFEST.json"),
-                                        options: .atomic
+                                    allSkip = false
+
+                                    // Promote db copy into dest latest
+                                    let destTmp = latest.appendingPathComponent(".tmp_promote_\(UUID().uuidString).db")
+                                    try self.fm.copyItem(at: artifact, to: destTmp)
+                                    if self.fm.fileExists(atPath: latestDB.path) {
+                                        try self.fm.removeItem(at: latestDB)
+                                    }
+                                    try self.fm.moveItem(at: destTmp, to: latestDB)
+
+                                    let manifest = Manifest(
+                                        createdAt: iso,
+                                        createdAtUnix: created.timeIntervalSince1970,
+                                        sourcePath: self.database.dbFileURL.path,
+                                        byteSize: size,
+                                        sha256: sha,
+                                        itemCount: count,
+                                        host: host,
+                                        note: "dest:\(dest.id)" + (snapId.map { " snap:\($0)" } ?? ""),
+                                        blobCount: blobCount,
+                                        blobBytes: blobBytes
                                     )
-                                    self.lastSnapshotUnix = created.timeIntervalSince1970
+                                    try JSONEncoder.pretty.encode(manifest).write(to: latestManifest, options: .atomic)
+
+                                    if let snapId = snapId {
+                                        let snapDir = snaps.appendingPathComponent(snapId, isDirectory: true)
+                                        try self.fm.createDirectory(at: snapDir, withIntermediateDirectories: true)
+                                        let snapDB = snapDir.appendingPathComponent("clipflow.db")
+                                        if self.fm.fileExists(atPath: snapDB.path) {
+                                            try self.fm.removeItem(at: snapDB)
+                                        }
+                                        try self.cloneOrCopy(from: latestDB, to: snapDB)
+                                        try JSONEncoder.pretty.encode(manifest).write(
+                                            to: snapDir.appendingPathComponent("MANIFEST.json"),
+                                            options: .atomic
+                                        )
+                                        snapIdGlobal = snapId
+                                    }
+
+                                    self.pruneSnapshots(in: snaps, keep: self.config.keepSnapshots)
+                                    self.destLastSuccessUnix[dest.id] = created.timeIntervalSince1970
+                                    self.destLastError[dest.id] = nil
+                                    self.destLastPhase[dest.id] = "ok"
+                                    anyOk = true
+                                    messages.append("\(BackupDestinationResolver.displayLabel(dest)): ok")
+                                    print("[Backup] dest=\(dest.id) ok db=\(Self.byteString(size)) blobs+\(blobNew)")
                                 } catch {
-                                    self.lastError = "latest 成功，快照失败: \(error.localizedDescription)"
-                                    snapId = nil
+                                    allSkip = false
+                                    self.destLastError[dest.id] = error.localizedDescription
+                                    self.destLastPhase[dest.id] = "error"
+                                    messages.append("\(BackupDestinationResolver.displayLabel(dest)): 失败")
+                                    print("[Backup] dest=\(dest.id) fail \(error)")
                                 }
                             }
 
-                            self.pruneSnapshots(keep: self.config.keepSnapshots)
+                            try? self.fm.removeItem(at: artifact)
                             self.scrubLegacyArtifacts()
-                            self.lastContentFingerprint = sha
-                            self.lastSuccessUnix = created.timeIntervalSince1970
-                            self.dirty = false
-                            self.inProgress = false
-                            self.lastPhase = "ok"
-                            if self.lastError?.hasPrefix("latest 成功") != true {
+
+                            if allSkip && anyOk {
+                                self.dirty = false
+                                self.inProgress = false
+                                self.lastPhase = "skip:unchanged"
                                 self.lastError = nil
+                                self.publishStatus()
+                                completion?(true, "内容未变，跳过 · " + messages.joined(separator: " · "))
+                                return
                             }
+
+                            if let snapIdGlobal = snapIdGlobal {
+                                self.lastSnapshotUnix = created.timeIntervalSince1970
+                            }
+                            self.lastContentFingerprint = sha
+                            if anyOk {
+                                self.lastSuccessUnix = created.timeIntervalSince1970
+                                self.dirty = false
+                                self.lastPhase = "ok"
+                                let fails = messages.filter { $0.contains("失败") }
+                                self.lastError = fails.isEmpty ? nil : fails.joined(separator: "; ")
+                            } else {
+                                self.lastPhase = "error:all_dest"
+                                self.lastError = messages.joined(separator: "; ")
+                            }
+                            self.inProgress = false
                             self.writeStatusFile()
                             self.publishStatus()
-                            let snapNote = snapId.map { "快照 \($0)" } ?? "仅 latest"
-                            let msg = "已备份 · \(snapNote) · db \(Self.byteString(size)) · blobs \(blobCount) (+\(blobNew))"
+                            let snapNote = snapIdGlobal.map { "快照 \($0)" } ?? "仅 latest"
+                            let msg = (anyOk ? "已备份" : "备份失败")
+                                + " · \(snapNote) · db \(Self.byteString(size)) · blobs \(lastBlobCount) (+\(totalBlobNew)) · "
+                                + messages.joined(separator: " · ")
                             print("[Backup] \(msg)")
-                            completion?(true, msg)
+                            completion?(anyOk, msg)
                         }
                     }
                 }
@@ -604,10 +672,9 @@ final class CloudDocsBackupService {
         return fm.fileExists(atPath: dest.path)
     }
 
-    /// Copy local CAS blobs that are missing from backup/blobs.
+    /// Copy local CAS blobs that are missing from a destination blobs dir.
     /// - returns: (totalLocal, totalBytes, newlyCopied)
-    private func syncBlobsToBackupCAS() -> (Int, Int, Int) {
-        guard let destRoot = backupBlobsDir else { return (0, 0, 0) }
+    private func syncBlobsToCAS(destRoot: URL) -> (Int, Int, Int) {
         try? fm.createDirectory(at: destRoot, withIntermediateDirectories: true)
         let local = database.blobsDirectoryURL
         guard let files = try? fm.contentsOfDirectory(at: local, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) else {
@@ -668,13 +735,18 @@ final class CloudDocsBackupService {
     }
 
     private func restoreBlobsFromBackupCAS() {
-        guard let cas = backupBlobsDir, fm.fileExists(atPath: cas.path) else { return }
+        // Merge CAS from all available destinations (union of hashes).
         let local = database.blobsDirectoryURL
         try? fm.createDirectory(at: local, withIntermediateDirectories: true)
-        let files = (try? fm.contentsOfDirectory(at: cas, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-        for src in files where src.pathExtension == "bin" {
-            let hash = src.deletingPathExtension().lastPathComponent
-            database.importBlobIfNeeded(hash: hash, from: src)
+        for d in config.destinations {
+            guard let root = BackupDestinationResolver.backupRoot(for: d) else { continue }
+            let cas = blobsDir(in: root)
+            guard fm.fileExists(atPath: cas.path) else { continue }
+            let files = (try? fm.contentsOfDirectory(at: cas, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+            for src in files where src.pathExtension == "bin" {
+                let hash = src.deletingPathExtension().lastPathComponent
+                database.importBlobIfNeeded(hash: hash, from: src)
+            }
         }
     }
 
@@ -711,8 +783,14 @@ final class CloudDocsBackupService {
     }
 
     private func pruneSnapshots(keep: Int) {
+        for d in enabledDestinations {
+            if let root = BackupDestinationResolver.backupRoot(for: d) {
+                pruneSnapshots(in: snapshotsDir(in: root), keep: keep)
+            }
+        }
+    }
 
-        guard let snaps = snapshotsDir else { return }
+    private func pruneSnapshots(in snaps: URL, keep: Int) {
         let dirs = ((try? fm.contentsOfDirectory(
             at: snaps,
             includingPropertiesForKeys: nil,
@@ -754,6 +832,7 @@ final class CloudDocsBackupService {
 
     private func buildStatus() -> Status {
         let cloud = Self.cloudDocsURL()
+        let gdrive = Self.googleDriveMyDriveURL()
         let root = backupRootURL
         var latestInfo: SnapshotInfo?
         if let latestDB = latestDir?.appendingPathComponent("clipflow.db"),
@@ -792,7 +871,26 @@ final class CloudDocsBackupService {
         let lastSnapISO = (lastSnapshotUnix ?? newestSnapshotUnix()).map {
             ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: $0))
         }
-        let policy = "db 精简 + blobs CAS；latest ≥\(Int(config.minIntervalSeconds))s；快照 ≥\(Int(config.snapshotEverySeconds))s ×\(config.keepSnapshots)"
+        let destStatuses: [BackupDestinationStatus] = config.destinations.map { d in
+            let rootURL = BackupDestinationResolver.backupRoot(for: d)
+            let avail = rootURL != nil
+            let lastU = destLastSuccessUnix[d.id]
+            return BackupDestinationStatus(
+                id: d.id,
+                type: d.type,
+                label: BackupDestinationResolver.displayLabel(d),
+                enabled: d.enabled,
+                available: avail,
+                rootPath: rootURL?.path,
+                lastSuccessAt: lastU.map { ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: $0)) },
+                lastSuccessUnix: lastU,
+                lastError: destLastError[d.id],
+                lastPhase: destLastPhase[d.id],
+                hint: avail ? nil : BackupDestinationResolver.availabilityHint(for: d)
+            )
+        }
+        let onLabels = destStatuses.filter { $0.enabled && $0.available }.map(\.label)
+        let policy = "多源 fan-out [\(onLabels.joined(separator: ", "))] · db+CAS · latest ≥\(Int(config.minIntervalSeconds))s · 快照 ≥\(Int(config.snapshotEverySeconds))s ×\(config.keepSnapshots)"
         return Status(
             enabled: config.enabled,
             cloudDocsAvailable: cloud != nil,
@@ -809,7 +907,10 @@ final class CloudDocsBackupService {
             config: config,
             policy: policy,
             lastSnapshotAt: lastSnapISO,
-            snapshotCount: snaps.count
+            snapshotCount: snaps.count,
+            destinations: destStatuses,
+            googleDriveAvailable: gdrive != nil,
+            googleDrivePath: gdrive?.path
         )
     }
 
@@ -819,9 +920,19 @@ final class CloudDocsBackupService {
     }
 
     private func writeStatusFile() {
-        guard let statusFile = statusFile else { return }
-        try? fm.createDirectory(at: statusFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? JSONEncoder.pretty.encode(buildStatus()).write(to: statusFile, options: .atomic)
+        let data = try? JSONEncoder.pretty.encode(buildStatus())
+        // Write STATUS.json to every available destination root + local work dir.
+        var roots: [URL] = [localWorkDir]
+        for d in config.destinations {
+            if let r = BackupDestinationResolver.backupRoot(for: d) { roots.append(r) }
+        }
+        for root in roots {
+            let url = statusFile(in: root)
+            try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+            if let data = data {
+                try? data.write(to: url, options: .atomic)
+            }
+        }
     }
 
     private func readManifest(_ url: URL) -> Manifest? {
