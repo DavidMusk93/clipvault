@@ -68,16 +68,45 @@ final class DatabaseManager: ObservableObject {
     private var ftsTokenizer: String = "unicode61"
 
     init() {
-        let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first ??
-            fm.temporaryDirectory.appendingPathComponent("com.clipflow.app")
-        appDir = docsDir.appendingPathComponent("ClipFlow")
+        appDir = Self.resolveDataRoot()
         try? fm.createDirectory(at: appDir, withIntermediateDirectories: true)
         dbPath = appDir.appendingPathComponent("clipflow.db")
         blobsDir = appDir.appendingPathComponent("blobs", isDirectory: true)
         try? fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: appDir.appendingPathComponent("config", isDirectory: true), withIntermediateDirectories: true)
+        try? fm.createDirectory(at: appDir.appendingPathComponent("logs", isDirectory: true), withIntermediateDirectories: true)
+        print("[Database] data root: \(appDir.path)")
 
         initializeDatabase()
         startMaintenanceTimer()
+    }
+
+    /// Local data root (db + CAS blobs + config).
+    /// - `KEEPSAKE_HOME` env wins (recommended for LaunchAgent).
+    /// - Under launchd (`XPC_SERVICE_NAME`): always Application Support — macOS TCC
+    ///   blocks Documents for agents and can hang forever on `sqlite3_open`.
+    /// - Interactive shell: prefer existing `~/Documents/ClipFlow` for backward compat,
+    ///   else Application Support (`~/Library/Application Support/Keepsake`).
+    static func resolveDataRoot() -> URL {
+        let fm = FileManager.default
+        if let raw = ProcessInfo.processInfo.environment["KEEPSAKE_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty {
+            return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        let appSupport = (fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support"))
+            .appendingPathComponent("Keepsake", isDirectory: true)
+        let underLaunchd = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] != nil
+        if underLaunchd {
+            return appSupport
+        }
+        let docs = (fm.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents"))
+            .appendingPathComponent("ClipFlow", isDirectory: true)
+        if fm.fileExists(atPath: docs.appendingPathComponent("clipflow.db").path) {
+            return docs
+        }
+        return appSupport
     }
 
     var dbFileURL: URL { dbPath }

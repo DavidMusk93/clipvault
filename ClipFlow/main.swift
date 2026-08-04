@@ -1,6 +1,11 @@
 import Foundation
 import AppKit
 
+// LaunchAgent redirects stdout/stderr to files (full block buffering by default).
+// Force line buffering so startup / backup logs appear promptly.
+setlinebuf(stdout)
+setlinebuf(stderr)
+
 print("🚀 启动 ClipFlow 后台守护进程与 Web 服务 (Port: 8080)...")
 
 let db = DatabaseManager()

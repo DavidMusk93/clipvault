@@ -133,7 +133,10 @@ final class CloudDocsBackupService {
         self.config = Self.loadConfig()
         self.migrateConfigIfNeeded()
         self.config.destinations = BackupDestinationResolver.normalizeDestinations(self.config.destinations)
-        self.lastSnapshotUnix = self.newestSnapshotUnix()
+        // Never enumerate CloudDocs on the main/init path: File Provider can block
+        // `contentsOfDirectory` for tens of seconds under launchd, which stalls
+        // WebServer bind and looks like a dead daemon.
+        self.lastSnapshotUnix = nil
         NotificationCenter.default.addObserver(
             forName: Self.itemAddedNotification,
             object: nil,
@@ -142,20 +145,23 @@ final class CloudDocsBackupService {
             self?.markDirty(reason: "item_added")
         }
         startMaxIntervalWatchdog()
-        // Prune excess versions from older chatty defaults
+        // Resolve last snapshot + prune off the critical path (iCloud may stall).
         queue.async { [weak self] in
-            self?.pruneSnapshots(keep: self?.config.keepSnapshots ?? 5)
-            self?.publishStatus()
+            guard let self = self else { return }
+            self.lastSnapshotUnix = self.newestSnapshotUnix()
+            self.pruneSnapshots(keep: self.config.keepSnapshots)
+            self.publishStatus()
+            self.scrubLegacyArtifacts()
         }
         if config.enabled {
             queue.asyncAfter(deadline: .now() + 5) { [weak self] in
                 self?.markDirty(reason: "startup")
             }
         }
-        print("[Backup] CloudDocs ready · enabled=\(config.enabled) · keep=\(config.keepSnapshots) · latest≥\(Int(config.minIntervalSeconds))s · snap≥\(Int(config.snapshotEverySeconds))s · root=\(backupRootURL?.path ?? "nil")")
-        queue.async { [weak self] in
-            self?.scrubLegacyArtifacts()
-        }
+        // Path string only — do not touch CloudDocs listing here.
+        let rootHint = BackupDestinationResolver.cloudDocsURL()?.appendingPathComponent("ClipFlow/backup").path
+            ?? "(CloudDocs pending)"
+        print("[Backup] CloudDocs ready · enabled=\(config.enabled) · keep=\(config.keepSnapshots) · latest≥\(Int(config.minIntervalSeconds))s · snap≥\(Int(config.snapshotEverySeconds))s · root=\(rootHint)")
     }
 
     /// Tighten chatty early defaults (keep=20, throttle=3s) to minute-level policy.
@@ -253,9 +259,7 @@ final class CloudDocsBackupService {
     }
 
     private static var localConfigURL: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let dir = docs.appendingPathComponent("ClipFlow/config", isDirectory: true)
+        let dir = DatabaseManager.resolveDataRoot().appendingPathComponent("config", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("backup.json")
     }
