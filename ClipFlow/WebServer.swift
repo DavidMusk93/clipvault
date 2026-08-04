@@ -21,6 +21,26 @@ class WebServer {
         self.backup = backup
     }
     
+    /// Resolve web/ by cwd first, then walk up from executable (LaunchAgent-safe).
+    private func projectWebDirectory() -> String? {
+        let fm = FileManager.default
+        let cwdWeb = fm.currentDirectoryPath + "/web"
+        if fm.fileExists(atPath: cwdWeb + "/index.html") { return cwdWeb }
+
+        let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        var dir = exe.deletingLastPathComponent()
+        for _ in 0..<6 {
+            let candidate = dir.appendingPathComponent("web")
+            if fm.fileExists(atPath: candidate.appendingPathComponent("index.html").path) {
+                return candidate.path
+            }
+            let parent = dir.deletingLastPathComponent()
+            if parent.path == dir.path { break }
+            dir = parent
+        }
+        return nil
+    }
+
     func start() {
         guard listener == nil else { return }
         
@@ -250,7 +270,11 @@ class WebServer {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
         }
-        let filePath = FileManager.default.currentDirectoryPath + "/web/assets/" + name
+        guard let webRoot = projectWebDirectory() else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        let filePath = webRoot + "/assets/" + name
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)), !data.isEmpty else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
@@ -277,9 +301,11 @@ class WebServer {
 
     private func sendHTMLResponse(connection: NWConnection) {
         var html = WebServer.indexHTML
-        let webPath = FileManager.default.currentDirectoryPath + "/web/index.html"
-        if let customHTML = try? String(contentsOfFile: webPath, encoding: .utf8) {
-            html = customHTML
+        if let webRoot = projectWebDirectory() {
+            let webPath = webRoot + "/index.html"
+            if let customHTML = try? String(contentsOfFile: webPath, encoding: .utf8) {
+                html = customHTML
+            }
         }
         let response = """
         HTTP/1.1 200 OK
@@ -584,6 +610,10 @@ class WebServer {
         if let html = item.htmlContent { dict["htmlContent"] = html }
         if let text = item.textContent { dict["textContent"] = text }
         if let ocr = item.ocrText { dict["ocrText"] = ocr }
+        if let urls = item.fileURLs, !urls.isEmpty {
+            dict["filePaths"] = urls.map { $0.path }
+            dict["fileNames"] = urls.map { $0.lastPathComponent }
+        }
         // Thumb URL for image types — client never loads full blob in feed
         if item.type == .image {
             dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb"

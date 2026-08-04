@@ -75,8 +75,34 @@ class ClipboardMonitor: ObservableObject {
         return nil
     }
 
+    private static let imageFileExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "tiff", "tif", "bmp"
+    ]
+
+    /// Feishu/Lark, Finder, and many apps put **image file URLs** on the pasteboard
+    /// (public.file-url / NSFilenamesPboardType) instead of public.png/tiff.
+    /// createClipboardItem prefers files over images, so without promotion those
+    /// become type=file with path-only hash → UI "No preview" and no CAS blob/OCR.
     private func createFileItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
         guard let fileURLs = getFileURLs(), !fileURLs.isEmpty else { return nil }
+
+        let allImageFiles = fileURLs.allSatisfy {
+            Self.imageFileExtensions.contains($0.pathExtension.lowercased())
+        }
+        if allImageFiles,
+           let first = fileURLs.first,
+           let rawData = try? Data(contentsOf: first),
+           !rawData.isEmpty {
+            let imageData = compressForStorage(rawData) ?? normalizeToPNG(rawData) ?? rawData
+            let ocrText = performOCR(on: imageData)
+            let hash = computeHash(for: imageData)
+            return ClipboardItem(
+                timestamp: timestamp, type: .image, contentHash: hash,
+                imageData: imageData, fileURLs: fileURLs,
+                ocrText: ocrText, sourceApp: sourceApp
+            )
+        }
+
         let hash = computeHash(for: fileURLs.map { $0.path }.joined())
         return ClipboardItem(
             timestamp: timestamp, type: .file, contentHash: hash,

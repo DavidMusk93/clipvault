@@ -936,6 +936,14 @@ final class DatabaseManager: ObservableObject {
 
         let timestamp = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1))
         let textContent = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+        // SELECT … text_content, file_urls, url, html_content, source_app, ocr_text
+        let fileURLs: [URL]? = {
+            guard let raw = sqlite3_column_text(stmt, 5).map({ String(cString: $0) }),
+                  !raw.isEmpty else { return nil }
+            let urls = raw.split(separator: "|").map { URL(fileURLWithPath: String($0)) }
+            return urls.isEmpty ? nil : urls
+        }()
+        let url: URL? = sqlite3_column_text(stmt, 6).map { String(cString: $0) }.flatMap { URL(string: $0) }
         let htmlContent = sqlite3_column_text(stmt, 7).map { String(cString: $0) }
         let sourceApp = sqlite3_column_text(stmt, 8).map { String(cString: $0) }
         let ocrText = sqlite3_column_text(stmt, 9).map { String(cString: $0) }
@@ -947,6 +955,8 @@ final class DatabaseManager: ObservableObject {
             contentHash: hash,
             textContent: textContent,
             imageData: nil,
+            fileURLs: fileURLs,
+            url: url,
             htmlContent: htmlContent,
             ocrText: ocrText,
             sourceApp: sourceApp
