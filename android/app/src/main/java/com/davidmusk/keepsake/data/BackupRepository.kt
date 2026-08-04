@@ -215,8 +215,7 @@ class BackupRepository(
 
     private fun readRows(c: android.database.Cursor): List<ClipboardRow> {
         val out = ArrayList<ClipboardRow>(c.count)
-        val iId = c.getColumnIndexOrThrow("id")
-        // rawQuery aliases columns without names in some cases — use indices
+        // Column order must match SELECT list in queryItems/getItem.
         while (c.moveToNext()) {
             out += ClipboardRow(
                 id = c.getString(0),
@@ -232,8 +231,6 @@ class BackupRepository(
                 fileUrls = c.getString(10),
             )
         }
-        // silence unused
-        @Suppress("UNUSED_VARIABLE") val _ = iId
         return out
     }
 
