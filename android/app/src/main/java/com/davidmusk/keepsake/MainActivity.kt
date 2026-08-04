@@ -74,8 +74,10 @@ import com.davidmusk.keepsake.data.BackupRepository
 import com.davidmusk.keepsake.data.ClipboardRow
 import com.davidmusk.keepsake.data.LocalCapture
 import com.davidmusk.keepsake.ui.theme.KeepsakeTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 class MainActivity : ComponentActivity() {
@@ -165,7 +167,6 @@ private fun KeepsakeRoot(
     fun launchDriveFolderPicker() {
         if (!DriveTreePicker.isDriveInstalled(ctx.applicationContext)) {
             Toast.makeText(ctx, "请先安装 Google 云端硬盘", Toast.LENGTH_LONG).show()
-            // Open Play Store listing
             try {
                 ctx.startActivity(
                     Intent(
@@ -183,7 +184,23 @@ private fun KeepsakeRoot(
             }
             return
         }
-        openTree.launch(DriveTreePicker.bestInitialUri(ctx.applicationContext))
+        // Resolve Drive → Keepsake/backup on IO thread, then open tree picker there.
+        scope.launch {
+            loading = true
+            statusMsg = "正在定位 Google 云端硬盘中的 Keepsake…"
+            val initial = withContext(Dispatchers.IO) {
+                DriveTreePicker.bestInitialUri(ctx.applicationContext)
+            }
+            loading = false
+            if (initial == null) {
+                Toast.makeText(
+                    ctx,
+                    "无法访问云端硬盘目录。请打开一次 Google Drive 后再试。",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+            openTree.launch(initial)
+        }
     }
 
     suspend fun refreshList(reset: Boolean) {
