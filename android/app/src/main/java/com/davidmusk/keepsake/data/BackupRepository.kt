@@ -62,11 +62,11 @@ class BackupRepository(
     }
 
     suspend fun syncFromBackup(): SyncResult = withContext(Dispatchers.IO) {
-        val root = treeRoot() ?: return@withContext SyncResult(0, null, null, null, "尚未选择备份目录")
+        val root = treeRoot() ?: return@withContext SyncResult(0, null, null, null, "尚未选择云端文件夹")
         val latest = root.findFile("latest")
-            ?: return@withContext SyncResult(0, null, null, null, "未找到 latest/ — 请选择 Keepsake/backup 根目录")
+            ?: return@withContext SyncResult(0, null, null, null, "文件夹不对：请选中 Keepsake/backup（内含 latest）")
         val dbDoc = latest.findFile("clipflow.db")
-            ?: return@withContext SyncResult(0, null, null, null, "未找到 latest/clipflow.db")
+            ?: return@withContext SyncResult(0, null, null, null, "未找到记忆库，请确认选中了 backup 文件夹")
 
         copyDocumentToFile(dbDoc.uri, cacheDb)
 
@@ -84,7 +84,7 @@ class BackupRepository(
             sha256 = manifest?.sha256,
             manifest = manifest,
             status = status,
-            message = "已同步 $count 条 · db ${formatBytes(cacheDb.length())}"
+            message = "已载入 $count 条"
         )
     }
 

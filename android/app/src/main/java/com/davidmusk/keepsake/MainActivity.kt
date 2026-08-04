@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
                         val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
                         val text = cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
                         if (text.isNullOrBlank()) {
-                            Toast.makeText(this, "剪贴板为空或不可读（需前台粘贴）", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, "剪贴板为空，请先复制内容再粘贴", Toast.LENGTH_SHORT).show()
                             null
                         } else text
                     },
@@ -189,7 +189,7 @@ private fun KeepsakeRoot(
                     Column {
                         Text("Keepsake", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "你的剪贴板记忆 · Android",
+                            "你的剪贴板记忆",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         )
@@ -202,16 +202,16 @@ private fun KeepsakeRoot(
                             app.captures.insertText(text, source = "paste")
                             captures = app.captures.list()
                             tab = Tab.Captures
-                            Toast.makeText(ctx, "已保存到本机捕获", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, "已记下", Toast.LENGTH_SHORT).show()
                         }
                     }) {
-                        Icon(Icons.Default.ContentPaste, contentDescription = "粘贴保存")
+                        Icon(Icons.Default.ContentPaste, contentDescription = "粘贴并记下")
                     }
                     IconButton(onClick = { openTree.launch(null) }) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = "选择备份目录")
+                        Icon(Icons.Default.FolderOpen, contentDescription = "选择云端文件夹")
                     }
                     IconButton(onClick = { scope.launch { syncAndLoad() } }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "同步")
+                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -235,7 +235,7 @@ private fun KeepsakeRoot(
                 FilterChip(
                     selected = tab == Tab.Backup,
                     onClick = { tab = Tab.Backup },
-                    label = { Text("备份") },
+                    label = { Text("历史") },
                 )
                 FilterChip(
                     selected = tab == Tab.Captures,
@@ -243,7 +243,7 @@ private fun KeepsakeRoot(
                         tab = Tab.Captures
                         scope.launch { captures = app.captures.list() }
                     },
-                    label = { Text("本机捕获") },
+                    label = { Text("随手记") },
                 )
             }
 
@@ -284,7 +284,7 @@ private fun KeepsakeRoot(
                 }
             } else {
                 Text(
-                    "前台粘贴 / 系统分享写入本机队列。上传回 Mac 备份为后续版本。",
+                    "顶栏粘贴，或从其他 App 分享到这里。先保存在本机。",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     modifier = Modifier.padding(vertical = 6.dp),
@@ -321,7 +321,7 @@ private fun KeepsakeRoot(
                     }
                     if (items.isEmpty() && hasRoot) {
                         item {
-                            Text("备份为空或尚未同步成功", modifier = Modifier.padding(24.dp))
+                            Text("这里还没有条目。点右上角刷新，或确认云端文件夹选对了。", modifier = Modifier.padding(24.dp))
                         }
                     }
                 }
@@ -339,7 +339,7 @@ private fun KeepsakeRoot(
                     if (captures.isEmpty()) {
                         item {
                             Text(
-                                "还没有本机捕获。点顶栏粘贴，或从其他 App 分享到 Keepsake。",
+                                "还没有随手记。点顶栏粘贴，或从其他 App 分享到 Keepsake。",
                                 modifier = Modifier.padding(24.dp),
                             )
                         }
@@ -358,16 +358,16 @@ private fun SetupCard(onPick: () -> Unit) {
         elevation = CardDefaults.cardElevation(2.dp),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("连接 Mac 备份", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("打开云端记忆", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "在文件选择器中打开 Google Drive → My Drive → Keepsake → backup（含 latest/ 与 blobs/ 的那一层）。建议把该文件夹设为离线可用。",
+                "在电脑端 Keepsake 会把剪贴板记忆同步到云盘。请选择其中的 Keepsake → backup 文件夹（常见于 Google 云端硬盘）。建议将该文件夹设为离线可用。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
             )
             Button(onClick = onPick) {
                 Icon(Icons.Default.FolderOpen, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("选择备份目录")
+                Text("选择文件夹")
             }
         }
     }

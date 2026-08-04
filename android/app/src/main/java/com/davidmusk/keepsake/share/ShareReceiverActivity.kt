@@ -22,13 +22,13 @@ class ShareReceiverActivity : ComponentActivity() {
             else -> intent.getStringExtra(Intent.EXTRA_TEXT)
         }
         if (text.isNullOrBlank()) {
-            Toast.makeText(this, "暂仅支持分享文本", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "目前只支持分享文字", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
         lifecycleScope.launch {
             application.keepsake.captures.insertText(text, source = "share")
-            Toast.makeText(this@ShareReceiverActivity, "已保存到 Keepsake", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@ShareReceiverActivity, "已记下", Toast.LENGTH_SHORT).show()
             finish()
         }
     }
