@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -71,6 +72,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -263,11 +265,17 @@ private fun KeepsakeRoot(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Image(
                             painter = painterResource(R.drawable.keepsake_logo),
-                            contentDescription = null,
+                            contentDescription = "Keepsake",
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape),
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .border(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                    CircleShape,
+                                ),
                             contentScale = ContentScale.Crop,
+                            filterQuality = FilterQuality.High,
                         )
                         Spacer(Modifier.width(10.dp))
                         Column {

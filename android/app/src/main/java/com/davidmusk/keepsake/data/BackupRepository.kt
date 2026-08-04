@@ -296,37 +296,42 @@ class BackupRepository(
     }
 
     /**
-     * Decode image for UI without loading full multi‑MB bitmap into heap twice.
-     * Prefers ContentResolver stream + inSampleSize.
+     * Decode image for UI without OOM.
+     * Pipeline: bounds → power-of-2 inSampleSize (fast) → filtered exact downscale
+     * so list thumbs are not soft/aliased when Compose scales them.
      */
     suspend fun loadImageBitmap(
         row: ClipboardRow,
         maxSidePx: Int = 1600,
     ): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+        val target = maxSidePx.coerceIn(64, 4096)
         val candidates = listOf("${row.contentHash}.bin")
         for (name in candidates) {
             val uri = findBlobUri(name)
             if (uri != null) {
-                decodeSampledFromUri(uri, maxSidePx)?.let { return@withContext it }
+                decodeSampledFromUri(uri, target)?.let { return@withContext it }
             }
         }
-        // inline BLOB fallback
         val bytes = loadPayload(row) ?: return@withContext null
-        decodeSampledFromBytes(bytes, maxSidePx)
+        decodeSampledFromBytes(bytes, target)
     }
 
     private fun decodeSampledFromUri(uri: Uri, maxSidePx: Int): android.graphics.Bitmap? {
         return try {
-            // bounds
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, bounds)
             }
             val sample = sampleSizeFor(bounds.outWidth, bounds.outHeight, maxSidePx)
-            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-            context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, opts)
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                inScaled = false
             }
+            val raw = context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, opts)
+            } ?: return null
+            scaleDownIfNeeded(raw, maxSidePx)
         } catch (e: Exception) {
             Log.e(TAG, "decode uri failed $uri", e)
             null
@@ -338,19 +343,49 @@ class BackupRepository(
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             val sample = sampleSizeFor(bounds.outWidth, bounds.outHeight, maxSidePx)
-            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+                inScaled = false
+            }
+            val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
+            scaleDownIfNeeded(raw, maxSidePx)
         } catch (e: Exception) {
             Log.e(TAG, "decode bytes failed", e)
             null
         }
     }
 
+    /** Power-of-2 sample stays ≥ maxSide so final filter pass does the precise shrink. */
     private fun sampleSizeFor(w: Int, h: Int, maxSide: Int): Int {
         if (w <= 0 || h <= 0) return 1
         var sample = 1
-        while (w / sample > maxSide || h / sample > maxSide) sample *= 2
+        // Keep decoded size roughly ≤ 2× target to avoid huge intermediate bitmaps
+        // while leaving headroom for filtered downscale (sharper than pure sample).
+        val limit = maxSide * 2
+        while (w / (sample * 2) >= limit || h / (sample * 2) >= limit) sample *= 2
         return sample.coerceAtLeast(1)
+    }
+
+    private fun scaleDownIfNeeded(
+        src: android.graphics.Bitmap,
+        maxSide: Int,
+    ): android.graphics.Bitmap {
+        val w = src.width
+        val h = src.height
+        val longSide = maxOf(w, h)
+        if (longSide <= maxSide || longSide <= 0) return src
+        val scale = maxSide.toFloat() / longSide.toFloat()
+        val nw = (w * scale).toInt().coerceAtLeast(1)
+        val nh = (h * scale).toInt().coerceAtLeast(1)
+        return try {
+            val scaled = android.graphics.Bitmap.createScaledBitmap(src, nw, nh, /* filter */ true)
+            if (scaled !== src && !src.isRecycled) src.recycle()
+            scaled
+        } catch (e: Exception) {
+            Log.w(TAG, "scaleDown failed, using sample bitmap", e)
+            src
+        }
     }
 
     private fun openDb(): SQLiteDatabase? {

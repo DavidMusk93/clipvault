@@ -12,7 +12,6 @@ import android.widget.TextView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,13 +50,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.text.HtmlCompat
@@ -87,15 +89,15 @@ fun TypeBadge(type: String, modifier: Modifier = Modifier) {
     val style = typeStyle(type)
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(8.dp),
         color = style.color.copy(alpha = 0.12f),
     ) {
         Row(
-            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Icon(style.icon, null, Modifier.size(12.dp), tint = style.color)
+            Icon(style.icon, null, Modifier.size(14.dp), tint = style.color)
             Text(
                 style.label,
                 style = MaterialTheme.typography.labelSmall,
@@ -106,14 +108,19 @@ fun TypeBadge(type: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Async load blob → ImageBitmap (sampled); cancels when leave composition. */
+/**
+ * Async load blob → ImageBitmap.
+ * [maxSideDp] is converted with density so xxhdpi/xxxhdpi stay sharp (not upscaled soft).
+ */
 @Composable
 fun rememberPayloadBitmap(
     row: ClipboardRow,
     repo: BackupRepository,
     enabled: Boolean = row.type == "image",
-    maxSidePx: Int = 1600,
+    maxSideDp: Dp = 360.dp,
 ): Pair<androidx.compose.ui.graphics.ImageBitmap?, Boolean> {
+    val density = LocalDensity.current
+    val maxSidePx = with(density) { maxSideDp.roundToPx() }.coerceIn(128, 4096)
     var bmp by remember(row.id) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var loading by remember(row.id) { mutableStateOf(enabled) }
     LaunchedEffect(row.id, enabled, maxSidePx) {
@@ -128,6 +135,12 @@ fun rememberPayloadBitmap(
     return bmp to loading
 }
 
+/** Keep masonry heights sane for extreme panoramic / ultra-tall shots. */
+private fun displayAspect(width: Int, height: Int): Float {
+    if (width <= 0 || height <= 0) return 1f
+    return (width.toFloat() / height.toFloat()).coerceIn(0.52f, 1.85f)
+}
+
 @Composable
 fun ListItemBody(
     row: ClipboardRow,
@@ -136,13 +149,19 @@ fun ListItemBody(
 ) {
     when (row.type.lowercase()) {
         "image" -> {
-            // Masonry-friendly: full-width thumb + optional OCR caption below.
-            val (bmp, loading) = rememberPayloadBitmap(row, repo, maxSidePx = 720)
+            // Natural aspect (no fixed 0.85 crop box) + density-aware decode.
+            val (bmp, loading) = rememberPayloadBitmap(row, repo, maxSideDp = 280.dp)
             Column(modifier = modifier.fillMaxWidth()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(0.85f)
+                        .then(
+                            if (bmp != null) {
+                                Modifier.aspectRatio(displayAspect(bmp.width, bmp.height))
+                            } else {
+                                Modifier.aspectRatio(1f)
+                            },
+                        )
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center,
@@ -157,11 +176,13 @@ fun ListItemBody(
                             contentDescription = "图片预览",
                             modifier = Modifier.fillMaxWidth(),
                             contentScale = ContentScale.Crop,
+                            filterQuality = FilterQuality.High,
                         )
                         else -> Icon(
                             imageVector = Icons.Default.Image,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(28.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                         )
                     }
                 }
@@ -268,7 +289,8 @@ fun DetailContent(
 
 @Composable
 private fun DetailImage(row: ClipboardRow, repo: BackupRepository) {
-    val (bmp, loading) = rememberPayloadBitmap(row, repo, enabled = true, maxSidePx = 2048)
+    // Full-width decode ≈ screen width * density (sharp on 3x/4x panels).
+    val (bmp, loading) = rememberPayloadBitmap(row, repo, enabled = true, maxSideDp = 720.dp)
     if (loading) {
         Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
@@ -276,21 +298,22 @@ private fun DetailImage(row: ClipboardRow, repo: BackupRepository) {
         return
     }
     if (bmp != null) {
+        val aspect = displayAspect(bmp.width, bmp.height)
         Box(
             Modifier
                 .fillMaxWidth()
+                .aspectRatio(aspect)
                 .clip(RoundedCornerShape(12.dp))
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                .background(Color(0xFF0E0E0E))
-                .horizontalScroll(rememberScrollState()),
+                .background(Color(0xFF121212)),
+            contentAlignment = Alignment.Center,
         ) {
             Image(
                 bitmap = bmp,
                 contentDescription = "图片",
-                modifier = Modifier
-                    .heightIn(min = 160.dp, max = 520.dp)
-                    .fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 contentScale = ContentScale.Fit,
+                filterQuality = FilterQuality.High,
             )
         }
     } else {
