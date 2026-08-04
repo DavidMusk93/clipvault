@@ -2,6 +2,7 @@ package com.davidmusk.keepsake.data
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
