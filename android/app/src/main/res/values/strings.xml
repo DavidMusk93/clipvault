@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Keepsake</string>
+    <string name="share_to_keepsake">保存到 Keepsake</string>
+    <string name="tagline">你的剪贴板记忆</string>
+</resources>

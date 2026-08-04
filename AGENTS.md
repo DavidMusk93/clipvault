@@ -114,3 +114,14 @@ Owner 要的是 **独立产品气质 + 终局工程**，不是 demo 合集。
 **Keepsake = 个人剪贴板记忆产品。**  
 做终局、像产品、本机优先、列表轻预览重、备份可恢复。  
 历史文件夹名 `ClipView` 不定义品牌。
+
+---
+
+## Android 客户端
+
+| 项 | 值 |
+| --- | --- |
+| 路径 | `android/` |
+| 定位 | 备份阅读器 + 前台粘贴/分享；**不做**后台剪贴板监听 |
+| 数据 | SAF 读 `Keepsake/backup`（与 Mac GDrive fan-out 一致） |
+| 发布 | `.github/workflows/android-apk.yml` → artifact / tag Release |

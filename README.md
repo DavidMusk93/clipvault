@@ -137,3 +137,11 @@ Web：右上角 **备份** 侧栏 → 开关 / 立即备份 / 从快照恢复。
 ---
 
 **Keepsake** — 剪贴板会忘；记忆不必。
+
+## Keepsake Android
+
+手机端备份阅读器（+ 主动粘贴/分享），工程在 [`android/`](./android/)。
+
+- 本地：`cd android && ./gradlew :app:assembleRelease`
+- CI：push `master` 上传 APK artifact；tag `v*` 发 GitHub Release
+- 说明见 [`android/README.md`](./android/README.md)

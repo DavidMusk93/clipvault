@@ -42,3 +42,16 @@ test_write
 ## Large Files
 Vendor/lib/libDuckDB.a
 
+
+## Android (Keepsake mobile)
+android/.gradle/
+android/**/build/
+android/local.properties
+android/*.iml
+android/.cxx/
+android/captures/
+android/.externalNativeBuild/
+*.apk
+*.ap_
+*.aab
+!android/keystore/*.jks
