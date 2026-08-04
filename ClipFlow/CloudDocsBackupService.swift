@@ -580,6 +580,10 @@ final class CloudDocsBackupService {
                                     )
                                     try JSONEncoder.pretty.encode(manifest).write(to: latestManifest, options: .atomic)
 
+                                    // Mobile-friendly: one zip of recent CAS blobs under latest/
+                                    // (Drive SAF is unreliable listing large blobs/ trees on Android).
+                                    self.writeCasPack(into: latest, localBlobs: self.database.blobsDirectoryURL)
+
                                     if let snapId = snapId {
                                         let snapDir = snaps.appendingPathComponent(snapId, isDirectory: true)
                                         try self.fm.createDirectory(at: snapDir, withIntermediateDirectories: true)
@@ -701,6 +705,65 @@ final class CloudDocsBackupService {
             }
         }
         return (total, bytes, copied)
+    }
+
+    /// Pack recent image CAS files into `latest/cas_pack.zip` for Android (single SAF download).
+    /// Caps: ≤40 files, ≤12 MB total, skip rtf/pdf suffixes and huge frames.
+    private func writeCasPack(into latest: URL, localBlobs: URL) {
+        let dest = latest.appendingPathComponent("cas_pack.zip")
+        let tmp = latest.appendingPathComponent(".tmp_cas_pack_\(UUID().uuidString).zip")
+        defer { try? fm.removeItem(at: tmp) }
+
+        guard let files = try? fm.contentsOfDirectory(
+            at: localBlobs,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        // Prefer plain `hash.bin` (images) over `hash.rtf.bin` / `hash.pdf.bin`.
+        let imageBins = files.filter { url in
+            let n = url.lastPathComponent
+            return n.hasSuffix(".bin") && !n.contains(".rtf.") && !n.contains(".pdf.")
+        }
+        let sorted = imageBins.sorted { a, b in
+            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return da > db
+        }
+
+        var chosen: [URL] = []
+        var totalBytes = 0
+        let maxFiles = 40
+        let maxBytes = 12 * 1024 * 1024
+        for u in sorted {
+            let sz = (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            if sz <= 0 || sz > 2_500_000 { continue } // skip empty / huge
+            if totalBytes + sz > maxBytes { break }
+            chosen.append(u)
+            totalBytes += sz
+            if chosen.count >= maxFiles { break }
+        }
+        guard !chosen.isEmpty else { return }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        // -j: junk paths (store basename only) · -q quiet · -0 store (CAS already compressed images)
+        proc.arguments = ["-j", "-q", "-0", tmp.path] + chosen.map(\.path)
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            guard proc.terminationStatus == 0, fm.fileExists(atPath: tmp.path) else {
+                print("[Backup] cas_pack zip failed status=\(proc.terminationStatus)")
+                return
+            }
+            if fm.fileExists(atPath: dest.path) { try? fm.removeItem(at: dest) }
+            try fm.moveItem(at: tmp, to: dest)
+            print("[Backup] cas_pack.zip files=\(chosen.count) bytes=\(totalBytes)")
+        } catch {
+            print("[Backup] cas_pack zip error \(error)")
+        }
     }
 
     private func scrubLatestTmpFiles(in latest: URL) {
