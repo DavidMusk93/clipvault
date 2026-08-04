@@ -529,9 +529,12 @@ final class CloudDocsBackupService {
                                     let latest = self.latestDir(in: root)
                                     let snaps = self.snapshotsDir(in: root)
                                     let blobs = self.blobsDir(in: root)
-                                    try self.fm.createDirectory(at: latest, withIntermediateDirectories: true)
-                                    try self.fm.createDirectory(at: snaps, withIntermediateDirectories: true)
-                                    try self.fm.createDirectory(at: blobs, withIntermediateDirectories: true)
+                                    // Create parents step-by-step (Google Drive File Provider is picky).
+                                    try self.ensureCloudDir(root.deletingLastPathComponent()) // Keepsake/
+                                    try self.ensureCloudDir(root) // backup/
+                                    try self.ensureCloudDir(latest)
+                                    try self.ensureCloudDir(snaps)
+                                    try self.ensureCloudDir(blobs)
                                     self.scrubLatestTmpFiles(in: latest)
 
                                     let (blobCount, blobBytes, blobNew) = self.syncBlobsToCAS(destRoot: blobs)
@@ -780,6 +783,22 @@ final class CloudDocsBackupService {
         if rc == 0 { return }
         // Fallback full copy (iCloud will still delta-sync when possible)
         try fm.copyItem(at: src, to: dst)
+    }
+
+    /// File Provider (Google Drive) often fails multi-level createDirectory in one call.
+    private func ensureCloudDir(_ url: URL) throws {
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: url.path, isDirectory: &isDir) {
+            if isDir.boolValue { return }
+            try fm.removeItem(at: url)
+        }
+        do {
+            try fm.createDirectory(at: url, withIntermediateDirectories: true)
+        } catch {
+            // Retry once after short yield
+            Thread.sleep(forTimeInterval: 0.15)
+            try fm.createDirectory(at: url, withIntermediateDirectories: true)
+        }
     }
 
     private func pruneSnapshots(keep: Int) {
