@@ -47,7 +47,7 @@ class BackupRepository(
     private val blobNameToDocId: MutableMap<String, String> =
         Collections.synchronizedMap(
             object : LinkedHashMap<String, String>(256, 0.75f, true) {
-                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean =
                     size > BLOB_INDEX_MAX
             },
         )

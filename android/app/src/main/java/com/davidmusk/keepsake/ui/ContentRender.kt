@@ -1,6 +1,5 @@
 package com.davidmusk.keepsake.ui
 
-import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.text.method.LinkMovementMethod
