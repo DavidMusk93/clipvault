@@ -441,8 +441,11 @@
     const cardCache = new Map();
     let lastColCount = 0;
     let rebalanceTimer = null;
+    let rebalanceBusy = false;
     let fullUrlForLightbox = null;
     let sentinelObserved = false;
+    /** Col heights for incremental pack (load-more). Null → need full rebuild. */
+    let colHeights = null;
 
     function esc(s) {
       return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -499,8 +502,9 @@
         // Stale response (a newer reset happened while we were in flight)
         if (gen !== fetchGen) return;
 
+        const prevLen = clips.length;
+        const prevIds = new Set(clips.map(c => c.id));
         clips = Pagination.mergePage(clips, items, { reset });
-        if (reset) cardCache.clear();
         nextCursor = cursor;
         if (!cursor || items.length === 0) exhausted = true;
 
@@ -511,7 +515,18 @@
           cardCache.delete(r.id);
         });
 
-        rebuildFromData();
+        if (reset) {
+          cardCache.clear();
+          colHeights = null;
+          rebuildFromData({ preserveScroll: false });
+        } else {
+          // Only brand-new ids — never re-paint page1 on load-more.
+          const added = clips.filter(c => !prevIds.has(c.id));
+          if (added.length) {
+            appendCardsIncremental(added);
+          }
+          // If nothing new but API returned rows, they were all dups — stay put.
+        }
         ensureSentinelObserved();
       } catch (e) {
         console.error(e);
@@ -545,7 +560,9 @@
           const removed = clips.splice(CLIENT_CAP);
           removed.forEach(r => { cardCache.get(r.id)?.remove(); cardCache.delete(r.id); });
         }
-        rebuildFromData();
+        // Head insert changes order — full rebuild with scroll anchor.
+        colHeights = null;
+        rebuildFromData({ preserveScroll: true });
       } catch (_) {}
     }
 
@@ -622,22 +639,62 @@
       if (wrap) {
         wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview')));
         const img = wrap.querySelector('img');
-        if (img && !img.complete) img.addEventListener('load', () => scheduleRebalance(), { once: true });
-        img?.addEventListener('error', () => { wrap.style.display = 'none'; scheduleRebalance(); }, { once: true });
+        // Do not full-rebalance on image load/error during infinite scroll (causes jump/dups).
+        if (img && !img.complete) {
+          img.addEventListener('load', () => { /* height settles in-column; skip remount */ }, { once: true });
+        }
+        img?.addEventListener('error', () => { wrap.style.display = 'none'; }, { once: true });
       }
       return card;
     }
 
-    function rebuildFromData() {
+    function highlightCard(card) {
+      card.querySelectorAll('pre code:not([data-hljs])').forEach(block => {
+        try { hljs.highlightElement(block); block.setAttribute('data-hljs', '1'); } catch (_) {}
+      });
+    }
+
+    function ensureCard(item) {
+      let c = cardCache.get(item.id);
+      if (!c) {
+        c = buildCard(item);
+        cardCache.set(item.id, c);
+        highlightCard(c);
+      }
+      return c;
+    }
+
+    /**
+     * Full masonry rebuild. Used for reset / filter / resize only.
+     * Load-more must use appendCardsIncremental to avoid scroll jump that looks like dups.
+     */
+    function rebuildFromData({ preserveScroll = true } = {}) {
       const host = document.getElementById('grid');
       const view = clientFilter(clips);
 
       if (!view.length) {
         cardCache.clear();
+        colHeights = null;
         host.innerHTML = `<div class="empty"><span class="material-symbols-outlined" style="font-size:48px;opacity:.5">inbox</span>
           <p style="margin-top:12px">${loading ? '加载中…' : '没有匹配的记录'}</p></div>`;
         lastColCount = 0;
         return;
+      }
+
+      // Scroll anchor: first card whose top is >= 0 (in viewport)
+      let anchorId = null;
+      let anchorOffset = 0;
+      if (preserveScroll) {
+        for (const item of view) {
+          const el = cardCache.get(item.id);
+          if (!el || !el.isConnected) continue;
+          const r = el.getBoundingClientRect();
+          if (r.bottom > 80) {
+            anchorId = item.id;
+            anchorOffset = r.top;
+            break;
+          }
+        }
       }
 
       const nextIds = new Set(view.map(i => i.id));
@@ -648,61 +705,112 @@
         }
       }
 
-      const cards = view.map(item => {
-        let c = cardCache.get(item.id);
-        if (!c) {
-          c = buildCard(item);
-          cardCache.set(item.id, c);
-        }
-        return c;
-      });
-
-      cards.forEach(card => {
-        card.querySelectorAll('pre code:not([data-hljs])').forEach(block => {
-          try { hljs.highlightElement(block); block.setAttribute('data-hljs', '1'); } catch (_) {}
-        });
-      });
-
+      const cards = view.map(item => ensureCard(item));
       rebalance(cards);
+
+      if (preserveScroll && anchorId) {
+        const el = cardCache.get(anchorId);
+        if (el && el.isConnected) {
+          const delta = el.getBoundingClientRect().top - anchorOffset;
+          if (Math.abs(delta) > 1) window.scrollBy(0, delta);
+        }
+      }
     }
 
-    function rebalance(orderedCards) {
+    /**
+     * Pack only new cards into existing columns (shortest-column).
+     * Does not remount existing cards → no scroll jump / false "duplicates".
+     */
+    function appendCardsIncremental(newItems) {
       const host = document.getElementById('grid');
-      if (!orderedCards) {
-        orderedCards = clientFilter(clips).map(i => cardCache.get(i.id)).filter(Boolean);
-      }
-      if (!orderedCards.length) return;
-
+      let colEls = [...host.querySelectorAll(':scope > .masonry-col')];
       const cols = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
-      lastColCount = cols;
 
-      orderedCards.forEach(c => c.remove());
-      host.className = 'masonry';
-      host.innerHTML = '';
-      const colEls = [];
-      for (let i = 0; i < cols; i++) {
-        const col = document.createElement('div');
-        col.className = 'masonry-col';
-        host.appendChild(col);
-        colEls.push(col);
+      // No columns yet, filter active mismatch, or column count changed → full rebuild.
+      if (!colEls.length || colEls.length !== cols || colHeights == null || colHeights.length !== cols) {
+        rebuildFromData({ preserveScroll: true });
+        return;
       }
 
-      // Measure then pack
-      const heights = orderedCards.map(card => {
+      // Filter may hide some types — only append if they pass clientFilter.
+      const viewIds = new Set(clientFilter(clips).map(i => i.id));
+      const toAdd = newItems.filter(it => viewIds.has(it.id) && !cardCache.has(it.id));
+      if (!toAdd.length) return;
+
+      for (const item of toAdd) {
+        const card = ensureCard(item);
+        // Measure off-layout using first column
         colEls[0].appendChild(card);
         const h = card.getBoundingClientRect().height || 120;
         card.remove();
-        return h;
-      });
-      const { colOf } = Masonry.pack(heights, cols, 16);
-      for (let i = 0; i < orderedCards.length; i++) {
-        colEls[colOf[i]].appendChild(orderedCards[i]);
+
+        let best = 0;
+        for (let c = 1; c < cols; c++) {
+          if (colHeights[c] < colHeights[best]) best = c;
+        }
+        colEls[best].appendChild(card);
+        colHeights[best] += h + (colHeights[best] > 0 ? 16 : 0);
+      }
+    }
+
+    function rebalance(orderedCards) {
+      if (rebalanceBusy) return;
+      rebalanceBusy = true;
+      try {
+        const host = document.getElementById('grid');
+        if (!orderedCards) {
+          orderedCards = clientFilter(clips).map(i => cardCache.get(i.id)).filter(Boolean);
+        }
+        // Deduplicate card element refs (same node twice would confuse pack).
+        const seenEl = new Set();
+        orderedCards = orderedCards.filter(c => {
+          if (!c || seenEl.has(c)) return false;
+          seenEl.add(c);
+          return true;
+        });
+        if (!orderedCards.length) return;
+
+        const cols = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
+        lastColCount = cols;
+
+        orderedCards.forEach(c => c.remove());
+        host.className = 'masonry';
+        host.innerHTML = '';
+        const colEls = [];
+        for (let i = 0; i < cols; i++) {
+          const col = document.createElement('div');
+          col.className = 'masonry-col';
+          host.appendChild(col);
+          colEls.push(col);
+        }
+
+        const heights = orderedCards.map(card => {
+          colEls[0].appendChild(card);
+          const h = card.getBoundingClientRect().height || 120;
+          card.remove();
+          return h;
+        });
+        const packed = Masonry.pack(heights, cols, 16);
+        colHeights = packed.colHeights.slice();
+        for (let i = 0; i < orderedCards.length; i++) {
+          colEls[packed.colOf[i]].appendChild(orderedCards[i]);
+        }
+      } finally {
+        rebalanceBusy = false;
       }
     }
 
     function scheduleRebalance() {
+      // Soft: full rebalance only when column count may change (resize). Avoid on image load
+      // during infinite scroll — remounting the whole wall jumps scroll and looks like dups.
       clearTimeout(rebalanceTimer);
-      rebalanceTimer = setTimeout(() => requestAnimationFrame(() => rebalance()), 48);
+      rebalanceTimer = setTimeout(() => requestAnimationFrame(() => {
+        const host = document.getElementById('grid');
+        const cols = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
+        if (cols !== lastColCount || !host.querySelector('.masonry-col')) {
+          rebuildFromData({ preserveScroll: true });
+        }
+      }), 48);
     }
 
     // --- Lightbox ---
@@ -763,7 +871,8 @@
         document.querySelectorAll('.chip').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentFilter = btn.dataset.type;
-        rebuildFromData();
+        colHeights = null;
+        rebuildFromData({ preserveScroll: false });
       });
     });
 

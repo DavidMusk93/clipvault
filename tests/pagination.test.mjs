@@ -171,3 +171,14 @@ test('simulated first-scroll: page2 overlapping tail is stripped', () => {
   const ids = clips.map(x => x.id);
   assert.equal(new Set(ids).size, ids.length, 'no duplicate ids after merge');
 });
+
+test('load-more only yields newly added ids (incremental append contract)', () => {
+  const page1 = [item('a'), item('b'), item('c')];
+  let clips = Pagination.mergePage([], page1, { reset: true });
+  const prevIds = new Set(clips.map(c => c.id));
+  // API re-includes 'c' (lossy cursor) plus new 'd','e'
+  clips = Pagination.mergePage(clips, [item('c'), item('d'), item('e')], { reset: false });
+  const added = clips.filter(c => !prevIds.has(c.id));
+  assert.deepEqual(added.map(x => x.id), ['d', 'e']);
+  assert.ok(!added.some(x => x.id === 'c'), 'boundary row must not be re-appended to DOM');
+});
