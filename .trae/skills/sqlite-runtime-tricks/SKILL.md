@@ -112,6 +112,19 @@ Ops checklist:
 - External-content or explicit dual-write FTS table; keep triggers / app code in sync on INSERT/UPDATE/DELETE.
 - After building FTS: `ANALYZE` (and `INSERT INTO fts(fts) VALUES('optimize')` when appropriate).
 - If FTS suddenly slow: stats first, then query plan — not "rewrite in Postgres" yet.
+- **Fuzzy / substring:** use `tokenize='trigram'` when SQLite ≥ 3.34 (macOS ships it). Rebuild FTS if tokenizer changes; hybrid = FTS first, `LIKE` fallback for &lt;3 chars or empty FTS.
+- Rank with `ORDER BY bm25(fts), timestamp DESC` when joining to base table.
+
+## 5b. Latest-alive + periodic dedupe (clipboard / event streams)
+
+Same payload re-copied must **not** insert a new primary key forever.
+
+| Layer | Practice |
+| --- | --- |
+| **Write path** | Upsert by `content_hash`: hit → `UPDATE timestamp, copy_count+1` (stable id); miss → `INSERT` |
+| **Periodic cleanup** | Every N minutes, **batch** delete losers (`LIMIT 50`) where another row shares `content_hash` and is newer — same spirit as §3, not one giant `DELETE` |
+| **Orphans** | After base deletes, prune FTS ids missing from base (also batched) |
+| **Don't** | One-shot “cleanup script” as the only strategy; rely on write-path + continuous drain |
 
 ## 6. Multiple database files
 
@@ -144,11 +157,12 @@ Product DB: `~/Documents/ClipFlow/clipflow.db` via `DatabaseManager` (single `db
 Must-have runtime profile for this product:
 
 1. Connection pragmas in §1 on open and after restore reopen  
-2. FTS5 for web search (text / ocr / source / html)  
-3. `ANALYZE` after schema/FTS bootstrap; `PRAGMA optimize` on close + periodic  
+2. FTS5 **trigram** (fallback unicode61) + bm25 + LIKE hybrid for web search  
+3. `ANALYZE` after schema/FTS bootstrap; `PRAGMA optimize` + FTS optimize on a slow timer  
 4. CloudDocs path already uses `sqlite3_backup` — keep that; never hot-copy  
 5. `clearAll` / mass delete → batched  
-6. List queries: no `image_data`; keyset `(timestamp DESC, id DESC)`
+6. List queries: no `image_data`; keyset `(timestamp DESC, id DESC)`  
+7. **Latest-alive** upsert by `content_hash` + **10min batched** dupe drain (not one-shot only)
 
 ## 9. References
 
