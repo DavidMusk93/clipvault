@@ -1,19 +1,22 @@
 import Foundation
 import CryptoKit
 import Darwin
+import SQLite3
 
 /// Personal-machine SOTA backup to **iCloud Drive (CloudDocs)** — no App iCloud entitlements.
 ///
-/// ## Strategy (minute-level, sparse versions)
-/// - **latest/** — rolling head; updated about every minute when dirty (sqlite3_backup).
-/// - **snapshots/** — sparse history; only every `snapshotEverySeconds`, max `keepSnapshots`.
-/// - Unchanged content (SHA256) → skip write (true no-op for iCloud upload).
-/// - Snapshot copy prefers APFS `clonefile` (CoW / near-incremental on disk).
+/// ## Strategy (sqlite-runtime-tricks aligned)
+/// - **latest/clipflow.db** — slim SQLite (metadata; blobs externalized) via `sqlite3_backup`.
+/// - **blobs/{hash}.bin** — content-addressed CAS at backup root (sync only missing files).
+/// - **snapshots/** — sparse **db-only** history (small); blobs shared via CAS.
+/// - SHA256 of db → skip promote when unchanged; prune keep=3; scrub `.tmp_*`.
+/// - One-shot cleanup of legacy DuckDB under CloudDocs/ClipFlow/db.
 ///
 /// ```
 /// …/CloudDocs/ClipFlow/backup/
-///   latest/{clipflow.db, MANIFEST.json}     # always newest
-///   snapshots/YYYYMMDD-HHmmss/…            # few, timed
+///   latest/{clipflow.db, MANIFEST.json}
+///   blobs/{sha256}.bin
+///   snapshots/YYYYMMDD-HHmmss/{clipflow.db, MANIFEST.json}
 ///   STATUS.json
 /// ```
 /// Local config: `~/Documents/ClipFlow/config/backup.json`
@@ -35,30 +38,32 @@ final class CloudDocsBackupService {
     /// Minute-level cadence + tight version budget.
     struct Config: Codable, Equatable {
         var enabled: Bool = true
-        /// Named history dirs under snapshots/ (not counting latest/)
-        var keepSnapshots: Int = 5
+        /// Named history dirs under snapshots/ (not counting latest/) — keep small: each is full db.
+        var keepSnapshots: Int = 3
         /// Coalesce bursty clip writes before starting a backup
         var throttleSeconds: Double = 60
         /// Min gap between successive **latest** updates
         var minIntervalSeconds: Double = 60
         /// If still dirty, force latest update at least this often
         var maxIntervalSeconds: Double = 300
-        /// Min gap between **named snapshots** (sparse history)
-        var snapshotEverySeconds: Double = 600
+        /// Min gap between **named snapshots** (sparse history) — default 30min
+        var snapshotEverySeconds: Double = 1800
         static let `default` = Config()
     }
 
     struct Manifest: Codable {
-        var version: Int = 1
+        var version: Int = 2
         var createdAt: String
         var createdAtUnix: Double
         var sourcePath: String
         var byteSize: Int
         var sha256: String
         var itemCount: Int?
-        var engine: String = "sqlite3_backup"
+        var engine: String = "sqlite3_backup+cas_blobs"
         var host: String
         var note: String?
+        var blobCount: Int? = nil
+        var blobBytes: Int? = nil
     }
 
     struct SnapshotInfo: Codable {
@@ -132,6 +137,9 @@ final class CloudDocsBackupService {
             }
         }
         print("[Backup] CloudDocs ready · enabled=\(config.enabled) · keep=\(config.keepSnapshots) · latest≥\(Int(config.minIntervalSeconds))s · snap≥\(Int(config.snapshotEverySeconds))s · root=\(backupRootURL?.path ?? "nil")")
+        queue.async { [weak self] in
+            self?.scrubLegacyArtifacts()
+        }
     }
 
     /// Tighten chatty early defaults (keep=20, throttle=3s) to minute-level policy.
@@ -161,7 +169,12 @@ final class CloudDocsBackupService {
         // For synthesized Codable, missing keys cause decode failure → loadConfig falls back to default Config().
         // If file exists with old keys only, decode succeeds and snapshotEverySeconds gets 0!
         if c.snapshotEverySeconds < 120 {
-            c.snapshotEverySeconds = 600
+            c.snapshotEverySeconds = 1800
+            changed = true
+        }
+        // Tighten historical keep=5+ → 3 (db-only snaps still cost cloud if CoW broken).
+        if c.keepSnapshots > 3 {
+            c.keepSnapshots = 3
             changed = true
         }
         c = Self.clamp(c)
@@ -174,7 +187,7 @@ final class CloudDocsBackupService {
 
     private static func clamp(_ c: Config) -> Config {
         var x = c
-        x.keepSnapshots = max(2, min(x.keepSnapshots, 10))
+        x.keepSnapshots = max(1, min(x.keepSnapshots, 5))
         x.throttleSeconds = max(30, min(x.throttleSeconds, 600))
         x.minIntervalSeconds = max(30, min(x.minIntervalSeconds, 600))
         x.maxIntervalSeconds = max(x.minIntervalSeconds, min(x.maxIntervalSeconds, 3600))
@@ -200,6 +213,8 @@ final class CloudDocsBackupService {
 
     private var latestDir: URL? { backupRootURL?.appendingPathComponent("latest", isDirectory: true) }
     private var snapshotsDir: URL? { backupRootURL?.appendingPathComponent("snapshots", isDirectory: true) }
+    /// Shared content-addressed blob mirror (not per-snapshot) — skill §6.
+    private var backupBlobsDir: URL? { backupRootURL?.appendingPathComponent("blobs", isDirectory: true) }
     private var statusFile: URL? { backupRootURL?.appendingPathComponent("STATUS.json") }
 
     private static var localConfigURL: URL {
@@ -305,6 +320,9 @@ final class CloudDocsBackupService {
 
             self.performBackup(force: true, snapshotOverrideId: safetyId) { [weak self] _, _ in
                 guard let self = self else { return }
+                self.lastPhase = "restore:blobs"
+                // Pull CAS blobs from backup before swapping db so images resolve.
+                self.restoreBlobsFromBackupCAS()
                 self.lastPhase = "restore:replace"
                 self.publishStatus()
                 self.database.replaceDatabaseFile(with: srcDB) { result in
@@ -410,6 +428,9 @@ final class CloudDocsBackupService {
         do {
             try fm.createDirectory(at: latest, withIntermediateDirectories: true)
             try fm.createDirectory(at: snaps, withIntermediateDirectories: true)
+            if let bb = backupBlobsDir {
+                try fm.createDirectory(at: bb, withIntermediateDirectories: true)
+            }
         } catch {
             inProgress = false
             lastError = "无法创建备份目录: \(error.localizedDescription)"
@@ -418,6 +439,9 @@ final class CloudDocsBackupService {
             completion?(false, lastError!)
             return
         }
+
+        // Scrub leftover tmp shards from interrupted backups (can pile up on iCloud).
+        scrubLatestTmpFiles(in: latest)
 
         let tmpURL = latest.appendingPathComponent(".tmp_\(UUID().uuidString).db")
         let latestDB = latest.appendingPathComponent("clipflow.db")
@@ -439,14 +463,30 @@ final class CloudDocsBackupService {
                     completion?(false, err.localizedDescription)
 
                 case .success:
-                    let sha = (try? Self.sha256File(tmpURL)) ?? ""
-                    let size = (try? self.fm.attributesOfItem(atPath: tmpURL.path)[.size] as? NSNumber)?.intValue ?? 0
+                    // Prefer compact single-file artifact for cloud (skill: VACUUM INTO style).
+                    let compactURL = latest.appendingPathComponent(".tmp_compact_\(UUID().uuidString).db")
+                    let finalTmp: URL
+                    if self.compactBackupFile(from: tmpURL, to: compactURL) {
+                        try? self.fm.removeItem(at: tmpURL)
+                        finalTmp = compactURL
+                    } else {
+                        try? self.fm.removeItem(at: compactURL)
+                        finalTmp = tmpURL
+                    }
+
+                    let sha = (try? Self.sha256File(finalTmp)) ?? ""
+                    let size = (try? self.fm.attributesOfItem(atPath: finalTmp.path)[.size] as? NSNumber)?.intValue ?? 0
+
+                    // Sync content-addressed blobs (only missing hashes) — not full re-upload.
+                    self.lastPhase = "sync_blobs"
+                    let (blobCount, blobBytes, blobNew) = self.syncBlobsToBackupCAS()
 
                     if snapshotOverrideId == nil,
                        let prev = self.lastContentFingerprint,
                        prev == sha,
-                       self.fm.fileExists(atPath: latestDB.path) {
-                        try? self.fm.removeItem(at: tmpURL)
+                       self.fm.fileExists(atPath: latestDB.path),
+                       blobNew == 0 {
+                        try? self.fm.removeItem(at: finalTmp)
                         self.dirty = false
                         self.inProgress = false
                         self.lastPhase = "skip:unchanged"
@@ -460,9 +500,9 @@ final class CloudDocsBackupService {
                         if self.fm.fileExists(atPath: latestDB.path) {
                             try self.fm.removeItem(at: latestDB)
                         }
-                        try self.fm.moveItem(at: tmpURL, to: latestDB)
+                        try self.fm.moveItem(at: finalTmp, to: latestDB)
                     } catch {
-                        try? self.fm.removeItem(at: tmpURL)
+                        try? self.fm.removeItem(at: finalTmp)
                         self.inProgress = false
                         self.lastError = error.localizedDescription
                         self.lastPhase = "error:promote"
@@ -485,11 +525,13 @@ final class CloudDocsBackupService {
                                 sha256: sha,
                                 itemCount: count,
                                 host: host,
-                                note: snapshotOverrideId.map { "id:\($0)" }
+                                note: snapshotOverrideId.map { "id:\($0)" },
+                                blobCount: blobCount,
+                                blobBytes: blobBytes
                             )
                             try? JSONEncoder.pretty.encode(manifest).write(to: latestManifest, options: .atomic)
 
-                            // Sparse named snapshots (not every latest update)
+                            // Sparse named snapshots: **db only** (blobs shared in CAS).
                             var snapId: String? = nil
                             let shouldSnap =
                                 snapshotOverrideId != nil
@@ -505,7 +547,6 @@ final class CloudDocsBackupService {
                                     if self.fm.fileExists(atPath: snapDB.path) {
                                         try self.fm.removeItem(at: snapDB)
                                     }
-                                    // Prefer APFS clonefile (CoW) — cheap "incremental" on disk
                                     try self.cloneOrCopy(from: latestDB, to: snapDB)
                                     try JSONEncoder.pretty.encode(manifest).write(
                                         to: snapDir.appendingPathComponent("MANIFEST.json"),
@@ -519,6 +560,7 @@ final class CloudDocsBackupService {
                             }
 
                             self.pruneSnapshots(keep: self.config.keepSnapshots)
+                            self.scrubLegacyArtifacts()
                             self.lastContentFingerprint = sha
                             self.lastSuccessUnix = created.timeIntervalSince1970
                             self.dirty = false
@@ -530,13 +572,108 @@ final class CloudDocsBackupService {
                             self.writeStatusFile()
                             self.publishStatus()
                             let snapNote = snapId.map { "快照 \($0)" } ?? "仅 latest"
-                            let msg = "已备份 · \(snapNote) · \(Self.byteString(size))"
+                            let msg = "已备份 · \(snapNote) · db \(Self.byteString(size)) · blobs \(blobCount) (+\(blobNew))"
                             print("[Backup] \(msg)")
                             completion?(true, msg)
                         }
                     }
                 }
             }
+        }
+    }
+
+    /// `VACUUM INTO` when possible — smaller single-file artifact for iCloud.
+    private func compactBackupFile(from src: URL, to dest: URL) -> Bool {
+        var db: OpaquePointer?
+        defer {
+            if db != nil { sqlite3_close(db) }
+        }
+        guard sqlite3_open_v2(src.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db = db else {
+            return false
+        }
+        try? fm.removeItem(at: dest)
+        let destPath = dest.path.replacingOccurrences(of: "'", with: "''")
+        var err: UnsafeMutablePointer<CChar>?
+        let rc = sqlite3_exec(db, "VACUUM INTO '\(destPath)';", nil, nil, &err)
+        if rc != SQLITE_OK {
+            if let err { sqlite3_free(err) }
+            try? fm.removeItem(at: dest)
+            return false
+        }
+        return fm.fileExists(atPath: dest.path)
+    }
+
+    /// Copy local CAS blobs that are missing from backup/blobs.
+    /// - returns: (totalLocal, totalBytes, newlyCopied)
+    private func syncBlobsToBackupCAS() -> (Int, Int, Int) {
+        guard let destRoot = backupBlobsDir else { return (0, 0, 0) }
+        try? fm.createDirectory(at: destRoot, withIntermediateDirectories: true)
+        let local = database.blobsDirectoryURL
+        guard let files = try? fm.contentsOfDirectory(at: local, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) else {
+            return (0, 0, 0)
+        }
+        var total = 0
+        var bytes = 0
+        var copied = 0
+        for src in files where src.pathExtension == "bin" {
+            total += 1
+            let size = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            bytes += size
+            let dest = destRoot.appendingPathComponent(src.lastPathComponent)
+            if fm.fileExists(atPath: dest.path) { continue }
+            do {
+                try cloneOrCopy(from: src, to: dest)
+                copied += 1
+            } catch {
+                try? fm.copyItem(at: src, to: dest)
+                if fm.fileExists(atPath: dest.path) { copied += 1 }
+            }
+        }
+        return (total, bytes, copied)
+    }
+
+    private func scrubLatestTmpFiles(in latest: URL) {
+        let files = (try? fm.contentsOfDirectory(at: latest, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        for f in files {
+            let name = f.lastPathComponent
+            if name.hasPrefix(".tmp_") || name.hasSuffix("-shm") || name.hasSuffix("-wal") {
+                // Keep only final clipflow.db; drop interrupted temps.
+                if name != "clipflow.db" && name != "MANIFEST.json" {
+                    try? fm.removeItem(at: f)
+                }
+            }
+        }
+        // Also remove hidden tmp with skipsHiddenFiles off
+        let all = (try? fm.contentsOfDirectory(at: latest, includingPropertiesForKeys: nil, options: [])) ?? []
+        for f in all where f.lastPathComponent.hasPrefix(".tmp_") {
+            try? fm.removeItem(at: f)
+        }
+    }
+
+    /// Drop legacy DuckDB + oversized junk under CloudDocs ClipFlow.
+    private func scrubLegacyArtifacts() {
+        guard let cloud = Self.cloudDocsURL() else { return }
+        let duck = cloud.appendingPathComponent("ClipFlow/db/clipflow.duckdb")
+        if fm.fileExists(atPath: duck.path) {
+            try? fm.removeItem(at: duck)
+            print("[Backup] removed legacy DuckDB \(duck.path)")
+        }
+        let duckDir = cloud.appendingPathComponent("ClipFlow/db")
+        if let rest = try? fm.contentsOfDirectory(at: duckDir, includingPropertiesForKeys: nil), rest.isEmpty {
+            try? fm.removeItem(at: duckDir)
+        }
+        // Drop old full-db snapshot trees beyond keep (also remove nested blobs if any).
+        pruneSnapshots(keep: config.keepSnapshots)
+    }
+
+    private func restoreBlobsFromBackupCAS() {
+        guard let cas = backupBlobsDir, fm.fileExists(atPath: cas.path) else { return }
+        let local = database.blobsDirectoryURL
+        try? fm.createDirectory(at: local, withIntermediateDirectories: true)
+        let files = (try? fm.contentsOfDirectory(at: cas, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        for src in files where src.pathExtension == "bin" {
+            let hash = src.deletingPathExtension().lastPathComponent
+            database.importBlobIfNeeded(hash: hash, from: src)
         }
     }
 
@@ -634,7 +771,7 @@ final class CloudDocsBackupService {
         let lastSnapISO = (lastSnapshotUnix ?? newestSnapshotUnix()).map {
             ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: $0))
         }
-        let policy = "latest 约每 \(Int(config.minIntervalSeconds))s；命名快照 ≥\(Int(config.snapshotEverySeconds))s；最多保留 \(config.keepSnapshots) 个"
+        let policy = "db 精简 + blobs CAS；latest ≥\(Int(config.minIntervalSeconds))s；快照 ≥\(Int(config.snapshotEverySeconds))s ×\(config.keepSnapshots)"
         return Status(
             enabled: config.enabled,
             cloudDocsAvailable: cloud != nil,

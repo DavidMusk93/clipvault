@@ -86,14 +86,54 @@ class ClipboardMonitor: ObservableObject {
 
     private func createImageItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
         guard let rawData = getImageData() else { return nil }
-        // Prefer PNG storage so /api/image always serves a browser-friendly format
-        let imageData = normalizeToPNG(rawData) ?? rawData
+        // Downscale + PNG for storage; blobs live on disk (not SQLite) — keep payloads lean.
+        let imageData = compressForStorage(rawData) ?? normalizeToPNG(rawData) ?? rawData
         let ocrText = performOCR(on: imageData)
         let hash = computeHash(for: imageData)
         return ClipboardItem(
             timestamp: timestamp, type: .image, contentHash: hash,
             imageData: imageData, ocrText: ocrText, sourceApp: sourceApp
         )
+    }
+
+    /// Max long edge 1600px; prefer JPEG for large photos, PNG for small/UI shots.
+    private func compressForStorage(_ data: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return normalizeToPNG(data)
+        }
+        let maxEdge: CGFloat = 1600
+        let w = CGFloat(cgImage.width)
+        let h = CGFloat(cgImage.height)
+        let scale = min(1.0, maxEdge / max(w, h))
+        let tw = max(1, Int(w * scale))
+        let th = max(1, Int(h * scale))
+
+        let colorSpace = cgImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: tw, height: th,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return normalizeToPNG(data) }
+        ctx.interpolationQuality = .medium
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: tw, height: th))
+        guard let scaled = ctx.makeImage() else { return normalizeToPNG(data) }
+
+        let out = NSMutableData()
+        // Screenshots/UI stay sharp as PNG; large photographic frames → JPEG ~0.8
+        let useJPEG = (data.count > 400_000) || (tw * th > 900_000)
+        let uti = useJPEG ? "public.jpeg" as CFString : "public.png" as CFString
+        guard let dest = CGImageDestinationCreateWithData(out, uti, 1, nil) else {
+            return normalizeToPNG(data)
+        }
+        let props: [CFString: Any] = useJPEG
+            ? [kCGImageDestinationLossyCompressionQuality: 0.82]
+            : [:]
+        CGImageDestinationAddImage(dest, scaled, props as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return normalizeToPNG(data) }
+        return out as Data
     }
 
     private func normalizeToPNG(_ data: Data) -> Data? {

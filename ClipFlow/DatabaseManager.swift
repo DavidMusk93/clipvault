@@ -44,10 +44,14 @@ struct ClipPage {
 /// Runtime: `sqlite-runtime-tricks` — WAL, busy_timeout, ANALYZE, FTS5 trigram,
 /// latest-alive upsert by content_hash, **periodic batched** dupe cleanup, online backup.
 final class DatabaseManager: ObservableObject {
+    private let appDir: URL
     private let dbPath: URL
+    /// Content-addressed blob store: `blobs/{content_hash}.bin` (images/pdf/rtf out of SQLite).
+    private let blobsDir: URL
     private let dbQueue = DispatchQueue(label: "com.clipflow.database", qos: .userInitiated)
     private var db: OpaquePointer?
     private var maintenanceTimer: DispatchSourceTimer?
+    private let fm = FileManager.default
 
     private static let deleteBatchSize = 500
     /// Per maintenance tick: max stale rows removed (jvns: short writer batches).
@@ -56,25 +60,63 @@ final class DatabaseManager: ObservableObject {
     private static let maintenanceIntervalSeconds: Double = 10 * 60
     /// Heavy optimize cadence (also runs on some maintenance ticks).
     private static let optimizeEveryNMaintenances = 36 // ~6h at 10min
+    /// Inline BLOB larger than this is written to CAS and nulled in SQLite.
+    private static let inlineBlobMaxBytes = 0 // always externalize image/pdf/rtf payloads
     private var maintenanceTicks = 0
 
     /// Active FTS tokenizer: "trigram" (fuzzy substring) or "unicode61".
     private var ftsTokenizer: String = "unicode61"
 
     init() {
-        let fileManager = FileManager.default
-        let docsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first ??
-            fileManager.temporaryDirectory.appendingPathComponent("com.clipflow.app")
-        let appDir = docsDir.appendingPathComponent("ClipFlow")
-
-        try? fileManager.createDirectory(at: appDir, withIntermediateDirectories: true)
+        let docsDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first ??
+            fm.temporaryDirectory.appendingPathComponent("com.clipflow.app")
+        appDir = docsDir.appendingPathComponent("ClipFlow")
+        try? fm.createDirectory(at: appDir, withIntermediateDirectories: true)
         dbPath = appDir.appendingPathComponent("clipflow.db")
+        blobsDir = appDir.appendingPathComponent("blobs", isDirectory: true)
+        try? fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
 
         initializeDatabase()
         startMaintenanceTimer()
     }
 
     var dbFileURL: URL { dbPath }
+    /// Public for CloudDocs backup CAS sync.
+    var blobsDirectoryURL: URL { blobsDir }
+
+    // MARK: - Content-addressed blobs (sqlite skill §6)
+
+    func blobFileURL(hash: String) -> URL {
+        blobsDir.appendingPathComponent(hash + ".bin")
+    }
+
+    @discardableResult
+    func writeBlobFile(hash: String, data: Data) -> Bool {
+        let url = blobFileURL(hash: hash)
+        if fm.fileExists(atPath: url.path) { return true }
+        do {
+            try fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            print("[DatabaseManager] blob write failed: \(error)")
+            return false
+        }
+    }
+
+    func readBlobFile(hash: String) -> Data? {
+        let url = blobFileURL(hash: hash)
+        guard fm.fileExists(atPath: url.path) else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    /// Import a blob from backup CAS into local store (restore path).
+    func importBlobIfNeeded(hash: String, from source: URL) {
+        let dest = blobFileURL(hash: hash)
+        if fm.fileExists(atPath: dest.path) { return }
+        try? fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
+        try? fm.copyItem(at: source, to: dest)
+    }
 
     // MARK: - Open / pragmas / schema
 
@@ -83,6 +125,9 @@ final class DatabaseManager: ObservableObject {
             createTables()
             migrateSchema()
             bootstrapFTSIfNeeded()
+            // Extract in-row BLOBs → CAS files, then VACUUM once (shrink ~40MB image rows).
+            migrateInlineBlobsToFiles(maxBatches: 200)
+            maybeVacuumAfterBlobMigration()
             runAnalyze()
             // Drain residual dups after boot in short batches (not one giant DELETE).
             dbQueue.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -147,6 +192,117 @@ final class DatabaseManager: ObservableObject {
         // copy_count: how many times this exact content was re-copied (latest-alive).
         if !columnExists("clipboard_items", "copy_count") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN copy_count INTEGER NOT NULL DEFAULT 1;")
+        }
+    }
+
+    /// Pull image/pdf/rtf out of SQLite into `blobs/{hash}.bin` (content-addressed).
+    @discardableResult
+    private func migrateInlineBlobsToFiles(maxBatches: Int) -> Int {
+        guard db != nil else { return 0 }
+        var total = 0
+        for _ in 0..<maxBatches {
+            let n = migrateInlineBlobsBatch(limit: 8)
+            total += n
+            if n == 0 { break }
+        }
+        if total > 0 {
+            print("[DatabaseManager] migrated \(total) inline BLOBs → \(blobsDir.path)")
+        }
+        return total
+    }
+
+    private func migrateInlineBlobsBatch(limit: Int) -> Int {
+        guard let db = db else { return 0 }
+        // Prefer images (dominant size); also peel pdf/rtf.
+        let sql = """
+        SELECT id, content_hash, image_data, rtf_data, pdf_data FROM clipboard_items
+        WHERE (image_data IS NOT NULL AND length(image_data) > 0)
+           OR (rtf_data IS NOT NULL AND length(rtf_data) > 0)
+           OR (pdf_data IS NOT NULL AND length(pdf_data) > 0)
+        LIMIT \(limit);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        var ids: [(String, String, Data?, Data?, Data?)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                  let hash = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) else { continue }
+            var img: Data?
+            var rtf: Data?
+            var pdf: Data?
+            if let p = sqlite3_column_blob(stmt, 2) {
+                let n = Int(sqlite3_column_bytes(stmt, 2))
+                if n > 0 { img = Data(bytes: p, count: n) }
+            }
+            if let p = sqlite3_column_blob(stmt, 3) {
+                let n = Int(sqlite3_column_bytes(stmt, 3))
+                if n > 0 { rtf = Data(bytes: p, count: n) }
+            }
+            if let p = sqlite3_column_blob(stmt, 4) {
+                let n = Int(sqlite3_column_bytes(stmt, 4))
+                if n > 0 { pdf = Data(bytes: p, count: n) }
+            }
+            ids.append((id, hash, img, rtf, pdf))
+        }
+        sqlite3_finalize(stmt)
+
+        var done = 0
+        for (id, hash, img, rtf, pdf) in ids {
+            // Primary payload for images is content_hash-named; rtf/pdf use suffix keys.
+            if let img = img {
+                _ = writeBlobFile(hash: hash, data: img)
+            }
+            if let rtf = rtf {
+                _ = writeBlobFile(hash: hash + ".rtf", data: rtf)
+            }
+            if let pdf = pdf {
+                _ = writeBlobFile(hash: hash + ".pdf", data: pdf)
+            }
+            let upd = """
+            UPDATE clipboard_items SET
+              image_data = NULL,
+              rtf_data = CASE WHEN rtf_data IS NOT NULL THEN NULL ELSE rtf_data END,
+              pdf_data = CASE WHEN pdf_data IS NOT NULL THEN NULL ELSE pdf_data END
+            WHERE id = ?;
+            """
+            // Always null the large columns we externalized
+            let upd2 = "UPDATE clipboard_items SET image_data=NULL, rtf_data=NULL, pdf_data=NULL WHERE id=?;"
+            var u: OpaquePointer?
+            if sqlite3_prepare_v2(db, upd2, -1, &u, nil) == SQLITE_OK {
+                bindText(u, 1, id)
+                if sqlite3_step(u) == SQLITE_DONE { done += 1 }
+            }
+            sqlite3_finalize(u)
+            _ = upd
+        }
+        return done
+    }
+
+    private func maybeVacuumAfterBlobMigration() {
+        guard metaGet("blob_vacuum_v1") != "1" else { return }
+        let remaining = scalarInt64("""
+            SELECT COUNT(*) FROM clipboard_items
+            WHERE (image_data IS NOT NULL AND length(image_data)>0)
+               OR (rtf_data IS NOT NULL AND length(rtf_data)>0)
+               OR (pdf_data IS NOT NULL AND length(pdf_data)>0);
+            """) ?? 0
+        guard remaining == 0 else { return }
+        print("[DatabaseManager] VACUUM after blob externalization…")
+        if execQuiet("VACUUM;") {
+            metaSet("blob_vacuum_v1", "1")
+            print("[DatabaseManager] VACUUM done")
+        }
+    }
+
+    /// List content hashes that still have a local blob file (for backup CAS sync).
+    func listLocalBlobHashes() -> [String] {
+        guard let files = try? fm.contentsOfDirectory(at: blobsDir, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        return files.compactMap { url -> String? in
+            let name = url.lastPathComponent
+            guard name.hasSuffix(".bin") else { return nil }
+            return String(name.dropLast(4))
         }
     }
 
@@ -297,6 +453,10 @@ final class DatabaseManager: ObservableObject {
 
         // Passive WAL checkpoint every tick (cheap).
         execQuiet("PRAGMA wal_checkpoint(PASSIVE);")
+
+        // Keep peeling any residual inline BLOBs (new code paths should not insert them).
+        _ = migrateInlineBlobsBatch(limit: 4)
+        maybeVacuumAfterBlobMigration()
 
         if forceOptimize || maintenanceTicks % Self.optimizeEveryNMaintenances == 0 {
             runOptimize()
@@ -545,28 +705,26 @@ final class DatabaseManager: ObservableObject {
 
         if let text = item.textContent { bindText(stmt, 5, text) } else { sqlite3_bind_null(stmt, 5) }
 
-        if let imgData = item.imageData {
-            imgData.withUnsafeBytes { ptr in
-                sqlite3_bind_blob(stmt, 6, ptr.baseAddress, Int32(imgData.count), Self.SQLITE_TRANSIENT)
-            }
-        } else { sqlite3_bind_null(stmt, 6) }
+        // Images/pdf/rtf live in CAS files (skill §6) — keep SQLite lean for backups.
+        if let imgData = item.imageData, !imgData.isEmpty {
+            _ = writeBlobFile(hash: item.contentHash, data: imgData)
+        }
+        sqlite3_bind_null(stmt, 6)
 
         let fileURLsStr = item.fileURLs?.map { $0.path }.joined(separator: "|")
         if let fUrls = fileURLsStr { bindText(stmt, 7, fUrls) } else { sqlite3_bind_null(stmt, 7) }
 
         if let urlStr = item.url?.absoluteString { bindText(stmt, 8, urlStr) } else { sqlite3_bind_null(stmt, 8) }
 
-        if let rtfData = item.rtfData {
-            rtfData.withUnsafeBytes { ptr in
-                sqlite3_bind_blob(stmt, 9, ptr.baseAddress, Int32(rtfData.count), Self.SQLITE_TRANSIENT)
-            }
-        } else { sqlite3_bind_null(stmt, 9) }
+        if let rtfData = item.rtfData, !rtfData.isEmpty {
+            _ = writeBlobFile(hash: item.contentHash + ".rtf", data: rtfData)
+        }
+        sqlite3_bind_null(stmt, 9)
 
-        if let pdfData = item.pdfData {
-            pdfData.withUnsafeBytes { ptr in
-                sqlite3_bind_blob(stmt, 10, ptr.baseAddress, Int32(pdfData.count), Self.SQLITE_TRANSIENT)
-            }
-        } else { sqlite3_bind_null(stmt, 10) }
+        if let pdfData = item.pdfData, !pdfData.isEmpty {
+            _ = writeBlobFile(hash: item.contentHash + ".pdf", data: pdfData)
+        }
+        sqlite3_bind_null(stmt, 10)
 
         if let html = item.htmlContent { bindText(stmt, 11, html) } else { sqlite3_bind_null(stmt, 11) }
         sqlite3_bind_null(stmt, 12)
@@ -794,6 +952,17 @@ final class DatabaseManager: ObservableObject {
         dbQueue.async { [weak self] in
             guard let self = self, let db = self.db else { completion?(false); return }
 
+            // Capture hash for optional blob GC after row delete.
+            var hash: String?
+            var hStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, "SELECT content_hash FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
+                self.bindText(hStmt, 1, id.uuidString)
+                if sqlite3_step(hStmt) == SQLITE_ROW {
+                    hash = sqlite3_column_text(hStmt, 0).map { String(cString: $0) }
+                }
+            }
+            sqlite3_finalize(hStmt)
+
             let sql = "DELETE FROM clipboard_items WHERE id = ?;"
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -802,12 +971,23 @@ final class DatabaseManager: ObservableObject {
                 sqlite3_finalize(stmt)
                 if stepRes == SQLITE_DONE {
                     self.deleteFTS(id: id.uuidString)
+                    if let hash = hash {
+                        self.gcBlobIfUnreferenced(hash: hash)
+                    }
                 }
                 DispatchQueue.main.async { completion?(stepRes == SQLITE_DONE) }
             } else {
                 DispatchQueue.main.async { completion?(false) }
             }
         }
+    }
+
+    private func gcBlobIfUnreferenced(hash: String) {
+        let n = scalarInt64("SELECT COUNT(*) FROM clipboard_items WHERE content_hash = '\(hash.replacingOccurrences(of: "'", with: "''"))';") ?? 0
+        guard n == 0 else { return }
+        try? fm.removeItem(at: blobFileURL(hash: hash))
+        try? fm.removeItem(at: blobFileURL(hash: hash + ".rtf"))
+        try? fm.removeItem(at: blobFileURL(hash: hash + ".pdf"))
     }
 
     func searchItems(query: String, limit: Int = 100, completion: @escaping ([ClipboardItem]) -> Void) {
@@ -819,24 +999,37 @@ final class DatabaseManager: ObservableObject {
     func fetchImageData(id: UUID, completion: @escaping (Data?) -> Void) {
         dbQueue.async { [weak self] in
             guard let self = self, let db = self.db else { completion(nil); return }
-            let sql = "SELECT image_data FROM clipboard_items WHERE id = ?;"
+            let sql = "SELECT content_hash, image_data FROM clipboard_items WHERE id = ?;"
             var stmt: OpaquePointer?
+            var data: Data?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
                 self.bindText(stmt, 1, id.uuidString)
                 if sqlite3_step(stmt) == SQLITE_ROW {
-                    if let blobPtr = sqlite3_column_blob(stmt, 0) {
-                        let size = sqlite3_column_bytes(stmt, 0)
+                    let hash = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+                    if let hash = hash, let fileData = self.readBlobFile(hash: hash) {
+                        data = fileData
+                    } else if let blobPtr = sqlite3_column_blob(stmt, 1) {
+                        let size = Int(sqlite3_column_bytes(stmt, 1))
                         if size > 0 {
-                            let data = Data(bytes: blobPtr, count: Int(size))
-                            sqlite3_finalize(stmt)
-                            DispatchQueue.main.async { completion(data) }
-                            return
+                            let inline = Data(bytes: blobPtr, count: size)
+                            data = inline
+                            // Lazy externalize legacy rows
+                            if let hash = hash {
+                                _ = self.writeBlobFile(hash: hash, data: inline)
+                                let clear = "UPDATE clipboard_items SET image_data=NULL WHERE id=?;"
+                                var u: OpaquePointer?
+                                if sqlite3_prepare_v2(db, clear, -1, &u, nil) == SQLITE_OK {
+                                    self.bindText(u, 1, id.uuidString)
+                                    _ = sqlite3_step(u)
+                                }
+                                sqlite3_finalize(u)
+                            }
                         }
                     }
                 }
                 sqlite3_finalize(stmt)
             }
-            DispatchQueue.main.async { completion(nil) }
+            DispatchQueue.main.async { completion(data) }
         }
     }
 
@@ -1011,6 +1204,8 @@ final class DatabaseManager: ObservableObject {
             self.createTables()
             self.migrateSchema()
             self.bootstrapFTSIfNeeded()
+            self.migrateInlineBlobsToFiles(maxBatches: 200)
+            self.maybeVacuumAfterBlobMigration()
             self.runAnalyze()
             completion(.success(()))
         }
