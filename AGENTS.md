@@ -53,7 +53,10 @@ Owner 要的是 **独立产品气质 + 终局工程**，不是 demo 合集。
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |
 | SQLite 备份用 `sqlite3_backup`；CloudDocs 固定目录 | 热 copy 开着的 db；依赖未签名的 App ubiquity 容器当 daemon 方案 |
+| SQLite 运行时按 `sqlite-runtime-tricks` skill：WAL / busy_timeout / ANALYZE / FTS5 / 分批清理 | 裸 `sqlite3_open` + 全表 `LIKE '%q%'` + 一次 `DELETE` 清库 |
 | CI = 能绿的真构建（`swift build` + 单测） | 为旧 xcodeproj+DuckDB 殉葬 |
+
+**SQLite 运维 skill（agent 必读）**：本机 `~/.trae-cn/skills/sqlite-runtime-tricks/` 与仓库 `.trae/skills/sqlite-runtime-tricks/`（同源）；源文 [jvns 2026-07](https://jvns.ca/blog/2026/07/17/learning-about-running-sqlite/)。改 `DatabaseManager` / 备份 / 搜索前先加载。
 
 ### 2.4 隐私与本机
 

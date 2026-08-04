@@ -29,10 +29,19 @@ struct ClipPage {
     let nextCursor: ClipCursor?
 }
 
+/// SQLite-backed store for Keepsake.
+/// Runtime profile follows `sqlite-runtime-tricks` skill (WAL, busy_timeout, ANALYZE,
+/// FTS5, batched mass-delete, sqlite3_backup online backup).
 final class DatabaseManager: ObservableObject {
     private let dbPath: URL
     private let dbQueue = DispatchQueue(label: "com.clipflow.database", qos: .userInitiated)
     private var db: OpaquePointer?
+    private var optimizeTimer: DispatchSourceTimer?
+
+    /// Mass-delete batch size so one writer never holds the lock for the full table.
+    private static let deleteBatchSize = 500
+    /// How often long-lived connections run `PRAGMA optimize` (seconds).
+    private static let optimizeIntervalSeconds: Double = 6 * 3600
 
     init() {
         let fileManager = FileManager.default
@@ -44,16 +53,48 @@ final class DatabaseManager: ObservableObject {
         dbPath = appDir.appendingPathComponent("clipflow.db")
 
         initializeDatabase()
+        startOptimizeTimer()
     }
 
     var dbFileURL: URL { dbPath }
 
+    // MARK: - Open / pragmas / schema
+
     private func initializeDatabase() {
-        if sqlite3_open(dbPath.path, &db) == SQLITE_OK {
+        if openAndConfigure() {
             createTables()
+            bootstrapFTSIfNeeded()
+            runAnalyze()
         } else {
             print("Failed to open SQLite database at \(dbPath.path)")
         }
+    }
+
+    @discardableResult
+    private func openAndConfigure() -> Bool {
+        if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
+            return false
+        }
+        applyConnectionPragmas()
+        return true
+    }
+
+    /// Per-connection (and durable) runtime profile — run after every open/reopen.
+    private func applyConnectionPragmas() {
+        guard let db = db else { return }
+        // journal_mode persists; others are per-connection.
+        execQuiet("PRAGMA journal_mode=WAL;")
+        execQuiet("PRAGMA synchronous=NORMAL;")
+        execQuiet("PRAGMA busy_timeout=5000;")
+        execQuiet("PRAGMA temp_store=MEMORY;")
+        execQuiet("PRAGMA foreign_keys=ON;")
+        // ~256 MiB mmap window; OS manages physical pages.
+        execQuiet("PRAGMA mmap_size=268435456;")
+        // Negative cache_size = KiB → ~64 MiB page cache.
+        execQuiet("PRAGMA cache_size=-64000;")
+        // Passive autocheckpoint default is fine; keep WAL from unbounded growth on bulk ops.
+        execQuiet("PRAGMA wal_autocheckpoint=1000;")
+        _ = db
     }
 
     private func createTables() {
@@ -76,9 +117,170 @@ final class DatabaseManager: ObservableObject {
         );
         CREATE INDEX IF NOT EXISTS idx_timestamp ON clipboard_items(timestamp);
         CREATE INDEX IF NOT EXISTS idx_ts_id ON clipboard_items(timestamp DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_content_hash ON clipboard_items(content_hash);
         """
-        sqlite3_exec(db, createSQL, nil, nil, nil)
+        execQuiet(createSQL)
     }
+
+    /// FTS5 index for search (replaces multi-column `LIKE '%q%'` full scans).
+    private func bootstrapFTSIfNeeded() {
+        guard let db = db else { return }
+
+        let ftsSQL = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
+            id UNINDEXED,
+            text_content,
+            ocr_text,
+            source_app,
+            html_content,
+            tokenize = 'unicode61 remove_diacritics 2'
+        );
+        """
+        execQuiet(ftsSQL)
+
+        // One-time backfill when FTS is empty but base table is not.
+        var ftsCount: Int64 = 0
+        var baseCount: Int64 = 0
+        if let c = scalarInt64("SELECT COUNT(*) FROM clipboard_fts;") { ftsCount = c }
+        if let c = scalarInt64("SELECT COUNT(*) FROM clipboard_items;") { baseCount = c }
+
+        if ftsCount == 0 && baseCount > 0 {
+            let backfill = """
+            INSERT INTO clipboard_fts(id, text_content, ocr_text, source_app, html_content)
+            SELECT id,
+                   IFNULL(text_content,''),
+                   IFNULL(ocr_text,''),
+                   IFNULL(source_app,''),
+                   IFNULL(html_content,'')
+            FROM clipboard_items;
+            """
+            execQuiet(backfill)
+            print("[DatabaseManager] FTS5 backfill: \(baseCount) rows")
+        }
+        _ = db
+    }
+
+    private func runAnalyze() {
+        execQuiet("ANALYZE;")
+    }
+
+    private func runOptimize() {
+        // Recommended by SQLite for long-lived apps (pragma_optimize).
+        execQuiet("PRAGMA optimize;")
+    }
+
+    private func startOptimizeTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: dbQueue)
+        timer.schedule(
+            deadline: .now() + Self.optimizeIntervalSeconds,
+            repeating: Self.optimizeIntervalSeconds
+        )
+        timer.setEventHandler { [weak self] in
+            self?.runOptimize()
+            // Cheap passive checkpoint so WAL does not grow without bound under clip bursts.
+            self?.execQuiet("PRAGMA wal_checkpoint(PASSIVE);")
+        }
+        timer.resume()
+        optimizeTimer = timer
+    }
+
+    // MARK: - Helpers
+
+    @discardableResult
+    private func execQuiet(_ sql: String) -> Bool {
+        guard let db = db else { return false }
+        var err: UnsafeMutablePointer<CChar>?
+        let rc = sqlite3_exec(db, sql, nil, nil, &err)
+        if rc != SQLITE_OK {
+            let msg = err.map { String(cString: $0) } ?? "rc=\(rc)"
+            if let err { sqlite3_free(err) }
+            print("[DatabaseManager] SQL error: \(msg) | \(sql.prefix(120))")
+            return false
+        }
+        return true
+    }
+
+    private func scalarInt64(_ sql: String) -> Int64? {
+        guard let db = db else { return nil }
+        var stmt: OpaquePointer?
+        defer { if stmt != nil { sqlite3_finalize(stmt) } }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_int64(stmt, 0)
+    }
+
+    private static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+    private func bindText(_ stmt: OpaquePointer?, _ idx: Int32, _ value: String?) {
+        if let value = value {
+            sqlite3_bind_text(stmt, idx, (value as NSString).utf8String, -1, Self.SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(stmt, idx)
+        }
+    }
+
+    private func upsertFTS(id: String, text: String?, ocr: String?, source: String?, html: String?) {
+        // Delete-then-insert keeps FTS in sync with INSERT OR REPLACE on base table.
+        var del: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM clipboard_fts WHERE id = ?;", -1, &del, nil) == SQLITE_OK {
+            bindText(del, 1, id)
+            _ = sqlite3_step(del)
+        }
+        sqlite3_finalize(del)
+
+        let sql = """
+        INSERT INTO clipboard_fts(id, text_content, ocr_text, source_app, html_content)
+        VALUES (?, ?, ?, ?, ?);
+        """
+        var ins: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &ins, nil) == SQLITE_OK {
+            bindText(ins, 1, id)
+            bindText(ins, 2, text ?? "")
+            bindText(ins, 3, ocr ?? "")
+            bindText(ins, 4, source ?? "")
+            bindText(ins, 5, html ?? "")
+            _ = sqlite3_step(ins)
+        }
+        sqlite3_finalize(ins)
+    }
+
+    private func deleteFTS(id: String) {
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM clipboard_fts WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, id)
+            _ = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    /// Build a safe FTS5 MATCH expression (AND of tokens; ASCII gets prefix `token*`).
+    private func ftsMatchQuery(from raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        // Strip FTS operators / quotes; keep letters/digits/CJK/underscore/hyphen.
+        let cleaned = trimmed.unicodeScalars.map { s -> Character in
+            if CharacterSet.alphanumerics.contains(s) || s == "_" || s == "-" || s.value > 0x7F {
+                return Character(s)
+            }
+            return " "
+        }
+        let tokens = String(cleaned)
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .filter { !$0.isEmpty && $0.count <= 64 }
+        guard !tokens.isEmpty else { return nil }
+        // AND terms. ASCII: prefix match. Non-ASCII (e.g. CJK): exact token.
+        let parts = tokens.map { tok -> String in
+            let isAscii = tok.unicodeScalars.allSatisfy { $0.isASCII }
+            if isAscii {
+                return "\(tok)*"
+            }
+            return "\"\(tok.replacingOccurrences(of: "\"", with: ""))\""
+        }
+        return parts.joined(separator: " ")
+    }
+
+    // MARK: - CRUD
 
     func saveItem(_ item: ClipboardItem, completion: ((Bool) -> Void)? = nil) {
         dbQueue.async { [weak self] in
@@ -92,62 +294,70 @@ final class DatabaseManager: ObservableObject {
 
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-
-                sqlite3_bind_text(stmt, 1, (item.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                let idStr = item.id.uuidString
+                self.bindText(stmt, 1, idStr)
                 sqlite3_bind_double(stmt, 2, item.timestamp.timeIntervalSince1970)
-                sqlite3_bind_text(stmt, 3, (item.type.rawValue as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(stmt, 4, (item.contentHash as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                self.bindText(stmt, 3, item.type.rawValue)
+                self.bindText(stmt, 4, item.contentHash)
 
                 if let text = item.textContent {
-                    sqlite3_bind_text(stmt, 5, (text as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    self.bindText(stmt, 5, text)
                 } else { sqlite3_bind_null(stmt, 5) }
 
                 if let imgData = item.imageData {
                     imgData.withUnsafeBytes { ptr in
-                        sqlite3_bind_blob(stmt, 6, ptr.baseAddress, Int32(imgData.count), SQLITE_TRANSIENT)
+                        sqlite3_bind_blob(stmt, 6, ptr.baseAddress, Int32(imgData.count), Self.SQLITE_TRANSIENT)
                     }
                 } else { sqlite3_bind_null(stmt, 6) }
 
                 let fileURLsStr = item.fileURLs?.map { $0.path }.joined(separator: "|")
                 if let fUrls = fileURLsStr {
-                    sqlite3_bind_text(stmt, 7, (fUrls as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    self.bindText(stmt, 7, fUrls)
                 } else { sqlite3_bind_null(stmt, 7) }
 
                 if let urlStr = item.url?.absoluteString {
-                    sqlite3_bind_text(stmt, 8, (urlStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    self.bindText(stmt, 8, urlStr)
                 } else { sqlite3_bind_null(stmt, 8) }
 
                 if let rtfData = item.rtfData {
                     rtfData.withUnsafeBytes { ptr in
-                        sqlite3_bind_blob(stmt, 9, ptr.baseAddress, Int32(rtfData.count), SQLITE_TRANSIENT)
+                        sqlite3_bind_blob(stmt, 9, ptr.baseAddress, Int32(rtfData.count), Self.SQLITE_TRANSIENT)
                     }
                 } else { sqlite3_bind_null(stmt, 9) }
 
                 if let pdfData = item.pdfData {
                     pdfData.withUnsafeBytes { ptr in
-                        sqlite3_bind_blob(stmt, 10, ptr.baseAddress, Int32(pdfData.count), SQLITE_TRANSIENT)
+                        sqlite3_bind_blob(stmt, 10, ptr.baseAddress, Int32(pdfData.count), Self.SQLITE_TRANSIENT)
                     }
                 } else { sqlite3_bind_null(stmt, 10) }
 
                 if let html = item.htmlContent {
-                    sqlite3_bind_text(stmt, 11, (html as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    self.bindText(stmt, 11, html)
                 } else { sqlite3_bind_null(stmt, 11) }
 
                 sqlite3_bind_null(stmt, 12)
 
                 if let srcApp = item.sourceApp {
-                    sqlite3_bind_text(stmt, 13, (srcApp as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    self.bindText(stmt, 13, srcApp)
                 } else { sqlite3_bind_null(stmt, 13) }
 
                 if let ocr = item.ocrText {
-                    sqlite3_bind_text(stmt, 14, (ocr as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    self.bindText(stmt, 14, ocr)
                 } else { sqlite3_bind_null(stmt, 14) }
 
                 let stepRes = sqlite3_step(stmt)
                 sqlite3_finalize(stmt)
 
                 let success = (stepRes == SQLITE_DONE)
+                if success {
+                    self.upsertFTS(
+                        id: idStr,
+                        text: item.textContent,
+                        ocr: item.ocrText,
+                        source: item.sourceApp,
+                        html: item.htmlContent
+                    )
+                }
                 DispatchQueue.main.async { completion?(success) }
             } else {
                 DispatchQueue.main.async { completion?(false) }
@@ -163,6 +373,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Keyset pagination. Cursor points to last item of previous page.
+    /// Search uses FTS5 MATCH; falls back to LIKE only if FTS query cannot be built.
     func fetchPage(
         limit: Int = 30,
         cursor: ClipCursor? = nil,
@@ -179,41 +390,68 @@ final class DatabaseManager: ObservableObject {
             let fetchLimit = pageLimit + 1 // detect hasMore
             let q = query?.trimmingCharacters(in: .whitespacesAndNewlines)
             let hasQuery = !(q ?? "").isEmpty
+            let ftsMatch = hasQuery ? self.ftsMatchQuery(from: q!) : nil
 
             // Never SELECT image_data in list path.
-            var sql = """
-            SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text
-            FROM clipboard_items
-            """
-            var whereParts: [String] = []
-            if let cursor = cursor {
-                whereParts.append("(timestamp < ? OR (timestamp = ? AND id < ?))")
-                _ = cursor
+            var sql: String
+            var useFTS = false
+
+            if hasQuery, ftsMatch != nil {
+                useFTS = true
+                sql = """
+                SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, c.html_content, c.source_app, c.ocr_text
+                FROM clipboard_items c
+                WHERE c.id IN (
+                    SELECT id FROM clipboard_fts WHERE clipboard_fts MATCH ?
+                )
+                """
+                if cursor != nil {
+                    sql += " AND (c.timestamp < ? OR (c.timestamp = ? AND c.id < ?))"
+                }
+                sql += " ORDER BY c.timestamp DESC, c.id DESC LIMIT ?;"
+            } else {
+                sql = """
+                SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text
+                FROM clipboard_items
+                """
+                var whereParts: [String] = []
+                if cursor != nil {
+                    whereParts.append("(timestamp < ? OR (timestamp = ? AND id < ?))")
+                }
+                if hasQuery {
+                    // Fallback if FTS tokens empty: bounded LIKE (still better than nothing).
+                    whereParts.append("(IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ?)")
+                }
+                if !whereParts.isEmpty {
+                    sql += " WHERE " + whereParts.joined(separator: " AND ")
+                }
+                sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
             }
-            if hasQuery {
-                whereParts.append("(IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ?)")
-            }
-            if !whereParts.isEmpty {
-                sql += " WHERE " + whereParts.joined(separator: " AND ")
-            }
-            sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
 
             var stmt: OpaquePointer?
             var items: [ClipboardItem] = []
 
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
                 var bind = 1
-                if let cursor = cursor {
-                    sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
-                    sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
-                    sqlite3_bind_text(stmt, Int32(bind), (cursor.id as NSString).utf8String, -1, SQLITE_TRANSIENT); bind += 1
-                }
-                if hasQuery, let q = q {
-                    let like = "%\(q)%" as NSString
-                    for _ in 0..<4 {
-                        sqlite3_bind_text(stmt, Int32(bind), like.utf8String, -1, SQLITE_TRANSIENT)
-                        bind += 1
+                if useFTS, let match = ftsMatch {
+                    self.bindText(stmt, Int32(bind), match); bind += 1
+                    if let cursor = cursor {
+                        sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
+                        sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
+                        self.bindText(stmt, Int32(bind), cursor.id); bind += 1
+                    }
+                } else {
+                    if let cursor = cursor {
+                        sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
+                        sqlite3_bind_double(stmt, Int32(bind), cursor.timestamp); bind += 1
+                        self.bindText(stmt, Int32(bind), cursor.id); bind += 1
+                    }
+                    if hasQuery, let q = q {
+                        let like = "%\(q)%"
+                        for _ in 0..<4 {
+                            self.bindText(stmt, Int32(bind), like)
+                            bind += 1
+                        }
                     }
                 }
                 sqlite3_bind_int(stmt, Int32(bind), Int32(fetchLimit))
@@ -224,6 +462,9 @@ final class DatabaseManager: ObservableObject {
                     }
                 }
                 sqlite3_finalize(stmt)
+            } else {
+                let msg = String(cString: sqlite3_errmsg(db))
+                print("[DatabaseManager] fetchPage prepare failed: \(msg)")
             }
 
             var next: ClipCursor? = nil
@@ -284,10 +525,12 @@ final class DatabaseManager: ObservableObject {
             let sql = "DELETE FROM clipboard_items WHERE id = ?;"
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-                sqlite3_bind_text(stmt, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                self.bindText(stmt, 1, id.uuidString)
                 let stepRes = sqlite3_step(stmt)
                 sqlite3_finalize(stmt)
+                if stepRes == SQLITE_DONE {
+                    self.deleteFTS(id: id.uuidString)
+                }
                 DispatchQueue.main.async { completion?(stepRes == SQLITE_DONE) }
             } else {
                 DispatchQueue.main.async { completion?(false) }
@@ -307,8 +550,7 @@ final class DatabaseManager: ObservableObject {
             let sql = "SELECT image_data FROM clipboard_items WHERE id = ?;"
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-                sqlite3_bind_text(stmt, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                self.bindText(stmt, 1, id.uuidString)
 
                 if sqlite3_step(stmt) == SQLITE_ROW {
                     if let blobPtr = sqlite3_column_blob(stmt, 0) {
@@ -327,14 +569,42 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Batched wipe — avoids one multi-second write lock that starves backup/monitor writers.
     func clearAll(completion: ((Bool) -> Void)? = nil) {
         dbQueue.async { [weak self] in
             guard let self = self, let db = self.db else { completion?(false); return }
-            let res = sqlite3_exec(db, "DELETE FROM clipboard_items;", nil, nil, nil)
-            DispatchQueue.main.async { completion?(res == SQLITE_OK) }
+
+            var ok = true
+            // Clear FTS first (smaller); then base in batches.
+            if !self.execQuiet("DELETE FROM clipboard_fts;") {
+                ok = false
+            }
+
+            let batchSQL = """
+            DELETE FROM clipboard_items WHERE id IN (
+                SELECT id FROM clipboard_items LIMIT \(Self.deleteBatchSize)
+            );
+            """
+            var guardLoops = 0
+            while ok && guardLoops < 1_000_000 {
+                guardLoops += 1
+                var err: UnsafeMutablePointer<CChar>?
+                let rc = sqlite3_exec(db, batchSQL, nil, nil, &err)
+                if rc != SQLITE_OK {
+                    let msg = err.map { String(cString: $0) } ?? "rc=\(rc)"
+                    if let err { sqlite3_free(err) }
+                    print("[DatabaseManager] clearAll batch error: \(msg)")
+                    ok = false
+                    break
+                }
+                let changed = sqlite3_changes(db)
+                if changed == 0 { break }
+            }
+
+            self.execQuiet("PRAGMA wal_checkpoint(PASSIVE);")
+            DispatchQueue.main.async { completion?(ok) }
         }
     }
-
 
     // MARK: - Online backup / restore (sqlite3_backup)
 
@@ -426,6 +696,7 @@ final class DatabaseManager: ObservableObject {
                 sqlite3_finalize(stmt)
             }
             completion(count)
+            _ = db
         }
     }
 
@@ -442,6 +713,7 @@ final class DatabaseManager: ObservableObject {
             }
 
             if let db = self.db {
+                self.runOptimize()
                 sqlite3_close(db)
                 self.db = nil
             }
@@ -461,25 +733,30 @@ final class DatabaseManager: ObservableObject {
                 }
                 try FileManager.default.copyItem(at: sourceURL, to: dest)
             } catch {
-                _ = sqlite3_open(dest.path, &self.db)
+                _ = self.openAndConfigure()
                 completion(.failure(DBFileError.replaceFailed(error.localizedDescription)))
                 return
             }
 
-            if sqlite3_open(dest.path, &self.db) != SQLITE_OK {
+            if !self.openAndConfigure() {
                 let msg = self.db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "reopen failed"
                 completion(.failure(DBFileError.openFailed(msg)))
                 return
             }
             self.createTables()
+            self.bootstrapFTSIfNeeded()
+            self.runAnalyze()
             completion(.success(()))
         }
     }
 
     deinit {
+        optimizeTimer?.cancel()
+        optimizeTimer = nil
         if let db = db {
+            // Best-effort; deinit may not be on dbQueue.
+            sqlite3_exec(db, "PRAGMA optimize;", nil, nil, nil)
             sqlite3_close(db)
         }
     }
 }
-
