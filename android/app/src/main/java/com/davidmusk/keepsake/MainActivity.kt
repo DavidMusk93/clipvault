@@ -360,7 +360,7 @@ private fun SetupCard(onPick: () -> Unit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("打开云端记忆", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "在电脑端 Keepsake 会把剪贴板记忆同步到云盘。请选择其中的 Keepsake → backup 文件夹（常见于 Google 云端硬盘）。建议将该文件夹设为离线可用。",
+                "电脑端 Keepsake 会把记忆同步到 Google 云端硬盘。手机需先安装并登录「云端硬盘」App，再点下方按钮：在系统文件页左上角菜单切换到「云端硬盘 / Drive」，进入 My Drive → Keepsake → backup 后点使用此文件夹。若只看到本地目录，说明还没装 Drive 或没在侧栏切换存储源。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
             )
