@@ -684,23 +684,280 @@ final class DatabaseManager: ObservableObject {
 
     // MARK: - CRUD (latest-alive)
 
+    /// Outcome of a local capture write (for multi-device op-log).
+    enum ItemSaveResult: Equatable {
+        case failed
+        case inserted
+        case bumped(existingId: UUID)
+    }
+
     /// Insert new content, or **bump** existing same `content_hash` to newest (no new row).
     func saveItem(_ item: ClipboardItem, completion: ((Bool) -> Void)? = nil) {
+        saveItemDetailed(item) { result in
+            completion?(result != .failed)
+        }
+    }
+
+    func saveItemDetailed(_ item: ClipboardItem, completion: ((ItemSaveResult) -> Void)? = nil) {
         dbQueue.async { [weak self] in
-            guard let self = self, let db = self.db else { completion?(false); return }
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion?(.failed) }
+                return
+            }
 
             if let existingId = self.findIdByContentHash(item.contentHash) {
-                let ok = self.bumpLatestAlive(
-                    id: existingId,
-                    item: item
-                )
-                DispatchQueue.main.async { completion?(ok) }
+                let ok = self.bumpLatestAlive(id: existingId, item: item)
+                let uuid = UUID(uuidString: existingId)
+                DispatchQueue.main.async {
+                    if ok, let uuid {
+                        completion?(.bumped(existingId: uuid))
+                    } else {
+                        completion?(ok ? .inserted : .failed)
+                    }
+                }
                 return
             }
 
             let ok = self.insertNewItem(item, db: db)
-            DispatchQueue.main.async { completion?(ok) }
+            DispatchQueue.main.async { completion?(ok ? .inserted : .failed) }
         }
+    }
+
+    // MARK: - Multi-device sync helpers
+
+    func metaValue(forKey key: String, completion: @escaping (String?) -> Void) {
+        dbQueue.async { [weak self] in
+            let v = self?.metaGet(key)
+            DispatchQueue.main.async { completion(v) }
+        }
+    }
+
+    func setMetaValue(_ key: String, _ value: String, completion: (() -> Void)? = nil) {
+        dbQueue.async { [weak self] in
+            self?.metaSet(key, value)
+            DispatchQueue.main.async { completion?() }
+        }
+    }
+
+    /// Synchronous meta access — **must** be called on `dbQueue` only (sync service workers).
+    func metaGetSync(_ key: String) -> String? { metaGet(key) }
+    func metaSetSync(_ key: String, _ value: String) { metaSet(key, value) }
+
+    /// Run work on the database serial queue (sync apply / bootstrap).
+    func performSyncWork(_ body: @escaping () -> Void) {
+        dbQueue.async(execute: body)
+    }
+
+    /// Blob keys present locally for a content hash (image / rtf / pdf suffixes).
+    func existingBlobKeys(for contentHash: String) -> [String] {
+        var keys: [String] = []
+        let candidates = [contentHash, contentHash + ".rtf", contentHash + ".pdf"]
+        for k in candidates {
+            if fm.fileExists(atPath: blobFileURL(hash: k).path) {
+                keys.append(k)
+            }
+        }
+        return keys
+    }
+
+    /// Keyset export of metadata rows (no BLOBs) for one-shot sync bootstrap.
+    func exportItemsForSync(
+        limit: Int,
+        cursor: ClipCursor?,
+        completion: @escaping (_ items: [ClipboardItem], _ next: ClipCursor?) -> Void
+    ) {
+        fetchPage(limit: limit, cursor: cursor, query: nil, completion: { page in
+            completion(page.items, page.nextCursor)
+        })
+    }
+
+    /// Apply remote upsert. Content-hash latest-alive: same body does not create a second row.
+    /// Returns whether the local DB changed.
+    @discardableResult
+    func applySyncUpsertLocked(
+        id: UUID,
+        timestamp: Date,
+        typeRaw: String,
+        contentHash: String,
+        textContent: String?,
+        htmlContent: String?,
+        ocrText: String?,
+        sourceApp: String?,
+        urlString: String?,
+        fileURLPaths: [String]?,
+        copyCount: Int
+    ) -> Bool {
+        guard let db = db else { return false }
+        let idStr = id.uuidString
+        let type = ClipboardType(rawValue: typeRaw) ?? .other
+
+        // Same content already present under any id → bump that row (dedupe across hosts).
+        if let existing = findIdByContentHash(contentHash) {
+            if existing == idStr {
+                return refreshRemoteFields(
+                    id: idStr,
+                    timestamp: timestamp,
+                    sourceApp: sourceApp,
+                    ocrText: ocrText,
+                    textContent: textContent,
+                    htmlContent: htmlContent,
+                    copyCount: copyCount
+                )
+            }
+            // Different id, same body: bump existing, keep local id stable.
+            let item = ClipboardItem(
+                id: UUID(uuidString: existing) ?? id,
+                timestamp: timestamp,
+                type: type,
+                contentHash: contentHash,
+                textContent: textContent,
+                htmlContent: htmlContent,
+                ocrText: ocrText,
+                sourceApp: sourceApp
+            )
+            return bumpLatestAlive(id: existing, item: item)
+        }
+
+        // Row with this id already? (re-delivery)
+        if rowExists(id: idStr) {
+            return refreshRemoteFields(
+                id: idStr,
+                timestamp: timestamp,
+                sourceApp: sourceApp,
+                ocrText: ocrText,
+                textContent: textContent,
+                htmlContent: htmlContent,
+                copyCount: copyCount
+            )
+        }
+
+        let urls = fileURLPaths?.compactMap { URL(fileURLWithPath: $0) }
+        let url = urlString.flatMap { URL(string: $0) }
+        let item = ClipboardItem(
+            id: id,
+            timestamp: timestamp,
+            type: type,
+            contentHash: contentHash,
+            textContent: textContent,
+            fileURLs: urls,
+            url: url,
+            htmlContent: htmlContent,
+            ocrText: ocrText,
+            sourceApp: sourceApp
+        )
+        guard insertNewItem(item, db: db) else { return false }
+        if copyCount > 1 {
+            _ = setCopyCount(id: idStr, count: copyCount)
+        }
+        return true
+    }
+
+    @discardableResult
+    func applySyncTombstoneLocked(id: UUID) -> Bool {
+        guard let db = db else { return false }
+        let idStr = id.uuidString
+        var hash: String?
+        var hStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT content_hash FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
+            bindText(hStmt, 1, idStr)
+            if sqlite3_step(hStmt) == SQLITE_ROW {
+                hash = sqlite3_column_text(hStmt, 0).map { String(cString: $0) }
+            }
+        }
+        sqlite3_finalize(hStmt)
+
+        let sql = "DELETE FROM clipboard_items WHERE id = ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        bindText(stmt, 1, idStr)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        guard rc == SQLITE_DONE else { return false }
+        // sqlite3_changes: 0 means already gone — still success for idempotent tombstone.
+        deleteFTS(id: idStr)
+        if let hash { gcBlobIfUnreferenced(hash: hash) }
+        return true
+    }
+
+    private func rowExists(id: String) -> Bool {
+        guard let db = db else { return false }
+        var stmt: OpaquePointer?
+        defer { if stmt != nil { sqlite3_finalize(stmt) } }
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM clipboard_items WHERE id = ? LIMIT 1;", -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+        bindText(stmt, 1, id)
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
+    private func setCopyCount(id: String, count: Int) -> Bool {
+        guard let db = db else { return false }
+        var stmt: OpaquePointer?
+        let sql = "UPDATE clipboard_items SET copy_count = MAX(COALESCE(copy_count, 1), ?) WHERE id = ?;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        sqlite3_bind_int(stmt, 1, Int32(max(1, count)))
+        bindText(stmt, 2, id)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        return rc == SQLITE_DONE
+    }
+
+    private func refreshRemoteFields(
+        id: String,
+        timestamp: Date,
+        sourceApp: String?,
+        ocrText: String?,
+        textContent: String?,
+        htmlContent: String?,
+        copyCount: Int
+    ) -> Bool {
+        guard let db = db else { return false }
+        let sql = """
+        UPDATE clipboard_items SET
+            timestamp = MAX(timestamp, ?),
+            source_app = COALESCE(?, source_app),
+            ocr_text = CASE WHEN ? IS NOT NULL AND length(?) > length(COALESCE(ocr_text, '')) THEN ? ELSE ocr_text END,
+            text_content = COALESCE(text_content, ?),
+            html_content = COALESCE(html_content, ?),
+            copy_count = MAX(COALESCE(copy_count, 1), ?)
+        WHERE id = ?;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        sqlite3_bind_double(stmt, 1, timestamp.timeIntervalSince1970)
+        bindText(stmt, 2, sourceApp)
+        bindText(stmt, 3, ocrText)
+        bindText(stmt, 4, ocrText)
+        bindText(stmt, 5, ocrText)
+        bindText(stmt, 6, textContent)
+        bindText(stmt, 7, htmlContent)
+        sqlite3_bind_int(stmt, 8, Int32(max(1, copyCount)))
+        bindText(stmt, 9, id)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        guard rc == SQLITE_DONE else { return false }
+        // Refresh FTS with best-known fields
+        var t: String?
+        var o: String?
+        var s: String?
+        var h: String?
+        var q: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db,
+            "SELECT text_content, ocr_text, source_app, html_content FROM clipboard_items WHERE id = ?;",
+            -1, &q, nil
+        ) == SQLITE_OK {
+            bindText(q, 1, id)
+            if sqlite3_step(q) == SQLITE_ROW {
+                t = sqlite3_column_text(q, 0).map { String(cString: $0) }
+                o = sqlite3_column_text(q, 1).map { String(cString: $0) }
+                s = sqlite3_column_text(q, 2).map { String(cString: $0) }
+                h = sqlite3_column_text(q, 3).map { String(cString: $0) }
+            }
+        }
+        sqlite3_finalize(q)
+        upsertFTS(id: id, text: t, ocr: o, source: s, html: h)
+        return true
     }
 
     /// Same content re-copied: keep one row, refresh timestamp / source / count; keep stable id.

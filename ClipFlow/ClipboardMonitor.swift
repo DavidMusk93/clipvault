@@ -48,11 +48,16 @@ class ClipboardMonitor: ObservableObject {
                 return
             }
             
-            // 存入 DuckDB 数据库并触发 iCloud 同步
-            self.database?.saveItem(item)
-            iCloudSyncManager.shared.syncItemToCloud(item)
-            NotificationCenter.default.post(name: Notification.Name("ClipFlowItemAdded"), object: nil)
-            
+            // Local SQLite first; multi-device op-log via CloudDocsSyncService (not whole-db backup).
+            self.database?.saveItemDetailed(item) { result in
+                CloudDocsSyncService.shared?.recordLocalCapture(item: item, result: result)
+                iCloudSyncManager.shared.syncItemToCloud(item)
+                NotificationCenter.default.post(
+                    name: Notification.Name("ClipFlowItemAdded"),
+                    object: item
+                )
+            }
+
             DispatchQueue.main.async {
                 self.lastItem = item
             }

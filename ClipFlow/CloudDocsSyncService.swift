@@ -1,0 +1,819 @@
+import Foundation
+import CryptoKit
+
+/// Multi-device **live sync** over iCloud Drive CloudDocs (op-log + shared CAS).
+///
+/// ## Two planes (do not conflate)
+/// - **Backup** (`CloudDocsBackupService`): disaster recovery — full slim DB + CAS snapshot.
+/// - **Sync** (this type): multi-active Mac merge — append-only ops per host + content-addressed blobs.
+///
+/// ```
+/// …/CloudDocs/ClipFlow/sync/v1/
+///   ops/{host_id}/{seq:016d}.json
+///   heads/{host_id}.json
+/// …/CloudDocs/ClipFlow/backup/blobs/{hash}.bin   # shared CAS with backup plane
+/// ```
+///
+/// Local: outbox under `KEEPSAKE_HOME/sync/outbox/`, cursors in `keepsake_meta`.
+final class CloudDocsSyncService {
+    private(set) static var shared: CloudDocsSyncService?
+
+    static let statusChangedNotification = Notification.Name("ClipFlowSyncStatusChanged")
+
+    @discardableResult
+    static func bootstrap(database: DatabaseManager) -> CloudDocsSyncService {
+        if let s = shared { return s }
+        let s = CloudDocsSyncService(database: database)
+        shared = s
+        return s
+    }
+
+    // MARK: Types
+
+    struct Config: Codable, Equatable {
+        var enabled: Bool = true
+        /// Poll remote heads / drain outbox (CloudDocs File Provider is laggy).
+        var pollIntervalSeconds: Double = 45
+        /// Max ops to pull per host per cycle.
+        var pullBatchLimit: Int = 200
+        static let `default` = Config()
+    }
+
+    struct SyncOp: Codable, Equatable {
+        var v: Int = 1
+        var opId: String
+        var host: String
+        var seq: Int
+        /// `upsert` | `tombstone` | `touch`
+        var kind: String
+        var itemId: String
+        var contentHash: String?
+        var type: String?
+        var wallTs: Double
+        var hlc: String
+        var textContent: String?
+        var htmlContent: String?
+        var ocrText: String?
+        var sourceApp: String?
+        var url: String?
+        var fileUrls: [String]?
+        var copyCount: Int?
+        /// CAS keys under backup/blobs (without `.bin` suffix in storage path — keys as DatabaseManager uses).
+        var blobKeys: [String]?
+        var note: String?
+
+        enum CodingKeys: String, CodingKey {
+            case v, opId = "op_id", host, seq, kind
+            case itemId = "item_id", contentHash = "content_hash", type
+            case wallTs = "wall_ts", hlc
+            case textContent = "text_content", htmlContent = "html_content"
+            case ocrText = "ocr_text", sourceApp = "source_app", url
+            case fileUrls = "file_urls", copyCount = "copy_count"
+            case blobKeys = "blob_keys", note
+        }
+    }
+
+    struct HostHead: Codable, Equatable {
+        var host: String
+        var seq: Int
+        var lastOpId: String?
+        var wallTs: Double
+        var itemHint: Int?
+        var updatedAt: String
+    }
+
+    struct PeerStatus: Codable, Equatable {
+        var host: String
+        var remoteSeq: Int
+        var appliedSeq: Int
+        var lag: Int
+    }
+
+    struct Status: Codable, Equatable {
+        var enabled: Bool
+        var hostId: String
+        var localSeq: Int
+        var outboxPending: Int
+        var cloudDocsAvailable: Bool
+        var syncRootPath: String?
+        var lastPushAt: String?
+        var lastPullAt: String?
+        var lastPhase: String?
+        var lastError: String?
+        var inProgress: Bool
+        var peers: [PeerStatus]
+        var pollIntervalSeconds: Double
+        var scheme: String = "op-log+cas"
+        var policy: String
+    }
+
+    // MARK: State
+
+    private let database: DatabaseManager
+    private let queue = DispatchQueue(label: "com.keepsake.sync.clouddocs", qos: .utility)
+    private let fm = FileManager.default
+    private let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys]
+        return e
+    }()
+    private let decoder = JSONDecoder()
+
+    private var config: Config
+    private let hostId: String
+    private var nextSeq: Int = 1
+    private var lastPushUnix: Double?
+    private var lastPullUnix: Double?
+    private var lastPhase: String?
+    private var lastError: String?
+    private var inProgress = false
+    private var pollTimer: DispatchSourceTimer?
+    private var peerRemoteSeq: [String: Int] = [:]
+
+    private init(database: DatabaseManager) {
+        self.database = database
+        self.config = Self.loadConfig()
+        self.hostId = Self.loadOrCreateHostId()
+        // Hydrate seq + start loops off the critical path (CloudDocs may stall).
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.database.performSyncWork {
+                if let s = self.database.metaGetSync("sync.next_seq"), let n = Int(s), n > 0 {
+                    self.nextSeq = n
+                } else {
+                    self.nextSeq = max(1, self.highestLocalOutboxSeq() + 1)
+                    self.database.metaSetSync("sync.next_seq", String(self.nextSeq))
+                }
+            }
+            self.bootstrapLocalHistoryIfNeeded()
+            self.startPollTimer()
+            if self.config.enabled {
+                self.queue.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    self?.cycle(reason: "startup")
+                }
+            }
+            self.publishStatus()
+            print("[Sync] ready · host=\(self.hostId) · enabled=\(self.config.enabled) · poll=\(Int(self.config.pollIntervalSeconds))s · root=\(self.syncRootURL()?.path ?? "nil")")
+        }
+    }
+
+    // MARK: Public API
+
+    func recordLocalCapture(item: ClipboardItem, result: DatabaseManager.ItemSaveResult) {
+        guard config.enabled else { return }
+        guard result != .failed else { return }
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            let kind: String
+            let itemId: String
+            switch result {
+            case .failed:
+                return
+            case .inserted:
+                kind = "upsert"
+                itemId = item.id.uuidString
+            case .bumped(let existingId):
+                kind = "touch"
+                itemId = existingId.uuidString
+            }
+            let blobs = self.database.existingBlobKeys(for: item.contentHash)
+            // Ensure payload files exist for image/rtf/pdf before op leaves the machine.
+            if let data = item.imageData, !data.isEmpty {
+                _ = self.database.writeBlobFile(hash: item.contentHash, data: data)
+            }
+            if let data = item.rtfData, !data.isEmpty {
+                _ = self.database.writeBlobFile(hash: item.contentHash + ".rtf", data: data)
+            }
+            if let data = item.pdfData, !data.isEmpty {
+                _ = self.database.writeBlobFile(hash: item.contentHash + ".pdf", data: data)
+            }
+            let keys = self.database.existingBlobKeys(for: item.contentHash)
+            let op = self.makeOp(
+                kind: kind,
+                itemId: itemId,
+                item: item,
+                blobKeys: keys.isEmpty ? blobs : keys
+            )
+            self.enqueue(op)
+            self.scheduleDrain(reason: "capture")
+        }
+    }
+
+    func recordLocalTombstone(id: UUID) {
+        guard config.enabled else { return }
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            let op = self.makeOp(
+                kind: "tombstone",
+                itemId: id.uuidString,
+                item: nil,
+                blobKeys: nil
+            )
+            self.enqueue(op)
+            self.scheduleDrain(reason: "tombstone")
+        }
+    }
+
+    func runNow(completion: ((Bool, String) -> Void)? = nil) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.cycle(reason: "manual") { ok, msg in
+                DispatchQueue.main.async { completion?(ok, msg) }
+            }
+        }
+    }
+
+    func setEnabled(_ on: Bool, completion: ((Config) -> Void)? = nil) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.config.enabled = on
+            Self.saveConfig(self.config)
+            if on {
+                self.cycle(reason: "enable")
+            }
+            self.publishStatus()
+            let c = self.config
+            DispatchQueue.main.async { completion?(c) }
+        }
+    }
+
+    func statusSnapshot(completion: @escaping (Status) -> Void) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            let st = self.buildStatus()
+            DispatchQueue.main.async { completion(st) }
+        }
+    }
+
+    // MARK: Cycle
+
+    private var drainWorkItem: DispatchWorkItem?
+
+    private func scheduleDrain(reason: String) {
+        drainWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.cycle(reason: reason)
+        }
+        drainWorkItem = work
+        // Short coalesce so bursty copies don't thrash File Provider.
+        queue.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+
+    private func cycle(reason: String, completion: ((Bool, String) -> Void)? = nil) {
+        guard config.enabled else {
+            completion?(false, "sync disabled")
+            return
+        }
+        guard !inProgress else {
+            completion?(false, "sync in progress")
+            return
+        }
+        inProgress = true
+        lastPhase = "cycle:\(reason)"
+        lastError = nil
+        publishStatus()
+
+        var messages: [String] = []
+        var okAll = true
+
+        // 1) Push local outbox (+ CAS)
+        lastPhase = "push"
+        let pushed = pushOutbox()
+        messages.append(pushed.message)
+        okAll = okAll && pushed.ok
+        if pushed.ok { lastPushUnix = Date().timeIntervalSince1970 }
+
+        // 2) Pull remote ops
+        lastPhase = "pull"
+        let pulled = pullRemote()
+        messages.append(pulled.message)
+        okAll = okAll && pulled.ok
+        if pulled.ok { lastPullUnix = Date().timeIntervalSince1970 }
+
+        lastPhase = okAll ? "ok" : "partial"
+        if !okAll, lastError == nil {
+            lastError = messages.joined(separator: " · ")
+        }
+        inProgress = false
+        publishStatus()
+        completion?(okAll, messages.joined(separator: " · "))
+    }
+
+    // MARK: Outbox / push
+
+    private func localSyncDir() -> URL {
+        let root = DatabaseManager.resolveDataRoot().appendingPathComponent("sync", isDirectory: true)
+        try? fm.createDirectory(at: root.appendingPathComponent("outbox", isDirectory: true), withIntermediateDirectories: true)
+        return root
+    }
+
+    private func outboxDir() -> URL {
+        localSyncDir().appendingPathComponent("outbox", isDirectory: true)
+    }
+
+    private func highestLocalOutboxSeq() -> Int {
+        let dir = outboxDir()
+        let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        var best = 0
+        for f in files where f.pathExtension == "json" {
+            if let n = Int(f.deletingPathExtension().lastPathComponent) {
+                best = max(best, n)
+            }
+        }
+        return best
+    }
+
+    private func makeOp(kind: String, itemId: String, item: ClipboardItem?, blobKeys: [String]?) -> SyncOp {
+        let seq = nextSeq
+        nextSeq += 1
+        persistNextSeq()
+        let wall = item?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
+        let hlc = String(format: "%.0f-%@-%d", wall * 1000, hostId, seq)
+        return SyncOp(
+            opId: UUID().uuidString,
+            host: hostId,
+            seq: seq,
+            kind: kind,
+            itemId: itemId,
+            contentHash: item?.contentHash,
+            type: item?.type.rawValue,
+            wallTs: wall,
+            hlc: hlc,
+            textContent: item?.textContent,
+            htmlContent: item?.htmlContent,
+            ocrText: item?.ocrText,
+            sourceApp: item?.sourceApp,
+            url: item?.url?.absoluteString,
+            fileUrls: item?.fileURLs?.map(\.path),
+            copyCount: 1,
+            blobKeys: blobKeys,
+            note: nil
+        )
+    }
+
+    private func persistNextSeq() {
+        let sem = DispatchSemaphore(value: 0)
+        database.performSyncWork {
+            self.database.metaSetSync("sync.next_seq", String(self.nextSeq))
+            sem.signal()
+        }
+        sem.wait()
+    }
+
+    private func enqueue(_ op: SyncOp) {
+        let url = outboxDir().appendingPathComponent(String(format: "%016d.json", op.seq))
+        do {
+            let data = try encoder.encode(op)
+            try data.write(to: url, options: .atomic)
+            lastPhase = "outbox:\(op.seq)"
+        } catch {
+            lastError = "outbox write: \(error.localizedDescription)"
+            print("[Sync] outbox write failed: \(error)")
+        }
+        publishStatus()
+    }
+
+    private struct StepResult {
+        var ok: Bool
+        var message: String
+    }
+
+    private func pushOutbox() -> StepResult {
+        guard let syncRoot = syncRootURL(), let casRoot = casBlobsURL() else {
+            lastError = "CloudDocs unavailable"
+            return StepResult(ok: false, message: "no CloudDocs")
+        }
+        ensureDir(syncRoot)
+        ensureDir(opsDir(in: syncRoot, host: hostId))
+        ensureDir(headsDir(in: syncRoot))
+        ensureDir(casRoot)
+
+        let files = ((try? fm.contentsOfDirectory(
+            at: outboxDir(),
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []).filter { $0.pathExtension == "json" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        if files.isEmpty {
+            // Still refresh head so peers see liveness.
+            writeHead(seq: max(0, nextSeq - 1), lastOpId: nil, root: syncRoot)
+            return StepResult(ok: true, message: "push:idle")
+        }
+
+        var published = 0
+        var lastOp: SyncOp?
+        for file in files {
+            guard let data = try? Data(contentsOf: file),
+                  let op = try? decoder.decode(SyncOp.self, from: data) else {
+                continue
+            }
+            // CAS first
+            if let keys = op.blobKeys {
+                for key in keys {
+                    if !publishBlob(key: key, to: casRoot) {
+                        lastError = "blob missing local \(key)"
+                        return StepResult(ok: false, message: "push:blob_missing \(key)")
+                    }
+                }
+            }
+            let dest = opsDir(in: syncRoot, host: hostId)
+                .appendingPathComponent(String(format: "%016d.json", op.seq))
+            do {
+                try publishJSONAtomic(data, to: dest)
+                try? fm.removeItem(at: file)
+                published += 1
+                lastOp = op
+            } catch {
+                lastError = "push op \(op.seq): \(error.localizedDescription)"
+                return StepResult(ok: false, message: "push:fail \(op.seq)")
+            }
+        }
+        if let lastOp {
+            writeHead(seq: lastOp.seq, lastOpId: lastOp.opId, root: syncRoot)
+        } else {
+            writeHead(seq: max(0, nextSeq - 1), lastOpId: nil, root: syncRoot)
+        }
+        return StepResult(ok: true, message: "push:\(published)")
+    }
+
+    private func publishBlob(key: String, to casRoot: URL) -> Bool {
+        let local = database.blobFileURL(hash: key)
+        guard fm.fileExists(atPath: local.path) else { return false }
+        let dest = casRoot.appendingPathComponent(key + ".bin")
+        if fm.fileExists(atPath: dest.path) {
+            let ls = (try? local.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+            let ds = (try? dest.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -2
+            if ls == ds, ls > 0 { return true }
+            try? fm.removeItem(at: dest)
+        }
+        do {
+            try fullCopy(from: local, to: dest)
+            return true
+        } catch {
+            print("[Sync] blob publish failed \(key): \(error)")
+            return false
+        }
+    }
+
+    // MARK: Pull / merge
+
+    private func pullRemote() -> StepResult {
+        guard let syncRoot = syncRootURL(), let casRoot = casBlobsURL() else {
+            return StepResult(ok: false, message: "pull:no CloudDocs")
+        }
+        let heads = headsDir(in: syncRoot)
+        ensureDir(heads)
+        let headFiles = ((try? fm.contentsOfDirectory(
+            at: heads,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []).filter { $0.pathExtension == "json" }
+
+        var appliedTotal = 0
+        var peerNotes: [String] = []
+
+        for headFile in headFiles {
+            guard let data = try? Data(contentsOf: headFile),
+                  let head = try? decoder.decode(HostHead.self, from: data) else { continue }
+            if head.host == hostId { continue }
+            peerRemoteSeq[head.host] = head.seq
+
+            var applied = 0
+            database.performSyncWork {
+                // run applied cursor read/write + DB apply on db queue via nested sync — we use a lock pattern:
+            }
+            // Use a serial handshake: pull ops on sync queue, apply via performSyncWork with semaphore.
+            let appliedBefore = appliedSeq(for: head.host)
+            var cursor = appliedBefore
+            let limit = config.pullBatchLimit
+            var batch = 0
+            while cursor < head.seq, batch < limit {
+                let next = cursor + 1
+                let opURL = opsDir(in: syncRoot, host: head.host)
+                    .appendingPathComponent(String(format: "%016d.json", next))
+                guard fm.fileExists(atPath: opURL.path),
+                      let opData = try? Data(contentsOf: opURL),
+                      let op = try? decoder.decode(SyncOp.self, from: opData) else {
+                    // File Provider lag: stop this host, retry next poll.
+                    lastPhase = "pull:wait \(head.host)#\(next)"
+                    break
+                }
+                // Import blobs
+                if let keys = op.blobKeys {
+                    for key in keys {
+                        let remote = casRoot.appendingPathComponent(key + ".bin")
+                        if fm.fileExists(atPath: remote.path) {
+                            database.importBlobIfNeeded(hash: key, from: remote)
+                        } else {
+                            lastPhase = "pull:blob_wait \(key)"
+                            // Do not advance cursor — retry later.
+                            break
+                        }
+                    }
+                    // If any blob still missing locally after import attempt, wait.
+                    if let keys = op.blobKeys, keys.contains(where: { database.readBlobFile(hash: $0) == nil && needsBlob(op: op, key: $0) }) {
+                        break
+                    }
+                }
+
+                let sem = DispatchSemaphore(value: 0)
+                var changed = false
+                database.performSyncWork {
+                    changed = self.applyOpLocked(op)
+                    self.database.metaSetSync(self.appliedKey(host: head.host), String(next))
+                    sem.signal()
+                }
+                sem.wait()
+                cursor = next
+                applied += 1
+                batch += 1
+                if changed {
+                    NotificationCenter.default.post(name: Notification.Name("ClipFlowItemAdded"), object: nil)
+                }
+            }
+            appliedTotal += applied
+            peerNotes.append("\(head.host)+\(applied)/@\(cursor)")
+        }
+
+        return StepResult(ok: true, message: "pull:\(appliedTotal) [\(peerNotes.joined(separator: ","))]")
+    }
+
+    private func needsBlob(op: SyncOp, key: String) -> Bool {
+        // Text-only upserts may list empty blobKeys; if key listed, require it for image/rtf/pdf types.
+        guard let t = op.type else { return true }
+        switch t {
+        case "image", "rtf", "pdf": return true
+        default: return key.hasSuffix(".rtf") || key.hasSuffix(".pdf")
+        }
+    }
+
+    private func applyOpLocked(_ op: SyncOp) -> Bool {
+        guard let uuid = UUID(uuidString: op.itemId) else { return false }
+        switch op.kind {
+        case "tombstone":
+            return database.applySyncTombstoneLocked(id: uuid)
+        case "upsert", "touch":
+            guard let hash = op.contentHash, let type = op.type else { return false }
+            return database.applySyncUpsertLocked(
+                id: uuid,
+                timestamp: Date(timeIntervalSince1970: op.wallTs),
+                typeRaw: type,
+                contentHash: hash,
+                textContent: op.textContent,
+                htmlContent: op.htmlContent,
+                ocrText: op.ocrText,
+                sourceApp: op.sourceApp,
+                urlString: op.url,
+                fileURLPaths: op.fileUrls,
+                copyCount: op.copyCount ?? 1
+            )
+        default:
+            return false
+        }
+    }
+
+    private func appliedKey(host: String) -> String { "sync.applied.\(host)" }
+
+    private func appliedSeq(for host: String) -> Int {
+        var value = 0
+        let sem = DispatchSemaphore(value: 0)
+        database.performSyncWork {
+            if let s = self.database.metaGetSync(self.appliedKey(host: host)), let n = Int(s) {
+                value = n
+            }
+            sem.signal()
+        }
+        sem.wait()
+        return value
+    }
+
+    // MARK: Bootstrap local history → outbox (once)
+
+    private func bootstrapLocalHistoryIfNeeded() {
+        let sem = DispatchSemaphore(value: 0)
+        var done = false
+        database.performSyncWork {
+            done = self.database.metaGetSync("sync.bootstrapped") == "1"
+            sem.signal()
+        }
+        sem.wait()
+        guard !done else { return }
+        lastPhase = "bootstrap"
+        // Export pages and enqueue upserts without spamming CloudDocs mid-loop;
+        // drain happens in cycle.
+        var cursor: ClipCursor? = nil
+        var total = 0
+        let pageLimit = 50
+        let group = DispatchGroup()
+        var keepGoing = true
+        while keepGoing {
+            group.enter()
+            var pageItems: [ClipboardItem] = []
+            var next: ClipCursor?
+            database.exportItemsForSync(limit: pageLimit, cursor: cursor) { items, n in
+                pageItems = items
+                next = n
+                group.leave()
+            }
+            group.wait()
+            if pageItems.isEmpty {
+                keepGoing = false
+                break
+            }
+            for item in pageItems {
+                let keys = database.existingBlobKeys(for: item.contentHash)
+                let op = makeOp(kind: "upsert", itemId: item.id.uuidString, item: item, blobKeys: keys)
+                enqueue(op)
+                total += 1
+            }
+            cursor = next
+            if next == nil { keepGoing = false }
+            // Safety cap for huge histories: remaining items still sync on future captures;
+            // full history can re-run after meta clear. 5k is plenty for personal clipboard.
+            if total >= 5000 { keepGoing = false }
+        }
+        database.performSyncWork {
+            self.database.metaSetSync("sync.bootstrapped", "1")
+        }
+        print("[Sync] bootstrapped \(total) local items into outbox")
+        lastPhase = "bootstrap:\(total)"
+    }
+
+    // MARK: Paths
+
+    private func syncRootURL() -> URL? {
+        BackupDestinationResolver.cloudDocsURL()?
+            .appendingPathComponent("ClipFlow/sync/v1", isDirectory: true)
+    }
+
+    private func casBlobsURL() -> URL? {
+        BackupDestinationResolver.cloudDocsURL()?
+            .appendingPathComponent("ClipFlow/backup/blobs", isDirectory: true)
+    }
+
+    private func opsDir(in root: URL, host: String) -> URL {
+        root.appendingPathComponent("ops/\(host)", isDirectory: true)
+    }
+
+    private func headsDir(in root: URL) -> URL {
+        root.appendingPathComponent("heads", isDirectory: true)
+    }
+
+    private func ensureDir(_ url: URL) {
+        // Stepwise for File Provider friendliness
+        var partial = URL(fileURLWithPath: "/")
+        let parts = url.path.split(separator: "/").map(String.init)
+        for p in parts {
+            partial = partial.appendingPathComponent(p, isDirectory: true)
+            if !fm.fileExists(atPath: partial.path) {
+                try? fm.createDirectory(at: partial, withIntermediateDirectories: false)
+            }
+        }
+    }
+
+    private func writeHead(seq: Int, lastOpId: String?, root: URL) {
+        let head = HostHead(
+            host: hostId,
+            seq: seq,
+            lastOpId: lastOpId,
+            wallTs: Date().timeIntervalSince1970,
+            itemHint: nil,
+            updatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        let url = headsDir(in: root).appendingPathComponent("\(hostId).json")
+        guard let data = try? encoder.encode(head) else { return }
+        try? publishJSONAtomic(data, to: url)
+    }
+
+    private func publishJSONAtomic(_ data: Data, to dest: URL) throws {
+        ensureDir(dest.deletingLastPathComponent())
+        let tmp = dest.deletingLastPathComponent()
+            .appendingPathComponent(".tmp_\(UUID().uuidString).json")
+        try data.write(to: tmp, options: .atomic)
+        if fm.fileExists(atPath: dest.path) {
+            try fm.removeItem(at: dest)
+        }
+        try fm.moveItem(at: tmp, to: dest)
+    }
+
+    private func fullCopy(from src: URL, to dst: URL) throws {
+        ensureDir(dst.deletingLastPathComponent())
+        let tmp = dst.deletingLastPathComponent()
+            .appendingPathComponent(".tmp_\(UUID().uuidString)_\(dst.lastPathComponent)")
+        if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
+        try fm.copyItem(at: src, to: tmp)
+        if fm.fileExists(atPath: dst.path) { try? fm.removeItem(at: dst) }
+        try fm.moveItem(at: tmp, to: dst)
+    }
+
+    // MARK: Host / config
+
+    private static func loadOrCreateHostId() -> String {
+        let root = DatabaseManager.resolveDataRoot()
+        let url = root.appendingPathComponent("config/host.json")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        struct HostFile: Codable { var hostId: String; var label: String? }
+        if let data = try? Data(contentsOf: url),
+           let hf = try? JSONDecoder().decode(HostFile.self, from: data),
+           !hf.hostId.isEmpty {
+            return hf.hostId
+        }
+        let hostName = ProcessInfo.processInfo.hostName
+            .replacingOccurrences(of: ".local", with: "")
+            .replacingOccurrences(of: " ", with: "-")
+        let short = String(UUID().uuidString.prefix(8)).lowercased()
+        let id = "\(hostName)-\(short)"
+        let hf = HostFile(hostId: id, label: ProcessInfo.processInfo.hostName)
+        if let data = try? JSONEncoder().encode(hf) {
+            try? data.write(to: url, options: .atomic)
+        }
+        return id
+    }
+
+    private static var configURL: URL {
+        DatabaseManager.resolveDataRoot().appendingPathComponent("config/sync.json")
+    }
+
+    private static func loadConfig() -> Config {
+        if let data = try? Data(contentsOf: configURL),
+           let c = try? JSONDecoder().decode(Config.self, from: data) {
+            return c
+        }
+        let c = Config.default
+        saveConfig(c)
+        return c
+    }
+
+    private static func saveConfig(_ c: Config) {
+        try? FileManager.default.createDirectory(
+            at: configURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? enc.encode(c) {
+            try? data.write(to: configURL, options: .atomic)
+        }
+    }
+
+    private func startPollTimer() {
+        pollTimer?.cancel()
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        let interval = max(15, config.pollIntervalSeconds)
+        t.schedule(deadline: .now() + interval, repeating: interval)
+        t.setEventHandler { [weak self] in
+            self?.cycle(reason: "poll")
+        }
+        t.resume()
+        pollTimer = t
+    }
+
+    private func outboxPendingCount() -> Int {
+        let files = (try? fm.contentsOfDirectory(at: outboxDir(), includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        return files.filter { $0.pathExtension == "json" }.count
+    }
+
+    private func buildStatus() -> Status {
+        let root = syncRootURL()
+        var peers: [PeerStatus] = []
+        if let root {
+            let heads = headsDir(in: root)
+            let files = ((try? fm.contentsOfDirectory(at: heads, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+                .filter { $0.pathExtension == "json" }
+            for f in files {
+                guard let data = try? Data(contentsOf: f),
+                      let head = try? decoder.decode(HostHead.self, from: data),
+                      head.host != hostId else { continue }
+                let applied = appliedSeq(for: head.host)
+                peers.append(PeerStatus(
+                    host: head.host,
+                    remoteSeq: head.seq,
+                    appliedSeq: applied,
+                    lag: max(0, head.seq - applied)
+                ))
+            }
+        }
+        let iso = ISO8601DateFormatter()
+        return Status(
+            enabled: config.enabled,
+            hostId: hostId,
+            localSeq: max(0, nextSeq - 1),
+            outboxPending: outboxPendingCount(),
+            cloudDocsAvailable: root != nil,
+            syncRootPath: root?.path,
+            lastPushAt: lastPushUnix.map { iso.string(from: Date(timeIntervalSince1970: $0)) },
+            lastPullAt: lastPullUnix.map { iso.string(from: Date(timeIntervalSince1970: $0)) },
+            lastPhase: lastPhase,
+            lastError: lastError,
+            inProgress: inProgress,
+            peers: peers.sorted { $0.host < $1.host },
+            pollIntervalSeconds: config.pollIntervalSeconds,
+            policy: "op-log + shared CAS · poll \(Int(config.pollIntervalSeconds))s · never whole-db replace"
+        )
+    }
+
+    private func publishStatus() {
+        NotificationCenter.default.post(name: Self.statusChangedNotification, object: nil)
+    }
+}

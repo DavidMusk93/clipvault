@@ -29,8 +29,9 @@ Keepsake 是面向个人 Mac 的剪贴板历史产品：本机守护进程静默
 - **OCR**：中英识别，限高可滚动展示，写入可检索字段  
 - **实时**：SSE 推送新条目，增量合并而非整表重刷  
 - **规模**：游标分页 + 列表不拉 BLOB + `content-visibility`  
-- **备份**：CloudDocs · `sqlite3_backup` · latest + 滚动快照 · Web 侧栏控制 / 恢复  
-- **隐私**：数据默认在 `~/Documents/ClipFlow/`；备份在你的 iCloud 云盘目录下  
+- **备份（灾备平面）**：CloudDocs · `sqlite3_backup` · latest + 滚动快照 · Web 侧栏控制 / 恢复  
+- **多机同步（同步平面）**：CloudDocs **op-log + 共享 CAS** · 每机 push/pull merge · **禁止整库覆盖当同步**  
+- **隐私**：本机数据优先 Application Support / 可配置；备份与同步在你的 iCloud 云盘目录下  
 
 ---
 
@@ -42,7 +43,8 @@ Keepsake (product)
 │   ├── ClipboardMonitor    # pasteboard + OCR
 │   ├── DatabaseManager     # SQLite3 · cursor pages · online backup API
 │   ├── WebServer           # :8080 · REST + SSE + static UI
-│   └── CloudDocsBackupService
+│   ├── CloudDocsBackupService   # 灾备：整库 snapshot
+│   └── CloudDocsSyncService     # 同步：ops/{host}/{seq}.json + CAS
 ├── web/index.html          # 浏览器控制面
 └── LaunchAgent             # 登录自启（可选）
 ```
@@ -93,23 +95,32 @@ node --test tests/masonry.test.mjs
 
 ---
 
-## 数据与备份位置
+## 数据 · 备份 · 多机同步
 
 ```text
-~/Documents/ClipFlow/
-├── clipflow.db                 # 主库
-├── config/backup.json          # 备份开关与策略
-└── Logs/                       # 可选日志
+# 本地（LaunchAgent 推荐 KEEPSAKE_HOME → Application Support）
+~/Library/Application Support/Keepsake/   # 或 legacy ~/Documents/ClipFlow
+├── clipflow.db
+├── blobs/{sha}.bin
+├── config/{backup,sync,host}.json
+└── sync/outbox/                  # 待推送 ops
 
-~/Library/Mobile Documents/com~apple~CloudDocs/ClipFlow/backup/
+# 灾备平面
+…/CloudDocs/ClipFlow/backup/
 ├── latest/{clipflow.db, MANIFEST.json}
-├── snapshots/YYYYMMDD-HHmmss/
+├── blobs/{sha}.bin               # 与同步共用 CAS
+├── snapshots/…
 └── STATUS.json
+
+# 同步平面（多机 live merge）
+…/CloudDocs/ClipFlow/sync/v1/
+├── ops/{host_id}/{seq:016d}.json
+└── heads/{host_id}.json
 ```
 
-Finder：**iCloud 云盘 → ClipFlow → backup**
+Web：右上角 **备份** 侧栏 → 灾备开关 / 立即备份 / 恢复；同侧栏 **多机同步** → 开关 / 立即同步 / peer lag。
 
-Web：右上角 **备份** 侧栏 → 开关 / 立即备份 / 从快照恢复。
+**不要**用「恢复 latest」当多机同步：那是整库替换，会丢另一台本地条目。
 
 ---
 
@@ -121,10 +132,13 @@ Web：右上角 **备份** 侧栏 → 开关 / 立即备份 / 从快照恢复。
 | GET | `/api/clips?limit&cursor&q` | 游标分页 · `{ items, nextCursor }` |
 | GET | `/api/image?id=&size=thumb\|medium\|full` | 多档图片 |
 | GET | `/api/events` | SSE |
-| GET | `/api/backup/status` | 备份状态 |
+| GET | `/api/backup/status` | 灾备状态 |
 | POST | `/api/backup/config` | `{ "enabled": true }` |
 | POST | `/api/backup/run` | 立即备份 |
-| POST | `/api/backup/restore` | `{ "id": "latest" \| snapId }` |
+| POST | `/api/backup/restore` | `{ "id": "latest" \| snapId }` · 整库恢复 |
+| GET | `/api/sync/status` | 多机同步状态 · peers/lag |
+| POST | `/api/sync/config` | `{ "enabled": true }` |
+| POST | `/api/sync/now` | 立即 push+pull |
 
 ---
 

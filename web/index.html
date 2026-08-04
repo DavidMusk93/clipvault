@@ -310,6 +310,29 @@
       </div>
       <h3 style="font-size:14px;font-weight:600;margin-top:8px">命名快照（稀疏历史）</h3><p class="backup-label" style="margin:4px 0 8px">日常恢复优先用 latest；命名快照用于回滚到更早时间点。</p>
       <ul class="snap-list" id="bkSnaps"></ul>
+
+      <h3 style="font-size:14px;font-weight:600;margin-top:20px">多机同步（终局）</h3>
+      <p class="backup-label" style="margin:4px 0 8px">
+        op-log + 共享 CAS，不是整库覆盖。home/work 各自 push/pull merge；灾备平面与同步平面分离。
+      </p>
+      <div class="backup-row">
+        <div>
+          <div style="font-weight:600">启用多机同步</div>
+          <div class="backup-label">捕获后写 ops · 轮询 pull peer · 按 content_hash 去重</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="syncEnabled"/><span></span></label>
+      </div>
+      <div class="backup-row"><span class="backup-label">本机 host</span><span class="backup-value" id="syHost">—</span></div>
+      <div class="backup-row"><span class="backup-label">local seq</span><span class="backup-value" id="sySeq">—</span></div>
+      <div class="backup-row"><span class="backup-label">outbox</span><span class="backup-value" id="syOutbox">—</span></div>
+      <div class="backup-row"><span class="backup-label">上次 push / pull</span><span class="backup-value" id="syTimes">—</span></div>
+      <div class="backup-row"><span class="backup-label">状态</span><span class="backup-value" id="syPhase">—</span></div>
+      <div class="backup-row"><span class="backup-label">错误</span><span class="backup-value" id="syErr">—</span></div>
+      <div class="backup-row"><span class="backup-label">peers</span><span class="backup-value" id="syPeers">—</span></div>
+      <div class="backup-actions">
+        <button type="button" id="syRunNow">立即同步</button>
+        <button type="button" class="secondary" id="syRefresh">刷新同步状态</button>
+      </div>
     </div>
   </aside>
 
@@ -918,7 +941,12 @@
     const bkOpen = document.getElementById('backupOpenBtn');
     const bkDrawer = document.getElementById('backupDrawer');
     const bkScrim = document.getElementById('backupScrim');
-    function openBackup() { bkDrawer.classList.add('open'); bkScrim.classList.add('open'); refreshBackupStatus(); }
+    function openBackup() {
+      bkDrawer.classList.add('open');
+      bkScrim.classList.add('open');
+      refreshBackupStatus();
+      refreshSyncStatus();
+    }
     function closeBackup() { bkDrawer.classList.remove('open'); bkScrim.classList.remove('open'); }
     bkOpen?.addEventListener('click', openBackup);
     document.getElementById('backupCloseBtn')?.addEventListener('click', closeBackup);
@@ -1043,6 +1071,51 @@
       toast(enabled ? '已开启自动备份（多源）' : '已关闭自动备份');
       refreshBackupStatus();
     });
+
+    async function refreshSyncStatus() {
+      try {
+        const res = await fetch(API + '/api/sync/status');
+        if (!res.ok) throw new Error('sync status ' + res.status);
+        const s = await res.json();
+        const en = document.getElementById('syncEnabled');
+        if (en) en.checked = !!s.enabled;
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        set('syHost', s.hostId || '—');
+        set('sySeq', s.localSeq != null ? String(s.localSeq) : '—');
+        set('syOutbox', s.outboxPending != null ? String(s.outboxPending) : '—');
+        set('syTimes', (s.lastPushAt || '—') + ' / ' + (s.lastPullAt || '—'));
+        let phase = s.lastPhase || '—';
+        if (s.inProgress) phase = '进行中 · ' + phase;
+        set('syPhase', phase);
+        set('syErr', s.lastError || '—');
+        const peers = s.peers || [];
+        if (!peers.length) set('syPeers', '暂无其他 host（对端启动并 push 后出现）');
+        else set('syPeers', peers.map(p => p.host + ' lag=' + p.lag + ' (r' + p.remoteSeq + '/a' + p.appliedSeq + ')').join(' · '));
+      } catch (e) {
+        console.error(e);
+        const el = document.getElementById('syPhase');
+        if (el) el.textContent = '同步状态不可用';
+      }
+    }
+    document.getElementById('syncEnabled')?.addEventListener('change', async (e) => {
+      const enabled = e.target.checked;
+      await fetch(API + '/api/sync/config', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      toast(enabled ? '已开启多机同步' : '已关闭多机同步');
+      refreshSyncStatus();
+    });
+    document.getElementById('syRunNow')?.addEventListener('click', async () => {
+      toast('同步中…');
+      const r = await fetch(API + '/api/sync/now', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      toast(j.message || (j.ok ? '同步完成' : '同步结束'));
+      refreshSyncStatus();
+      if (j.ok) mergeHead();
+    });
+    document.getElementById('syRefresh')?.addEventListener('click', () => refreshSyncStatus());
+
     document.getElementById('bkRunNow')?.addEventListener('click', async () => {
       toast('开始备份…');
       const r = await fetch(API + '/api/backup/run', { method: 'POST' });

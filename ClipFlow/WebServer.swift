@@ -9,16 +9,23 @@ class WebServer {
     private let port: UInt16
     private let database: DatabaseManager
     private let backup: CloudDocsBackupService?
+    private let sync: CloudDocsSyncService?
     private var sseConnections: [NWConnection] = []
     
     var isRunning: Bool {
         listener != nil
     }
 
-    init(port: UInt16 = 8080, database: DatabaseManager = DatabaseManager(), backup: CloudDocsBackupService? = nil) {
+    init(
+        port: UInt16 = 8080,
+        database: DatabaseManager = DatabaseManager(),
+        backup: CloudDocsBackupService? = nil,
+        sync: CloudDocsSyncService? = nil
+    ) {
         self.port = port
         self.database = database
         self.backup = backup
+        self.sync = sync
     }
     
     /// Resolve web/ by cwd first, then walk up from executable (LaunchAgent-safe).
@@ -143,6 +150,10 @@ class WebServer {
             handleBackupRun(connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/restore" {
             handleBackupRestore(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/sync/now" {
+            handleSyncNow(connection: connection)
+        } else if method == "POST" && pathOnly == "/api/sync/config" {
+            handleSyncConfig(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
             handleDeleteClip(path: path, connection: connection)
         } else {
@@ -176,6 +187,8 @@ class WebServer {
             sendBackupStatus(connection: connection)
         } else if pathOnly == "/api/backup/snapshots" {
             sendBackupStatus(connection: connection) // same payload includes snapshots
+        } else if pathOnly == "/api/sync/status" {
+            sendSyncStatus(connection: connection)
         } else if pathOnly.hasPrefix("/assets/") {
             sendStaticAsset(pathOnly: pathOnly, connection: connection)
         } else {
@@ -245,6 +258,7 @@ class WebServer {
         database.deleteItem(id: uuid) { [weak self] success in
             guard let self = self else { return }
             if success {
+                self.sync?.recordLocalTombstone(id: uuid)
                 let resp = """
                 HTTP/1.1 200 OK
                 Access-Control-Allow-Origin: *
@@ -257,6 +271,93 @@ class WebServer {
                 self.sendErrorResponse(connection: connection, status: 500, message: "Failed to delete")
             }
         }
+    }
+
+    private func sendSyncStatus(connection: NWConnection) {
+        guard let sync = sync else {
+            sendJSON(["enabled": false, "error": "sync not configured"], connection: connection)
+            return
+        }
+        sync.statusSnapshot { [weak self] st in
+            guard let self = self else { return }
+            let peers: [[String: Any]] = st.peers.map {
+                [
+                    "host": $0.host,
+                    "remoteSeq": $0.remoteSeq,
+                    "appliedSeq": $0.appliedSeq,
+                    "lag": $0.lag
+                ]
+            }
+            let dict: [String: Any] = [
+                "enabled": st.enabled,
+                "hostId": st.hostId,
+                "localSeq": st.localSeq,
+                "outboxPending": st.outboxPending,
+                "cloudDocsAvailable": st.cloudDocsAvailable,
+                "syncRootPath": st.syncRootPath as Any,
+                "lastPushAt": st.lastPushAt as Any,
+                "lastPullAt": st.lastPullAt as Any,
+                "lastPhase": st.lastPhase as Any,
+                "lastError": st.lastError as Any,
+                "inProgress": st.inProgress,
+                "peers": peers,
+                "pollIntervalSeconds": st.pollIntervalSeconds,
+                "scheme": st.scheme,
+                "policy": st.policy
+            ]
+            self.sendJSON(dict, connection: connection)
+        }
+    }
+
+    private func handleSyncNow(connection: NWConnection) {
+        guard let sync = sync else {
+            sendErrorResponse(connection: connection, status: 503, message: "sync not configured")
+            return
+        }
+        sync.runNow { [weak self] ok, msg in
+            guard let self = self else { return }
+            self.sendJSON(["ok": ok, "message": msg], connection: connection)
+        }
+    }
+
+    private func handleSyncConfig(data: Data, connection: NWConnection) {
+        guard let sync = sync else {
+            sendErrorResponse(connection: connection, status: 503, message: "sync not configured")
+            return
+        }
+        // Body may include headers; take last JSON object if present.
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        var enabled: Bool?
+        if let brace = raw.range(of: "{", options: .backwards),
+           let jsonData = raw[brace.lowerBound...].data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+           let e = obj["enabled"] as? Bool {
+            enabled = e
+        }
+        guard let enabled = enabled else {
+            sendErrorResponse(connection: connection, status: 400, message: "expected {\"enabled\":bool}")
+            return
+        }
+        sync.setEnabled(enabled) { [weak self] _ in
+            self?.sendSyncStatus(connection: connection)
+        }
+    }
+
+    private func sendJSON(_ object: [String: Any], connection: NWConnection) {
+        guard let body = try? JSONSerialization.data(withJSONObject: object),
+              let bodyStr = String(data: body, encoding: .utf8) else {
+            sendErrorResponse(connection: connection, status: 500, message: "JSON encode failed")
+            return
+        }
+        let response = """
+        HTTP/1.1 200 OK\r
+        Access-Control-Allow-Origin: *\r
+        Content-Type: application/json; charset=utf-8\r
+        Content-Length: \(body.count)\r
+        \r
+        \(bodyStr)
+        """
+        sendResponse(response, connection: connection)
     }
     
     /// Serve files from ./web/assets (logo, favicon, etc.)
