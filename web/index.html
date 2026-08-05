@@ -252,11 +252,40 @@
       border-radius: var(--radius-sm);
       border: 0.5px solid var(--separator);
       max-height: min(42vh, 280px); overflow: auto;
-      overscroll-behavior: contain; white-space: pre-wrap; word-break: break-word;
+      overscroll-behavior: contain;
+      word-break: break-word;
+      font-family: var(--font-ui);
+      font-size: 13.5px;
+      line-height: 1.4;
+      letter-spacing: -0.01em;
     }
     .snippet-html.is-tiny {
       max-height: none; overflow: visible; border: 0; background: transparent; padding: 0;
     }
+    .snippet-html p { margin: 0 0 0.2em; min-height: 0 !important; }
+    .snippet-html p:last-child { margin-bottom: 0; }
+    .snippet-html p:empty,
+    .snippet-html p > br:only-child { display: none; }
+    .snippet-html ul, .snippet-html ol {
+      margin: 0.15em 0 0.25em; padding-left: 1.15em;
+    }
+    .snippet-html li { margin: 0.1em 0; }
+    .snippet-html ul ul, .snippet-html ol ol { margin-top: 0.1em; }
+    .snippet-html .Apple-tab-span { display: none; }
+
+    .card-body .text-scroll.is-rtf pre.plain {
+      margin: 0; padding: 10px 12px;
+      font-family: var(--font-ui);
+      font-size: 13.5px;
+      line-height: 1.45;
+      letter-spacing: -0.01em;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      min-width: 0;
+      tab-size: 2;
+    }
+    .card-body .text-scroll.is-rtf.is-tiny pre.plain { padding: 0; font-size: 14px; }
 
     .thumb-wrap {
       position: relative; border-radius: 14px; overflow: hidden;
@@ -742,9 +771,9 @@
       },
       isCompact(item) {
         if (!item || item.type === 'image') return false;
-        const raw = item.textContent || item.preview || '';
-        const html = item.htmlContent || '';
-        const plain = (html ? html.replace(/<[^>]+>/g, '') : raw).trim();
+        let plain = normalizePlainText(item.textContent || '');
+        if (!plain && item.htmlContent) plain = stripHtmlToText(item.htmlContent);
+        if (!plain) plain = normalizePlainText(item.preview || '');
         return plain.length > 0 && plain.length <= 80 && !plain.includes('\n');
       }
     };
@@ -897,7 +926,58 @@
       return `/api/image?id=${item.id}&size=full`;
     }
 
-    function buildCard(item) {
+    
+    function normalizePlainText(s) {
+      return String(s || '')
+        .replace(/\u2028|\u2029/g, '\n')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\t+/g, ' ')
+        .replace(/^[ \t]*[•‣▪◦⁃]\s*/gm, '• ')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
+
+    function stripHtmlToText(html) {
+      if (!html) return '';
+      let s = String(html);
+      const body = s.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (body) s = body[1];
+      s = s
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
+        .replace(/<li[^>]*>/gi, '• ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+      try {
+        s = new DOMParser().parseFromString('<!doctype html><body>' + s, 'text/html').body.textContent || s;
+      } catch (_) {}
+      return normalizePlainText(s);
+    }
+
+    function sanitizeSnippetHtml(html) {
+      if (!html) return '';
+      let s = String(html);
+      const body = s.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (body) s = body[1];
+      s = s
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<p[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\s|<\/?span[^>]*>)*<\/p>/gi, '')
+        .replace(/<span class="Apple-tab-span"[^>]*>[\s\S]*?<\/span>/gi, '')
+        .replace(/(?:\s*<br\s*\/?>\s*){3,}/gi, '<br><br>');
+      return s.trim();
+    }
+
+function buildCard(item) {
       const card = document.createElement('article');
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
       card.dataset.id = item.id;
@@ -915,21 +995,32 @@
         if (ocr) {
           body += `<div class="ocr-panel">
             <div class="ocr-panel-header"><span class="material-symbols-outlined" style="font-size:16px">find_in_page</span>OCR 识别结果</div>
-            <div class="ocr-body"><span class="ocr-body-inner">${esc(ocr)}</span></div>
+            <div class="ocr-body"><span class="ocr-body-inner">${esc(normalizePlainText(ocr))}</span></div>
           </div>`;
         }
-      } else if (item.htmlContent) {
-        const plain = item.htmlContent.replace(/<[^>]+>/g, '').trim();
-        const tiny = plain.length <= 80 ? ' is-tiny' : '';
-        body = `<div class="snippet-html${tiny}">${item.htmlContent}</div>`;
       } else if (item.type === 'rtf') {
-        const text = item.textContent || (item.preview && item.preview !== 'Rich Text' ? item.preview : '') || '（富文本无正文，请重新复制）';
-        const tiny = text.length <= 80 && !text.includes('\n') ? ' is-tiny' : '';
-        body = `<div class="text-scroll${tiny}"><pre><code>${esc(text)}</code></pre></div>`;
+        // Prefer plain text: Cocoa HTML Writer dumps full documents with nested lists / spacer <p><br>
+        // that look like large holes when injected as snippet-html.
+        let rtfText = normalizePlainText(item.textContent || '');
+        if (!rtfText) rtfText = stripHtmlToText(item.htmlContent || '');
+        if (!rtfText && item.preview && item.preview !== 'Rich Text') rtfText = normalizePlainText(item.preview);
+        if (!rtfText) rtfText = '（富文本无正文，请重新复制）';
+        const tiny = rtfText.length <= 80 && !rtfText.includes('\n') ? ' is-tiny' : '';
+        body = `<div class="text-scroll is-rtf${tiny}"><pre class="plain">${esc(rtfText)}</pre></div>`;
+      } else if (item.htmlContent) {
+        const fragment = sanitizeSnippetHtml(item.htmlContent);
+        const plain = stripHtmlToText(fragment || item.htmlContent);
+        const tiny = plain.length > 0 && plain.length <= 80 && !plain.includes('\n') ? ' is-tiny' : '';
+        // Fallback to plain if fragment empty after sanitize
+        if (fragment) {
+          body = `<div class="snippet-html${tiny}">${fragment}</div>`;
+        } else {
+          body = `<div class="text-scroll${tiny}"><pre><code>${esc(plain || item.preview || '')}</code></pre></div>`;
+        }
       } else {
-        const text = item.textContent || item.preview || '';
-        const tiny = text.length <= 80 && !text.includes('\n') ? ' is-tiny' : '';
-        body = `<div class="text-scroll${tiny}"><pre><code>${esc(text)}</code></pre></div>`;
+        const plain = normalizePlainText(item.textContent || item.preview || '');
+        const tiny = plain.length <= 80 && !plain.includes('\n') ? ' is-tiny' : '';
+        body = `<div class="text-scroll${tiny}"><pre><code>${esc(plain)}</code></pre></div>`;
       }
 
       const copyText = escAttr(item.textContent || item.ocrText || item.preview || '');
