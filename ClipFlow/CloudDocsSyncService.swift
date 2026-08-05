@@ -378,6 +378,64 @@ final class CloudDocsSyncService {
         var message: String
     }
 
+
+    // MARK: CloudDocs materialization (File Provider dataless)
+
+    /// Trigger download + read bytes for a CloudDocs path. Without this, `Data(contentsOf:)`
+    /// often fails with "Resource deadlock avoided" on dataless placeholders and peers stay empty.
+    @discardableResult
+    private func startDownloadIfNeeded(_ url: URL) -> Bool {
+        var isUbiq: Any? = nil
+        do {
+            let vals = try url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey])
+            if vals.isUbiquitousItem == true {
+                let status = vals.ubiquitousItemDownloadingStatus
+                if status != URLUbiquitousItemDownloadingStatus.current {
+                    try? fm.startDownloadingUbiquitousItem(at: url)
+                    return true
+                }
+            }
+            _ = isUbiq
+        } catch {
+            // Not ubiquitous / key unsupported — still try read.
+            try? fm.startDownloadingUbiquitousItem(at: url)
+        }
+        return false
+    }
+
+    private func readCloudData(_ url: URL, attempts: Int = 8, delayMs: UInt32 = 120) -> Data? {
+        guard fm.fileExists(atPath: url.path) else {
+            // Parent may be dataless directory placeholder — request download of parent if any.
+            startDownloadIfNeeded(url)
+            return nil
+        }
+        startDownloadIfNeeded(url)
+        for i in 0..<attempts {
+            if let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), !data.isEmpty {
+                return data
+            }
+            // Evict "Resource deadlock avoided" / partial by re-requesting download.
+            startDownloadIfNeeded(url)
+            if i + 1 < attempts {
+                usleep(delayMs * 1000 * UInt32(i + 1))
+            }
+        }
+        return nil
+    }
+
+    private func kickPeerOpsDownload(host: String, fromSeq: Int, toSeq: Int, root: URL) {
+        let dir = opsDir(in: root, host: host)
+        startDownloadIfNeeded(dir)
+        // Request a window of upcoming ops so File Provider hydrates ahead of cursor.
+        let end = min(toSeq, fromSeq + 40)
+        var s = max(1, fromSeq + 1)
+        while s <= end {
+            let u = dir.appendingPathComponent(String(format: "%016d.json", s))
+            startDownloadIfNeeded(u)
+            s += 1
+        }
+    }
+
     private func pushOutbox() -> StepResult {
         guard let syncRoot = syncRootURL(), let casRoot = casBlobsURL() else {
             lastError = "CloudDocs unavailable"
@@ -474,7 +532,8 @@ final class CloudDocsSyncService {
         var peerNotes: [String] = []
 
         for headFile in headFiles {
-            guard let data = try? Data(contentsOf: headFile),
+            startDownloadIfNeeded(headFile)
+            guard let data = readCloudData(headFile),
                   let head = try? decoder.decode(HostHead.self, from: data) else { continue }
             if head.host == hostId { continue }
             peerRemoteSeq[head.host] = head.seq
@@ -488,22 +547,25 @@ final class CloudDocsSyncService {
             var cursor = appliedBefore
             let limit = config.pullBatchLimit
             var batch = 0
+            kickPeerOpsDownload(host: head.host, fromSeq: cursor, toSeq: head.seq, root: syncRoot)
             while cursor < head.seq, batch < limit {
                 let next = cursor + 1
                 let opURL = opsDir(in: syncRoot, host: head.host)
                     .appendingPathComponent(String(format: "%016d.json", next))
-                guard fm.fileExists(atPath: opURL.path),
-                      let opData = try? Data(contentsOf: opURL),
+                guard let opData = readCloudData(opURL),
                       let op = try? decoder.decode(SyncOp.self, from: opData) else {
-                    // File Provider lag: stop this host, retry next poll.
+                    // File Provider lag: requested download; stop this host, retry next poll.
                     lastPhase = "pull:wait \(head.host)#\(next)"
+                    startDownloadIfNeeded(opURL)
                     break
                 }
                 // Import blobs
                 if let keys = op.blobKeys {
                     for key in keys {
                         let remote = casRoot.appendingPathComponent(key + ".bin")
-                        if fm.fileExists(atPath: remote.path) {
+                        startDownloadIfNeeded(remote)
+                        // Ensure bytes present (not only placeholder) before import.
+                        if readCloudData(remote, attempts: 4, delayMs: 80) != nil || fm.fileExists(atPath: remote.path) {
                             database.importBlobIfNeeded(hash: key, from: remote)
                         } else {
                             lastPhase = "pull:blob_wait \(key)"
@@ -782,7 +844,8 @@ final class CloudDocsSyncService {
             let files = ((try? fm.contentsOfDirectory(at: heads, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
                 .filter { $0.pathExtension == "json" }
             for f in files {
-                guard let data = try? Data(contentsOf: f),
+                startDownloadIfNeeded(f)
+                guard let data = readCloudData(f, attempts: 4, delayMs: 50),
                       let head = try? decoder.decode(HostHead.self, from: data),
                       head.host != hostId else { continue }
                 let applied = appliedSeq(for: head.host)
