@@ -304,22 +304,22 @@
     }
     .card-body pre { margin: 0; }
     /*
-     * Notes-like rich text surface (RTF/HTML from Cocoa / Notes)
-     * Preserve list hierarchy & indent; kill Writer spacer chrome.
+     * Notes-like rich text (RTF/HTML from Cocoa / Notes)
+     * Same contract as .text-scroll / OCR: unwrap long lines + pan X/Y.
+     * Outer scrolls; inner is max-content so soft-wrap never steals horizontal room.
      */
     .notes-rich, .snippet-html {
       background: rgba(245, 245, 247, 0.88);
-      padding: 11px 13px 14px;
+      padding: 11px 13px 12px;
       border-radius: var(--radius-sm);
       border: 0.5px solid var(--separator);
       max-height: min(42vh, 340px);
-      overflow: auto;
+      overflow-x: auto;
+      overflow-y: auto;
       min-width: 0;
       max-width: 100%;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      word-break: break-word;
-      overflow-wrap: anywhere;
       font-family: var(--font-ui);
       font-size: 14px;
       line-height: 1.38;
@@ -329,6 +329,9 @@
       scrollbar-gutter: stable;
       scrollbar-width: thin;
       scrollbar-color: rgba(60, 60, 67, 0.35) transparent;
+      /* never soft-wrap at the scrollport — wrapping lives nowhere */
+      word-break: normal;
+      overflow-wrap: normal;
     }
     .notes-rich::-webkit-scrollbar,
     .snippet-html::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -339,33 +342,70 @@
       border: 2px solid transparent;
       background-clip: padding-box;
     }
+    .notes-rich::-webkit-scrollbar-thumb:hover,
+    .snippet-html::-webkit-scrollbar-thumb:hover {
+      background: rgba(60, 60, 67, 0.42);
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
     .notes-rich::-webkit-scrollbar-track,
     .snippet-html::-webkit-scrollbar-track,
     .notes-rich::-webkit-scrollbar-corner,
     .snippet-html::-webkit-scrollbar-corner { background: transparent; }
-    .notes-rich.is-tiny, .snippet-html.is-tiny {
-      max-height: none;
-      overflow: visible;
-      border: 0;
-      background: transparent;
-      padding: 0;
+
+    /* Inner: grow with content width so overflow-x can pan */
+    .notes-rich-inner, .snippet-html-inner {
+      display: block;
+      box-sizing: border-box;
+      /* pad so last glyphs clear scrollbar tracks */
+      padding: 0 8px 8px 0;
+      width: max-content;
+      min-width: 100%;
+      max-width: none;
+      word-break: normal;
+      overflow-wrap: normal;
     }
 
-    .notes-rich p, .snippet-html p {
+    .notes-rich.is-tiny, .snippet-html.is-tiny {
+      max-height: none;
+      overflow-x: auto;
+      overflow-y: hidden;
+      border: 0;
+      background: transparent;
+      padding: 0 0 6px 0;
+      scrollbar-gutter: auto;
+    }
+    .notes-rich.is-tiny .notes-rich-inner,
+    .snippet-html.is-tiny .snippet-html-inner {
+      padding: 0 12px 4px 0;
+    }
+
+    .notes-rich p, .snippet-html p,
+    .notes-rich div, .snippet-html div,
+    .notes-rich li, .snippet-html li,
+    .notes-rich pre, .snippet-html pre,
+    .notes-rich h1, .notes-rich h2, .notes-rich h3,
+    .snippet-html h1, .snippet-html h2, .snippet-html h3 {
       margin: 0 0 0.32em;
       min-height: 0 !important;
-      white-space: pre-wrap; /* keep SQL / code indent from Apple-converted-space */
+      /* unwrap: no soft wrap — pan horizontally like plain text / OCR */
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      max-width: none;
     }
-    .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
+    .notes-rich p:last-child, .snippet-html p:last-child,
+    .notes-rich div:last-child, .snippet-html div:last-child { margin-bottom: 0; }
     .notes-rich p:empty, .snippet-html p:empty,
     .notes-rich p > br:only-child, .snippet-html p > br:only-child { display: none; }
 
-    /* Hierarchical lists — Apple Notes feel */
+    /* Hierarchical lists — Apple Notes feel; keep indent, still unwrap lines */
     .notes-rich ul, .snippet-html ul,
     .notes-rich ol, .snippet-html ol {
       margin: 0.08em 0 0.28em;
       padding-left: 1.4em;
       list-style-position: outside;
+      max-width: none;
     }
     .notes-rich ul, .snippet-html ul { list-style-type: disc; }
     .notes-rich ul ul, .snippet-html ul ul { list-style-type: circle; }
@@ -394,11 +434,24 @@
 
     /* Mono runs (Notes monospaced paragraphs / code) */
     .notes-rich .is-mono, .snippet-html .is-mono,
-    .notes-rich code, .snippet-html code {
+    .notes-rich code, .snippet-html code,
+    .notes-rich pre, .snippet-html pre {
       font-family: var(--font-mono);
       font-size: 0.9em;
       letter-spacing: 0;
       font-variant-ligatures: none;
+      font-feature-settings: "liga" 0, "calt" 0;
+      white-space: pre;
+    }
+    .notes-rich table, .snippet-html table {
+      border-collapse: collapse;
+      max-width: none;
+      width: max-content;
+    }
+    .notes-rich td, .notes-rich th, .snippet-html td, .snippet-html th {
+      white-space: pre;
+      padding: 0 0.6em 0.2em 0;
+      vertical-align: top;
     }
     .notes-rich .Apple-tab-span, .snippet-html .Apple-tab-span { display: none !important; }
 
@@ -1373,9 +1426,11 @@ window.ClipViewMasonry = Masonry;
           plain = normalizePlainText(item.preview);
         }
         const tinyBase = (plain || plainFromHtml || '');
+        // Only truly short single-line snippets skip the tall scrollport.
+        // Multi-line / long HTML must keep max-height + XY pan (never soft-wrap).
         const tiny = tinyBase.length > 0 && tinyBase.length <= 80 && !tinyBase.includes('\n') ? ' is-tiny' : '';
         if (notesFragmentUseful(fragment)) {
-          body = `<div class="notes-rich${tiny}">${fragment}</div>`;
+          body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
         } else if (plain) {
           const mode = textLineModeClass(plain);
           body = `<div class="text-scroll is-rtf${mode}"><pre class="plain">${esc(plain)}</pre></div>`;
