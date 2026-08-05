@@ -404,18 +404,27 @@
 
     /* Plain fallback (no HTML layout) */
     .card-body .text-scroll.is-rtf pre.plain {
-      margin: 0; padding: 11px 13px;
+      margin: 0; padding: 11px 14px 12px 13px;
       font-family: var(--font-ui);
       font-size: 14px;
       line-height: 1.4;
       letter-spacing: -0.016em;
+      /* multi-line notes plain: soft wrap ok; single-line overridden below */
       white-space: pre-wrap;
       word-break: break-word;
       overflow-wrap: anywhere;
       min-width: 0;
       tab-size: 2;
     }
-    .card-body .text-scroll.is-rtf.is-tiny pre.plain { padding: 0; font-size: 14px; }
+    .card-body .text-scroll.is-rtf.is-single pre.plain {
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      min-width: min-content;
+      width: max-content;
+      max-width: none;
+    }
+    .card-body .text-scroll.is-rtf.is-tiny pre.plain { padding: 0 12px 10px 0; font-size: 14px; }
 
     .thumb-wrap {
       position: relative; border-radius: 14px; overflow: hidden;
