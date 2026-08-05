@@ -224,9 +224,7 @@
 
     .card-body .text-scroll {
       max-height: min(42vh, 320px);
-      /* both axes: long single line pans X; tall content pans Y */
-      overflow: auto;
-      overflow-x: auto;
+      overflow-x: hidden;
       overflow-y: auto;
       min-width: 0;
       max-width: 100%;
@@ -237,10 +235,8 @@
       background: rgba(245, 245, 247, 0.85);
     }
     .card-body .text-scroll.is-tiny {
-      /* short cards: no vertical cap, but still allow horizontal pan if line is long */
       max-height: none;
-      overflow-x: auto;
-      overflow-y: visible;
+      overflow: visible;
       border: 0;
       background: transparent;
     }
@@ -250,14 +246,14 @@
       display: block; margin: 0; padding: 10px 12px;
       font-family: var(--font-mono) !important;
       font-size: 12.5px; line-height: 1.45;
-      /* hard newlines kept; long tokens can still pan via parent overflow-x */
-      white-space: pre;
-      word-break: normal;
-      overflow-wrap: normal;
+      /* keep hard newlines; wrap long single lines (no horizontal pan) */
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       tab-size: 4;
-      min-width: min-content;
-      width: max-content;
-      max-width: none;
+      min-width: 0;
+      width: 100%;
+      max-width: 100%;
       box-sizing: border-box;
       font-variant-ligatures: none;
       font-feature-settings: "liga" 0, "calt" 0;
@@ -270,9 +266,10 @@
     }
     .card-body .text-scroll pre {
       margin: 0;
-      min-width: min-content;
-      width: max-content;
-      max-width: none;
+      min-width: 0;
+      width: 100%;
+      max-width: 100%;
+      white-space: inherit;
     }
     .card-body pre { margin: 0; }
     /*
@@ -301,8 +298,7 @@
     }
     .notes-rich.is-tiny, .snippet-html.is-tiny {
       max-height: none;
-      overflow-x: auto;
-      overflow-y: visible;
+      overflow: visible;
       border: 0;
       background: transparent;
       padding: 0;
@@ -409,12 +405,14 @@
     .ocr-body {
       flex: 1; min-height: 0; max-height: 140px; overflow: auto;
       overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
-      padding: 8px 12px 10px; white-space: pre; line-height: 1.45; font-weight: 400;
+      padding: 8px 12px 10px; white-space: pre-wrap; line-height: 1.45; font-weight: 400;
       word-break: normal; overflow-wrap: normal;
       font-family: var(--font-mono);
     }
     .ocr-body-inner {
-      display: block; min-width: min-content; white-space: pre; tab-size: 4;
+      display: block; min-width: 0; max-width: 100%;
+      white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+      tab-size: 4;
     }
 
     .card-actions {
