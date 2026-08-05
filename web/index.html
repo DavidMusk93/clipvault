@@ -247,38 +247,89 @@
       padding: 0; font-size: 14px;
     }
     .card-body pre { margin: 0; }
-    .snippet-html {
-      background: rgba(245, 245, 247, 0.85); padding: 10px 12px;
+    /*
+     * Notes-like rich text surface (RTF/HTML from Cocoa / Notes)
+     * Preserve list hierarchy & indent; kill Writer spacer chrome.
+     */
+    .notes-rich, .snippet-html {
+      background: rgba(245, 245, 247, 0.88);
+      padding: 11px 13px;
       border-radius: var(--radius-sm);
       border: 0.5px solid var(--separator);
-      max-height: min(42vh, 280px); overflow: auto;
+      max-height: min(42vh, 340px);
+      overflow: auto;
       overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
       word-break: break-word;
       font-family: var(--font-ui);
-      font-size: 13.5px;
-      line-height: 1.4;
-      letter-spacing: -0.01em;
+      font-size: 14px;
+      line-height: 1.38;
+      letter-spacing: -0.016em;
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
     }
-    .snippet-html.is-tiny {
+    .notes-rich.is-tiny, .snippet-html.is-tiny {
       max-height: none; overflow: visible; border: 0; background: transparent; padding: 0;
     }
-    .snippet-html p { margin: 0 0 0.2em; min-height: 0 !important; }
-    .snippet-html p:last-child { margin-bottom: 0; }
-    .snippet-html p:empty,
-    .snippet-html p > br:only-child { display: none; }
-    .snippet-html ul, .snippet-html ol {
-      margin: 0.15em 0 0.25em; padding-left: 1.15em;
-    }
-    .snippet-html li { margin: 0.1em 0; }
-    .snippet-html ul ul, .snippet-html ol ol { margin-top: 0.1em; }
-    .snippet-html .Apple-tab-span { display: none; }
 
+    .notes-rich p, .snippet-html p {
+      margin: 0 0 0.32em;
+      min-height: 0 !important;
+      white-space: pre-wrap; /* keep SQL / code indent from Apple-converted-space */
+    }
+    .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
+    .notes-rich p:empty, .snippet-html p:empty,
+    .notes-rich p > br:only-child, .snippet-html p > br:only-child { display: none; }
+
+    /* Hierarchical lists — Apple Notes feel */
+    .notes-rich ul, .snippet-html ul,
+    .notes-rich ol, .snippet-html ol {
+      margin: 0.08em 0 0.28em;
+      padding-left: 1.4em;
+      list-style-position: outside;
+    }
+    .notes-rich ul, .snippet-html ul { list-style-type: disc; }
+    .notes-rich ul ul, .snippet-html ul ul { list-style-type: circle; }
+    .notes-rich ul ul ul, .snippet-html ul ul ul { list-style-type: square; }
+    .notes-rich ol, .snippet-html ol { list-style-type: decimal; }
+    .notes-rich li, .snippet-html li {
+      margin: 0.14em 0;
+      padding-left: 0.12em;
+      line-height: 1.38;
+    }
+    .notes-rich li > ul, .notes-rich li > ol,
+    .snippet-html li > ul, .snippet-html li > ol {
+      margin: 0.12em 0 0.16em;
+    }
+    /* Cocoa often nests <ul> as sibling of <li>; still indent */
+    .notes-rich ul > ul, .snippet-html ul > ul {
+      margin-left: 0.1em;
+    }
+    .notes-rich b, .notes-rich strong, .snippet-html b, .snippet-html strong { font-weight: 600; }
+    .notes-rich i, .notes-rich em, .snippet-html i, .snippet-html em { font-style: italic; }
+    .notes-rich u, .snippet-html u { text-decoration: underline; text-underline-offset: 2px; }
+    .notes-rich a, .snippet-html a {
+      color: var(--accent); text-decoration: none;
+    }
+    .notes-rich a:hover, .snippet-html a:hover { text-decoration: underline; }
+
+    /* Mono runs (Notes monospaced paragraphs / code) */
+    .notes-rich .is-mono, .snippet-html .is-mono,
+    .notes-rich code, .snippet-html code {
+      font-family: var(--font-mono);
+      font-size: 0.9em;
+      letter-spacing: 0;
+      font-variant-ligatures: none;
+    }
+    .notes-rich .Apple-tab-span, .snippet-html .Apple-tab-span { display: none !important; }
+
+    /* Plain fallback (no HTML layout) */
     .card-body .text-scroll.is-rtf pre.plain {
-      margin: 0; padding: 10px 12px;
+      margin: 0; padding: 11px 13px;
       font-family: var(--font-ui);
-      font-size: 13.5px;
-      line-height: 1.45;
-      letter-spacing: -0.01em;
+      font-size: 14px;
+      line-height: 1.4;
+      letter-spacing: -0.016em;
       white-space: pre-wrap;
       word-break: break-word;
       overflow-wrap: anywhere;
@@ -1003,18 +1054,98 @@
     }
 
     function sanitizeSnippetHtml(html) {
-      if (!html) return '';
-      let s = String(html);
-      const body = s.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-      if (body) s = body[1];
-      s = s
-        .replace(/<style[\s\S]*?<\/style>/gi, '')
-        .replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/<p[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\s|<\/?span[^>]*>)*<\/p>/gi, '')
-        .replace(/<span class="Apple-tab-span"[^>]*>[\s\S]*?<\/span>/gi, '')
-        .replace(/(?:\s*<br\s*\/?>\s*){3,}/gi, '<br><br>');
-      return s.trim();
+      return renderNotesFragment(html);
     }
+
+    /**
+     * Cocoa / Notes HTML → Notes-like fragment.
+     * Keeps lists, paragraphs, bold/italic; drops Writer chrome & spacer holes.
+     */
+    function renderNotesFragment(html) {
+      if (!html) return '';
+      let raw = String(html);
+      try {
+        const doc = new DOMParser().parseFromString(raw, 'text/html');
+        // Prefer body; if none, use full document body still
+        const root = doc.body || doc;
+
+        // Drop style/script
+        root.querySelectorAll('style, script, meta, title, link').forEach(el => el.remove());
+
+        // Apple tab markers only add holes — remove
+        root.querySelectorAll('.Apple-tab-span, span[class*="Apple-tab"]').forEach(el => el.remove());
+
+        // Unwrap converted-space spans (preserve nbsp indent for code)
+        root.querySelectorAll('.Apple-converted-space, span[class*="Apple-converted-space"]').forEach(el => {
+          const parent = el.parentNode;
+          if (!parent) return;
+          while (el.firstChild) parent.insertBefore(el.firstChild, el);
+          parent.removeChild(el);
+        });
+
+        // Remove empty spacer paragraphs / empty list items
+        root.querySelectorAll('p, li, div').forEach(el => {
+          const t = (el.textContent || '').replace(/\u00a0/g, ' ').trim();
+          const hasMedia = el.querySelector('img, video, svg');
+          if (!t && !hasMedia) el.remove();
+        });
+
+        // Normalize list style: drop Writer custom glyphs via class/style
+        root.querySelectorAll('ul, ol, li, p, span, div').forEach(el => {
+          el.removeAttribute('style');
+          el.removeAttribute('class');
+          el.removeAttribute('face');
+          el.removeAttribute('size');
+          el.removeAttribute('color');
+        });
+
+        // Mark monospaced-ish blocks: paragraphs that are mostly ASCII/code after cleanup
+        // (heuristic for Notes SQL dumps)
+        root.querySelectorAll('p').forEach(p => {
+          const t = (p.textContent || '');
+          if (/^\s*(SELECT|FROM|WHERE|AND|OR|JOIN|GROUP|ORDER|LIMIT|INSERT|UPDATE|DELETE|CREATE|WITH)\b/i.test(t)
+              || /^\s{2,}\S/.test(t)
+              || /formatDateTime|AS\s+\w+,?\s*$/i.test(t)) {
+            p.classList.add('is-mono');
+          }
+        });
+
+        // Fix deeply invalid: unwrap empty spans
+        root.querySelectorAll('span').forEach(span => {
+          if (!span.attributes.length) {
+            const parent = span.parentNode;
+            if (!parent) return;
+            while (span.firstChild) parent.insertBefore(span.firstChild, span);
+            parent.removeChild(span);
+          }
+        });
+
+        return (root.innerHTML || '').trim();
+      } catch (_) {
+        // Regex fallback
+        let s = raw;
+        const body = s.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        if (body) s = body[1];
+        s = s
+          .replace(/<style[\s\S]*?<\/style>/gi, '')
+          .replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<p[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\s|<\/?span[^>]*>)*<\/p>/gi, '')
+          .replace(/<span class="Apple-tab-span"[^>]*>[\s\S]*?<\/span>/gi, '')
+          .replace(/<span class="Apple-converted-space"[^>]*>([\s\S]*?)<\/span>/gi, '$1')
+          .replace(/\sclass="[^"]*"/gi, '')
+          .replace(/\sstyle="[^"]*"/gi, '');
+        return s.trim();
+      }
+    }
+
+    function notesFragmentUseful(fragment) {
+      if (!fragment) return false;
+      // Has structure beyond bare text
+      if (/<(ul|ol|li|p|br|b|strong|i|em|u|h[1-6]|table|blockquote)\b/i.test(fragment)) return true;
+      const plain = stripHtmlToText(fragment);
+      return plain.length > 0;
+    }
+
 
 function buildCard(item) {
       const card = document.createElement('article');
@@ -1037,24 +1168,23 @@ function buildCard(item) {
             <div class="ocr-body"><span class="ocr-body-inner">${esc(normalizePlainText(ocr))}</span></div>
           </div>`;
         }
-      } else if (item.type === 'rtf') {
-        // Prefer plain text: Cocoa HTML Writer dumps full documents with nested lists / spacer <p><br>
-        // that look like large holes when injected as snippet-html.
-        let rtfText = normalizePlainText(item.textContent || '');
-        if (!rtfText) rtfText = stripHtmlToText(item.htmlContent || '');
-        if (!rtfText && item.preview && item.preview !== 'Rich Text') rtfText = normalizePlainText(item.preview);
-        if (!rtfText) rtfText = '（富文本无正文，请重新复制）';
-        const tiny = rtfText.length <= 80 && !rtfText.includes('\n') ? ' is-tiny' : '';
-        body = `<div class="text-scroll is-rtf${tiny}"><pre class="plain">${esc(rtfText)}</pre></div>`;
-      } else if (item.htmlContent) {
-        const fragment = sanitizeSnippetHtml(item.htmlContent);
-        const plain = stripHtmlToText(fragment || item.htmlContent);
-        const tiny = plain.length > 0 && plain.length <= 80 && !plain.includes('\n') ? ' is-tiny' : '';
-        // Fallback to plain if fragment empty after sanitize
-        if (fragment) {
-          body = `<div class="snippet-html${tiny}">${fragment}</div>`;
+      } else if (item.type === 'rtf' || item.type === 'html' || item.htmlContent) {
+        // Apple Notes–like rich layout when we have HTML; plain text only as fallback.
+        const fragment = renderNotesFragment(item.htmlContent || '');
+        const plainFromHtml = stripHtmlToText(fragment || item.htmlContent || '');
+        let plain = normalizePlainText(item.textContent || '');
+        if (!plain) plain = plainFromHtml;
+        if (!plain && item.preview && item.preview !== 'Rich Text' && item.preview !== 'HTML') {
+          plain = normalizePlainText(item.preview);
+        }
+        const tinyBase = (plain || plainFromHtml || '');
+        const tiny = tinyBase.length > 0 && tinyBase.length <= 80 && !tinyBase.includes('\n') ? ' is-tiny' : '';
+        if (notesFragmentUseful(fragment)) {
+          body = `<div class="notes-rich${tiny}">${fragment}</div>`;
+        } else if (plain) {
+          body = `<div class="text-scroll is-rtf${tiny}"><pre class="plain">${esc(plain)}</pre></div>`;
         } else {
-          body = `<div class="text-scroll${tiny}"><pre><code>${esc(plain || item.preview || '')}</code></pre></div>`;
+          body = `<div class="text-scroll is-rtf${tiny}"><pre class="plain">${esc('（富文本无正文，请重新复制）')}</pre></div>`;
         }
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
