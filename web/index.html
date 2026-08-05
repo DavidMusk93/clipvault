@@ -936,20 +936,16 @@
         }
       }
       if (Number.isNaN(d.getTime())) return String(input);
-      // Local wall clock, 24h, stable digits
-      try {
-        return new Intl.DateTimeFormat(undefined, {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false,
-        }).format(d);
-      } catch (_) {
-        return d.toLocaleString();
-      }
+      const p = n => String(n).padStart(2, '0');
+      // Local wall clock: yyyy/mm/dd HH:MM:SS
+      return (
+        d.getFullYear() + '/' +
+        p(d.getMonth() + 1) + '/' +
+        p(d.getDate()) + ' ' +
+        p(d.getHours()) + ':' +
+        p(d.getMinutes()) + ':' +
+        p(d.getSeconds())
+      );
     }
 
 
