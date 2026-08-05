@@ -224,7 +224,7 @@
 
     .card-body .text-scroll {
       max-height: min(42vh, 320px);
-      overflow-x: auto;  /* multi-line long rows may pan X; single-line uses is-wrap */
+      overflow-x: auto;
       overflow-y: auto;
       min-width: 0;
       max-width: 100%;
@@ -233,29 +233,52 @@
       border-radius: var(--radius-sm);
       border: 0.5px solid var(--separator);
       background: rgba(245, 245, 247, 0.85);
+      /* non-overlay bars — do not paint over glyphs */
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(60, 60, 67, 0.35) transparent;
+      padding-bottom: 2px;
+    }
+    .card-body .text-scroll::-webkit-scrollbar {
+      width: 9px;
+      height: 9px;
+    }
+    .card-body .text-scroll::-webkit-scrollbar-thumb {
+      background: rgba(60, 60, 67, 0.28);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    .card-body .text-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(60, 60, 67, 0.42);
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    .card-body .text-scroll::-webkit-scrollbar-track,
+    .card-body .text-scroll::-webkit-scrollbar-corner {
+      background: transparent;
     }
     .card-body .text-scroll.is-tiny {
       max-height: none;
-      overflow: visible;
+      overflow-x: auto;
+      overflow-y: hidden;
       border: 0;
       background: transparent;
+      padding-bottom: 6px;
     }
-    /* ONLY single-line long paste: wrap instead of pan */
-    .card-body .text-scroll.is-wrap {
-      overflow-x: hidden;
-    }
-    .card-body .text-scroll.is-tiny.is-wrap {
-      overflow-x: hidden;
-      overflow-y: visible;
+    .card-body .text-scroll.is-single {
+      overflow-x: auto;
+      overflow-y: hidden;
     }
     .card-body .text-scroll pre { margin: 0; }
     .card-body .text-scroll pre code,
     .card-body .text-scroll > code {
-      display: block; margin: 0; padding: 10px 12px;
+      display: block; margin: 0;
+      /* pad bottom/right so last glyphs clear scrollbar tracks */
+      padding: 10px 14px 12px 12px;
       font-family: var(--font-mono) !important;
       font-size: 12.5px; line-height: 1.45;
-      /* multi-line / ASCII / code: hard newlines, no soft wrap */
-      white-space: pre;
+      white-space: pre; /* no soft wrap — pan instead */
       word-break: normal;
       overflow-wrap: normal;
       tab-size: 4;
@@ -270,24 +293,14 @@
     }
     .card-body .text-scroll.is-tiny pre code,
     .card-body .text-scroll.is-tiny > code {
-      padding: 0; font-size: 14px;
+      padding: 0 12px 10px 0;
+      font-size: 14px;
     }
     .card-body .text-scroll pre {
       margin: 0;
       min-width: min-content;
       width: max-content;
       max-width: none;
-    }
-    /* single-line long text only */
-    .card-body .text-scroll.is-wrap pre,
-    .card-body .text-scroll.is-wrap pre code,
-    .card-body .text-scroll.is-wrap > code {
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-      min-width: 0;
-      width: 100%;
-      max-width: 100%;
     }
     .card-body pre { margin: 0; }
     /*
@@ -296,7 +309,7 @@
      */
     .notes-rich, .snippet-html {
       background: rgba(245, 245, 247, 0.88);
-      padding: 11px 13px;
+      padding: 11px 13px 14px;
       border-radius: var(--radius-sm);
       border: 0.5px solid var(--separator);
       max-height: min(42vh, 340px);
@@ -313,7 +326,23 @@
       letter-spacing: -0.016em;
       color: var(--ink);
       -webkit-font-smoothing: antialiased;
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(60, 60, 67, 0.35) transparent;
     }
+    .notes-rich::-webkit-scrollbar,
+    .snippet-html::-webkit-scrollbar { width: 9px; height: 9px; }
+    .notes-rich::-webkit-scrollbar-thumb,
+    .snippet-html::-webkit-scrollbar-thumb {
+      background: rgba(60, 60, 67, 0.28);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+    .notes-rich::-webkit-scrollbar-track,
+    .snippet-html::-webkit-scrollbar-track,
+    .notes-rich::-webkit-scrollbar-corner,
+    .snippet-html::-webkit-scrollbar-corner { background: transparent; }
     .notes-rich.is-tiny, .snippet-html.is-tiny {
       max-height: none;
       overflow: visible;
@@ -1218,21 +1247,21 @@ window.ClipViewMasonry = Masonry;
 
 
     /**
-     * Single-line long paste → wrap; multi-line (ASCII/code) → pre + optional X pan.
-     * Returns class suffix string including leading space, e.g. " is-wrap" / " is-tiny" / "".
+     * Single physical line → is-single (horizontal pan, no soft wrap).
+     * Multi-line → pre only (ASCII/code alignment; pan X if a row is long).
      */
     function textLineModeClass(text) {
       const s = String(text || '');
       const hasNL = /[\n\r\u2028\u2029]/.test(s);
-      const compact = !hasNL && s.length > 0 && s.length <= 80;
-      const wrap = !hasNL && s.length > 0; // one physical line → wrap (short or long)
+      const single = !hasNL && s.length > 0;
+      const compact = single && s.length <= 80;
       let cls = '';
       if (compact) cls += ' is-tiny';
-      if (wrap) cls += ' is-wrap';
+      if (single) cls += ' is-single';
       return cls;
     }
 
-function buildCard(item) {
+    function buildCard(item) {
       const card = document.createElement('article');
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
       card.dataset.id = item.id;
@@ -1270,7 +1299,7 @@ function buildCard(item) {
           const mode = textLineModeClass(plain);
           body = `<div class="text-scroll is-rtf${mode}"><pre class="plain">${esc(plain)}</pre></div>`;
         } else {
-          body = `<div class="text-scroll is-rtf is-tiny is-wrap"><pre class="plain">（富文本无正文，请重新复制）</pre></div>`;
+          body = `<div class="text-scroll is-rtf is-tiny is-single"><pre class="plain">（富文本无正文，请重新复制）</pre></div>`;
         }
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
