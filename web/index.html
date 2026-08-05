@@ -342,25 +342,64 @@
     }
 
     /* Card actions: pair of equal emoji buttons (copy / delete) */
+    /* Card icon buttons — Apple toolbar style (round, equal weight, press feedback) */
     .card-actions .action-pair {
-      display: flex; gap: 6px; align-items: center; flex-shrink: 0;
+      display: flex; gap: 4px; align-items: center; flex-shrink: 0;
     }
-    .btn-emoji {
-      width: 34px; height: 34px; padding: 0;
-      border-radius: var(--radius-pill);
-      border: 0.5px solid var(--separator-strong);
-      background: rgba(255, 255, 255, 0.72);
-      font: inherit; font-size: 16px; line-height: 1;
+    .icon-btn {
+      --icon-size: 17px;
+      position: relative;
+      width: 32px; height: 32px; padding: 0; margin: 0;
+      border: 0; border-radius: 50%;
+      background: transparent;
+      color: var(--muted);
       cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center;
-      color: var(--ink);
-      transition: background var(--press), transform var(--press), border-color var(--press);
+      -webkit-tap-highlight-color: transparent;
+      transition:
+        background 100ms ease-out,
+        color 100ms ease-out,
+        transform 100ms ease-out,
+        box-shadow 160ms var(--spring);
     }
-    .btn-emoji:hover { background: rgba(255, 255, 255, 0.98); }
-    .btn-emoji:active { transform: scale(0.95); }
-    .btn-emoji.is-danger:hover {
+    .icon-btn svg {
+      width: var(--icon-size); height: var(--icon-size);
+      display: block; pointer-events: none;
+      flex-shrink: 0;
+    }
+    .icon-btn .icon-on { display: none; }
+    .icon-btn:hover {
+      background: var(--fill);
+      color: var(--ink);
+    }
+    .icon-btn:active {
+      transform: scale(0.88);
+      background: var(--fill-elevated);
+      transition-duration: 60ms;
+    }
+    .icon-btn:focus { outline: none; }
+    .icon-btn:focus-visible {
+      box-shadow: 0 0 0 3px var(--accent-soft);
+      color: var(--accent);
+    }
+    /* Copy success: brief check + green (Apple confirm) */
+    .icon-btn.is-copied {
+      color: var(--ok);
+      background: var(--ok-soft);
+    }
+    .icon-btn.is-copied .icon-off { display: none; }
+    .icon-btn.is-copied .icon-on { display: block; }
+    /* Delete: same chrome, danger only on hover/active */
+    .icon-btn.is-danger:hover {
+      color: var(--danger);
       background: var(--danger-soft);
-      border-color: rgba(215, 0, 21, 0.22);
+    }
+    .icon-btn.is-danger:active {
+      color: var(--danger);
+      background: rgba(215, 0, 21, 0.18);
+    }
+    .icon-btn:disabled {
+      opacity: 0.4; cursor: default; transform: none;
     }
     /* legacy names still used by drawer close / other chrome */
     .btn {
@@ -563,7 +602,7 @@
       }
       .backup-drawer { transition: none; }
       .lightbox-inner { animation: none; }
-      .chip:active, .btn:active, .btn-emoji:active, .backup-btn:active { transform: none; }
+      .chip:active, .btn:active, .icon-btn:active, .backup-btn:active { transform: none; }
     }
     @media (prefers-reduced-transparency: reduce) {
       .top-bar, .chips {
@@ -1033,16 +1072,33 @@ function buildCard(item) {
         <div class="card-actions">
           <div class="source">${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size:14px">apps</span>${esc(item.sourceApp)}` : ''}</div>
           <div class="action-pair">
-            <button type="button" class="btn-emoji" data-copy="${copyText}" title="复制" aria-label="复制">📋</button>
-            <button type="button" class="btn-emoji is-danger" data-del="${item.id}" title="删除" aria-label="删除">🗑️</button>
+            <button type="button" class="icon-btn" data-copy="${copyText}" title="复制" aria-label="复制"><svg class="icon-off" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button type="button" class="icon-btn is-danger" data-del="${item.id}" title="删除" aria-label="删除"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9.5 7.5V6.2A1.7 1.7 0 0 1 11.2 4.5h1.6a1.7 1.7 0 0 1 1.7 1.7v1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.2 7.5l.6 11.2a1.7 1.7 0 0 0 1.7 1.6h3a1.7 1.7 0 0 0 1.7-1.6l.6-11.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10.2 11v5.5M13.8 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           </div>
         </div>`;
 
-      card.querySelector('[data-copy]')?.addEventListener('click', e => {
-        copyClip(e.currentTarget.getAttribute('data-copy') || '');
+      card.querySelector('[data-copy]')?.addEventListener('click', async e => {
+        const btn = e.currentTarget;
+        const ok = await copyClip(btn.getAttribute('data-copy') || '');
+        if (!ok) return;
+        btn.classList.add('is-copied');
+        btn.setAttribute('aria-label', '已复制');
+        clearTimeout(btn._copiedTimer);
+        btn._copiedTimer = setTimeout(() => {
+          btn.classList.remove('is-copied');
+          btn.setAttribute('aria-label', '复制');
+        }, 1400);
       });
       card.querySelector('[data-del]')?.addEventListener('click', e => {
-        deleteClip(e.currentTarget.getAttribute('data-del'));
+        const btn = e.currentTarget;
+        // brief press lock so double-tap doesn't fan-out
+        if (btn.dataset.busy === '1') return;
+        btn.dataset.busy = '1';
+        btn.disabled = true;
+        deleteClip(btn.getAttribute('data-del')).finally(() => {
+          btn.dataset.busy = '0';
+          btn.disabled = false;
+        });
       });
       const wrap = card.querySelector('.thumb-wrap');
       if (wrap) {
@@ -1252,7 +1308,7 @@ function buildCard(item) {
     });
 
     async function copyClip(text) {
-      if (!text) return;
+      if (!text) return false;
       try {
         await fetch(API + '/api/clips', {
           method: 'POST',
@@ -1260,7 +1316,11 @@ function buildCard(item) {
           body: JSON.stringify({ text, type: 'text' })
         });
         toast('已写入 macOS 剪贴板');
-      } catch (_) { toast('复制失败'); }
+        return true;
+      } catch (_) {
+        toast('复制失败');
+        return false;
+      }
     }
 
     async function deleteClip(id) {
