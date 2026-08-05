@@ -88,9 +88,13 @@ data class LocalCapture(
     val contentHash: String,
     val createdAtMs: Long,
     val source: String,
+    val htmlContent: String? = null,
 ) {
     val preview: String
-        get() = (text ?: type).replace("\n", " ").take(160)
+        get() {
+            val raw = text ?: htmlContent?.replace(Regex("<[^>]+>"), "") ?: type
+            return raw.replace("\n", " ").trim().take(160).ifBlank { type }
+        }
 
     val displayTime: String
         get() {

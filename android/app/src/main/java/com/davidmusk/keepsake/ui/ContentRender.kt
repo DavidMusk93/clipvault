@@ -259,22 +259,21 @@ fun ListItemBody(
                 }
             }
         }
-        "html" -> {
-            val plain = stripHtml(row.htmlContent ?: row.textContent.orEmpty())
+        "html", "rtf" -> {
+            val plain = when (row.type.lowercase()) {
+                "html" -> stripHtml(row.htmlContent ?: row.textContent.orEmpty())
+                else -> {
+                    val t = row.textContent?.takeIf { it.isNotBlank() }
+                        ?: stripHtml(row.htmlContent.orEmpty()).takeIf { it.isNotBlank() }
+                        ?: row.ocrText.orEmpty()
+                    t
+                }
+            }.ifBlank { if (row.type.equals("html", true)) "HTML 内容" else "富文本" }
             Text(
-                plain.ifBlank { "HTML 内容" },
+                plain,
                 modifier = modifier,
                 style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        "rtf" -> {
-            Text(
-                row.textContent ?: row.ocrText ?: "富文本",
-                modifier = modifier,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -291,8 +290,10 @@ fun ListItemBody(
             }
         }
         else -> {
+            // Keep hard newlines in list cards (preview used to flatten them).
+            val body = (row.textContent ?: row.ocrText ?: row.preview).trim()
             Text(
-                row.preview,
+                body.ifBlank { row.preview },
                 modifier = modifier,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 4,
@@ -321,6 +322,24 @@ fun DetailContent(
                 DetailHtml(row.htmlContent ?: row.textContent.orEmpty())
             }
         }
+        "rtf" -> {
+            // Prefer Cocoa/Notes HTML layout (lists/indent) like web notes-rich.
+            val html = row.htmlContent?.takeIf { it.isNotBlank() }
+            if (html != null) {
+                val scroll = rememberScrollState()
+                Column(modifier.fillMaxWidth().verticalScroll(scroll)) {
+                    DetailNotesHtml(html)
+                }
+            } else {
+                val body = row.textContent ?: row.ocrText
+                    ?: stripHtml(row.htmlContent.orEmpty()).ifBlank { "（富文本无正文）" }
+                DetailPlainText(
+                    text = body,
+                    modifier = modifier.fillMaxWidth().fillMaxHeight(),
+                    mono = looksLikeCode(body),
+                )
+            }
+        }
         "pdf" -> {
             val scroll = rememberScrollState()
             Column(modifier.fillMaxWidth().verticalScroll(scroll)) {
@@ -333,17 +352,14 @@ fun DetailContent(
                 DetailUrl(row)
             }
         }
-        // text / rtf / default: 2-axis pan (hard newlines + horizontal long lines)
+        // text / default: 2-axis pan (hard newlines + horizontal long lines, no soft wrap)
         else -> {
-            val body = when (row.type.lowercase()) {
-                "rtf" -> row.textContent ?: row.ocrText
-                    ?: stripHtml(row.htmlContent.orEmpty()).ifBlank { "（富文本无正文）" }
-                else -> row.textContent ?: row.ocrText ?: row.htmlContent
-                    ?: row.preview.ifBlank { "（无文本内容）" }
-            }
+            val body = row.textContent ?: row.ocrText ?: row.htmlContent
+                ?: row.preview.ifBlank { "（无文本内容）" }
             DetailPlainText(
                 text = body,
                 modifier = modifier.fillMaxWidth().fillMaxHeight(),
+                mono = looksLikeCode(body),
             )
         }
     }
@@ -407,13 +423,13 @@ private fun DetailImage(row: ClipboardRow, repo: BackupRepository) {
     }
     row.ocrText?.takeIf { it.isNotBlank() }?.let { ocr ->
         Spacer(Modifier.height(16.dp))
-        Text("识别文字", fontWeight = FontWeight.SemiBold)
+        Text("OCR 识别结果", fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
-        DetailPlainText(
+        DetailOcrPanel(
             text = ocr,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 280.dp),
+                .heightIn(min = 96.dp, max = 280.dp),
         )
     }
 }
@@ -424,46 +440,92 @@ private fun DetailHtml(html: String) {
         Text("（空 HTML）")
         return
     }
-    // Prefer native HTML spans for simple docs; WebView for richer markup.
-    val rich = html.contains("<img", ignoreCase = true) ||
-        html.contains("<table", ignoreCase = true) ||
-        html.contains("<style", ignoreCase = true)
-    if (rich) {
-        AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    )
-                    settings.javaScriptEnabled = false
-                    settings.defaultTextEncodingName = "utf-8"
-                    webViewClient = WebViewClient()
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    val wrapped = """
-                        <!DOCTYPE html><html><head>
-                        <meta name="viewport" content="width=device-width,initial-scale=1"/>
-                        <style>
-                          body{font-family:-apple-system,sans-serif;font-size:15px;line-height:1.55;
-                               color:#1C1410;margin:0;padding:4px 2px;word-wrap:break-word;}
-                          img{max-width:100%;height:auto;border-radius:8px;}
-                          a{color:#C47A2C;}
-                          pre,code{font-family:ui-monospace,monospace;font-size:13px;
-                                   background:#F3EBE0;padding:2px 4px;border-radius:4px;}
-                          pre{padding:10px;overflow:auto;}
-                        </style></head><body>$html</body></html>
-                    """.trimIndent()
-                    loadDataWithBaseURL(null, wrapped, "text/html", "utf-8", null)
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 120.dp, max = 640.dp)
-                .clip(RoundedCornerShape(10.dp)),
-        )
+    // Cocoa/Notes HTML Writer docs always go through Notes-like WebView.
+    val notesLike = html.contains("Cocoa HTML Writer", ignoreCase = true) ||
+        html.contains("Apple-converted-space") ||
+        html.contains("<ul", ignoreCase = true) ||
+        html.contains("<style", ignoreCase = true) ||
+        html.contains("<img", ignoreCase = true) ||
+        html.contains("<table", ignoreCase = true)
+    if (notesLike) {
+        DetailNotesHtml(html)
     } else {
         HtmlTextBlock(html)
     }
+}
+
+/** Notes-like rich surface (lists / paragraphs) — mirrors web `.notes-rich`. */
+@Composable
+private fun DetailNotesHtml(html: String) {
+    val fragment = remember(html) { notesHtmlFragment(html) }
+    AndroidView(
+        factory = { ctx ->
+            WebView(ctx).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                )
+                settings.javaScriptEnabled = false
+                settings.defaultTextEncodingName = "utf-8"
+                settings.builtInZoomControls = false
+                settings.displayZoomControls = false
+                webViewClient = WebViewClient()
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                isHorizontalScrollBarEnabled = true
+                isVerticalScrollBarEnabled = true
+                overScrollMode = android.view.View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            }
+        },
+        update = { web ->
+            val wrapped = """
+                <!DOCTYPE html><html><head>
+                <meta name="viewport" content="width=device-width,initial-scale=1"/>
+                <style>
+                  body{
+                    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+                    font-size:15px;line-height:1.38;letter-spacing:-0.016em;
+                    color:#1d1d1f;margin:0;padding:10px 12px 14px;
+                    background:#f5f5f7;
+                  }
+                  p{margin:0 0 0.32em;min-height:0;white-space:pre-wrap;word-break:break-word;}
+                  p:last-child{margin-bottom:0;}
+                  ul,ol{margin:0.08em 0 0.28em;padding-left:1.4em;}
+                  ul{list-style-type:disc;}
+                  ul ul{list-style-type:circle;}
+                  ul ul ul{list-style-type:square;}
+                  li{margin:0.14em 0;line-height:1.38;}
+                  b,strong{font-weight:600;}
+                  a{color:#0071e3;text-decoration:none;}
+                  pre,code{font-family:ui-monospace,Menlo,monospace;font-size:13px;}
+                  pre{padding:10px;overflow:auto;white-space:pre;background:#eceef0;border-radius:8px;}
+                  img{max-width:100%;height:auto;border-radius:8px;}
+                </style></head><body>$fragment</body></html>
+            """.trimIndent()
+            web.loadDataWithBaseURL(null, wrapped, "text/html", "utf-8", null)
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 120.dp, max = 640.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+            .background(Color(0xFFF5F5F7)),
+    )
+}
+
+/** Extract body + drop Writer chrome (style/spacer), keep list structure. */
+private fun notesHtmlFragment(html: String): String {
+    var s = html
+    val body = Regex("(?is)<body[^>]*>(.*)</body>").find(s)?.groupValues?.getOrNull(1)
+    if (body != null) s = body
+    s = s
+        .replace(Regex("(?is)<style[^>]*>.*?</style>"), "")
+        .replace(Regex("(?is)<script[^>]*>.*?</script>"), "")
+        .replace(Regex("(?is)<span[^>]*Apple-tab-span[^>]*>.*?</span>"), "")
+        .replace(Regex("(?is)<span[^>]*Apple-converted-space[^>]*>(.*?)</span>"), "$1")
+        .replace(Regex("(?is)<p[^>]*>\\s*(?:<br\\s*/?>|&nbsp;|\\s|</?span[^>]*>)*</p>"), "")
+        .replace(Regex("\\sclass=\"[^\"]*\""), "")
+        .replace(Regex("\\sstyle=\"[^\"]*\""), "")
+    return s.trim()
 }
 
 @Composable
@@ -577,12 +639,13 @@ private fun DetailPdf(row: ClipboardRow, repo: BackupRepository) {
 
 /**
  * Plain / code text viewer: hard newlines preserved, long lines pan horizontally,
- * tall content pans vertically (四向滚动).
+ * tall content pans vertically (四向滚动, no soft wrap).
  */
 @Composable
 private fun DetailPlainText(
     text: String,
     modifier: Modifier = Modifier,
+    mono: Boolean = looksLikeCode(text),
 ) {
     val vScroll = rememberScrollState()
     val hScroll = rememberScrollState()
@@ -596,9 +659,51 @@ private fun DetailPlainText(
                 text = text,
                 softWrap = false,
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    fontFamily = if (looksLikeCode(text)) FontFamily.Monospace else FontFamily.Default,
+                    fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
                 ),
             )
+        }
+    }
+}
+
+/**
+ * OCR panel: unwrap + 四向滚动, mono, fixed viewport (mirrors web .ocr-body).
+ */
+@Composable
+private fun DetailOcrPanel(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val vScroll = rememberScrollState()
+    val hScroll = rememberScrollState()
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+        ),
+    ) {
+        SelectionContainer {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .padding(10.dp)
+                    .verticalScroll(vScroll)
+                    .horizontalScroll(hScroll),
+            ) {
+                Text(
+                    text = text,
+                    softWrap = false,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = FontFamily.Monospace,
+                        lineHeight = MaterialTheme.typography.bodyMedium.lineHeight,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }

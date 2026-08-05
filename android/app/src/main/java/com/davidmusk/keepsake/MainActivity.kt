@@ -85,6 +85,8 @@ import com.davidmusk.keepsake.R
 import com.davidmusk.keepsake.data.BackupRepository
 import com.davidmusk.keepsake.data.BackupSyncWorker
 import com.davidmusk.keepsake.data.ClipboardRow
+import com.davidmusk.keepsake.data.CapturedClip
+import com.davidmusk.keepsake.data.ClipboardReader
 import com.davidmusk.keepsake.data.DriveTreePicker
 import com.davidmusk.keepsake.data.LocalCapture
 import com.davidmusk.keepsake.ui.DetailContent
@@ -115,12 +117,11 @@ class MainActivity : ComponentActivity() {
                         Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show()
                     },
                     onPasteFromClipboard = {
-                        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                        val text = cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
-                        if (text.isNullOrBlank()) {
+                        val cap = ClipboardReader.read(this)
+                        if (cap == null) {
                             Toast.makeText(this, "剪贴板为空，请先复制内容再粘贴", Toast.LENGTH_SHORT).show()
                             null
-                        } else text
+                        } else cap
                     },
                 )
             }
@@ -135,7 +136,7 @@ private enum class Tab { Backup, Captures }
 private fun KeepsakeRoot(
     app: KeepsakeApp,
     onCopyText: (String) -> Unit,
-    onPasteFromClipboard: () -> String?,
+    onPasteFromClipboard: () -> CapturedClip?,
 ) {
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
@@ -290,11 +291,16 @@ private fun KeepsakeRoot(
                     actions = {
                         IconButton(onClick = {
                             scope.launch {
-                                val text = onPasteFromClipboard() ?: return@launch
-                                app.captures.insertText(text, source = "paste")
+                                val cap = onPasteFromClipboard() ?: return@launch
+                                app.captures.insertCapture(cap, source = "paste")
                                 captures = app.captures.list()
                                 tab = Tab.Captures
-                                Toast.makeText(ctx, "已记下", Toast.LENGTH_SHORT).show()
+                                val kind = when (cap.type) {
+                                    "html" -> "富文本"
+                                    "url" -> "链接"
+                                    else -> "文本"
+                                }
+                                Toast.makeText(ctx, "已记下$kind", Toast.LENGTH_SHORT).show()
                             }
                         }) {
                             Icon(Icons.Default.ContentPaste, contentDescription = "粘贴并记下")
