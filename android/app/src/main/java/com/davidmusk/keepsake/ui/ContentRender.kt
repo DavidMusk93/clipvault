@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
@@ -228,7 +230,7 @@ fun ListItemBody(
                 if (caption != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = caption.replace("\n", " ").trim(),
+                        text = caption.trim(),
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
@@ -269,7 +271,7 @@ fun ListItemBody(
         }
         "rtf" -> {
             Text(
-                (row.textContent ?: row.ocrText ?: "富文本").replace("\n", " "),
+                row.textContent ?: row.ocrText ?: "富文本",
                 modifier = modifier,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 3,
@@ -306,20 +308,42 @@ fun DetailContent(
     repo: BackupRepository,
     modifier: Modifier = Modifier,
 ) {
-    val scroll = rememberScrollState()
-    Column(
-        modifier
-            .fillMaxWidth()
-            .verticalScroll(scroll),
-    ) {
-        when (row.type.lowercase()) {
-            "image" -> DetailImage(row, repo)
-            "html" -> DetailHtml(row.htmlContent ?: row.textContent.orEmpty())
-            "rtf" -> DetailRtf(row, repo)
-            "url" -> DetailUrl(row)
-            "pdf" -> DetailPdf(row, repo)
-            else -> DetailPlainText(
-                row.textContent ?: row.ocrText ?: row.htmlContent ?: "（无文本内容）"
+    when (row.type.lowercase()) {
+        "image" -> {
+            val scroll = rememberScrollState()
+            Column(modifier.fillMaxWidth().verticalScroll(scroll)) {
+                DetailImage(row, repo)
+            }
+        }
+        "html" -> {
+            val scroll = rememberScrollState()
+            Column(modifier.fillMaxWidth().verticalScroll(scroll)) {
+                DetailHtml(row.htmlContent ?: row.textContent.orEmpty())
+            }
+        }
+        "pdf" -> {
+            val scroll = rememberScrollState()
+            Column(modifier.fillMaxWidth().verticalScroll(scroll)) {
+                DetailPdf(row, repo)
+            }
+        }
+        "url" -> {
+            val scroll = rememberScrollState()
+            Column(modifier.fillMaxWidth().verticalScroll(scroll)) {
+                DetailUrl(row)
+            }
+        }
+        // text / rtf / default: 2-axis pan (hard newlines + horizontal long lines)
+        else -> {
+            val body = when (row.type.lowercase()) {
+                "rtf" -> row.textContent ?: row.ocrText
+                    ?: stripHtml(row.htmlContent.orEmpty()).ifBlank { "（富文本无正文）" }
+                else -> row.textContent ?: row.ocrText ?: row.htmlContent
+                    ?: row.preview.ifBlank { "（无文本内容）" }
+            }
+            DetailPlainText(
+                text = body,
+                modifier = modifier.fillMaxWidth().fillMaxHeight(),
             )
         }
     }
@@ -385,9 +409,12 @@ private fun DetailImage(row: ClipboardRow, repo: BackupRepository) {
         Spacer(Modifier.height(16.dp))
         Text("识别文字", fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(6.dp))
-        SelectionContainer {
-            Text(ocr, style = MaterialTheme.typography.bodyMedium)
-        }
+        DetailPlainText(
+            text = ocr,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 280.dp),
+        )
     }
 }
 
@@ -466,7 +493,7 @@ private fun DetailRtf(row: ClipboardRow, repo: BackupRepository) {
     val plain = row.textContent?.takeIf { it.isNotBlank() }
         ?: row.htmlContent?.let { stripHtml(it) }?.takeIf { it.isNotBlank() }
     if (!plain.isNullOrBlank()) {
-        DetailPlainText(plain)
+        DetailPlainText(plain, modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp))
         return
     }
     var info by remember { mutableStateOf("加载富文本…") }
@@ -493,7 +520,7 @@ private fun DetailUrl(row: ClipboardRow) {
     }
     row.textContent?.takeIf { it != url && it.isNotBlank() }?.let {
         Spacer(Modifier.height(12.dp))
-        DetailPlainText(it)
+        DetailPlainText(it, modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp))
     }
 }
 
@@ -548,15 +575,31 @@ private fun DetailPdf(row: ClipboardRow, repo: BackupRepository) {
     }
 }
 
+/**
+ * Plain / code text viewer: hard newlines preserved, long lines pan horizontally,
+ * tall content pans vertically (四向滚动).
+ */
 @Composable
-private fun DetailPlainText(text: String) {
+private fun DetailPlainText(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val vScroll = rememberScrollState()
+    val hScroll = rememberScrollState()
     SelectionContainer {
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyLarge.copy(
-                fontFamily = if (looksLikeCode(text)) FontFamily.Monospace else FontFamily.Default,
-            ),
-        )
+        Box(
+            modifier
+                .verticalScroll(vScroll)
+                .horizontalScroll(hScroll),
+        ) {
+            Text(
+                text = text,
+                softWrap = false,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontFamily = if (looksLikeCode(text)) FontFamily.Monospace else FontFamily.Default,
+                ),
+            )
+        }
     }
 }
 

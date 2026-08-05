@@ -92,18 +92,50 @@
     }
     .time { font-size: 12px; color: var(--md-outline); white-space: nowrap; }
     .card-body { font-size: 14px; line-height: 1.55; color: #2c2c2c; min-width: 0; }
-    .card-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
-    .card-body pre code {
-      display: block; border-radius: 12px; font-size: 12.5px; padding: 10px 12px;
-      border: 1px solid var(--md-outline-v); background: var(--md-surface-c);
-      max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    /* Text viewer: preserve hard newlines; long lines scroll X; tall content scrolls Y */
+    .card-body .text-scroll {
+      max-height: min(42vh, 320px);
+      overflow: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      border-radius: 12px;
+      border: 1px solid var(--md-outline-v);
+      background: var(--md-surface-c);
     }
-    .card-body pre code.is-tiny { max-height: none; }
+    .card-body .text-scroll.is-tiny {
+      max-height: none;
+      overflow: visible;
+      border: 0;
+      background: transparent;
+    }
+    .card-body .text-scroll pre { margin: 0; }
+    .card-body .text-scroll pre code,
+    .card-body .text-scroll > code {
+      display: block;
+      margin: 0;
+      padding: 10px 12px;
+      font-size: 12.5px;
+      line-height: 1.5;
+      white-space: pre;          /* 硬换行保留；不软折行 → 可左右滚 */
+      word-break: normal;
+      overflow-wrap: normal;
+      tab-size: 4;
+      min-width: min-content;    /* 内容宽于容器时触发横向滚动 */
+      box-sizing: border-box;
+    }
+    .card-body .text-scroll.is-tiny pre code,
+    .card-body .text-scroll.is-tiny > code {
+      padding: 0;
+      font-size: 14px;
+    }
+    /* legacy selectors kept as aliases */
+    .card-body pre { margin: 0; }
     .snippet-html {
       background: var(--md-surface-c); padding: 10px 12px; border-radius: 12px;
-      border: 1px solid var(--md-outline-v); max-height: 140px; overflow: auto; word-break: break-word;
+      border: 1px solid var(--md-outline-v); max-height: min(42vh, 280px); overflow: auto;
+      overscroll-behavior: contain; white-space: pre-wrap; word-break: break-word;
     }
-    .snippet-html.is-tiny { max-height: none; }
+    .snippet-html.is-tiny { max-height: none; overflow: visible; border: 0; background: transparent; padding: 0; }
 
     .thumb-wrap {
       position: relative; border-radius: 14px; overflow: hidden;
@@ -129,8 +161,13 @@
       border-bottom: 1px solid rgba(4,30,73,.08);
     }
     .ocr-body {
-      flex: 1; min-height: 0; max-height: 120px; overflow: auto; overscroll-behavior: contain;
+      flex: 1; min-height: 0; max-height: 140px; overflow: auto; overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
       padding: 8px 12px 10px; white-space: pre; line-height: 1.5; font-weight: 400;
+      word-break: normal; overflow-wrap: normal;
+    }
+    .ocr-body-inner {
+      display: block; min-width: min-content; white-space: pre; tab-size: 4;
     }
 
     .card-actions {
@@ -615,7 +652,7 @@
         if (ocr) {
           body += `<div class="ocr-panel">
             <div class="ocr-panel-header"><span class="material-symbols-outlined" style="font-size:16px">find_in_page</span>OCR 识别结果</div>
-            <div class="ocr-body">${esc(ocr)}</div>
+            <div class="ocr-body"><span class="ocr-body-inner">${esc(ocr)}</span></div>
           </div>`;
         }
       } else if (item.htmlContent) {
@@ -625,11 +662,11 @@
       } else if (item.type === 'rtf') {
         const text = item.textContent || (item.preview && item.preview !== 'Rich Text' ? item.preview : '') || '（富文本无正文，请重新复制）';
         const tiny = text.length <= 80 && !text.includes('\n') ? ' is-tiny' : '';
-        body = `<pre><code class="${tiny}">${esc(text)}</code></pre>`;
+        body = `<div class="text-scroll${tiny}"><pre><code>${esc(text)}</code></pre></div>`;
       } else {
         const text = item.textContent || item.preview || '';
         const tiny = text.length <= 80 && !text.includes('\n') ? ' is-tiny' : '';
-        body = `<pre><code class="${tiny}">${esc(text)}</code></pre>`;
+        body = `<div class="text-scroll${tiny}"><pre><code>${esc(text)}</code></pre></div>`;
       }
 
       const copyText = escAttr(item.textContent || item.ocrText || item.preview || '');

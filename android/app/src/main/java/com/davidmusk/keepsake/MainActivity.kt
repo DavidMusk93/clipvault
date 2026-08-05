@@ -632,7 +632,7 @@ private fun DetailScreen(
             )
             Spacer(Modifier.height(12.dp))
             Box(Modifier.weight(1f, fill = true).fillMaxWidth()) {
-                DetailContent(row = row, repo = repo, modifier = Modifier.fillMaxWidth())
+                DetailContent(row = row, repo = repo, modifier = Modifier.fillMaxSize())
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
