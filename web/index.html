@@ -312,6 +312,28 @@
       letter-spacing: -0.01em;
     }
 
+    /* Card actions: pair of equal emoji buttons (copy / delete) */
+    .card-actions .action-pair {
+      display: flex; gap: 6px; align-items: center; flex-shrink: 0;
+    }
+    .btn-emoji {
+      width: 34px; height: 34px; padding: 0;
+      border-radius: var(--radius-pill);
+      border: 0.5px solid var(--separator-strong);
+      background: rgba(255, 255, 255, 0.72);
+      font: inherit; font-size: 16px; line-height: 1;
+      cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--ink);
+      transition: background var(--press), transform var(--press), border-color var(--press);
+    }
+    .btn-emoji:hover { background: rgba(255, 255, 255, 0.98); }
+    .btn-emoji:active { transform: scale(0.95); }
+    .btn-emoji.is-danger:hover {
+      background: var(--danger-soft);
+      border-color: rgba(215, 0, 21, 0.22);
+    }
+    /* legacy names still used by drawer close / other chrome */
     .btn {
       height: 32px; padding: 0 14px; border-radius: var(--radius-pill); border: 0;
       font: inherit; font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
@@ -323,11 +345,11 @@
     .btn:active { transform: scale(0.97); }
     .btn-icon {
       width: 32px; height: 32px; border: 0; border-radius: var(--radius-pill);
-      background: transparent; color: var(--danger); cursor: pointer;
+      background: transparent; color: var(--muted); cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center;
-      transition: background var(--press), transform var(--press);
+      transition: background var(--press), transform var(--press), color var(--press);
     }
-    .btn-icon:hover { background: var(--danger-soft); }
+    .btn-icon:hover { background: var(--fill); color: var(--ink); }
     .btn-icon:active { transform: scale(0.95); }
 
     /* Lightbox — dim to focus */
@@ -512,7 +534,7 @@
       }
       .backup-drawer { transition: none; }
       .lightbox-inner { animation: none; }
-      .chip:active, .btn:active, .backup-btn:active { transform: none; }
+      .chip:active, .btn:active, .btn-emoji:active, .backup-btn:active { transform: none; }
     }
     @media (prefers-reduced-transparency: reduce) {
       .top-bar, .chips {
@@ -919,13 +941,9 @@
         <div class="card-body">${body}</div>
         <div class="card-actions">
           <div class="source">${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size:14px">apps</span>${esc(item.sourceApp)}` : ''}</div>
-          <div style="display:flex;gap:6px">
-            <button type="button" class="btn" data-copy="${copyText}">
-              <span class="material-symbols-outlined" style="font-size:17px">content_copy</span>复制
-            </button>
-            <button type="button" class="btn-icon" data-del="${item.id}" title="删除">
-              <span class="material-symbols-outlined">delete</span>
-            </button>
+          <div class="action-pair">
+            <button type="button" class="btn-emoji" data-copy="${copyText}" title="复制" aria-label="复制">📋</button>
+            <button type="button" class="btn-emoji is-danger" data-del="${item.id}" title="删除" aria-label="删除">🗑️</button>
           </div>
         </div>`;
 
