@@ -224,7 +224,7 @@
 
     .card-body .text-scroll {
       max-height: min(42vh, 320px);
-      overflow-x: hidden;
+      overflow-x: auto;  /* multi-line long rows may pan X; single-line uses is-wrap */
       overflow-y: auto;
       min-width: 0;
       max-width: 100%;
@@ -240,20 +240,28 @@
       border: 0;
       background: transparent;
     }
+    /* ONLY single-line long paste: wrap instead of pan */
+    .card-body .text-scroll.is-wrap {
+      overflow-x: hidden;
+    }
+    .card-body .text-scroll.is-tiny.is-wrap {
+      overflow-x: hidden;
+      overflow-y: visible;
+    }
     .card-body .text-scroll pre { margin: 0; }
     .card-body .text-scroll pre code,
     .card-body .text-scroll > code {
       display: block; margin: 0; padding: 10px 12px;
       font-family: var(--font-mono) !important;
       font-size: 12.5px; line-height: 1.45;
-      /* keep hard newlines; wrap long single lines (no horizontal pan) */
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
+      /* multi-line / ASCII / code: hard newlines, no soft wrap */
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
       tab-size: 4;
-      min-width: 0;
-      width: 100%;
-      max-width: 100%;
+      min-width: min-content;
+      width: max-content;
+      max-width: none;
       box-sizing: border-box;
       font-variant-ligatures: none;
       font-feature-settings: "liga" 0, "calt" 0;
@@ -266,10 +274,20 @@
     }
     .card-body .text-scroll pre {
       margin: 0;
+      min-width: min-content;
+      width: max-content;
+      max-width: none;
+    }
+    /* single-line long text only */
+    .card-body .text-scroll.is-wrap pre,
+    .card-body .text-scroll.is-wrap pre code,
+    .card-body .text-scroll.is-wrap > code {
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       min-width: 0;
       width: 100%;
       max-width: 100%;
-      white-space: inherit;
     }
     .card-body pre { margin: 0; }
     /*
@@ -1198,6 +1216,22 @@ window.ClipViewMasonry = Masonry;
     }
 
 
+
+    /**
+     * Single-line long paste → wrap; multi-line (ASCII/code) → pre + optional X pan.
+     * Returns class suffix string including leading space, e.g. " is-wrap" / " is-tiny" / "".
+     */
+    function textLineModeClass(text) {
+      const s = String(text || '');
+      const hasNL = /[\n\r\u2028\u2029]/.test(s);
+      const compact = !hasNL && s.length > 0 && s.length <= 80;
+      const wrap = !hasNL && s.length > 0; // one physical line → wrap (short or long)
+      let cls = '';
+      if (compact) cls += ' is-tiny';
+      if (wrap) cls += ' is-wrap';
+      return cls;
+    }
+
 function buildCard(item) {
       const card = document.createElement('article');
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
@@ -1233,14 +1267,15 @@ function buildCard(item) {
         if (notesFragmentUseful(fragment)) {
           body = `<div class="notes-rich${tiny}">${fragment}</div>`;
         } else if (plain) {
-          body = `<div class="text-scroll is-rtf${tiny}"><pre class="plain">${esc(plain)}</pre></div>`;
+          const mode = textLineModeClass(plain);
+          body = `<div class="text-scroll is-rtf${mode}"><pre class="plain">${esc(plain)}</pre></div>`;
         } else {
-          body = `<div class="text-scroll is-rtf${tiny}"><pre class="plain">${esc('（富文本无正文，请重新复制）')}</pre></div>`;
+          body = `<div class="text-scroll is-rtf is-tiny is-wrap"><pre class="plain">（富文本无正文，请重新复制）</pre></div>`;
         }
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
-        const tiny = plain.length <= 80 && !plain.includes('\n') ? ' is-tiny' : '';
-        body = `<div class="text-scroll${tiny}"><pre><code>${esc(plain)}</code></pre></div>`;
+        const mode = textLineModeClass(plain);
+        body = `<div class="text-scroll${mode}"><pre><code>${esc(plain)}</code></pre></div>`;
       }
 
       const copyText = escAttr(item.textContent || item.ocrText || item.preview || '');
