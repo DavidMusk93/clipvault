@@ -18,7 +18,7 @@ const Masonry = {
     return 5;
   },
 
-  pack(heights, cols, gap = 16) {
+  pack(heights, cols, gap = 14) /* sync web MASONRY_GAP */ {
     const colOf = new Array(heights.length);
     const colHeights = new Array(cols).fill(0);
     for (let i = 0; i < heights.length; i++) {

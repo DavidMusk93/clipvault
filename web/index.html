@@ -187,12 +187,16 @@
       border: 0.5px solid var(--separator);
       border-radius: var(--radius);
       padding: 14px 15px;
-      display: flex; flex-direction: column; gap: 10px; width: 100%;
+      display: flex; flex-direction: column; gap: 10px;
+      width: 100%;
+      min-width: 0; /* flex item: allow inner overflow scroll */
+      max-width: 100%;
       box-shadow: var(--elev-1);
       transition: box-shadow 0.28s var(--spring), border-color 0.2s ease;
-      content-visibility: auto;
-      contain-intrinsic-size: auto 180px;
+      /* do NOT use content-visibility here: masonry measures real height;
+         placeholder intrinsic size made columns uneven at the bottom */
       position: relative; z-index: 0;
+      overflow: hidden; /* clip to card; scroll lives on .text-scroll / .notes-rich */
     }
     .m3-card:hover {
       box-shadow: var(--elev-2);
@@ -213,12 +217,19 @@
     }
     .card-body {
       font-size: 14px; line-height: 1.5; color: var(--ink);
-      min-width: 0; letter-spacing: -0.01em;
+      min-width: 0; max-width: 100%;
+      letter-spacing: -0.01em;
+      overflow: hidden; /* force children to scroll internally */
     }
 
     .card-body .text-scroll {
       max-height: min(42vh, 320px);
+      /* both axes: long single line pans X; tall content pans Y */
       overflow: auto;
+      overflow-x: auto;
+      overflow-y: auto;
+      min-width: 0;
+      max-width: 100%;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
       border-radius: var(--radius-sm);
@@ -226,7 +237,12 @@
       background: rgba(245, 245, 247, 0.85);
     }
     .card-body .text-scroll.is-tiny {
-      max-height: none; overflow: visible; border: 0; background: transparent;
+      /* short cards: no vertical cap, but still allow horizontal pan if line is long */
+      max-height: none;
+      overflow-x: auto;
+      overflow-y: visible;
+      border: 0;
+      background: transparent;
     }
     .card-body .text-scroll pre { margin: 0; }
     .card-body .text-scroll pre code,
@@ -234,9 +250,15 @@
       display: block; margin: 0; padding: 10px 12px;
       font-family: var(--font-mono) !important;
       font-size: 12.5px; line-height: 1.45;
+      /* hard newlines kept; long tokens can still pan via parent overflow-x */
       white-space: pre;
-      word-break: normal; overflow-wrap: normal;
-      tab-size: 4; min-width: min-content; box-sizing: border-box;
+      word-break: normal;
+      overflow-wrap: normal;
+      tab-size: 4;
+      min-width: min-content;
+      width: max-content;
+      max-width: none;
+      box-sizing: border-box;
       font-variant-ligatures: none;
       font-feature-settings: "liga" 0, "calt" 0;
       letter-spacing: 0;
@@ -245,6 +267,12 @@
     .card-body .text-scroll.is-tiny pre code,
     .card-body .text-scroll.is-tiny > code {
       padding: 0; font-size: 14px;
+    }
+    .card-body .text-scroll pre {
+      margin: 0;
+      min-width: min-content;
+      width: max-content;
+      max-width: none;
     }
     .card-body pre { margin: 0; }
     /*
@@ -258,9 +286,12 @@
       border: 0.5px solid var(--separator);
       max-height: min(42vh, 340px);
       overflow: auto;
+      min-width: 0;
+      max-width: 100%;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
       word-break: break-word;
+      overflow-wrap: anywhere;
       font-family: var(--font-ui);
       font-size: 14px;
       line-height: 1.38;
@@ -269,7 +300,12 @@
       -webkit-font-smoothing: antialiased;
     }
     .notes-rich.is-tiny, .snippet-html.is-tiny {
-      max-height: none; overflow: visible; border: 0; background: transparent; padding: 0;
+      max-height: none;
+      overflow-x: auto;
+      overflow-y: visible;
+      border: 0;
+      background: transparent;
+      padding: 0;
     }
 
     .notes-rich p, .snippet-html p {
@@ -840,6 +876,8 @@
     };
     window.ClipViewPagination = Pagination;
 
+        const MASONRY_GAP = 14; /* must match CSS --gap */
+
     const Masonry = {
       columnCountForWidth(w) {
         if (w < 560) return 1;
@@ -848,7 +886,7 @@
         if (w < 1680) return 4;
         return 5;
       },
-      pack(heights, cols, gap = 16) {
+      pack(heights, cols, gap = MASONRY_GAP) {
         const colOf = new Array(heights.length);
         const colHeights = new Array(cols).fill(0);
         for (let i = 0; i < heights.length; i++) {
@@ -859,15 +897,30 @@
         }
         return { colOf, colHeights };
       },
+      /** Measure true layout height (ignore content-visibility placeholders). */
+      measureHeight(card) {
+        if (!card) return 120;
+        const prevCV = card.style.contentVisibility;
+        const prevCIS = card.style.containIntrinsicSize;
+        card.style.contentVisibility = 'visible';
+        card.style.containIntrinsicSize = 'auto none';
+        // force layout
+        const h = Math.ceil(card.getBoundingClientRect().height);
+        card.style.contentVisibility = prevCV;
+        card.style.containIntrinsicSize = prevCIS;
+        return h > 0 ? h : 120;
+      },
       isCompact(item) {
         if (!item || item.type === 'image') return false;
         let plain = normalizePlainText(item.textContent || '');
         if (!plain && item.htmlContent) plain = stripHtmlToText(item.htmlContent);
         if (!plain) plain = normalizePlainText(item.preview || '');
-        return plain.length > 0 && plain.length <= 80 && !plain.includes('\n');
+        // Long single line is NOT compact: needs scroll surface, not overflow:visible
+        if (plain.length > 48) return false;
+        return plain.length > 0 && !plain.includes('\n');
       }
     };
-    window.ClipViewMasonry = Masonry;
+window.ClipViewMasonry = Masonry;
 
     /** @type {Array<object>} */
     let clips = [];
@@ -1234,11 +1287,13 @@ function buildCard(item) {
       if (wrap) {
         wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview')));
         const img = wrap.querySelector('img');
-        // Do not full-rebalance on image load/error during infinite scroll (causes jump/dups).
         if (img && !img.complete) {
-          img.addEventListener('load', () => { /* height settles in-column; skip remount */ }, { once: true });
+          img.addEventListener('load', () => scheduleMasonrySync(), { once: true });
         }
-        img?.addEventListener('error', () => { wrap.style.display = 'none'; }, { once: true });
+        img?.addEventListener('error', () => {
+          wrap.style.display = 'none';
+          scheduleMasonrySync();
+        }, { once: true });
       }
       return card;
     }
@@ -1334,9 +1389,9 @@ function buildCard(item) {
 
       for (const item of toAdd) {
         const card = ensureCard(item);
-        // Measure off-layout using first column
+        // Probe height at column width
         colEls[0].appendChild(card);
-        const h = card.getBoundingClientRect().height || 120;
+        const h = Masonry.measureHeight(card);
         card.remove();
 
         let best = 0;
@@ -1344,7 +1399,9 @@ function buildCard(item) {
           if (colHeights[c] < colHeights[best]) best = c;
         }
         colEls[best].appendChild(card);
-        colHeights[best] += h + (colHeights[best] > 0 ? 16 : 0);
+        // Prefer post-attach height (images/fonts settle)
+        const realH = Masonry.measureHeight(card) || h;
+        colHeights[best] += realH + (colHeights[best] > 0 ? MASONRY_GAP : 0);
       }
     }
 
@@ -1379,25 +1436,33 @@ function buildCard(item) {
           colEls.push(col);
         }
 
+        // Measure in-column at final width so wrapping matches painted result.
         const heights = orderedCards.map(card => {
           colEls[0].appendChild(card);
-          const h = card.getBoundingClientRect().height || 120;
+          const h = Masonry.measureHeight(card);
           card.remove();
           return h;
         });
-        const packed = Masonry.pack(heights, cols, 16);
-        colHeights = packed.colHeights.slice();
+        const packed = Masonry.pack(heights, cols, MASONRY_GAP);
         for (let i = 0; i < orderedCards.length; i++) {
           colEls[packed.colOf[i]].appendChild(orderedCards[i]);
         }
+        // Re-read live column heights after paint (fonts/images may differ from probe).
+        colHeights = colEls.map(col => {
+          let h = 0;
+          const kids = [...col.children];
+          kids.forEach((el, idx) => {
+            h += Masonry.measureHeight(el) + (idx > 0 ? MASONRY_GAP : 0);
+          });
+          return h;
+        });
       } finally {
         rebalanceBusy = false;
       }
     }
 
-    function scheduleRebalance() {
-      // Soft: full rebalance only when column count may change (resize). Avoid on image load
-      // during infinite scroll — remounting the whole wall jumps scroll and looks like dups.
+        function scheduleRebalance() {
+      // Resize path: only full rebuild when column count changes.
       clearTimeout(rebalanceTimer);
       rebalanceTimer = setTimeout(() => requestAnimationFrame(() => {
         const host = document.getElementById('grid');
@@ -1407,6 +1472,16 @@ function buildCard(item) {
         }
       }), 48);
     }
+
+    /** After image/font height settles, re-pack with scroll anchor (debounced). */
+    let masonrySyncTimer = 0;
+    function scheduleMasonrySync() {
+      clearTimeout(masonrySyncTimer);
+      masonrySyncTimer = setTimeout(() => requestAnimationFrame(() => {
+        rebuildFromData({ preserveScroll: true });
+      }), 120);
+    }
+
 
     // --- Lightbox ---
     function openLightbox(url) {
