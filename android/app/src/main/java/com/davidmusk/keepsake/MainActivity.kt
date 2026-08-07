@@ -835,11 +835,12 @@ private fun DetailScreen(
                     fontWeight = FontWeight.SemiBold,
                 )
             }
+            // Top line already shows latest displayTime — only add first-seen when different.
             row.displayFirstSeen?.let { first ->
                 if (first != row.displayTime) {
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "首次 $first · 最近 ${row.displayTime}",
+                        "首次 $first",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                     )
