@@ -179,25 +179,101 @@
       font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
     }
     .badge-count .material-symbols-outlined { font-size: 13px; }
-    .ops-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .ops-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
     .ops-item {
       border: 0.5px solid var(--separator);
-      border-radius: 12px; padding: 10px 12px;
+      border-radius: 12px; padding: 0;
       background: rgba(255,255,255,0.72);
+      overflow: hidden;
+      border-left: 3px solid var(--ops-src, #8e8e93);
     }
-    .ops-item .ops-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 13px; align-items: baseline; flex-wrap: wrap; }
-    .ops-item .ops-row {
-      display: grid; grid-template-columns: 72px 1fr; gap: 6px 10px;
-      margin-top: 6px; font-size: 12px; line-height: 1.45;
+    .ops-item .ops-top {
+      display: flex; justify-content: space-between; gap: 8px;
+      font-weight: 600; font-size: 13px; align-items: center;
+      padding: 10px 12px 8px;
+      flex-wrap: nowrap;
+      min-width: 0;
     }
-    .ops-item .ops-k { color: var(--muted); font-weight: 500; }
+    .ops-item .ops-top-left {
+      display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;
+    }
+    .ops-item .ops-action {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+    }
+    .ops-item .ops-source-pill {
+      flex-shrink: 0;
+      height: 20px; padding: 0 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
+      line-height: 20px;
+      color: var(--ops-src-ink, #3a3a3c);
+      background: var(--ops-src-soft, rgba(142,142,147,0.16));
+    }
+    .ops-item .ops-top .time { flex-shrink: 0; white-space: nowrap; }
+    /* Source color themes */
+    .ops-item.src-web {
+      --ops-src: #007aff; --ops-src-ink: #0056b3; --ops-src-soft: rgba(0,122,255,0.14);
+    }
+    .ops-item.src-clipboard {
+      --ops-src: #34c759; --ops-src-ink: #1b7a34; --ops-src-soft: rgba(52,199,89,0.16);
+    }
+    .ops-item.src-backup {
+      --ops-src: #af52de; --ops-src-ink: #7a2fa8; --ops-src-soft: rgba(175,82,222,0.14);
+    }
+    .ops-item.src-maintenance {
+      --ops-src: #ff9500; --ops-src-ink: #b56a00; --ops-src-soft: rgba(255,149,0,0.16);
+    }
+    .ops-item.src-app {
+      --ops-src: #5856d6; --ops-src-ink: #3b3a9a; --ops-src-soft: rgba(88,86,214,0.14);
+    }
+    .ops-item.src-sync {
+      --ops-src: #32ade6; --ops-src-ink: #1a6f99; --ops-src-soft: rgba(50,173,230,0.16);
+    }
+    .ops-item.src-system {
+      --ops-src: #8e8e93; --ops-src-ink: #3a3a3c; --ops-src-soft: rgba(142,142,147,0.16);
+    }
+    .ops-item .ops-scroll {
+      margin: 0 0 10px 12px;
+      padding: 0 10px 8px 0;
+      max-height: 160px;
+      overflow: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-gutter: stable;
+    }
+    .ops-item .ops-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .ops-item .ops-scroll::-webkit-scrollbar-thumb {
+      background: rgba(0,0,0,0.18); border-radius: 8px; border: 2px solid transparent; background-clip: content-box;
+    }
+    .ops-item .ops-scroll::-webkit-scrollbar-track,
+    .ops-item .ops-scroll::-webkit-scrollbar-corner { background: transparent; }
+    .ops-item .ops-grid {
+      display: grid;
+      grid-template-columns: max-content max-content;
+      column-gap: 14px;
+      row-gap: 6px;
+      align-items: start;
+      width: max-content;
+      min-width: 100%;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .ops-item .ops-k {
+      color: var(--muted); font-weight: 500;
+      white-space: nowrap;
+      padding-top: 1px;
+    }
     .ops-item .ops-v {
-      color: var(--ink); word-break: break-all; overflow-wrap: anywhere;
-      white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--ink);
+      white-space: pre; /* no wrap — pan to read */
+      word-break: normal;
+      overflow-wrap: normal;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 11.5px;
     }
     .ops-item .ops-v.is-plain {
-      font-family: inherit; font-size: 12.5px; white-space: pre-wrap;
+      font-family: inherit;
+      font-size: 12.5px;
+      white-space: pre;
     }
     .event-panel {
       margin-top: 8px; border-top: 0.5px solid var(--separator);
@@ -1979,6 +2055,21 @@ window.ClipViewMasonry = Masonry;
     opsScrim?.addEventListener('click', closeOps);
     document.getElementById('opsRefresh')?.addEventListener('click', refreshOpLogs);
 
+    function opsSourceKey(source) {
+      const s = String(source || 'system').toLowerCase().trim();
+      if (s === 'web' || s === 'clipboard' || s === 'backup' || s === 'maintenance' || s === 'app' || s === 'sync' || s === 'system') {
+        return s;
+      }
+      // map common aliases
+      if (s.includes('web') || s.includes('ui')) return 'web';
+      if (s.includes('clip')) return 'clipboard';
+      if (s.includes('back')) return 'backup';
+      if (s.includes('maint') || s.includes('purge') || s.includes('cron')) return 'maintenance';
+      if (s.includes('sync')) return 'sync';
+      if (s.includes('app')) return 'app';
+      return 'system';
+    }
+
     async function refreshOpLogs() {
       const host = document.getElementById('opsList');
       if (!host) return;
@@ -1995,13 +2086,14 @@ window.ClipViewMasonry = Masonry;
         host.innerHTML = '';
         items.forEach(row => {
           const li = document.createElement('li');
-          li.className = 'ops-item';
           const detail = (row.detail != null && row.detail !== '') ? String(row.detail) : '';
           const itemId = (row.itemId != null && row.itemId !== '') ? String(row.itemId) : '';
           const contentHash = (row.contentHash != null && row.contentHash !== '') ? String(row.contentHash) : '';
-          const source = row.source != null ? String(row.source) : '';
+          const source = row.source != null ? String(row.source) : 'system';
           const action = row.action != null ? String(row.action) : '';
           const id = row.id != null ? String(row.id) : '';
+          const srcKey = opsSourceKey(source);
+          li.className = 'ops-item src-' + srcKey;
           const rows = [];
           rows.push(['时间', formatLocalTime(row.ts), true]);
           rows.push(['动作', action, true]);
@@ -2011,11 +2103,19 @@ window.ClipViewMasonry = Masonry;
           if (id) rows.push(['日志 ID', id, false]);
           if (detail) rows.push(['详情', detail, true]);
           const body = rows.map(([k, v, plain]) =>
-            `<div class="ops-row"><span class="ops-k">${esc(k)}</span><span class="ops-v${plain ? ' is-plain' : ''}">${esc(v)}</span></div>`
+            `<span class="ops-k">${esc(k)}</span><span class="ops-v${plain ? ' is-plain' : ''}">${esc(v)}</span>`
           ).join('');
           li.innerHTML = `
-            <div class="ops-top"><span>${esc(action)}</span><span class="time">${formatLocalTime(row.ts)}</span></div>
-            ${body}`;
+            <div class="ops-top">
+              <div class="ops-top-left">
+                <span class="ops-action">${esc(action)}</span>
+                <span class="ops-source-pill">${esc(source || 'system')}</span>
+              </div>
+              <span class="time">${formatLocalTime(row.ts)}</span>
+            </div>
+            <div class="ops-scroll">
+              <div class="ops-grid">${body}</div>
+            </div>`;
           host.appendChild(li);
         });
       } catch (e) {
