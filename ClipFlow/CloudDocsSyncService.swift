@@ -61,6 +61,10 @@ final class CloudDocsSyncService {
         /// CAS keys under backup/blobs (without `.bin` suffix in storage path — keys as DatabaseManager uses).
         var blobKeys: [String]?
         var note: String?
+        /// User judgment layer (kind == user_context); never mutates capture payload.
+        var userNote: String?
+        var userStage: String?
+        var userRating: Int?
 
         enum CodingKeys: String, CodingKey {
             case v, opId = "op_id", host, seq, kind
@@ -70,6 +74,7 @@ final class CloudDocsSyncService {
             case ocrText = "ocr_text", sourceApp = "source_app", url
             case fileUrls = "file_urls", copyCount = "copy_count"
             case blobKeys = "blob_keys", note
+            case userNote = "user_note", userStage = "user_stage", userRating = "user_rating"
         }
     }
 
@@ -211,6 +216,31 @@ final class CloudDocsSyncService {
             )
             self.enqueue(op)
             self.scheduleDrain(reason: "tombstone")
+        }
+    }
+
+    /// Multi-device fan-out for user judgment (note/stage/rating). Capture payload stays immutable.
+    func recordLocalUserContext(item: ClipboardItem) {
+        guard config.enabled else { return }
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            var op = self.makeOp(
+                kind: "user_context",
+                itemId: item.id.uuidString,
+                item: item,
+                blobKeys: nil
+            )
+            // Avoid re-shipping full capture body for judgment-only ops.
+            op.textContent = nil
+            op.htmlContent = nil
+            op.ocrText = nil
+            op.blobKeys = nil
+            op.userNote = item.userNote
+            op.userStage = item.userStage
+            op.userRating = item.userRating
+            op.note = "user_context"
+            self.enqueue(op)
+            self.scheduleDrain(reason: "user_context")
         }
     }
 
@@ -615,6 +645,21 @@ final class CloudDocsSyncService {
         switch op.kind {
         case "tombstone":
             return database.applySyncTombstoneLocked(id: uuid)
+        case "user_context":
+            // Full projection replace for note/stage/rating from peer (including clears).
+            var update = DatabaseManager.UserContextUpdate()
+            update.note = .some(op.userNote)
+            update.stage = .some(op.userStage)
+            update.rating = .some(op.userRating)
+            do {
+                _ = try database.applyUserContextLocked(id: uuid, update: update, source: "sync:\(op.host)")
+                return true
+            } catch DatabaseManager.UserContextError.emptyUpdate {
+                return false
+            } catch {
+                print("[Sync] user_context apply failed \(op.itemId): \(error)")
+                return false
+            }
         case "upsert", "touch":
             guard let hash = op.contentHash, let type = op.type else { return false }
             return database.applySyncUpsertLocked(

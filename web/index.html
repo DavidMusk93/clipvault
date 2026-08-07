@@ -780,6 +780,93 @@
       letter-spacing: -0.01em;
     }
 
+    /* User context strip on card (judgment projection; capture stays immutable) */
+    .ctx-strip {
+      display: flex; flex-direction: column; gap: 6px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      border: 0.5px solid rgba(196, 122, 44, 0.22);
+      background: rgba(196, 122, 44, 0.07);
+      min-width: 0;
+    }
+    .ctx-strip-top {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .ctx-stage-pill {
+      height: 20px; padding: 0 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
+      line-height: 20px;
+      color: #8a5520;
+      background: rgba(196, 122, 44, 0.16);
+    }
+    .ctx-stage-pill[data-stage="useful"] { color: #1b7a34; background: rgba(52,199,89,0.16); }
+    .ctx-stage-pill[data-stage="followup"] { color: #0056b3; background: rgba(0,122,255,0.14); }
+    .ctx-stage-pill[data-stage="archive"] { color: #3a3a3c; background: rgba(142,142,147,0.16); }
+    .ctx-stage-pill[data-stage="reject"] { color: #c5221f; background: rgba(217,0,21,0.12); }
+    .ctx-stage-pill[data-stage="inbox"] { color: #8a5520; background: rgba(196,122,44,0.16); }
+    .ctx-rating-dots { font-size: 12px; letter-spacing: 1px; color: #C47A2C; font-weight: 600; }
+    .ctx-note-preview {
+      font-size: 12.5px; line-height: 1.4; color: var(--ink);
+      white-space: pre-wrap; word-break: break-word;
+      max-height: 4.2em; overflow: hidden;
+    }
+    .ctx-toast-card { width: min(360px, calc(100vw - 20px)); max-height: min(70vh, 480px); }
+    .ctx-toast-body {
+      padding: 0 14px 14px; display: flex; flex-direction: column; gap: 8px;
+      overflow: auto; min-height: 0; flex: 1;
+    }
+    .ctx-label {
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      letter-spacing: -0.01em;
+    }
+    .ctx-hint { font-weight: 400; opacity: 0.85; }
+    .ctx-note {
+      width: 100%; min-height: 88px; resize: vertical;
+      border-radius: 12px; border: 0.5px solid var(--separator-strong);
+      padding: 10px 12px; font: inherit; font-size: 14px; line-height: 1.4;
+      background: rgba(255,255,255,0.9); color: var(--ink);
+      box-sizing: border-box;
+    }
+    .ctx-note:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.22);
+      border-color: rgba(0, 113, 227, 0.45);
+    }
+    .ctx-stages, .ctx-rating {
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .ctx-chip {
+      height: 30px; padding: 0 12px; border-radius: 999px;
+      border: 0.5px solid var(--separator-strong);
+      background: var(--fill); color: var(--ink);
+      font: inherit; font-size: 12px; font-weight: 500;
+      cursor: pointer;
+      transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
+    }
+    .ctx-chip:hover { background: var(--fill-elevated); }
+    .ctx-chip.is-on {
+      background: rgba(0, 113, 227, 0.14);
+      border-color: rgba(0, 113, 227, 0.4);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .ctx-actions {
+      display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;
+    }
+    .ctx-actions button {
+      height: 34px; padding: 0 14px; border-radius: 999px;
+      border: 0; font: inherit; font-size: 13px; font-weight: 600;
+      cursor: pointer;
+      background: var(--accent); color: #fff;
+    }
+    .ctx-actions button.secondary {
+      background: var(--fill); color: var(--ink);
+      border: 0.5px solid var(--separator-strong);
+      font-weight: 500;
+    }
+    .icon-btn.has-ctx { color: #C47A2C; }
+    .icon-btn.has-ctx:hover { color: #8a5520; }
+
     /* Card actions: pair of equal emoji buttons (copy / delete) */
     /* Card icon buttons — Apple toolbar style (round, equal weight, press feedback) */
     .card-actions .action-pair {
@@ -1216,6 +1303,32 @@
     </div>
   </div>
 
+  <!-- User context (judgment layer): note + multi-stage evaluation; capture payload immutable -->
+  <div id="ctxToast" class="event-toast ctx-toast" aria-hidden="true">
+    <div class="event-toast-scrim" id="ctxToastScrim"></div>
+    <div class="event-toast-card ctx-toast-card" role="dialog" aria-modal="true" aria-labelledby="ctxToastTitle">
+      <div class="event-toast-head">
+        <h3 id="ctxToastTitle">我的语境</h3>
+        <button type="button" class="btn-icon" id="ctxToastClose" title="关闭" aria-label="关闭">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="event-toast-sub" id="ctxToastSub">剪贴板内容不可改；在此记录想法与阶段</div>
+      <div class="ctx-toast-body">
+        <label class="ctx-label" for="ctxNote">备注</label>
+        <textarea id="ctxNote" class="ctx-note" rows="4" maxlength="4000" placeholder="例如：用于某文档 / 待验证 / 不要删…"></textarea>
+        <div class="ctx-label">阶段</div>
+        <div class="ctx-stages" id="ctxStages" role="group" aria-label="评价阶段"></div>
+        <div class="ctx-label">评分 <span class="ctx-hint">可选 1–5</span></div>
+        <div class="ctx-rating" id="ctxRating" role="group" aria-label="评分"></div>
+        <div class="ctx-actions">
+          <button type="button" class="secondary" id="ctxClear">清除语境</button>
+          <button type="button" id="ctxSave">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="snackbar" class="snackbar">
     <span class="material-symbols-outlined" style="color:#64d2ff">check_circle</span>
     <span id="snackbarText">ok</span>
@@ -1377,6 +1490,161 @@ window.ClipViewMasonry = Masonry;
       el.classList.add('show');
       setTimeout(() => el.classList.remove('show'), 2400);
     }
+
+    /** Multi-stage evaluation (product invariant; matches ClipboardItem.userStages). */
+    const STAGE_META = {
+      inbox:    { label: '收件箱' },
+      useful:   { label: '有用' },
+      followup: { label: '待跟进' },
+      archive:  { label: '归档' },
+      reject:   { label: '淘汰' },
+    };
+    const STAGE_ORDER = ['inbox', 'useful', 'followup', 'archive', 'reject'];
+
+    let ctxEditorItemId = null;
+    let ctxSelectedStage = null;
+    let ctxSelectedRating = null;
+
+    function closeContextEditor() {
+      const root = document.getElementById('ctxToast');
+      if (!root) return;
+      root.classList.remove('open');
+      root.setAttribute('aria-hidden', 'true');
+      ctxEditorItemId = null;
+    }
+
+    function openContextEditor(item, anchorEl) {
+      const root = document.getElementById('ctxToast');
+      const card = root?.querySelector('.ctx-toast-card');
+      if (!root || !card) return;
+      ctxEditorItemId = item.id;
+      ctxSelectedStage = item.userStage || null;
+      ctxSelectedRating = item.userRating != null ? Number(item.userRating) : null;
+      const noteEl = document.getElementById('ctxNote');
+      if (noteEl) noteEl.value = item.userNote || '';
+      const sub = document.getElementById('ctxToastSub');
+      if (sub) {
+        const tm = typeMeta(item.type);
+        sub.textContent = (tm.label || item.type) + ' · 内容不可改 · 仅记录你的判断';
+      }
+
+      const stagesHost = document.getElementById('ctxStages');
+      if (stagesHost) {
+        stagesHost.innerHTML = '';
+        STAGE_ORDER.forEach(key => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ctx-chip' + (ctxSelectedStage === key ? ' is-on' : '');
+          b.textContent = STAGE_META[key].label;
+          b.dataset.stage = key;
+          b.addEventListener('click', () => {
+            ctxSelectedStage = ctxSelectedStage === key ? null : key;
+            stagesHost.querySelectorAll('.ctx-chip').forEach(el => {
+              el.classList.toggle('is-on', el.dataset.stage === ctxSelectedStage);
+            });
+          });
+          stagesHost.appendChild(b);
+        });
+      }
+
+      const ratingHost = document.getElementById('ctxRating');
+      if (ratingHost) {
+        ratingHost.innerHTML = '';
+        for (let n = 1; n <= 5; n++) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ctx-chip' + (ctxSelectedRating === n ? ' is-on' : '');
+          b.textContent = String(n);
+          b.dataset.rating = String(n);
+          b.title = n + ' 分';
+          b.addEventListener('click', () => {
+            ctxSelectedRating = ctxSelectedRating === n ? null : n;
+            ratingHost.querySelectorAll('.ctx-chip').forEach(el => {
+              el.classList.toggle('is-on', Number(el.dataset.rating) === ctxSelectedRating);
+            });
+          });
+          ratingHost.appendChild(b);
+        }
+      }
+
+      // Position like event toast when possible
+      root.classList.add('open');
+      root.setAttribute('aria-hidden', 'false');
+      requestAnimationFrame(() => {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const rect = anchorEl?.getBoundingClientRect?.();
+        const cw = card.offsetWidth || 360;
+        const ch = card.offsetHeight || 360;
+        let left = rect ? rect.left + rect.width / 2 - cw / 2 : (vw - cw) / 2;
+        let top = rect ? rect.bottom + 8 : (vh - ch) / 2;
+        left = Math.max(10, Math.min(left, vw - cw - 10));
+        if (top + ch > vh - 10) top = Math.max(10, (rect ? rect.top - ch - 8 : 10));
+        card.style.left = left + 'px';
+        card.style.top = top + 'px';
+      });
+      noteEl?.focus();
+    }
+
+    async function saveContextEditor({ clearAll = false } = {}) {
+      if (!ctxEditorItemId) return;
+      const noteEl = document.getElementById('ctxNote');
+      const body = { id: ctxEditorItemId };
+      if (clearAll) {
+        body.clearNote = true;
+        body.clearStage = true;
+        body.clearRating = true;
+      } else {
+        body.note = noteEl ? noteEl.value : '';
+        body.stage = ctxSelectedStage;
+        body.rating = ctxSelectedRating;
+        if (ctxSelectedStage == null) body.clearStage = true;
+        if (ctxSelectedRating == null) body.clearRating = true;
+      }
+      try {
+        const res = await fetch(API + '/api/clips/context', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.ok === false) {
+          toast(j.message || j.error || '保存失败');
+          return;
+        }
+        const updated = j.item;
+        if (updated && updated.id) {
+          const idx = clips.findIndex(c => c.id === updated.id);
+          if (idx >= 0) clips[idx] = { ...clips[idx], ...updated };
+          const card = cardCache.get(updated.id);
+          if (card) {
+            const next = buildCard({ ...clips[idx] });
+            card.replaceWith(next);
+            cardCache.set(updated.id, next);
+          } else {
+            rebuildFromData({ preserveScroll: true });
+          }
+        }
+        toast(clearAll ? '已清除语境' : '语境已保存');
+        closeContextEditor();
+      } catch (e) {
+        console.error(e);
+        toast('保存失败');
+      }
+    }
+
+    document.getElementById('ctxToastScrim')?.addEventListener('click', closeContextEditor);
+    document.getElementById('ctxToastClose')?.addEventListener('click', closeContextEditor);
+    document.getElementById('ctxSave')?.addEventListener('click', () => saveContextEditor());
+    document.getElementById('ctxClear')?.addEventListener('click', () => {
+      if (!confirm('清除此条上的备注、阶段与评分？')) return;
+      saveContextEditor({ clearAll: true });
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && document.getElementById('ctxToast')?.classList.contains('open')) {
+        closeContextEditor();
+      }
+    });
 
     function clientFilter(items) {
       if (currentFilter === 'all') return items;
@@ -1839,6 +2107,21 @@ window.ClipViewMasonry = Masonry;
         body = `<div class="text-scroll${mode}"><pre><code>${esc(plain)}</code></pre></div>`;
       }
 
+      // Judgment projection (never part of capture payload)
+      const stageLabel = STAGE_META[item.userStage]?.label || item.userStage;
+      if (item.userNote || item.userStage || item.userRating) {
+        const stars = item.userRating
+          ? `<span class="ctx-rating-dots" title="评分 ${item.userRating}">${'★'.repeat(item.userRating)}${'☆'.repeat(5 - item.userRating)}</span>`
+          : '';
+        const stagePill = item.userStage
+          ? `<span class="ctx-stage-pill" data-stage="${escAttr(item.userStage)}">${esc(stageLabel)}</span>`
+          : '';
+        const notePrev = item.userNote
+          ? `<div class="ctx-note-preview">${esc(item.userNote)}</div>`
+          : '';
+        body += `<div class="ctx-strip">${stagePill || stars ? `<div class="ctx-strip-top">${stagePill}${stars}</div>` : ''}${notePrev}</div>`;
+      }
+
       const copyText = escAttr(item.textContent || item.ocrText || item.preview || '');
       const inTrash = !!(item.inTrash || item.deletedAt);
       if (inTrash) card.classList.add('in-trash');
@@ -1847,11 +2130,13 @@ window.ClipViewMasonry = Masonry;
       const trashMeta = inTrash
         ? `<span class="time" title="删除 · 30 天后清除">${delTs || timeStr}</span>`
         : `<span class="time">${timeStr}</span>`;
+      const hasCtx = !!(item.userNote || item.userStage || item.userRating);
       const actions = inTrash
         ? `<div class="action-pair">
             <button type="button" class="icon-btn" data-restore="${item.id}" title="恢复" aria-label="恢复"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 12a5 5 0 1 1 1.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 8v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           </div>`
         : `<div class="action-pair">
+            <button type="button" class="icon-btn${hasCtx ? ' has-ctx' : ''}" data-ctx="${item.id}" title="我的语境" aria-label="编辑语境"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 20h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
             <button type="button" class="icon-btn" data-copy="${copyText}" title="复制" aria-label="复制"><svg class="icon-off" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button type="button" class="icon-btn is-danger" data-del="${item.id}" title="移入回收箱" aria-label="删除"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9.5 7.5V6.2A1.7 1.7 0 0 1 11.2 4.5h1.6a1.7 1.7 0 0 1 1.7 1.7v1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.2 7.5l.6 11.2a1.7 1.7 0 0 0 1.7 1.6h3a1.7 1.7 0 0 0 1.7-1.6l.6-11.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10.2 11v5.5M13.8 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           </div>`;
@@ -1890,6 +2175,11 @@ window.ClipViewMasonry = Masonry;
           btn.classList.remove('is-copied');
           btn.setAttribute('aria-label', '复制');
         }, 1400);
+      });
+      card.querySelector('[data-ctx]')?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        openContextEditor(item, e.currentTarget);
       });
       card.querySelector('[data-del]')?.addEventListener('click', e => {
         const btn = e.currentTarget;

@@ -267,6 +267,19 @@ final class DatabaseManager: ObservableObject {
         if !columnExists("clipboard_events", "detail") {
             execQuiet("ALTER TABLE clipboard_events ADD COLUMN detail TEXT;")
         }
+        // User judgment projections (payload remains immutable — see applyUserContext).
+        if !columnExists("clipboard_items", "user_note") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN user_note TEXT;")
+        }
+        if !columnExists("clipboard_items", "user_stage") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN user_stage TEXT;")
+        }
+        if !columnExists("clipboard_items", "user_rating") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN user_rating INTEGER;")
+        }
+        if !columnExists("clipboard_items", "user_context_updated_at") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN user_context_updated_at REAL;")
+        }
         // Ensure aux tables exist on upgraded DBs.
         execQuiet("""
         CREATE TABLE IF NOT EXISTS clipboard_events (
@@ -1265,7 +1278,8 @@ final class DatabaseManager: ObservableObject {
     ) -> [ClipboardItem] {
         var sql = """
         SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, c.html_content, c.source_app, c.ocr_text,
-               COALESCE(c.copy_count, 1), c.deleted_at, c.first_seen_at
+               COALESCE(c.copy_count, 1), c.deleted_at, c.first_seen_at,
+               c.user_note, c.user_stage, c.user_rating, c.user_context_updated_at
         FROM clipboard_fts f
         JOIN clipboard_items c ON c.id = f.id
         WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL
@@ -1302,13 +1316,13 @@ final class DatabaseManager: ObservableObject {
         fetchLimit: Int,
         trashOnly: Bool = false
     ) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
             sql += "deleted_at IS NULL"
         }
-        sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ?)"
+        sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ?)"
         if cursor != nil {
             sql += " AND " + Self.keysetSQL
         }
@@ -1323,7 +1337,7 @@ final class DatabaseManager: ObservableObject {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         var bind = 1
         let like = "%\(q)%"
-        for _ in 0..<4 {
+        for _ in 0..<6 {
             bindText(stmt, Int32(bind), like); bind += 1
         }
         if let cursor = cursor {
@@ -1338,7 +1352,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
@@ -1368,7 +1382,8 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
-    /// Columns: id, timestamp, type, content_hash, text, file_urls, url, html, source, ocr, copy_count, deleted_at, first_seen_at
+    /// Columns: id, timestamp, type, content_hash, text, file_urls, url, html, source, ocr,
+    /// copy_count, deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at
     private func rowToItem(stmt: OpaquePointer?) -> ClipboardItem? {
         guard let stmt = stmt,
               let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
@@ -1395,6 +1410,10 @@ final class DatabaseManager: ObservableObject {
         var copyCount = 1
         var deletedAt: Date? = nil
         var firstSeenAt: Date? = nil
+        var userNote: String? = nil
+        var userStage: String? = nil
+        var userRating: Int? = nil
+        var userContextUpdatedAt: Date? = nil
         if colCount >= 11 {
             copyCount = max(1, Int(sqlite3_column_int(stmt, 10)))
         }
@@ -1403,6 +1422,18 @@ final class DatabaseManager: ObservableObject {
         }
         if colCount >= 13, sqlite3_column_type(stmt, 12) != SQLITE_NULL {
             firstSeenAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12))
+        }
+        if colCount >= 14, sqlite3_column_type(stmt, 13) != SQLITE_NULL {
+            userNote = sqlite3_column_text(stmt, 13).map { String(cString: $0) }
+        }
+        if colCount >= 15, sqlite3_column_type(stmt, 14) != SQLITE_NULL {
+            userStage = sqlite3_column_text(stmt, 14).map { String(cString: $0) }
+        }
+        if colCount >= 16, sqlite3_column_type(stmt, 15) != SQLITE_NULL {
+            userRating = Int(sqlite3_column_int(stmt, 15))
+        }
+        if colCount >= 17, sqlite3_column_type(stmt, 16) != SQLITE_NULL {
+            userContextUpdatedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 16))
         }
 
         return ClipboardItem(
@@ -1419,8 +1450,232 @@ final class DatabaseManager: ObservableObject {
             sourceApp: sourceApp,
             copyCount: copyCount,
             deletedAt: deletedAt,
-            firstSeenAt: firstSeenAt
+            firstSeenAt: firstSeenAt,
+            userNote: userNote,
+            userStage: userStage,
+            userRating: userRating,
+            userContextUpdatedAt: userContextUpdatedAt
         )
+    }
+
+    // MARK: - User context (judgment layer; never mutates capture payload)
+
+    struct UserContextUpdate {
+        /// nil = leave note unchanged; empty string = clear note
+        var note: String?? = nil
+        /// nil = leave stage unchanged; empty string = clear stage
+        var stage: String?? = nil
+        /// nil = leave rating unchanged; -1 or 0 = clear rating
+        var rating: Int?? = nil
+    }
+
+    enum UserContextError: Error, LocalizedError {
+        case notFound
+        case invalidStage(String)
+        case invalidRating(Int)
+        case emptyUpdate
+        case db
+
+        var errorDescription: String? {
+            switch self {
+            case .notFound: return "条目不存在"
+            case .invalidStage(let s): return "无效阶段: \(s)"
+            case .invalidRating(let r): return "评分须为 1–5（或清除）: \(r)"
+            case .emptyUpdate: return "未提供 note/stage/rating 变更"
+            case .db: return "数据库写入失败"
+            }
+        }
+    }
+
+    /// Apply user judgment. **Never** updates text/html/image/ocr payload columns.
+    /// Always appends `operation_logs` + `clipboard_events` when something changes.
+    func applyUserContext(
+        id: UUID,
+        update: UserContextUpdate,
+        source: String = "web",
+        completion: @escaping (Result<ClipboardItem, Error>) -> Void
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self = self else {
+                DispatchQueue.main.async { completion(.failure(UserContextError.db)) }
+                return
+            }
+            do {
+                let item = try self.applyUserContextLocked(id: id, update: update, source: source)
+                DispatchQueue.main.async { completion(.success(item)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
+    @discardableResult
+    func applyUserContextLocked(
+        id: UUID,
+        update: UserContextUpdate,
+        source: String
+    ) throws -> ClipboardItem {
+        guard let db = db else { throw UserContextError.db }
+        let idStr = id.uuidString
+
+        // Load current projection + hash (payload untouched).
+        var curNote: String?
+        var curStage: String?
+        var curRating: Int?
+        var contentHash = ""
+        var typeRaw = "text"
+        var q: OpaquePointer?
+        let loadSQL = """
+        SELECT content_hash, type, user_note, user_stage, user_rating
+        FROM clipboard_items WHERE id = ? LIMIT 1;
+        """
+        guard sqlite3_prepare_v2(db, loadSQL, -1, &q, nil) == SQLITE_OK else { throw UserContextError.db }
+        bindText(q, 1, idStr)
+        guard sqlite3_step(q) == SQLITE_ROW else {
+            sqlite3_finalize(q)
+            throw UserContextError.notFound
+        }
+        contentHash = sqlite3_column_text(q, 0).map { String(cString: $0) } ?? ""
+        typeRaw = sqlite3_column_text(q, 1).map { String(cString: $0) } ?? "text"
+        if sqlite3_column_type(q, 2) != SQLITE_NULL {
+            curNote = sqlite3_column_text(q, 2).map { String(cString: $0) }
+        }
+        if sqlite3_column_type(q, 3) != SQLITE_NULL {
+            curStage = sqlite3_column_text(q, 3).map { String(cString: $0) }
+        }
+        if sqlite3_column_type(q, 4) != SQLITE_NULL {
+            curRating = Int(sqlite3_column_int(q, 4))
+        }
+        sqlite3_finalize(q)
+
+        var newNote = curNote
+        var newStage = curStage
+        var newRating = curRating
+        var changed = false
+        var changeBits: [String] = []
+
+        if let noteOpt = update.note {
+            let trimmed = noteOpt.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let normalized: String? = {
+                guard let t = trimmed else { return nil }
+                return t.isEmpty ? nil : String(t.prefix(4000))
+            }()
+            if normalized != curNote {
+                newNote = normalized
+                changed = true
+                changeBits.append("note")
+            }
+        }
+        if let stageOpt = update.stage {
+            if let raw = stageOpt?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+               !raw.isEmpty {
+                guard ClipboardItem.userStages.contains(raw) else {
+                    throw UserContextError.invalidStage(raw)
+                }
+                if raw != curStage {
+                    newStage = raw
+                    changed = true
+                    changeBits.append("stage")
+                }
+            } else if curStage != nil {
+                newStage = nil
+                changed = true
+                changeBits.append("stage")
+            }
+        }
+        if let ratingOpt = update.rating {
+            if let r = ratingOpt {
+                if r <= 0 {
+                    if curRating != nil {
+                        newRating = nil
+                        changed = true
+                        changeBits.append("rating")
+                    }
+                } else {
+                    guard (1...5).contains(r) else { throw UserContextError.invalidRating(r) }
+                    if r != curRating {
+                        newRating = r
+                        changed = true
+                        changeBits.append("rating")
+                    }
+                }
+            } else if curRating != nil {
+                newRating = nil
+                changed = true
+                changeBits.append("rating")
+            }
+        }
+
+        guard changed else { throw UserContextError.emptyUpdate }
+
+        let now = Date()
+        let sql = """
+        UPDATE clipboard_items SET
+            user_note = ?,
+            user_stage = ?,
+            user_rating = ?,
+            user_context_updated_at = ?
+        WHERE id = ?;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw UserContextError.db }
+        bindText(stmt, 1, newNote)
+        bindText(stmt, 2, newStage)
+        if let newRating {
+            sqlite3_bind_int(stmt, 3, Int32(newRating))
+        } else {
+            sqlite3_bind_null(stmt, 3)
+        }
+        sqlite3_bind_double(stmt, 4, now.timeIntervalSince1970)
+        bindText(stmt, 5, idStr)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        guard rc == SQLITE_DONE else { throw UserContextError.db }
+
+        // Detail JSON for ops audit (also readable in UI timeline).
+        var detailObj: [String: Any] = [
+            "fields": changeBits,
+            "stage": newStage as Any,
+            "rating": newRating as Any
+        ]
+        if let newNote { detailObj["note"] = newNote }
+        let detailData = (try? JSONSerialization.data(withJSONObject: detailObj)) ?? Data()
+        let detailStr = String(data: detailData, encoding: .utf8)
+
+        _ = appendOperationLogSync(
+            action: "user_context",
+            itemId: idStr,
+            contentHash: contentHash,
+            detail: detailStr,
+            source: source
+        )
+        _ = recordClipboardEvent(
+            itemId: idStr,
+            contentHash: contentHash,
+            eventTs: now,
+            type: typeRaw,
+            sourceApp: source,
+            kind: "user_context",
+            detail: detailStr
+        )
+
+        // Re-fetch full item for caller
+        var out: ClipboardItem?
+        var f: OpaquePointer?
+        let fetchSQL = """
+        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text,
+               COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at
+        FROM clipboard_items WHERE id = ? LIMIT 1;
+        """
+        if sqlite3_prepare_v2(db, fetchSQL, -1, &f, nil) == SQLITE_OK {
+            bindText(f, 1, idStr)
+            if sqlite3_step(f) == SQLITE_ROW {
+                out = rowToItem(stmt: f)
+            }
+        }
+        sqlite3_finalize(f)
+        guard let item = out else { throw UserContextError.db }
+        return item
     }
 
     // MARK: - Soft delete / recycle bin (TTL 30d)

@@ -67,6 +67,16 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | Android | `ui/ContentRender.kt` `typeStyle()`；`MainActivity.kt` `opsSourceStyle()` |
 | 产品约定 | `AGENTS.md` §2 + **本文** |
 
+## 数据语义（与视觉配套）
+
+| 层 | 可变？ | 说明 |
+| --- | --- | --- |
+| Capture payload | **不可变** | 复制瞬间的事实；`content_hash` 锚定 |
+| User judgment | **可变投影** | `user_note` / `user_stage` / `user_rating`；每次变更 = 一条 op |
+| 阶段枚举 | 固定 | `inbox` · `useful` · `followup` · `archive` · `reject` |
+
+卡片「我的语境」入口：轻量弹层，不撑爆 masonry；strip 仅展示投影摘要。
+
 ## 品味禁区
 
 | Don't | 为什么 |
@@ -75,6 +85,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | 灰 badge 通吃类型 | 扫一眼分不清介质 |
 | 堆彩虹装饰、无语义 | 像玩具不是器物 |
 | 为「好看」改交互语义色 | 色 = 信息通道 |
+| 就地改 capture 正文当「备注」 | 毁掉 hash/同步/审计 |
 
 ## 交互密度（轻量 & lazy）
 

@@ -38,6 +38,16 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let deletedAt: Date?
     /// First capture event time (history start).
     let firstSeenAt: Date?
+
+    // MARK: User judgment (mutable projection; payload above is immutable)
+    /// Latest free-text context from the user (not part of capture payload).
+    let userNote: String?
+    /// Workflow stage: inbox | useful | followup | archive | reject (nil = unset).
+    let userStage: String?
+    /// Optional 1…5 rating; nil = unset.
+    let userRating: Int?
+    /// Last time user context projection changed.
+    let userContextUpdatedAt: Date?
     
     init(id: UUID = UUID(),
          timestamp: Date = Date(),
@@ -55,7 +65,11 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
          sourceApp: String? = nil,
          copyCount: Int = 1,
          deletedAt: Date? = nil,
-         firstSeenAt: Date? = nil) {
+         firstSeenAt: Date? = nil,
+         userNote: String? = nil,
+         userStage: String? = nil,
+         userRating: Int? = nil,
+         userContextUpdatedAt: Date? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.type = type
@@ -73,7 +87,16 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.copyCount = max(1, copyCount)
         self.deletedAt = deletedAt
         self.firstSeenAt = firstSeenAt ?? timestamp
+        self.userNote = userNote
+        self.userStage = userStage
+        self.userRating = userRating
+        self.userContextUpdatedAt = userContextUpdatedAt
     }
+
+    /// Allowed multi-stage evaluation values (product invariant).
+    static let userStages: Set<String> = [
+        "inbox", "useful", "followup", "archive", "reject"
+    ]
     
     // swiftlint:disable cyclomatic_complexity
     func preview() -> String {

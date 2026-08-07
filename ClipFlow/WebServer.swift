@@ -156,6 +156,8 @@ class WebServer {
             handleSyncConfig(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/restore" {
             handleRestoreClip(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/clips/context" {
+            handleClipContext(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
             handleDeleteClip(path: path, connection: connection)
         } else {
@@ -810,12 +812,94 @@ class WebServer {
             dict["filePaths"] = urls.map { $0.path }
             dict["fileNames"] = urls.map { $0.lastPathComponent }
         }
+        // User judgment projection (capture payload remains immutable).
+        if let note = item.userNote { dict["userNote"] = note }
+        if let stage = item.userStage { dict["userStage"] = stage }
+        if let rating = item.userRating { dict["userRating"] = rating }
+        if let uat = item.userContextUpdatedAt {
+            dict["userContextUpdatedAt"] = uat.timeIntervalSince1970
+        }
+        dict["hasUserContext"] = (item.userNote != nil)
+            || (item.userStage != nil)
+            || (item.userRating != nil)
         // Thumb URL for image types — client never loads full blob in feed
         if item.type == .image {
             dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb"
             dict["fullUrl"] = "/api/image?id=\(item.id.uuidString)&size=full"
         }
         return dict
+    }
+
+    /// POST /api/clips/context  { id, note?, stage?, rating?, clearNote?, clearStage?, clearRating? }
+    /// Mutates only user judgment columns; append-only ops/events for history.
+    private func handleClipContext(data: Data, connection: NWConnection) {
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        guard let brace = raw.range(of: "{"),
+              let jsonData = raw[brace.lowerBound...].data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let idStr = obj["id"] as? String,
+              let uuid = UUID(uuidString: idStr) else {
+            sendErrorResponse(connection: connection, status: 400, message: "expected {id, note?, stage?, rating?}")
+            return
+        }
+
+        var update = DatabaseManager.UserContextUpdate()
+        if let clear = obj["clearNote"] as? Bool, clear {
+            update.note = .some(nil)
+        } else if obj.keys.contains("note") {
+            if obj["note"] is NSNull {
+                update.note = .some(nil)
+            } else if let n = obj["note"] as? String {
+                update.note = .some(n)
+            }
+        }
+        if let clear = obj["clearStage"] as? Bool, clear {
+            update.stage = .some(nil)
+        } else if obj.keys.contains("stage") {
+            if obj["stage"] is NSNull {
+                update.stage = .some(nil)
+            } else if let s = obj["stage"] as? String {
+                update.stage = .some(s)
+            }
+        }
+        if let clear = obj["clearRating"] as? Bool, clear {
+            update.rating = .some(nil)
+        } else if obj.keys.contains("rating") {
+            if obj["rating"] is NSNull {
+                update.rating = .some(nil)
+            } else if let r = obj["rating"] as? Int {
+                update.rating = .some(r)
+            } else if let r = obj["rating"] as? Double {
+                update.rating = .some(Int(r))
+            }
+        }
+
+        database.applyUserContext(id: uuid, update: update, source: "web") { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let item):
+                // Fan-out to multi-device sync as annotate op (payload untouched).
+                CloudDocsSyncService.shared?.recordLocalUserContext(item: item)
+                NotificationCenter.default.post(
+                    name: Notification.Name("ClipFlowItemAdded"),
+                    object: item
+                )
+                self.sendJSON([
+                    "ok": true,
+                    "item": self.itemToJSON(item)
+                ], connection: connection)
+            case .failure(let err):
+                let msg = (err as? LocalizedError)?.errorDescription ?? err.localizedDescription
+                let code = (err as? DatabaseManager.UserContextError).map { e -> Int in
+                    switch e {
+                    case .notFound: return 404
+                    case .invalidStage, .invalidRating, .emptyUpdate: return 400
+                    case .db: return 500
+                    }
+                } ?? 500
+                self.sendJSON(["ok": false, "message": msg, "status": code], connection: connection)
+            }
+        }
     }
 
     /// Paginated list. Supports:
