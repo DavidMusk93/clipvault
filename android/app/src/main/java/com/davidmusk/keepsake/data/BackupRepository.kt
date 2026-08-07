@@ -9,6 +9,8 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.BufferedInputStream
@@ -16,6 +18,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.Collections
+import java.util.UUID
 import java.util.LinkedHashMap
 import java.util.zip.ZipInputStream
 
@@ -39,6 +42,8 @@ class BackupRepository(
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val cacheDb: File get() = File(context.cacheDir, "clipflow_backup.db")
+    /** Serialize Drive db pull — concurrent resume+launch used to clobber the same .downloading temp. */
+    private val syncMutex = Mutex()
     private val blobCacheDir: File
         get() = File(context.filesDir, "blob_cache").also { it.mkdirs() }
 
@@ -93,17 +98,18 @@ class BackupRepository(
     }
 
     suspend fun syncFromBackup(): SyncResult = withContext(Dispatchers.IO) {
+        syncMutex.withLock {
         val treeUri = prefs.backupTreeUri
-            ?: return@withContext SyncResult(0, null, null, null, "尚未选择云端文件夹")
+            ?: return@withLock SyncResult(0, null, null, null, "尚未选择云端文件夹")
 
         // Drive SAF: DocumentFile.findFile is unreliable. Use DocumentsContract children query.
         val latestId = findChildDocumentId(treeUri, parentDocId = null, displayName = "latest")
-            ?: return@withContext SyncResult(
+            ?: return@withLock SyncResult(
                 0, null, null, null,
                 "文件夹不对：请选中 Keepsake/backup（内含 latest）",
             )
         val dbUri = findChildDocumentUri(treeUri, parentDocId = latestId, displayName = "clipflow.db")
-            ?: return@withContext SyncResult(
+            ?: return@withLock SyncResult(
                 0, null, null, null,
                 "未找到记忆库 clipflow.db（latest/ 下）",
             )
@@ -112,7 +118,7 @@ class BackupRepository(
             copyDocumentAtomic(dbUri, cacheDb)
         } catch (e: Exception) {
             Log.e(TAG, "db download failed", e)
-            return@withContext SyncResult(
+            return@withLock SyncResult(
                 0, null, null, null,
                 "下载记忆库失败：${e.message ?: "网络/权限"}，请稍后重试",
             )
@@ -183,6 +189,7 @@ class BackupRepository(
             status = status,
             message = msg,
         )
+        } // syncMutex.withLock
     }
 
     /** Unzip Mac `latest/cas_pack.zip` into local blob_cache. Returns number of files written. */
@@ -887,29 +894,38 @@ class BackupRepository(
         }
     }
 
-    /** Download to temp then rename so a partial db never replaces a good cache. */
+    /** Download to unique temp then rename so a partial/racing db never clobbers cache. */
     private fun copyDocumentAtomic(uri: Uri, dest: File) {
         dest.parentFile?.mkdirs()
-        val tmp = File(dest.absolutePath + ".downloading")
-        if (tmp.exists()) tmp.delete()
-        context.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "无法打开 $uri" }
-            FileOutputStream(tmp).use { output -> input.copyTo(output) }
-        }
-        require(tmp.length() > 0L) { "空文件: $uri" }
-        // Quick SQLite header check (db) or generic non-empty
-        if (dest.name.endsWith(".db", ignoreCase = true)) {
-            val hdr = ByteArray(16)
-            val n = tmp.inputStream().use { it.read(hdr) }
-            val ok = n >= 15 && String(hdr, 0, n.coerceAtLeast(0), Charsets.UTF_8)
-                .startsWith("SQLite format 3")
-            require(ok) { "不是有效的 SQLite 库" }
-            SQLiteDatabase.openDatabase(tmp.absolutePath, null, SQLiteDatabase.OPEN_READONLY).close()
-        }
-        if (dest.exists()) dest.delete()
-        if (!tmp.renameTo(dest)) {
-            tmp.copyTo(dest, overwrite = true)
-            tmp.delete()
+        val tmp = File(
+            dest.parentFile,
+            dest.name + ".downloading." + UUID.randomUUID().toString(),
+        )
+        try {
+            context.contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { "无法打开 $uri" }
+                FileOutputStream(tmp).use { output -> input.copyTo(output) }
+            }
+            require(tmp.exists() && tmp.length() > 0L) { "空文件: $uri" }
+            // Quick SQLite header check (db) or generic non-empty
+            if (dest.name.endsWith(".db", ignoreCase = true)) {
+                val hdr = ByteArray(16)
+                val n = tmp.inputStream().use { it.read(hdr) }
+                val ok = n >= 15 && String(hdr, 0, n.coerceAtLeast(0), Charsets.UTF_8)
+                    .startsWith("SQLite format 3")
+                require(ok) { "不是有效的 SQLite 库" }
+                SQLiteDatabase.openDatabase(tmp.absolutePath, null, SQLiteDatabase.OPEN_READONLY).close()
+            }
+            if (dest.exists()) dest.delete()
+            if (!tmp.renameTo(dest)) {
+                // Cross-filesystem rename can fail — stream copy with explicit streams
+                // (kotlin File.copyTo throws if source vanished mid-race).
+                java.io.FileInputStream(tmp).use { input ->
+                    FileOutputStream(dest).use { output -> input.copyTo(output) }
+                }
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete()
         }
     }
 

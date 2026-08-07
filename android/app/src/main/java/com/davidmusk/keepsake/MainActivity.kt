@@ -350,7 +350,18 @@ private fun KeepsakeRoot(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = tab == Tab.Backup,
-                        onClick = { tab = Tab.Backup },
+                        onClick = {
+                            tab = Tab.Backup
+                            // Returning to history keeps prior trashOnly; re-show main library by default.
+                            if (trashOnly) {
+                                trashOnly = false
+                                scope.launch {
+                                    loading = true
+                                    refreshList(true)
+                                    loading = false
+                                }
+                            }
+                        },
                         label = { Text("历史") },
                     )
                     FilterChip(
