@@ -288,6 +288,7 @@
       margin-top: 8px; border-top: 0.5px solid var(--separator);
       padding-top: 8px;
     }
+    .event-panel.is-meta-only { margin-top: 6px; padding-top: 0; border-top: 0; }
     .event-toggle {
       display: inline-flex; align-items: center; gap: 4px;
       border: 0; background: transparent; padding: 0; margin: 0;
@@ -300,22 +301,72 @@
       color: var(--muted); font-size: 11.5px; margin-top: 4px;
       letter-spacing: -0.01em; line-height: 1.4;
     }
-    .event-list {
-      list-style: none; margin: 8px 0 0; padding: 0 0 0 10px;
-      border-left: 2px solid rgba(0,0,0,0.08);
-      display: none; flex-direction: column; gap: 8px;
-      /* expand in place — column grows; no wall rebuild */
+    /* Interactive toast card — timeline without masonry reflow (design-taste: light + lazy) */
+    .event-toast {
+      position: fixed; inset: 0; z-index: 3600;
+      display: none; align-items: flex-end; justify-content: center;
+      padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+      pointer-events: none;
     }
-    .event-list.open { display: flex; }
-    .event-panel.is-meta-only { margin-top: 6px; padding-top: 0; border-top: 0; }
-    .event-item { position: relative; padding-left: 10px; }
+    .event-toast.open { display: flex; pointer-events: auto; }
+    .event-toast-scrim {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.22);
+      -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+    }
+    .event-toast-card {
+      position: relative; z-index: 1;
+      width: min(420px, 100%);
+      max-height: min(52vh, 420px);
+      display: flex; flex-direction: column;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.90);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      backdrop-filter: blur(28px) saturate(180%);
+      border: 0.5px solid var(--separator);
+      box-shadow: var(--elev-3);
+      transform: translateY(18px); opacity: 0;
+      transition: transform 0.32s var(--spring), opacity 0.28s var(--spring);
+      overflow: hidden;
+    }
+    .event-toast.open .event-toast-card {
+      transform: translateY(0); opacity: 1;
+    }
+    .event-toast-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 14px 16px 10px;
+      border-bottom: 0.5px solid var(--separator);
+    }
+    .event-toast-head h3 {
+      font-size: 16px; font-weight: 600; letter-spacing: -0.02em; margin: 0;
+    }
+    .event-toast-sub {
+      padding: 0 16px 8px; font-size: 12px; color: var(--muted);
+      letter-spacing: -0.01em;
+    }
+    .event-toast-body {
+      flex: 1; min-height: 0;
+      overflow: auto;
+      padding: 4px 16px 16px;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .event-toast-list {
+      list-style: none; margin: 0; padding: 0 0 0 12px;
+      border-left: 2px solid rgba(0,0,0,0.08);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .event-item { position: relative; padding-left: 12px; }
     .event-item::before {
-      content: ''; position: absolute; left: -15px; top: 6px;
+      content: ''; position: absolute; left: -16px; top: 6px;
       width: 7px; height: 7px; border-radius: 50%;
       background: var(--accent); box-shadow: 0 0 0 2px rgba(0,122,255,0.15);
     }
-    .event-item .ev-time { font-size: 12px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
-    .event-item .ev-sub { font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-all; }
+    .event-item .ev-time { font-size: 13px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+    .event-item .ev-sub { font-size: 12px; color: var(--muted); margin-top: 2px; word-break: break-all; }
+    @media (prefers-reduced-motion: reduce) {
+      .event-toast-card { transition: none; }
+    }
     .top-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
     main { flex: 1; padding: 6px var(--chrome-pad-x) 48px; }
@@ -1095,6 +1146,23 @@
     </div>
   </div>
 
+  <!-- Event timeline: interactive toast card (no in-masonry expand) -->
+  <div id="eventToast" class="event-toast" aria-hidden="true">
+    <div class="event-toast-scrim" id="eventToastScrim"></div>
+    <div class="event-toast-card" role="dialog" aria-modal="true" aria-labelledby="eventToastTitle">
+      <div class="event-toast-head">
+        <h3 id="eventToastTitle">事件时间线</h3>
+        <button type="button" class="btn-icon" id="eventToastClose" title="关闭" aria-label="关闭">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="event-toast-sub" id="eventToastSub"></div>
+      <div class="event-toast-body">
+        <ul class="event-toast-list" id="eventToastList"></ul>
+      </div>
+    </div>
+  </div>
+
   <div id="snackbar" class="snackbar">
     <span class="material-symbols-outlined" style="color:#64d2ff">check_circle</span>
     <span id="snackbarText">ok</span>
@@ -1531,77 +1599,51 @@ window.ClipViewMasonry = Masonry;
 
     const eventsCache = new Map(); // id -> events[]
 
-    /**
-     * After in-card height change: only remeasure that column's running height.
-     * Never rebuildFromData — full remount is the ugly flash.
-     */
-    function reflowColumnAfterCard(card) {
-      const col = card.closest('.masonry-col');
-      if (!col) return;
-      const host = document.getElementById('grid');
-      if (!host) return;
-      const colEls = [...host.querySelectorAll(':scope > .masonry-col')];
-      const idx = colEls.indexOf(col);
-      if (idx < 0) return;
-      // Live measure this column only; leave pack order alone (taste: expand in place).
-      let h = 0;
-      [...col.children].forEach((el, i) => {
-        h += Masonry.measureHeight(el) + (i > 0 ? MASONRY_GAP : 0);
-      });
-      if (Array.isArray(colHeights) && colHeights.length === colEls.length) {
-        colHeights[idx] = h;
-      }
-    }
-
     /** Multi-ref only: copyCount>1. Single capture stays light (no timeline chrome). */
     function itemHasMultiRef(item) {
       return Math.max(1, Number(item && item.copyCount) || 1) > 1;
     }
 
-    async function toggleCardEvents(card, id, btn) {
-      const list = card.querySelector(`[data-events-list="${CSS.escape(id)}"]`);
-      if (!list) return;
-      const open = list.classList.contains('open');
-      if (open) {
-        list.classList.remove('open');
-        list.hidden = true;
-        list.innerHTML = '';
-        btn.setAttribute('aria-expanded', 'false');
-        // Double-rAF: measure after browser paints collapsed height
-        requestAnimationFrame(() => requestAnimationFrame(() => reflowColumnAfterCard(card)));
-        return;
-      }
-      list.hidden = false;
-      list.classList.add('open');
-      btn.setAttribute('aria-expanded', 'true');
+    function closeEventToast() {
+      const host = document.getElementById('eventToast');
+      if (!host) return;
+      host.classList.remove('open');
+      host.setAttribute('aria-hidden', 'true');
+    }
+
+    /**
+     * Interactive toast card for timeline — never mutates masonry height.
+     * Taste: light list chrome + lazy fetch on open.
+     */
+    async function openEventToast(itemId, meta = {}) {
+      const host = document.getElementById('eventToast');
+      const list = document.getElementById('eventToastList');
+      const sub = document.getElementById('eventToastSub');
+      if (!host || !list) return;
+
+      const count = Math.max(1, Number(meta.copyCount) || 1);
+      const typeLabel = meta.typeLabel || meta.type || '';
+      sub.textContent = [
+        typeLabel,
+        count > 1 ? `×${count} 次捕获` : '',
+        meta.sourceApp || '',
+      ].filter(Boolean).join(' · ');
+
       list.innerHTML = '<li class="event-item"><div class="ev-sub">加载中…</div></li>';
-      requestAnimationFrame(() => requestAnimationFrame(() => reflowColumnAfterCard(card)));
+      host.classList.add('open');
+      host.setAttribute('aria-hidden', 'false');
+
       try {
-        let rows = eventsCache.get(id);
+        let rows = eventsCache.get(itemId);
         if (!rows) {
-          const res = await fetch(`${API}/api/items/${encodeURIComponent(id)}/events?limit=100`);
+          const res = await fetch(`${API}/api/items/${encodeURIComponent(itemId)}/events?limit=100`);
           if (!res.ok) throw new Error('events ' + res.status);
           const data = await res.json();
           rows = data.events || [];
-          eventsCache.set(id, rows);
+          eventsCache.set(itemId, rows);
         }
-        // Lazy truth: if server only has ≤1 capture event, collapse chrome away
-        const captureLike = rows.filter(r => {
-          const k = String(r.kind || 'capture');
-          return k === 'capture' || k === 'seed' || k === 'capture_bump' || k === 'capture_insert';
-        });
-        if (rows.length <= 1 || captureLike.length <= 1) {
-          list.classList.remove('open');
-          list.hidden = true;
-          list.innerHTML = '';
-          btn.setAttribute('aria-expanded', 'false');
-          // Hide the whole panel for this card — single ref after all
-          const panel = card.querySelector('.event-panel');
-          if (panel) {
-            const toggle = panel.querySelector('.event-toggle');
-            if (toggle) toggle.hidden = true;
-          }
-          requestAnimationFrame(() => requestAnimationFrame(() => reflowColumnAfterCard(card)));
+        if (!rows.length) {
+          list.innerHTML = '<li class="event-item"><div class="ev-sub">暂无事件记录</div></li>';
           return;
         }
         list.innerHTML = rows.map(ev => {
@@ -1617,8 +1659,18 @@ window.ClipViewMasonry = Masonry;
       } catch (err) {
         list.innerHTML = '<li class="event-item"><div class="ev-sub">加载失败</div></li>';
       }
-      requestAnimationFrame(() => requestAnimationFrame(() => reflowColumnAfterCard(card)));
     }
+
+    function wireEventToastOnce() {
+      if (wireEventToastOnce._done) return;
+      wireEventToastOnce._done = true;
+      document.getElementById('eventToastClose')?.addEventListener('click', closeEventToast);
+      document.getElementById('eventToastScrim')?.addEventListener('click', closeEventToast);
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeEventToast();
+      });
+    }
+    wireEventToastOnce();
 
 
     /** Clipboard type → label/icon/class. Shared palette: docs/design-taste.md + Android typeStyle(). */
@@ -1724,11 +1776,11 @@ window.ClipViewMasonry = Masonry;
       const eventPanelHtml = multiRef
         ? `<div class="event-panel" data-events-for="${escAttr(item.id)}">
           ${spanLine}
-          <button type="button" class="event-toggle" data-events-toggle="${escAttr(item.id)}" aria-expanded="false">
+          <button type="button" class="event-toggle" data-events-open="${escAttr(item.id)}"
+            data-copy-count="${count}" data-type-label="${escAttr(tm.label)}" data-source-app="${escAttr(item.sourceApp || '')}">
             <span class="material-symbols-outlined">timeline</span>
             <span class="event-toggle-label">事件时间线 · ${count} 次</span>
           </button>
-          <ul class="event-list" data-events-list="${escAttr(item.id)}" hidden></ul>
         </div>`
         : (spanLine ? `<div class="event-panel is-meta-only">${spanLine}</div>` : '');
       card.innerHTML = `
@@ -1777,11 +1829,17 @@ window.ClipViewMasonry = Masonry;
           btn.disabled = false;
         });
       });
-      card.querySelector('[data-events-toggle]')?.addEventListener('click', e => {
+      card.querySelector('[data-events-open]')?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
         const btn = e.currentTarget;
-        const id = btn.getAttribute('data-events-toggle');
+        const id = btn.getAttribute('data-events-open');
         if (!id) return;
-        toggleCardEvents(card, id, btn);
+        openEventToast(id, {
+          copyCount: Number(btn.getAttribute('data-copy-count') || 1),
+          typeLabel: btn.getAttribute('data-type-label') || '',
+          sourceApp: btn.getAttribute('data-source-app') || '',
+        });
       });
       const wrap = card.querySelector('.thumb-wrap');
       if (wrap) {

@@ -87,3 +87,5 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | 字段/日志：需要时再滚、再加载 | 为「完整」预渲染隐藏 DOM |
 
 时间线 = **多捕获历史** 的二级细节，不是默认噪音。
+
+瀑布流内 **禁止就地 expand**（列高/重排不稳）。多 ref 时间线用 **底部可交互 toast 卡片** （毛玻璃 sheet + scrim，lazy fetch，Esc/遮罩关闭）—— 列表零布局扰动。
