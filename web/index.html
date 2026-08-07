@@ -412,7 +412,16 @@
       z-index: 1;
     }
     .m3-card.is-compact { padding: 10px 11px; gap: 6px; }
-    .card-header { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-width: 0; }
+    .card-header {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0;
+    }
+    /* Type + ×N cluster left; time alone right — avoid mid-gap "floating" count */
+    .card-header-lead {
+      display: inline-flex; align-items: center; gap: 5px;
+      min-width: 0; flex: 1 1 auto;
+    }
+    .card-header-lead .badge { flex-shrink: 0; }
+    .card-header-lead .badge-count { flex-shrink: 0; }
     .badge {
       font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 7px;
       background: var(--fill); color: var(--muted);
@@ -1858,8 +1867,10 @@ window.ClipViewMasonry = Masonry;
         : '';
       card.innerHTML = `
         <div class="card-header">
-          <span class="badge ${tm.cls}"><span class="material-symbols-outlined">${tm.icon}</span>${esc(tm.label)}</span>
-          ${countBadge}
+          <div class="card-header-lead">
+            <span class="badge ${tm.cls}"><span class="material-symbols-outlined">${tm.icon}</span>${esc(tm.label)}</span>
+            ${countBadge}
+          </div>
           ${trashMeta}
         </div>
         <div class="card-body">${body}</div>
