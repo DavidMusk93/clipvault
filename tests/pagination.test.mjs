@@ -1,5 +1,5 @@
 /**
- * Keepsake / ClipView pagination regression tests (Node, no browser).
+ * ClipVault / ClipView pagination regression tests (Node, no browser).
  * Mirrors pure helpers in web/index.html (window.ClipViewPagination).
  *
  * Run: node --test tests/pagination.test.mjs

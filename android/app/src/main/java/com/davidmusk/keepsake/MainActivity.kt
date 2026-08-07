@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
                     app = app,
                     onCopyText = { text ->
                         val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("keepsake", text))
+                        cm.setPrimaryClip(ClipData.newPlainText("clipvault", text))
                         Toast.makeText(this, "已复制", Toast.LENGTH_SHORT).show()
                     },
                     onPasteFromClipboard = {
@@ -214,7 +214,7 @@ private fun KeepsakeRoot(
         }
         scope.launch {
             loading = true
-            statusMsg = "打开文件页 → 左上角显示根目录 → Drive → Keepsake → backup"
+            statusMsg = "打开文件页 → 左上角显示根目录 → Drive → ClipVault → backup（旧目录可能仍叫 Keepsake）"
             val initial = withContext(Dispatchers.IO) {
                 DriveTreePicker.bestInitialUri(ctx.applicationContext)
             }
@@ -293,7 +293,7 @@ private fun KeepsakeRoot(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Image(
                                 painter = painterResource(R.drawable.keepsake_logo),
-                                contentDescription = "Keepsake",
+                                contentDescription = "ClipVault",
                                 modifier = Modifier
                                     .size(34.dp)
                                     .clip(CircleShape)
@@ -306,7 +306,7 @@ private fun KeepsakeRoot(
                             )
                             Spacer(Modifier.width(10.dp))
                             Column {
-                                Text("Keepsake", fontWeight = FontWeight.SemiBold)
+                                Text("ClipVault", fontWeight = FontWeight.SemiBold)
                                 Text(
                                     "你的剪贴板记忆",
                                     style = MaterialTheme.typography.labelSmall,
@@ -563,7 +563,7 @@ private fun KeepsakeRoot(
                         if (captures.isEmpty()) {
                             item {
                                 Text(
-                                    "还没有随手记。点顶栏粘贴，或从其他 App 分享到 Keepsake。",
+                                    "还没有随手记。点顶栏粘贴，或从其他 App 分享到 ClipVault。",
                                     modifier = Modifier.padding(24.dp),
                                 )
                             }
@@ -597,7 +597,7 @@ private fun SetupCard(onPick: () -> Unit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("打开云端记忆", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "电脑端 Keepsake 会把记忆同步到 Google 云端硬盘。点下方按钮将直接打开云端硬盘（需已安装并登录同一账号）。进入 Keepsake → backup 后点「使用此文件夹」。",
+                "电脑端 ClipVault 会把记忆同步到 Google 云端硬盘。点下方按钮将直接打开云端硬盘（需已安装并登录同一账号）。进入 ClipVault → backup（若仍是旧名 Keepsake → backup 也可）后点「使用此文件夹」。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
             )

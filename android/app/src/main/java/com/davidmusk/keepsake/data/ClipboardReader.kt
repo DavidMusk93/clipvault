@@ -6,7 +6,7 @@ import android.content.Context
 import androidx.core.text.HtmlCompat
 
 /**
- * Read the system clipboard with the same type preference as Mac Keepsake:
+ * Read the system clipboard with the same type preference as Mac ClipVault:
  * HTML (rich) → plain/url text → uri string.
  *
  * Android does not expose RTF the way AppKit does; HTML is the rich path.

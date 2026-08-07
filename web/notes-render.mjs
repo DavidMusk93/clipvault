@@ -1,5 +1,5 @@
 /**
- * Keepsake Notes-like HTML fragment pipeline.
+ * ClipVault Notes-like HTML fragment pipeline.
  * Used by web/index.html (keep behavior in sync) and tests/notes-render.test.mjs.
  *
  * Goals:

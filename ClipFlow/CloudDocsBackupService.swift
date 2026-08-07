@@ -539,7 +539,7 @@ final class CloudDocsBackupService {
                                     let snaps = self.snapshotsDir(in: root)
                                     let blobs = self.blobsDir(in: root)
                                     // Create parents step-by-step (Google Drive File Provider is picky).
-                                    try self.ensureCloudDir(root.deletingLastPathComponent()) // Keepsake/
+                                    try self.ensureCloudDir(root.deletingLastPathComponent()) // ClipVault (or legacy Keepsake)/
                                     try self.ensureCloudDir(root) // backup/
                                     try self.ensureCloudDir(latest)
                                     try self.ensureCloudDir(snaps)

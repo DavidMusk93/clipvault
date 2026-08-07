@@ -95,7 +95,13 @@ enum BackupDestinationResolver {
         case "icloud":
             return cloudDocsURL()?.appendingPathComponent("ClipFlow/backup", isDirectory: true)
         case "gdrive":
-            return googleDriveMyDriveURL()?.appendingPathComponent("Keepsake/backup", isDirectory: true)
+            // Brand folder ClipVault; keep reading legacy Keepsake/backup.
+            guard let my = googleDriveMyDriveURL() else { return nil }
+            let preferred = my.appendingPathComponent("ClipVault/backup", isDirectory: true)
+            if FileManager.default.fileExists(atPath: preferred.path) { return preferred }
+            let legacy = my.appendingPathComponent("Keepsake/backup", isDirectory: true)
+            if FileManager.default.fileExists(atPath: legacy.path) { return legacy }
+            return preferred
         case "folder":
             guard let p = dest.path, !p.isEmpty else { return nil }
             return URL(fileURLWithPath: p, isDirectory: true).standardizedFileURL

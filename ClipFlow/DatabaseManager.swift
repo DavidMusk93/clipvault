@@ -40,7 +40,7 @@ struct ClipPage {
     let nextCursor: ClipCursor?
 }
 
-/// SQLite store for Keepsake.
+/// SQLite store for ClipVault.
 /// Runtime: `sqlite-runtime-tricks` — WAL, busy_timeout, ANALYZE, FTS5 trigram,
 /// latest-alive upsert by content_hash, **periodic batched** dupe cleanup, online backup.
 final class DatabaseManager: ObservableObject {
@@ -82,14 +82,16 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Local data root (db + CAS blobs + config).
-    /// - `KEEPSAKE_HOME` env wins (recommended for LaunchAgent).
+    /// - `CLIPVAULT_HOME` or legacy `KEEPSAKE_HOME` env wins (recommended for LaunchAgent).
     /// - Under launchd (`XPC_SERVICE_NAME`): always Application Support — macOS TCC
     ///   blocks Documents for agents and can hang forever on `sqlite3_open`.
     /// - Interactive shell: prefer existing `~/Documents/ClipFlow` for backward compat,
-    ///   else Application Support (`~/Library/Application Support/Keepsake`).
+    ///   else Application Support (`~/Library/Application Support/Keepsake` — legacy folder name; product brand is ClipVault).
     static func resolveDataRoot() -> URL {
         let fm = FileManager.default
-        if let raw = ProcessInfo.processInfo.environment["KEEPSAKE_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let raw = (ProcessInfo.processInfo.environment["CLIPVAULT_HOME"]
+            ?? ProcessInfo.processInfo.environment["KEEPSAKE_HOME"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
            !raw.isEmpty {
             return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath, isDirectory: true)
         }

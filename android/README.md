@@ -1,12 +1,12 @@
-# Keepsake Android
+# ClipVault Android
 
-手机端 **备份阅读器 + 主动粘贴/分享**。采集与 CAS 备份仍在 Mac 的 ClipFlowServer；本 App 只读 Google Drive（或任意）上的 `Keepsake/backup` 目录。
+手机端 **备份阅读器 + 主动粘贴/分享**。采集与 CAS 备份仍在 Mac 的 ClipFlowServer；本 App 只读 Google Drive（或任意）上的 `ClipVault/backup` 目录（兼容旧名 `Keepsake/backup`）。
 
 ## 能力（v0.1）
 
 | 功能 | 说明 |
 | --- | --- |
-| 选备份目录 | SAF 选中 `…/My Drive/Keepsake/backup`（含 `latest/`、`blobs/`） |
+| 选备份目录 | SAF 选中 `…/My Drive/ClipVault/backup`（或旧 `Keepsake/backup`）（含 `latest/`、`blobs/`） |
 | 列表 / 搜索 | 读 `latest/clipflow.db`（缓存到本机） |
 | 图片 | 按 `content_hash` 从 `blobs/{hash}.bin` 加载 |
 | 复制回去 | 详情页一键写入系统剪贴板 |
@@ -30,13 +30,13 @@ cd android
 
 1. 手机开启「允许安装未知应用」
 2. 下载 CI Artifact / GitHub Release 中的 `keepsake-*.apk`
-3. 安装后打开 → **选择备份目录** → Google Drive → `Keepsake/backup`
+3. 安装后打开 → **选择备份目录** → Google Drive → `ClipVault/backup`（或旧 `Keepsake/backup`）
 4. 建议在 Drive App 里对该文件夹开启 **离线可用**
 
 ## 目录约定（与 Mac 一致）
 
 ```
-Keepsake/backup/
+ClipVault/backup/
   latest/clipflow.db
   latest/MANIFEST.json
   blobs/{sha256}.bin

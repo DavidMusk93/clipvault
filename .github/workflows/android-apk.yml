@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build-apk:
-    name: Build · Keepsake Android
+    name: Build · ClipVault Android
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:
@@ -106,8 +106,8 @@ jobs:
             android/dist/keepsake-*-debug.apk
           generate_release_notes: true
           body: |
-            Keepsake Android — 备份阅读器 + 主动粘贴/分享。
+            ClipVault Android — 备份阅读器 + 主动粘贴/分享。
 
-            安装 release APK 后：选择 Google Drive 中的 `Keepsake/backup` 目录即可。
+            安装 release APK 后：选择 Google Drive 中的 `ClipVault/backup`（兼容 `Keepsake/backup`）目录即可。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

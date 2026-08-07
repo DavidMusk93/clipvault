@@ -1,10 +1,10 @@
-# Keepsake
+# ClipVault
 
 **你的剪贴板记忆。**
 
-Keepsake 是面向个人 Mac 的剪贴板历史产品：本机守护进程静默捕获，浏览器里检索与预览，图片 OCR 可检索，备份进 iCloud 云盘（CloudDocs）——**无需 App 签名、无第三方云。**
+ClipVault 是面向个人 Mac 的剪贴板历史产品：本机守护进程静默捕获，浏览器里检索与预览，图片 OCR 可检索，备份进 iCloud 云盘（CloudDocs）——**无需 App 签名、无第三方云。**
 
-> 仓库目录与部分可执行文件名仍可能显示历史代号 `ClipView` / `ClipFlow`。**产品品牌统一为 Keepsake。**
+> 仓库目录与部分可执行文件名仍可能显示历史代号 `ClipView` / `ClipFlow`。**产品品牌统一为 ClipVault。**
 
 ---
 
@@ -38,7 +38,7 @@ Keepsake 是面向个人 Mac 的剪贴板历史产品：本机守护进程静默
 ## 架构（当前真源）
 
 ```text
-Keepsake (product)
+ClipVault (product)
 ├── ClipFlowServer          # headless daemon (SPM product)
 │   ├── ClipboardMonitor    # pasteboard + OCR
 │   ├── DatabaseManager     # SQLite3 · cursor pages · online backup API
@@ -99,7 +99,7 @@ node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.
 
 ```text
 # 本地（LaunchAgent 推荐 KEEPSAKE_HOME → Application Support）
-~/Library/Application Support/Keepsake/   # 或 legacy ~/Documents/ClipFlow
+~/Library/Application Support/Keepsake/   # 历史目录名；产品品牌 ClipVault。或 legacy ~/Documents/ClipFlow
 ├── clipflow.db
 ├── blobs/{sha}.bin
 ├── config/{backup,sync,host}.json
@@ -144,15 +144,15 @@ Web：右上角 **备份** 侧栏 → 灾备开关 / 立即备份 / 恢复；同
 
 ## 产品与协作
 
-- 产品名：**Keepsake**  
+- 产品名：**ClipVault**  
 - 品味与 agent 约定：见仓库根目录 **[AGENTS.md](./AGENTS.md)**  
 - 许可证：MIT  
 
 ---
 
-**Keepsake** — 剪贴板会忘；记忆不必。
+**ClipVault** — 剪贴板会忘；记忆不必。
 
-## Keepsake Android
+## ClipVault Android
 
 手机端备份阅读器（+ 主动粘贴/分享），工程在 [`android/`](./android/)。
 

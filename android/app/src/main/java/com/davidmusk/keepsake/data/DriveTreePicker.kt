@@ -15,7 +15,7 @@ import android.util.Log
  *
  * MIUI DocumentsUI ignores vague INITIAL_URI and hides the roots drawer behind
  * a gesture that collides with system-back. We query Drive's DocumentsProvider
- * for the real document id of My Drive / Keepsake / backup, then pass that URI.
+ * for the real document id of My Drive / ClipVault|Keepsake / backup, then pass that URI.
  */
 object DriveTreePicker {
     const val DRIVE_PKG = "com.google.android.apps.docs"
@@ -47,7 +47,7 @@ object DriveTreePicker {
     }
 
     /**
-     * Best INITIAL_URI: prefer …/Keepsake/backup document, else My Drive root, else generic root.
+     * Best INITIAL_URI: prefer …/ClipVault/backup (or Keepsake/backup) document, else My Drive root, else generic root.
      * Safe to call on a background thread (does ContentResolver queries).
      */
     fun bestInitialUri(context: Context): Uri? {
@@ -99,7 +99,7 @@ object DriveTreePicker {
                 "com.android.documentsui.picker.PickActivity",
             )
         }
-        // Prefer landing on Keepsake/backup when discovery works; never set as data URI.
+        // Prefer landing on ClipVault/backup (or Keepsake) when discovery works; never set as data URI.
         val uri = initial
         if (uri != null &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
@@ -122,9 +122,11 @@ object DriveTreePicker {
         authority: String,
     ): Uri? {
         val rootDocId = myDriveDocumentId(resolver, authority) ?: return null
-        val keepsakeId = findChildDocumentId(resolver, authority, rootDocId, "Keepsake")
+        // Brand folder ClipVault; fall back to legacy Keepsake.
+        val brandId = findChildDocumentId(resolver, authority, rootDocId, "ClipVault")
+            ?: findChildDocumentId(resolver, authority, rootDocId, "Keepsake")
             ?: return null
-        val backupId = findChildDocumentId(resolver, authority, keepsakeId, "backup")
+        val backupId = findChildDocumentId(resolver, authority, brandId, "backup")
             ?: return null
         return DocumentsContract.buildDocumentUri(authority, backupId)
     }

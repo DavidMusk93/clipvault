@@ -30,7 +30,7 @@ sync.statusSnapshot { st in
     print("🔄 多机同步: host=\(st.hostId) enabled=\(st.enabled) root=\(st.syncRootPath ?? "nil")")
 }
 if let gd = CloudDocsBackupService.googleDriveMyDriveURL() {
-    print("📂 Google Drive: \(gd.appendingPathComponent("Keepsake/backup").path)")
+    print("📂 Google Drive: \(gd.appendingPathComponent("ClipVault/backup").path) (legacy Keepsake/backup ok)")
 } else {
     print("ℹ️  Google Drive 未挂载 — 安装并登录 Desktop 后启用 gdrive 目标")
 }

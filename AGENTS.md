@@ -1,4 +1,4 @@
-# Keepsake · AGENTS.md
+# ClipVault · AGENTS.md
 
 给 **人类协作者与编码 agent** 的仓库约定。改产品前先读本节；与全局 `~/.grok/AGENTS.md` / nmem 冲突时：**本仓库产品层以本文为准**。
 
@@ -8,15 +8,16 @@
 
 | 项 | 值 |
 | --- | --- |
-| **产品名** | **Keepsake** |
+| **产品名** | **ClipVault** |
 | **一句话** | 你的剪贴板记忆 |
 | **定位** | 个人 Mac 上的剪贴板记忆层：捕获 · 检索 · OCR · 本机 Web · iCloud Drive 备份 |
 | **不是** | 企业协同剪贴板、云笔记、又一个 `ClipXxx` 工具箱皮肤 |
 | **仓库历史名** | GitHub / 目录可能仍叫 `ClipView`；二进制/模块可能仍叫 `ClipFlow*` |
-| **品牌规则** | **对外文案、README、窗口标题、用户可见 UI 字符串 → Keepsake**。内部 SPM target / LaunchAgent label 可渐进迁移，禁止再引入新的「ClipView 产品名」文案 |
+| **品牌规则** | **对外文案、README、窗口标题、用户可见 UI 字符串 → ClipVault**。内部 SPM target / LaunchAgent label / 数据目录可仍为 ClipFlow* 或历史 Keepsake 路径；禁止把 ClipView/ClipFlow 当产品品牌回潮 |
 
 命名否决过的方向（不要回潮）：
 
+- `Keepsake` 当**现行品牌**（历史文案/路径可残留；新用户可见字符串一律 ClipVault）  
 - `ClipView` / `ClipFlow` 当**品牌**（可用作遗留路径/进程名）  
 - `XxxView` / `ClipManager` 等组件腔  
 - 为「一眼功能」牺牲独立产品感  
@@ -102,7 +103,7 @@ Owner 要的是 **独立产品气质 + 终局工程**，不是 demo 合集。
 
 ## 4. 改品牌时的检查清单
 
-改 Keepsake 相关呈现时至少碰：
+改 ClipVault 相关呈现时至少碰：
 
 - [ ] `README.md` 标题与叙事  
 - [ ] `web/index.html` 标题、顶栏、备份侧栏文案  
@@ -114,7 +115,7 @@ Owner 要的是 **独立产品气质 + 终局工程**，不是 demo 合集。
 
 ## 5. 一句话给 agent
 
-**Keepsake = 个人剪贴板记忆产品。**  
+**ClipVault = 个人剪贴板记忆产品。**  
 做终局、像产品、本机优先、列表轻预览重、备份可恢复。  
 历史文件夹名 `ClipView` 不定义品牌。
 
@@ -126,5 +127,5 @@ Owner 要的是 **独立产品气质 + 终局工程**，不是 demo 合集。
 | --- | --- |
 | 路径 | `android/` |
 | 定位 | 备份阅读器 + 前台粘贴/分享；**不做**后台剪贴板监听 |
-| 数据 | SAF 读 `Keepsake/backup`（与 Mac GDrive fan-out 一致） |
+| 数据 | SAF 读 `ClipVault/backup`（兼容旧目录 `Keepsake/backup`；与 Mac GDrive fan-out 一致） |
 | 发布 | `.github/workflows/android-apk.yml` → artifact / tag Release |

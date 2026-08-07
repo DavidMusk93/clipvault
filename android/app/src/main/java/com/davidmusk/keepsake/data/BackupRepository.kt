@@ -23,7 +23,7 @@ import java.util.LinkedHashMap
 import java.util.zip.ZipInputStream
 
 /**
- * Read Mac Keepsake backup layout via SAF tree URI:
+ * Read Mac ClipVault backup layout via SAF tree URI:
  *
  *   {tree}/latest/clipflow.db
  *   {tree}/latest/MANIFEST.json
@@ -106,7 +106,7 @@ class BackupRepository(
         val latestId = findChildDocumentId(treeUri, parentDocId = null, displayName = "latest")
             ?: return@withLock SyncResult(
                 0, null, null, null,
-                "文件夹不对：请选中 Keepsake/backup（内含 latest）",
+                "文件夹不对：请选中 ClipVault/backup（或旧 Keepsake/backup，内含 latest）",
             )
         val dbUri = findChildDocumentUri(treeUri, parentDocId = latestId, displayName = "clipflow.db")
             ?: return@withLock SyncResult(

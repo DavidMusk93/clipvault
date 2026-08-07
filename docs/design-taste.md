@@ -1,4 +1,4 @@
-# Keepsake · Design Taste（产品视觉真源）
+# ClipVault · Design Taste（产品视觉真源）
 
 > **长期产品**：跨 Mac Web / Android / 未来端共用同一套视觉身份。  
 > 改颜色、标签、来源色前先改本文，再改实现。  
