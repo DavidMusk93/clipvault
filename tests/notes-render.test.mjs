@@ -68,15 +68,33 @@ test('notesFragmentUseful rejects pure empty chrome', () => {
   assert.equal(notesFragmentUseful('<p>hi</p>'), true);
 });
 
-test('index.html CSS: Notes prose must not force white-space:pre on all blocks', () => {
-  // Regression: 3c37f48 applied white-space:pre to all notes p/li/div → blank lines + non-Notes look
-  const bad = /\.notes-rich p,\s*\.snippet-html p,\s*\.notes-rich li,\s*\.snippet-html li,\s*\.notes-rich div,\s*\.snippet-html div\s*\{[^}]*white-space:\s*pre\s*;/s;
-  assert.equal(bad.test(indexHtml), false, 'global pre on notes blocks is forbidden');
+test('index.html CSS: rich text must not soft-wrap (pre + pan)', () => {
+  // Product: dont wrap lines — pan instead. Empty holes are JS cleanup, not soft-wrap.
+  // Multi-selector block may span >120 chars before white-space; allow a generous window.
+  assert.match(
+    indexHtml,
+    /\.notes-rich p[\s\S]{0,400}?white-space:\s*pre\s*;/,
+    'notes-rich p must use white-space:pre (no soft wrap)',
+  );
+  assert.doesNotMatch(
+    indexHtml,
+    /\.notes-rich p[\s\S]{0,400}?white-space:\s*(?:normal|pre-wrap)\s*;/,
+    'notes-rich p must not soft-wrap (normal/pre-wrap forbidden)',
+  );
+  assert.match(indexHtml, /\.notes-rich-inner[\s\S]{0,120}?width:\s*max-content/);
+  assert.doesNotMatch(
+    indexHtml,
+    /\.notes-rich, \.snippet-html \{[\s\S]{0,300}?overflow-wrap:\s*anywhere/,
+    'notes container must not force overflow-wrap:anywhere',
+  );
   if (NOTES_CSS_POLICY.requireEmptyPHidden) {
     assert.match(indexHtml, /\.notes-rich p:empty/);
   }
   if (NOTES_CSS_POLICY.requireMonoPre) {
-    assert.match(indexHtml, /\.notes-rich[^\n]*\.is-mono|is-mono[^{]*\{[^}]*white-space:\s*pre/s);
+    assert.match(indexHtml, /is-mono[\s\S]{0,120}?white-space:\s*pre/);
+  }
+  if (NOTES_CSS_POLICY.requireNotesInnerMaxContent) {
+    assert.match(indexHtml, /\.notes-rich-inner[\s\S]{0,120}?width:\s*max-content/);
   }
 });
 

@@ -5,7 +5,7 @@
  * Goals:
  *  - Apple Notes-ish structure (lists, paragraphs, emphasis)
  *  - Collapse Writer/Cocoa empty spacer holes
- *  - Prose wraps like Notes; mono/code lines stay pre + pan
+ *  - No soft wrap: hard newlines only + XY pan; mono/code same
  */
 
 /** @param {string} s */
@@ -187,10 +187,12 @@ export function notesFragmentUseful(fragment) {
 
 /** CSS policy tokens that must hold in web/index.html (regression guard). */
 export const NOTES_CSS_POLICY = {
-  /** notes prose may wrap (Notes app wraps); forbid global white-space:pre on all p/div */
-  forbidGlobalPreOnNotesBlocks: true,
-  /** mono / code runs must stay unwrap-able */
+  /** product: rich text must NOT soft-wrap — pan instead (hard newlines only) */
+  requireNotesPreNoSoftWrap: true,
+  /** mono / code runs unwrap */
   requireMonoPre: true,
   /** empty spacers must be hidden */
   requireEmptyPHidden: true,
+  /** inner content max-content for horizontal pan */
+  requireNotesInnerMaxContent: true,
 };

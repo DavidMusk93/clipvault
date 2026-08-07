@@ -535,7 +535,7 @@
      * Notes-like rich text surface (RTF/HTML from Cocoa / Notes)
      * Preserve list hierarchy & indent; kill Writer spacer chrome.
      */
-    /* Apple Notes–like prose surface: natural wrap, tight spacing, no spacer holes */
+    /* Rich text: no soft wrap — XY pan (product). Empty Cocoa holes removed in JS. */
     .notes-rich, .snippet-html {
       background: rgba(245, 245, 247, 0.88);
       padding: 10px 12px 12px;
@@ -547,8 +547,8 @@
       max-width: 100%;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      word-break: break-word;
-      overflow-wrap: anywhere;
+      word-break: normal;
+      overflow-wrap: normal;
       font-family: var(--font-ui);
       font-size: 14px;
       line-height: 1.35;
@@ -561,9 +561,9 @@
     }
     .notes-rich-inner, .snippet-html-inner {
       display: block;
-      width: 100%;
-      max-width: 100%;
-      min-width: 0;
+      width: max-content;
+      min-width: 100%;
+      max-width: none;
     }
     .notes-rich::-webkit-scrollbar,
     .snippet-html::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -586,29 +586,30 @@
       padding: 0;
     }
 
-    .notes-rich p, .snippet-html p {
+    .notes-rich p, .snippet-html p,
+    .notes-rich li, .snippet-html li {
       margin: 0 0 0.28em;
       min-height: 0 !important;
-      /* Notes prose wraps; empty holes killed in renderNotesFragment */
-      white-space: normal;
-      word-break: break-word;
-      overflow-wrap: anywhere;
+      /* hard newlines only — long lines pan, never soft-wrap */
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
     }
     .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
     .notes-rich p:empty, .snippet-html p:empty,
     .notes-rich div:empty, .snippet-html div:empty,
+    .notes-rich li:empty, .snippet-html li:empty,
     .notes-rich p > br:only-child, .snippet-html p > br:only-child { display: none !important; }
-    /* Mono / SQL dumps: unwrap + horizontal pan inside the notes card */
+    /* Mono / SQL: same unwrap + mono font */
     .notes-rich .is-mono, .snippet-html .is-mono {
       white-space: pre !important;
       word-break: normal !important;
       overflow-wrap: normal !important;
-      overflow-x: auto;
-      max-width: 100%;
       font-family: var(--font-mono);
       font-size: 12.5px;
       line-height: 1.4;
       letter-spacing: 0;
+      font-variant-ligatures: none;
     }
 
     /* Hierarchical lists — Apple Notes feel */
