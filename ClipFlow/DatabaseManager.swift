@@ -211,18 +211,85 @@ final class DatabaseManager: ObservableObject {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS clipboard_events (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            event_ts REAL NOT NULL,
+            type TEXT NOT NULL,
+            source_app TEXT,
+            kind TEXT NOT NULL DEFAULT 'capture'
+        );
+        CREATE TABLE IF NOT EXISTS operation_logs (
+            id TEXT PRIMARY KEY,
+            ts REAL NOT NULL,
+            action TEXT NOT NULL,
+            item_id TEXT,
+            content_hash TEXT,
+            detail TEXT,
+            source TEXT NOT NULL DEFAULT 'system'
+        );
         CREATE INDEX IF NOT EXISTS idx_timestamp ON clipboard_items(timestamp);
         CREATE INDEX IF NOT EXISTS idx_ts_id ON clipboard_items(timestamp DESC, id DESC);
         CREATE INDEX IF NOT EXISTS idx_content_hash ON clipboard_items(content_hash);
+        CREATE INDEX IF NOT EXISTS idx_events_hash_ts ON clipboard_events(content_hash, event_ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_events_item_ts ON clipboard_events(item_id, event_ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_events_ts ON clipboard_events(event_ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_oplogs_ts ON operation_logs(ts DESC);
         """
         execQuiet(createSQL)
     }
+
+    /// Soft-delete TTL (seconds). Default 30 days.
+    private static let trashTTLSeconds: Double = 30 * 24 * 3600
 
     private func migrateSchema() {
         // copy_count: how many times this exact content was re-copied (latest-alive).
         if !columnExists("clipboard_items", "copy_count") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN copy_count INTEGER NOT NULL DEFAULT 1;")
         }
+        if !columnExists("clipboard_items", "deleted_at") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN deleted_at REAL;")
+        }
+        if !columnExists("clipboard_items", "first_seen_at") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN first_seen_at REAL;")
+            // Backfill from timestamp for existing rows.
+            execQuiet("UPDATE clipboard_items SET first_seen_at = timestamp WHERE first_seen_at IS NULL;")
+        }
+        // Ensure aux tables exist on upgraded DBs.
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS clipboard_events (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            event_ts REAL NOT NULL,
+            type TEXT NOT NULL,
+            source_app TEXT,
+            kind TEXT NOT NULL DEFAULT 'capture'
+        );
+        CREATE TABLE IF NOT EXISTS operation_logs (
+            id TEXT PRIMARY KEY,
+            ts REAL NOT NULL,
+            action TEXT NOT NULL,
+            item_id TEXT,
+            content_hash TEXT,
+            detail TEXT,
+            source TEXT NOT NULL DEFAULT 'system'
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_hash_ts ON clipboard_events(content_hash, event_ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_events_item_ts ON clipboard_events(item_id, event_ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_events_ts ON clipboard_events(event_ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_oplogs_ts ON operation_logs(ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_deleted_at ON clipboard_items(deleted_at);
+        """)
+        // Bootstrap events for existing items that have no history yet (one seed event).
+        execQuiet("""
+        INSERT INTO clipboard_events (id, item_id, content_hash, event_ts, type, source_app, kind)
+        SELECT lower(hex(randomblob(16))), c.id, c.content_hash, c.timestamp, c.type, c.source_app, 'seed'
+        FROM clipboard_items c
+        WHERE NOT EXISTS (SELECT 1 FROM clipboard_events e WHERE e.item_id = c.id)
+        LIMIT 5000;
+        """)
     }
 
     /// Pull image/pdf/rtf out of SQLite into `blobs/{hash}.bin` (content-addressed).
@@ -488,6 +555,13 @@ final class DatabaseManager: ObservableObject {
         if removed > 0 {
             print("[DatabaseManager] maintenance: dedupe_removed=\(removed)")
         }
+
+        let purged = purgeExpiredTrash(limit: Self.deleteBatchSize)
+        if purged > 0 {
+            print("[DatabaseManager] maintenance: trash_purged=\(purged)")
+        }
+        _ = pruneOperationLogs(maxAgeDays: 90, limit: 500)
+
 
         // Passive WAL checkpoint every tick (cheap).
         execQuiet("PRAGMA wal_checkpoint(PASSIVE);")
@@ -961,14 +1035,15 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Same content re-copied: keep one row, refresh timestamp / source / count; keep stable id.
+    /// If row was soft-deleted, re-copy restores it to the main library.
     private func bumpLatestAlive(id: String, item: ClipboardItem) -> Bool {
         guard let db = db else { return false }
-        // Optionally refresh text/ocr/source if new capture has richer fields (same hash ⇒ body same).
         let sql = """
         UPDATE clipboard_items SET
             timestamp = ?,
             source_app = COALESCE(?, source_app),
-            copy_count = COALESCE(copy_count, 1) + 1
+            copy_count = COALESCE(copy_count, 1) + 1,
+            deleted_at = NULL
         WHERE id = ?;
         """
         var stmt: OpaquePointer?
@@ -978,8 +1053,31 @@ final class DatabaseManager: ObservableObject {
         bindText(stmt, 3, id)
         let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
-        // FTS body unchanged for same hash — no FTS rewrite needed.
-        return rc == SQLITE_DONE
+        guard rc == SQLITE_DONE else { return false }
+        // Re-index FTS if restored from trash (FTS may have been removed on soft-delete).
+        upsertFTS(
+            id: id,
+            text: item.textContent,
+            ocr: item.ocrText,
+            source: item.sourceApp,
+            html: item.htmlContent
+        )
+        recordClipboardEvent(
+            itemId: id,
+            contentHash: item.contentHash,
+            eventTs: item.timestamp,
+            type: item.type.rawValue,
+            sourceApp: item.sourceApp,
+            kind: "capture"
+        )
+        appendOperationLogSync(
+            action: "capture_bump",
+            itemId: id,
+            contentHash: item.contentHash,
+            detail: "source=\(item.sourceApp ?? "-")",
+            source: "clipboard"
+        )
+        return true
     }
 
     private func insertNewItem(_ item: ClipboardItem, db: OpaquePointer) -> Bool {
@@ -1030,12 +1128,37 @@ final class DatabaseManager: ObservableObject {
         sqlite3_finalize(stmt)
         guard stepRes == SQLITE_DONE else { return false }
 
+        // first_seen_at on insert
+        let fsSQL = "UPDATE clipboard_items SET first_seen_at = COALESCE(first_seen_at, ?) WHERE id = ?;"
+        var fs: OpaquePointer?
+        if sqlite3_prepare_v2(db, fsSQL, -1, &fs, nil) == SQLITE_OK {
+            sqlite3_bind_double(fs, 1, item.timestamp.timeIntervalSince1970)
+            bindText(fs, 2, idStr)
+            _ = sqlite3_step(fs)
+        }
+        sqlite3_finalize(fs)
+
         upsertFTS(
             id: idStr,
             text: item.textContent,
             ocr: item.ocrText,
             source: item.sourceApp,
             html: item.htmlContent
+        )
+        recordClipboardEvent(
+            itemId: idStr,
+            contentHash: item.contentHash,
+            eventTs: item.timestamp,
+            type: item.type.rawValue,
+            sourceApp: item.sourceApp,
+            kind: "capture"
+        )
+        appendOperationLogSync(
+            action: "capture_insert",
+            itemId: idStr,
+            contentHash: item.contentHash,
+            detail: "type=\(item.type.rawValue)",
+            source: "clipboard"
         )
         return true
     }
@@ -1051,6 +1174,7 @@ final class DatabaseManager: ObservableObject {
         limit: Int = 30,
         cursor: ClipCursor? = nil,
         query: String? = nil,
+        trashOnly: Bool = false,
         completion: @escaping (ClipPage) -> Void
     ) {
         dbQueue.async { [weak self] in
@@ -1067,7 +1191,14 @@ final class DatabaseManager: ObservableObject {
 
             var items: [ClipboardItem] = []
 
-            if hasQuery, let match = ftsMatch {
+            if trashOnly {
+                // Trash view: no FTS; optional LIKE on alive fields of deleted rows.
+                if hasQuery, let q = q {
+                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true)
+                } else {
+                    items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true)
+                }
+            } else if hasQuery, let match = ftsMatch {
                 items = self.runSearchFTS(db: db, match: match, cursor: cursor, fetchLimit: fetchLimit)
                 // Hybrid: if FTS empty (e.g. odd tokens), fall back to LIKE once.
                 if items.isEmpty {
@@ -1077,7 +1208,7 @@ final class DatabaseManager: ObservableObject {
                 // Short query (<3) with trigram: LIKE path.
                 items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit)
             } else {
-                items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit)
+                items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: trashOnly)
             }
 
             var next: ClipCursor? = nil
@@ -1120,15 +1251,15 @@ final class DatabaseManager: ObservableObject {
         fetchLimit: Int
     ) -> [ClipboardItem] {
         var sql = """
-        SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, c.html_content, c.source_app, c.ocr_text
+        SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, c.html_content, c.source_app, c.ocr_text,
+               COALESCE(c.copy_count, 1), c.deleted_at, c.first_seen_at
         FROM clipboard_fts f
         JOIN clipboard_items c ON c.id = f.id
-        WHERE clipboard_fts MATCH ?
+        WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL
         """
         if cursor != nil {
             sql += " AND \(Self.keysetSQLAliased)"
         }
-        // Rank within page; keyset still on (timestamp, id) for stable scroll.
         sql += " ORDER BY bm25(clipboard_fts), c.timestamp DESC, c.id DESC LIMIT ?;"
 
         var stmt: OpaquePointer?
@@ -1155,17 +1286,24 @@ final class DatabaseManager: ObservableObject {
         db: OpaquePointer,
         q: String,
         cursor: ClipCursor?,
-        fetchLimit: Int
+        fetchLimit: Int,
+        trashOnly: Bool = false
     ) -> [ClipboardItem] {
-        var sql = """
-        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text
-        FROM clipboard_items
-        WHERE (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ?)
-        """
-        if cursor != nil {
-            sql += " AND \(Self.keysetSQL)"
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at FROM clipboard_items WHERE "
+        if trashOnly {
+            sql += "deleted_at IS NOT NULL"
+        } else {
+            sql += "deleted_at IS NULL"
         }
-        sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
+        sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ?)"
+        if cursor != nil {
+            sql += " AND " + Self.keysetSQL
+        }
+        if trashOnly {
+            sql += " ORDER BY deleted_at DESC, id DESC LIMIT ?;"
+        } else {
+            sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
+        }
 
         var stmt: OpaquePointer?
         var items: [ClipboardItem] = []
@@ -1186,15 +1324,21 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
-    private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int) -> [ClipboardItem] {
-        var sql = """
-        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text
-        FROM clipboard_items
-        """
-        if cursor != nil {
-            sql += " WHERE \(Self.keysetSQL)"
+    private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false) -> [ClipboardItem] {
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at FROM clipboard_items WHERE "
+        if trashOnly {
+            sql += "deleted_at IS NOT NULL"
+        } else {
+            sql += "deleted_at IS NULL"
         }
-        sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
+        if cursor != nil {
+            sql += " AND " + Self.keysetSQL
+        }
+        if trashOnly {
+            sql += " ORDER BY deleted_at DESC, id DESC LIMIT ?;"
+        } else {
+            sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
+        }
 
         var stmt: OpaquePointer?
         var items: [ClipboardItem] = []
@@ -1211,6 +1355,7 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
+    /// Columns: id, timestamp, type, content_hash, text, file_urls, url, html, source, ocr, copy_count, deleted_at, first_seen_at
     private func rowToItem(stmt: OpaquePointer?) -> ClipboardItem? {
         guard let stmt = stmt,
               let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
@@ -1222,7 +1367,6 @@ final class DatabaseManager: ObservableObject {
 
         let timestamp = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1))
         let textContent = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
-        // SELECT … text_content, file_urls, url, html_content, source_app, ocr_text
         let fileURLs: [URL]? = {
             guard let raw = sqlite3_column_text(stmt, 5).map({ String(cString: $0) }),
                   !raw.isEmpty else { return nil }
@@ -1233,6 +1377,20 @@ final class DatabaseManager: ObservableObject {
         let htmlContent = sqlite3_column_text(stmt, 7).map { String(cString: $0) }
         let sourceApp = sqlite3_column_text(stmt, 8).map { String(cString: $0) }
         let ocrText = sqlite3_column_text(stmt, 9).map { String(cString: $0) }
+
+        let colCount = sqlite3_column_count(stmt)
+        var copyCount = 1
+        var deletedAt: Date? = nil
+        var firstSeenAt: Date? = nil
+        if colCount >= 11 {
+            copyCount = max(1, Int(sqlite3_column_int(stmt, 10)))
+        }
+        if colCount >= 12, sqlite3_column_type(stmt, 11) != SQLITE_NULL {
+            deletedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 11))
+        }
+        if colCount >= 13, sqlite3_column_type(stmt, 12) != SQLITE_NULL {
+            firstSeenAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12))
+        }
 
         return ClipboardItem(
             id: uuid,
@@ -1245,50 +1403,175 @@ final class DatabaseManager: ObservableObject {
             url: url,
             htmlContent: htmlContent,
             ocrText: ocrText,
-            sourceApp: sourceApp
+            sourceApp: sourceApp,
+            copyCount: copyCount,
+            deletedAt: deletedAt,
+            firstSeenAt: firstSeenAt
         )
     }
+
+    // MARK: - Soft delete / recycle bin (TTL 30d)
 
     func deleteItem(_ item: ClipboardItem, completion: ((Bool) -> Void)? = nil) {
         deleteItem(id: item.id, completion: completion)
     }
 
+    /// Soft-delete: set deleted_at; keep row + CAS until TTL purge.
     func deleteItem(id: UUID, completion: ((Bool) -> Void)? = nil) {
         dbQueue.async { [weak self] in
-            guard let self = self, let db = self.db else { completion?(false); return }
-
-            // Capture hash for optional blob GC after row delete.
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            let idStr = id.uuidString
             var hash: String?
             var hStmt: OpaquePointer?
             if sqlite3_prepare_v2(db, "SELECT content_hash FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
-                self.bindText(hStmt, 1, id.uuidString)
+                self.bindText(hStmt, 1, idStr)
                 if sqlite3_step(hStmt) == SQLITE_ROW {
                     hash = sqlite3_column_text(hStmt, 0).map { String(cString: $0) }
                 }
             }
             sqlite3_finalize(hStmt)
 
-            let sql = "DELETE FROM clipboard_items WHERE id = ?;"
+            let sql = "UPDATE clipboard_items SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL;"
             var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                self.bindText(stmt, 1, id.uuidString)
-                let stepRes = sqlite3_step(stmt)
-                sqlite3_finalize(stmt)
-                if stepRes == SQLITE_DONE {
-                    self.deleteFTS(id: id.uuidString)
-                    if let hash = hash {
-                        self.gcBlobIfUnreferenced(hash: hash)
-                    }
-                }
-                DispatchQueue.main.async { completion?(stepRes == SQLITE_DONE) }
-            } else {
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
                 DispatchQueue.main.async { completion?(false) }
+                return
             }
+            let now = Date().timeIntervalSince1970
+            sqlite3_bind_double(stmt, 1, now)
+            self.bindText(stmt, 2, idStr)
+            let stepRes = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            let changed = sqlite3_changes(db) > 0
+            if stepRes == SQLITE_DONE && changed {
+                // Hide from main FTS; trash uses LIKE only.
+                self.deleteFTS(id: idStr)
+                self.appendOperationLogSync(
+                    action: "soft_delete",
+                    itemId: idStr,
+                    contentHash: hash,
+                    detail: "ttl_days=30",
+                    source: "web"
+                )
+            }
+            DispatchQueue.main.async { completion?(stepRes == SQLITE_DONE && changed) }
         }
     }
 
+    /// Restore from recycle bin.
+    func restoreItem(id: UUID, completion: ((Bool) -> Void)? = nil) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            let idStr = id.uuidString
+            // Load fields for FTS reindex
+            var text: String?
+            var ocr: String?
+            var source: String?
+            var html: String?
+            var hash: String?
+            var q: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "SELECT text_content, ocr_text, source_app, html_content, content_hash FROM clipboard_items WHERE id = ? AND deleted_at IS NOT NULL;",
+                -1, &q, nil
+            ) == SQLITE_OK {
+                self.bindText(q, 1, idStr)
+                if sqlite3_step(q) == SQLITE_ROW {
+                    text = sqlite3_column_text(q, 0).map { String(cString: $0) }
+                    ocr = sqlite3_column_text(q, 1).map { String(cString: $0) }
+                    source = sqlite3_column_text(q, 2).map { String(cString: $0) }
+                    html = sqlite3_column_text(q, 3).map { String(cString: $0) }
+                    hash = sqlite3_column_text(q, 4).map { String(cString: $0) }
+                } else {
+                    sqlite3_finalize(q)
+                    DispatchQueue.main.async { completion?(false) }
+                    return
+                }
+            } else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            sqlite3_finalize(q)
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "UPDATE clipboard_items SET deleted_at = NULL WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            self.bindText(stmt, 1, idStr)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            self.upsertFTS(id: idStr, text: text, ocr: ocr, source: source, html: html)
+            self.appendOperationLogSync(
+                action: "restore",
+                itemId: idStr,
+                contentHash: hash,
+                detail: nil,
+                source: "web"
+            )
+            DispatchQueue.main.async { completion?(true) }
+        }
+    }
+
+    /// Hard-delete rows past trash TTL (batched).
+    @discardableResult
+    private func purgeExpiredTrash(limit: Int) -> Int {
+        guard let db = db else { return 0 }
+        let cutoff = Date().timeIntervalSince1970 - Self.trashTTLSeconds
+        // Collect ids + hashes first
+        var victims: [(String, String)] = []
+        var sel: OpaquePointer?
+        let sql = "SELECT id, content_hash FROM clipboard_items WHERE deleted_at IS NOT NULL AND deleted_at < ? ORDER BY deleted_at ASC LIMIT ?;"
+        guard sqlite3_prepare_v2(db, sql, -1, &sel, nil) == SQLITE_OK else { return 0 }
+        sqlite3_bind_double(sel, 1, cutoff)
+        sqlite3_bind_int(sel, 2, Int32(limit))
+        while sqlite3_step(sel) == SQLITE_ROW {
+            if let id = sqlite3_column_text(sel, 0).map({ String(cString: $0) }),
+               let hash = sqlite3_column_text(sel, 1).map({ String(cString: $0) }) {
+                victims.append((id, hash))
+            }
+        }
+        sqlite3_finalize(sel)
+        guard !victims.isEmpty else { return 0 }
+
+        var purged = 0
+        for (id, hash) in victims {
+            var del: OpaquePointer?
+            if sqlite3_prepare_v2(db, "DELETE FROM clipboard_items WHERE id = ?;", -1, &del, nil) == SQLITE_OK {
+                bindText(del, 1, id)
+                if sqlite3_step(del) == SQLITE_DONE {
+                    purged += 1
+                    deleteFTS(id: id)
+                    gcBlobIfUnreferenced(hash: hash)
+                    // Keep events for frequency? Drop item-scoped events on hard purge.
+                    execQuiet("DELETE FROM clipboard_events WHERE item_id = '\(id.replacingOccurrences(of: "'", with: "''"))';")
+                    appendOperationLogSync(
+                        action: "purge_trash",
+                        itemId: id,
+                        contentHash: hash,
+                        detail: "ttl_expired",
+                        source: "maintenance"
+                    )
+                }
+            }
+            sqlite3_finalize(del)
+        }
+        return purged
+    }
+
     private func gcBlobIfUnreferenced(hash: String) {
-        let n = scalarInt64("SELECT COUNT(*) FROM clipboard_items WHERE content_hash = '\(hash.replacingOccurrences(of: "'", with: "''"))';") ?? 0
+        let safe = hash.replacingOccurrences(of: "'", with: "''")
+        let n = scalarInt64("SELECT COUNT(*) FROM clipboard_items WHERE content_hash = '\(safe)';") ?? 0
         guard n == 0 else { return }
         try? fm.removeItem(at: blobFileURL(hash: hash))
         try? fm.removeItem(at: blobFileURL(hash: hash + ".rtf"))
@@ -1318,7 +1601,6 @@ final class DatabaseManager: ObservableObject {
                         if size > 0 {
                             let inline = Data(bytes: blobPtr, count: size)
                             data = inline
-                            // Lazy externalize legacy rows
                             if let hash = hash {
                                 _ = self.writeBlobFile(hash: hash, data: inline)
                                 let clear = "UPDATE clipboard_items SET image_data=NULL WHERE id=?;"
@@ -1338,37 +1620,259 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
-    /// Batched wipe — short writer batches only.
+    /// Soft-delete all alive rows (into trash); does not hard-wipe.
     func clearAll(completion: ((Bool) -> Void)? = nil) {
         dbQueue.async { [weak self] in
-            guard let self = self, let db = self.db else { completion?(false); return }
-
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            let now = Date().timeIntervalSince1970
             var ok = true
-            if !self.execQuiet("DELETE FROM clipboard_fts;") { ok = false }
-
-            let batchSQL = """
-            DELETE FROM clipboard_items WHERE id IN (
-                SELECT id FROM clipboard_items LIMIT \(Self.deleteBatchSize)
-            );
-            """
             var guardLoops = 0
             while ok && guardLoops < 1_000_000 {
                 guardLoops += 1
-                var err: UnsafeMutablePointer<CChar>?
-                let rc = sqlite3_exec(db, batchSQL, nil, nil, &err)
-                if rc != SQLITE_OK {
-                    let msg = err.map { String(cString: $0) } ?? "rc=\(rc)"
-                    if let err { sqlite3_free(err) }
-                    print("[DatabaseManager] clearAll batch error: \(msg)")
+                let batchSQL = """
+                UPDATE clipboard_items SET deleted_at = \(now)
+                WHERE id IN (
+                    SELECT id FROM clipboard_items WHERE deleted_at IS NULL LIMIT \(Self.deleteBatchSize)
+                );
+                """
+                if !self.execQuiet(batchSQL) {
                     ok = false
                     break
                 }
                 if sqlite3_changes(db) == 0 { break }
             }
-
+            // Drop FTS for trashed items (full rebuild is simpler for clearAll)
+            _ = self.execQuiet("DELETE FROM clipboard_fts;")
+            self.appendOperationLogSync(
+                action: "clear_all_to_trash",
+                itemId: nil,
+                contentHash: nil,
+                detail: "soft_delete_all_alive",
+                source: "app"
+            )
             self.execQuiet("PRAGMA wal_checkpoint(PASSIVE);")
             DispatchQueue.main.async { completion?(ok) }
         }
+    }
+
+    // MARK: - Clipboard events + frequency
+
+    @discardableResult
+    private func recordClipboardEvent(
+        itemId: String,
+        contentHash: String,
+        eventTs: Date,
+        type: String,
+        sourceApp: String?,
+        kind: String
+    ) -> Bool {
+        guard let db = db else { return false }
+        let sql = """
+        INSERT INTO clipboard_events (id, item_id, content_hash, event_ts, type, source_app, kind)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        let eid = UUID().uuidString
+        bindText(stmt, 1, eid)
+        bindText(stmt, 2, itemId)
+        bindText(stmt, 3, contentHash)
+        sqlite3_bind_double(stmt, 4, eventTs.timeIntervalSince1970)
+        bindText(stmt, 5, type)
+        bindText(stmt, 6, sourceApp)
+        bindText(stmt, 7, kind)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        return rc == SQLITE_DONE
+    }
+
+    func fetchItemEvents(itemId: UUID, limit: Int = 50, completion: @escaping ([[String: Any]]) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            let lim = max(1, min(limit, 500))
+            let sql = """
+            SELECT id, item_id, content_hash, event_ts, type, source_app, kind
+            FROM clipboard_events WHERE item_id = ?
+            ORDER BY event_ts DESC LIMIT ?;
+            """
+            var stmt: OpaquePointer?
+            var rows: [[String: Any]] = []
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                self.bindText(stmt, 1, itemId.uuidString)
+                sqlite3_bind_int(stmt, 2, Int32(lim))
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    var row: [String: Any] = [:]
+                    row["id"] = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                    row["itemId"] = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                    row["contentHash"] = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+                    row["eventTs"] = sqlite3_column_double(stmt, 3)
+                    row["type"] = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? ""
+                    row["sourceApp"] = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
+                    row["kind"] = sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? ""
+                    rows.append(row)
+                }
+            }
+            sqlite3_finalize(stmt)
+            DispatchQueue.main.async { completion(rows) }
+        }
+    }
+
+    func contentFrequency(contentHash: String, completion: @escaping ([String: Any]) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion([:]) }
+                return
+            }
+            var eventCount: Int64 = 0
+            var firstTs: Double?
+            var lastTs: Double?
+            var stmt: OpaquePointer?
+            let sql = """
+            SELECT COUNT(*), MIN(event_ts), MAX(event_ts)
+            FROM clipboard_events WHERE content_hash = ?;
+            """
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                self.bindText(stmt, 1, contentHash)
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    eventCount = sqlite3_column_int64(stmt, 0)
+                    if sqlite3_column_type(stmt, 1) != SQLITE_NULL {
+                        firstTs = sqlite3_column_double(stmt, 1)
+                    }
+                    if sqlite3_column_type(stmt, 2) != SQLITE_NULL {
+                        lastTs = sqlite3_column_double(stmt, 2)
+                    }
+                }
+            }
+            sqlite3_finalize(stmt)
+
+            var copyCount = 1
+            var itemId: String?
+            var cStmt: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "SELECT id, COALESCE(copy_count,1) FROM clipboard_items WHERE content_hash = ? ORDER BY timestamp DESC LIMIT 1;",
+                -1, &cStmt, nil
+            ) == SQLITE_OK {
+                self.bindText(cStmt, 1, contentHash)
+                if sqlite3_step(cStmt) == SQLITE_ROW {
+                    itemId = sqlite3_column_text(cStmt, 0).map { String(cString: $0) }
+                    copyCount = Int(sqlite3_column_int(cStmt, 1))
+                }
+            }
+            sqlite3_finalize(cStmt)
+
+            var out: [String: Any] = [
+                "contentHash": contentHash,
+                "eventCount": eventCount,
+                "copyCount": copyCount
+            ]
+            if let itemId { out["itemId"] = itemId }
+            if let firstTs { out["firstEventTs"] = firstTs }
+            if let lastTs { out["lastEventTs"] = lastTs }
+            DispatchQueue.main.async { completion(out) }
+        }
+    }
+
+    // MARK: - Operation logs (audit)
+
+    /// Public async append (UI / backup / web).
+    func appendOperationLog(
+        action: String,
+        itemId: String?,
+        contentHash: String?,
+        detail: String?,
+        source: String = "system",
+        completion: (() -> Void)? = nil
+    ) {
+        dbQueue.async { [weak self] in
+            self?.appendOperationLogSync(
+                action: action,
+                itemId: itemId,
+                contentHash: contentHash,
+                detail: detail,
+                source: source
+            )
+            DispatchQueue.main.async { completion?() }
+        }
+    }
+
+    @discardableResult
+    private func appendOperationLogSync(
+        action: String,
+        itemId: String?,
+        contentHash: String?,
+        detail: String?,
+        source: String
+    ) -> Bool {
+        guard let db = db else { return false }
+        let sql = """
+        INSERT INTO operation_logs (id, ts, action, item_id, content_hash, detail, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        bindText(stmt, 1, UUID().uuidString)
+        sqlite3_bind_double(stmt, 2, Date().timeIntervalSince1970)
+        bindText(stmt, 3, action)
+        bindText(stmt, 4, itemId)
+        bindText(stmt, 5, contentHash)
+        bindText(stmt, 6, detail)
+        bindText(stmt, 7, source)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        return rc == SQLITE_DONE
+    }
+
+    func fetchOperationLogs(limit: Int = 100, completion: @escaping ([[String: Any]]) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            let lim = max(1, min(limit, 500))
+            let sql = """
+            SELECT id, ts, action, item_id, content_hash, detail, source
+            FROM operation_logs ORDER BY ts DESC LIMIT ?;
+            """
+            var stmt: OpaquePointer?
+            var rows: [[String: Any]] = []
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_int(stmt, 1, Int32(lim))
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    var row: [String: Any] = [:]
+                    row["id"] = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                    row["ts"] = sqlite3_column_double(stmt, 1)
+                    row["action"] = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+                    row["itemId"] = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? NSNull()
+                    row["contentHash"] = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? NSNull()
+                    row["detail"] = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? NSNull()
+                    row["source"] = sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? ""
+                    rows.append(row)
+                }
+            }
+            sqlite3_finalize(stmt)
+            DispatchQueue.main.async { completion(rows) }
+        }
+    }
+
+    @discardableResult
+    private func pruneOperationLogs(maxAgeDays: Int, limit: Int) -> Int {
+        guard let db = db else { return 0 }
+        let cutoff = Date().timeIntervalSince1970 - Double(maxAgeDays) * 86400
+        let sql = "DELETE FROM operation_logs WHERE id IN (SELECT id FROM operation_logs WHERE ts < ? ORDER BY ts ASC LIMIT ?);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        sqlite3_bind_double(stmt, 1, cutoff)
+        sqlite3_bind_int(stmt, 2, Int32(limit))
+        _ = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        return Int(sqlite3_changes(db))
     }
 
     // MARK: - Online backup / restore
@@ -1441,6 +1945,13 @@ final class DatabaseManager: ObservableObject {
             }
             sqlite3_exec(destDB, "PRAGMA wal_checkpoint(FULL);", nil, nil, nil)
             sqlite3_close(destDB)
+            self.appendOperationLogSync(
+                action: "backup",
+                itemId: nil,
+                contentHash: nil,
+                detail: "dest=\(destURL.lastPathComponent)",
+                source: "backup"
+            )
             completion(.success(()))
         }
     }
@@ -1453,7 +1964,7 @@ final class DatabaseManager: ObservableObject {
             }
             var stmt: OpaquePointer?
             var count = 0
-            if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM clipboard_items;", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM clipboard_items WHERE deleted_at IS NULL;", -1, &stmt, nil) == SQLITE_OK {
                 if sqlite3_step(stmt) == SQLITE_ROW {
                     count = Int(sqlite3_column_int64(stmt, 0))
                 }
@@ -1512,6 +2023,13 @@ final class DatabaseManager: ObservableObject {
             self.migrateInlineBlobsToFiles(maxBatches: 200)
             self.maybeVacuumAfterBlobMigration()
             self.runAnalyze()
+            self.appendOperationLogSync(
+                action: "restore_db",
+                itemId: nil,
+                contentHash: nil,
+                detail: "from=\(sourceURL.lastPathComponent)",
+                source: "backup"
+            )
             completion(.success(()))
         }
     }

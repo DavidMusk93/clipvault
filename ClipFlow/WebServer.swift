@@ -154,6 +154,8 @@ class WebServer {
             handleSyncNow(connection: connection)
         } else if method == "POST" && pathOnly == "/api/sync/config" {
             handleSyncConfig(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/clips/restore" {
+            handleRestoreClip(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
             handleDeleteClip(path: path, connection: connection)
         } else {
@@ -189,6 +191,12 @@ class WebServer {
             sendBackupStatus(connection: connection) // same payload includes snapshots
         } else if pathOnly == "/api/sync/status" {
             sendSyncStatus(connection: connection)
+        } else if pathOnly == "/api/oplogs" {
+            sendOpLogs(path: path, connection: connection)
+        } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/events") {
+            sendItemEvents(path: path, connection: connection)
+        } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/frequency") {
+            sendItemFrequency(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/assets/") {
             sendStaticAsset(pathOnly: pathOnly, connection: connection)
         } else {
@@ -234,6 +242,13 @@ class WebServer {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
+                self.database.appendOperationLog(
+                    action: "copy_ui",
+                    itemId: nil,
+                    contentHash: nil,
+                    detail: "len=\(text.count)",
+                    source: "web"
+                )
                 let resp = """
                 HTTP/1.1 200 OK
                 Access-Control-Allow-Origin: *
@@ -258,19 +273,90 @@ class WebServer {
         database.deleteItem(id: uuid) { [weak self] success in
             guard let self = self else { return }
             if success {
-                self.sync?.recordLocalTombstone(id: uuid)
+                // Soft-delete only — do not tombstone peers (row still exists for TTL).
+                self.broadcastSSE(event: "clip_deleted")
                 let resp = """
                 HTTP/1.1 200 OK
                 Access-Control-Allow-Origin: *
                 Content-Type: application/json
                 
-                {"status":"deleted"}
+                {"status":"deleted","soft":true}
                 """
                 self.sendResponse(resp, connection: connection)
             } else {
                 self.sendErrorResponse(connection: connection, status: 500, message: "Failed to delete")
             }
         }
+    }
+
+    
+    private func handleRestoreClip(data: Data, connection: NWConnection) {
+        let requestString = String(data: data, encoding: .utf8) ?? ""
+        guard let bodyRange = requestString.range(of: "\r\n\r\n") else {
+            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+            return
+        }
+        let bodyString = String(requestString[bodyRange.upperBound...])
+        guard let bodyData = bodyString.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+              let idValue = json["id"] as? String,
+              let uuid = UUID(uuidString: idValue) else {
+            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+            return
+        }
+        database.restoreItem(id: uuid) { [weak self] ok in
+            guard let self = self else { return }
+            if ok {
+                self.broadcastSSE(event: "clip_restored")
+                let resp = """
+                HTTP/1.1 200 OK
+                Access-Control-Allow-Origin: *
+                Content-Type: application/json
+                
+                {"status":"restored"}
+                """
+                self.sendResponse(resp, connection: connection)
+            } else {
+                self.sendErrorResponse(connection: connection, status: 404, message: "Not in trash")
+            }
+        }
+    }
+
+    private func sendOpLogs(path: String, connection: NWConnection) {
+        let comps = URLComponents(string: "http://localhost" + path)
+        let limit = comps?.queryItems?.first(where: { $0.name == "limit" }).flatMap { Int($0.value ?? "") } ?? 100
+        database.fetchOperationLogs(limit: limit) { [weak self] rows in
+            guard let self = self else { return }
+            self.sendJSON(["items": rows, "count": rows.count], connection: connection)
+        }
+    }
+
+    private func sendItemEvents(path: String, connection: NWConnection) {
+        let pathOnly = path.split(separator: "?").map(String.init).first ?? path
+        let parts = pathOnly.split(separator: "/").map(String.init)
+        // api items {uuid} events
+        guard parts.count >= 4,
+              let uuid = UUID(uuidString: parts[2]) else {
+            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+            return
+        }
+        let comps = URLComponents(string: "http://localhost" + path)
+        let limit = comps?.queryItems?.first(where: { $0.name == "limit" }).flatMap { Int($0.value ?? "") } ?? 50
+        database.fetchItemEvents(itemId: uuid, limit: limit) { [weak self] rows in
+            guard let self = self else { return }
+            self.sendJSON(["itemId": uuid.uuidString, "events": rows, "count": rows.count], connection: connection)
+        }
+    }
+
+    private func sendItemFrequency(path: String, connection: NWConnection) {
+        let comps = URLComponents(string: "http://localhost" + path)
+        if let hash = comps?.queryItems?.first(where: { $0.name == "hash" })?.value, !hash.isEmpty {
+            database.contentFrequency(contentHash: hash) { [weak self] freq in
+                self?.sendJSON(freq, connection: connection)
+            }
+            return
+        }
+        sendErrorResponse(connection: connection, status: 400, message: "hash query required")
     }
 
     private func sendSyncStatus(connection: NWConnection) {
@@ -706,8 +792,17 @@ class WebServer {
             "timestamp": item.timestamp.timeIntervalSince1970,
             "type": item.type.rawValue,
             "preview": item.preview(),
-            "sourceApp": item.sourceApp ?? ""
+            "sourceApp": item.sourceApp ?? "",
+            "copyCount": item.copyCount,
+            "contentHash": item.contentHash,
+            "firstSeenAt": (item.firstSeenAt ?? item.timestamp).timeIntervalSince1970
         ]
+        if let deleted = item.deletedAt {
+            dict["deletedAt"] = deleted.timeIntervalSince1970
+            dict["inTrash"] = true
+        } else {
+            dict["inTrash"] = false
+        }
         if let html = item.htmlContent { dict["htmlContent"] = html }
         if let text = item.textContent { dict["textContent"] = text }
         if let ocr = item.ocrText { dict["ocrText"] = ocr }
@@ -735,8 +830,10 @@ class WebServer {
         let cursorRaw = items.first(where: { $0.name == "cursor" })?.value
         let cursor = cursorRaw.flatMap { ClipCursor.decode($0) }
         let q = items.first(where: { $0.name == "q" })?.value
+        let view = items.first(where: { $0.name == "view" })?.value
+        let trashOnly = (view == "trash")
 
-        database.fetchPage(limit: limit, cursor: cursor, query: q) { [weak self] page in
+        database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly) { [weak self] page in
             guard let self = self else { return }
             let jsonItems = page.items.map { self.itemToJSON($0) }
             var payload: [String: Any] = [

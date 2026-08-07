@@ -31,6 +31,13 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let ocrText: String?
     
     let sourceApp: String?
+
+    /// How many capture events for this content (latest-alive).
+    let copyCount: Int
+    /// Soft-delete timestamp; nil = alive in main library.
+    let deletedAt: Date?
+    /// First capture event time (history start).
+    let firstSeenAt: Date?
     
     init(id: UUID = UUID(),
          timestamp: Date = Date(),
@@ -45,7 +52,10 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
          htmlContent: String? = nil,
          rawData: Data? = nil,
          ocrText: String? = nil,
-         sourceApp: String? = nil) {
+         sourceApp: String? = nil,
+         copyCount: Int = 1,
+         deletedAt: Date? = nil,
+         firstSeenAt: Date? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.type = type
@@ -60,6 +70,9 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.rawData = rawData
         self.ocrText = ocrText
         self.sourceApp = sourceApp
+        self.copyCount = max(1, copyCount)
+        self.deletedAt = deletedAt
+        self.firstSeenAt = firstSeenAt ?? timestamp
     }
     
     // swiftlint:disable cyclomatic_complexity
