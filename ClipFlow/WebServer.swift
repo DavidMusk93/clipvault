@@ -158,6 +158,8 @@ class WebServer {
             handleRestoreClip(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/context" {
             handleClipContext(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/clips/evaluate" {
+            handleClipEvaluate(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
             handleDeleteClip(path: path, connection: connection)
         } else {
@@ -199,6 +201,8 @@ class WebServer {
             sendItemEvents(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/frequency") {
             sendItemFrequency(path: path, connection: connection)
+        } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/evaluations") {
+            sendItemEvaluations(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/assets/") {
             sendStaticAsset(pathOnly: pathOnly, connection: connection)
         } else {
@@ -830,75 +834,62 @@ class WebServer {
         return dict
     }
 
-    /// POST /api/clips/context  { id, note?, stage?, rating?, clearNote?, clearStage?, clearRating? }
-    /// Mutates only user judgment columns; append-only ops/events for history.
-    private func handleClipContext(data: Data, connection: NWConnection) {
+    /// POST /api/clips/evaluate  { id, rating?, note? }
+    /// Append-only evaluation history; updates latest projection only. Capture payload immutable.
+    private func handleClipEvaluate(data: Data, connection: NWConnection) {
         let raw = String(data: data, encoding: .utf8) ?? ""
         guard let brace = raw.range(of: "{"),
               let jsonData = raw[brace.lowerBound...].data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
               let idStr = obj["id"] as? String,
               let uuid = UUID(uuidString: idStr) else {
-            sendErrorResponse(connection: connection, status: 400, message: "expected {id, note?, stage?, rating?}")
+            sendJSON(["ok": false, "message": "expected {id, rating?, note?}"], connection: connection)
             return
         }
+        var rating: Int?
+        if let r = obj["rating"] as? Int { rating = r }
+        else if let r = obj["rating"] as? Double { rating = Int(r) }
+        let note = obj["note"] as? String
 
-        var update = DatabaseManager.UserContextUpdate()
-        if let clear = obj["clearNote"] as? Bool, clear {
-            update.note = .some(nil)
-        } else if obj.keys.contains("note") {
-            if obj["note"] is NSNull {
-                update.note = .some(nil)
-            } else if let n = obj["note"] as? String {
-                update.note = .some(n)
-            }
-        }
-        if let clear = obj["clearStage"] as? Bool, clear {
-            update.stage = .some(nil)
-        } else if obj.keys.contains("stage") {
-            if obj["stage"] is NSNull {
-                update.stage = .some(nil)
-            } else if let s = obj["stage"] as? String {
-                update.stage = .some(s)
-            }
-        }
-        if let clear = obj["clearRating"] as? Bool, clear {
-            update.rating = .some(nil)
-        } else if obj.keys.contains("rating") {
-            if obj["rating"] is NSNull {
-                update.rating = .some(nil)
-            } else if let r = obj["rating"] as? Int {
-                update.rating = .some(r)
-            } else if let r = obj["rating"] as? Double {
-                update.rating = .some(Int(r))
-            }
-        }
-
-        database.applyUserContext(id: uuid, update: update, source: "web") { [weak self] result in
+        database.submitEvaluation(id: uuid, rating: rating, note: note, source: "web") { [weak self] result in
             guard let self = self else { return }
             switch result {
-            case .success(let item):
-                // Fan-out to multi-device sync as annotate op (payload untouched).
-                CloudDocsSyncService.shared?.recordLocalUserContext(item: item)
-                NotificationCenter.default.post(
-                    name: Notification.Name("ClipFlowItemAdded"),
-                    object: item
+            case .success(let pair):
+                CloudDocsSyncService.shared?.recordLocalUserEvaluation(
+                    item: pair.item,
+                    evaluationId: pair.evaluationId,
+                    rating: rating,
+                    note: note
                 )
+                // Do not broadcast full-list SSE "update" — avoids masonry re-layout storm.
                 self.sendJSON([
                     "ok": true,
-                    "item": self.itemToJSON(item)
+                    "evaluationId": pair.evaluationId,
+                    "item": self.itemToJSON(pair.item)
                 ], connection: connection)
             case .failure(let err):
                 let msg = (err as? LocalizedError)?.errorDescription ?? err.localizedDescription
-                let code = (err as? DatabaseManager.UserContextError).map { e -> Int in
-                    switch e {
-                    case .notFound: return 404
-                    case .invalidStage, .invalidRating, .emptyUpdate: return 400
-                    case .db: return 500
-                    }
-                } ?? 500
-                self.sendJSON(["ok": false, "message": msg, "status": code], connection: connection)
+                self.sendJSON(["ok": false, "message": msg], connection: connection)
             }
+        }
+    }
+
+    /// Legacy alias → evaluate
+    private func handleClipContext(data: Data, connection: NWConnection) {
+        handleClipEvaluate(data: data, connection: connection)
+    }
+
+    private func sendItemEvaluations(path: String, connection: NWConnection) {
+        // /api/items/{uuid}/evaluations
+        let parts = path.split(separator: "/").map(String.init)
+        // ["api","items","{id}","evaluations"]
+        guard parts.count >= 4,
+              let uuid = UUID(uuidString: parts[2]) else {
+            sendJSON(["ok": false, "message": "bad id"], connection: connection)
+            return
+        }
+        database.fetchEvaluations(itemId: uuid, limit: 100) { [weak self] rows in
+            self?.sendJSON(["ok": true, "evaluations": rows], connection: connection)
         }
     }
 

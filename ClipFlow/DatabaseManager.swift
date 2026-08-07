@@ -280,6 +280,19 @@ final class DatabaseManager: ObservableObject {
         if !columnExists("clipboard_items", "user_context_updated_at") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN user_context_updated_at REAL;")
         }
+        // Append-only user evaluations (each submit = one history row).
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS user_evaluations (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            content_hash TEXT,
+            ts REAL NOT NULL,
+            rating INTEGER,
+            note TEXT,
+            source TEXT NOT NULL DEFAULT 'web'
+        );
+        CREATE INDEX IF NOT EXISTS idx_eval_item_ts ON user_evaluations(item_id, ts DESC);
+        """)
         // Ensure aux tables exist on upgraded DBs.
         execQuiet("""
         CREATE TABLE IF NOT EXISTS clipboard_events (
@@ -1458,20 +1471,10 @@ final class DatabaseManager: ObservableObject {
         )
     }
 
-    // MARK: - User context (judgment layer; never mutates capture payload)
-
-    struct UserContextUpdate {
-        /// nil = leave note unchanged; empty string = clear note
-        var note: String?? = nil
-        /// nil = leave stage unchanged; empty string = clear stage
-        var stage: String?? = nil
-        /// nil = leave rating unchanged; -1 or 0 = clear rating
-        var rating: Int?? = nil
-    }
+    // MARK: - User evaluations (append-only history; never mutates capture payload)
 
     enum UserContextError: Error, LocalizedError {
         case notFound
-        case invalidStage(String)
         case invalidRating(Int)
         case emptyUpdate
         case db
@@ -1479,21 +1482,22 @@ final class DatabaseManager: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .notFound: return "条目不存在"
-            case .invalidStage(let s): return "无效阶段: \(s)"
-            case .invalidRating(let r): return "评分须为 1–5（或清除）: \(r)"
-            case .emptyUpdate: return "未提供 note/stage/rating 变更"
+            case .invalidRating(let r): return "请选择 1–5 星评分: \(r)"
+            case .emptyUpdate: return "请填写评分或备注"
             case .db: return "数据库写入失败"
             }
         }
     }
 
-    /// Apply user judgment. **Never** updates text/html/image/ocr payload columns.
-    /// Always appends `operation_logs` + `clipboard_events` when something changes.
-    func applyUserContext(
+    /// One evaluation submission. Always inserts a history row (even if values match latest).
+    /// Updates projection columns to latest note/rating only. **Never** touches capture payload.
+    func submitEvaluation(
         id: UUID,
-        update: UserContextUpdate,
+        rating: Int?,
+        note: String?,
+        evaluationId: UUID? = nil,
         source: String = "web",
-        completion: @escaping (Result<ClipboardItem, Error>) -> Void
+        completion: @escaping (Result<(item: ClipboardItem, evaluationId: String), Error>) -> Void
     ) {
         dbQueue.async { [weak self] in
             guard let self = self else {
@@ -1501,8 +1505,11 @@ final class DatabaseManager: ObservableObject {
                 return
             }
             do {
-                let item = try self.applyUserContextLocked(id: id, update: update, source: source)
-                DispatchQueue.main.async { completion(.success(item)) }
+                let r = try self.submitEvaluationLocked(
+                    id: id, rating: rating, note: note,
+                    evaluationId: evaluationId, source: source
+                )
+                DispatchQueue.main.async { completion(.success(r)) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }
@@ -1510,26 +1517,24 @@ final class DatabaseManager: ObservableObject {
     }
 
     @discardableResult
-    func applyUserContextLocked(
+    func submitEvaluationLocked(
         id: UUID,
-        update: UserContextUpdate,
+        rating: Int?,
+        note: String?,
+        evaluationId: UUID? = nil,
         source: String
-    ) throws -> ClipboardItem {
+    ) throws -> (item: ClipboardItem, evaluationId: String) {
         guard let db = db else { throw UserContextError.db }
         let idStr = id.uuidString
 
-        // Load current projection + hash (payload untouched).
-        var curNote: String?
-        var curStage: String?
-        var curRating: Int?
         var contentHash = ""
         var typeRaw = "text"
         var q: OpaquePointer?
-        let loadSQL = """
-        SELECT content_hash, type, user_note, user_stage, user_rating
-        FROM clipboard_items WHERE id = ? LIMIT 1;
-        """
-        guard sqlite3_prepare_v2(db, loadSQL, -1, &q, nil) == SQLITE_OK else { throw UserContextError.db }
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT content_hash, type FROM clipboard_items WHERE id = ? LIMIT 1;",
+            -1, &q, nil
+        ) == SQLITE_OK else { throw UserContextError.db }
         bindText(q, 1, idStr)
         guard sqlite3_step(q) == SQLITE_ROW else {
             sqlite3_finalize(q)
@@ -1537,136 +1542,158 @@ final class DatabaseManager: ObservableObject {
         }
         contentHash = sqlite3_column_text(q, 0).map { String(cString: $0) } ?? ""
         typeRaw = sqlite3_column_text(q, 1).map { String(cString: $0) } ?? "text"
-        if sqlite3_column_type(q, 2) != SQLITE_NULL {
-            curNote = sqlite3_column_text(q, 2).map { String(cString: $0) }
-        }
-        if sqlite3_column_type(q, 3) != SQLITE_NULL {
-            curStage = sqlite3_column_text(q, 3).map { String(cString: $0) }
-        }
-        if sqlite3_column_type(q, 4) != SQLITE_NULL {
-            curRating = Int(sqlite3_column_int(q, 4))
-        }
         sqlite3_finalize(q)
 
-        var newNote = curNote
-        var newStage = curStage
-        var newRating = curRating
-        var changed = false
-        var changeBits: [String] = []
-
-        if let noteOpt = update.note {
-            let trimmed = noteOpt.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            let normalized: String? = {
-                guard let t = trimmed else { return nil }
-                return t.isEmpty ? nil : String(t.prefix(4000))
-            }()
-            if normalized != curNote {
-                newNote = normalized
-                changed = true
-                changeBits.append("note")
-            }
+        let noteNorm: String? = {
+            guard let n = note?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty else { return nil }
+            return String(n.prefix(4000))
+        }()
+        let ratingNorm: Int? = {
+            guard let r = rating else { return nil }
+            if r <= 0 { return nil }
+            return r
+        }()
+        if let r = ratingNorm, !(1...5).contains(r) {
+            throw UserContextError.invalidRating(r)
         }
-        if let stageOpt = update.stage {
-            if let raw = stageOpt?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-               !raw.isEmpty {
-                guard ClipboardItem.userStages.contains(raw) else {
-                    throw UserContextError.invalidStage(raw)
-                }
-                if raw != curStage {
-                    newStage = raw
-                    changed = true
-                    changeBits.append("stage")
-                }
-            } else if curStage != nil {
-                newStage = nil
-                changed = true
-                changeBits.append("stage")
-            }
-        }
-        if let ratingOpt = update.rating {
-            if let r = ratingOpt {
-                if r <= 0 {
-                    if curRating != nil {
-                        newRating = nil
-                        changed = true
-                        changeBits.append("rating")
-                    }
-                } else {
-                    guard (1...5).contains(r) else { throw UserContextError.invalidRating(r) }
-                    if r != curRating {
-                        newRating = r
-                        changed = true
-                        changeBits.append("rating")
-                    }
-                }
-            } else if curRating != nil {
-                newRating = nil
-                changed = true
-                changeBits.append("rating")
-            }
-        }
+        // Require at least stars or a note for a meaningful evaluation.
+        guard ratingNorm != nil || noteNorm != nil else { throw UserContextError.emptyUpdate }
 
-        guard changed else { throw UserContextError.emptyUpdate }
-
+        let eid = (evaluationId ?? UUID()).uuidString
         let now = Date()
-        let sql = """
+
+        // Idempotent insert by id (multi-device re-delivery).
+        var exists = false
+        var eChk: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT 1 FROM user_evaluations WHERE id = ? LIMIT 1;", -1, &eChk, nil) == SQLITE_OK {
+            bindText(eChk, 1, eid)
+            exists = sqlite3_step(eChk) == SQLITE_ROW
+        }
+        sqlite3_finalize(eChk)
+
+        if !exists {
+            let ins = """
+            INSERT INTO user_evaluations (id, item_id, content_hash, ts, rating, note, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, ins, -1, &stmt, nil) == SQLITE_OK else { throw UserContextError.db }
+            bindText(stmt, 1, eid)
+            bindText(stmt, 2, idStr)
+            bindText(stmt, 3, contentHash)
+            sqlite3_bind_double(stmt, 4, now.timeIntervalSince1970)
+            if let ratingNorm { sqlite3_bind_int(stmt, 5, Int32(ratingNorm)) }
+            else { sqlite3_bind_null(stmt, 5) }
+            bindText(stmt, 6, noteNorm)
+            bindText(stmt, 7, source)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE else { throw UserContextError.db }
+        }
+
+        // Projection = latest evaluation for this item (by ts).
+        var latestNote: String?
+        var latestRating: Int?
+        var latestTs = now.timeIntervalSince1970
+        var lq: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db,
+            "SELECT note, rating, ts FROM user_evaluations WHERE item_id = ? ORDER BY ts DESC LIMIT 1;",
+            -1, &lq, nil
+        ) == SQLITE_OK {
+            bindText(lq, 1, idStr)
+            if sqlite3_step(lq) == SQLITE_ROW {
+                if sqlite3_column_type(lq, 0) != SQLITE_NULL {
+                    latestNote = sqlite3_column_text(lq, 0).map { String(cString: $0) }
+                }
+                if sqlite3_column_type(lq, 1) != SQLITE_NULL {
+                    latestRating = Int(sqlite3_column_int(lq, 1))
+                }
+                latestTs = sqlite3_column_double(lq, 2)
+            }
+        }
+        sqlite3_finalize(lq)
+
+        let up = """
         UPDATE clipboard_items SET
             user_note = ?,
-            user_stage = ?,
             user_rating = ?,
-            user_context_updated_at = ?
+            user_context_updated_at = ?,
+            user_stage = NULL
         WHERE id = ?;
         """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw UserContextError.db }
-        bindText(stmt, 1, newNote)
-        bindText(stmt, 2, newStage)
-        if let newRating {
-            sqlite3_bind_int(stmt, 3, Int32(newRating))
-        } else {
-            sqlite3_bind_null(stmt, 3)
-        }
-        sqlite3_bind_double(stmt, 4, now.timeIntervalSince1970)
-        bindText(stmt, 5, idStr)
-        let rc = sqlite3_step(stmt)
-        sqlite3_finalize(stmt)
-        guard rc == SQLITE_DONE else { throw UserContextError.db }
+        var u: OpaquePointer?
+        guard sqlite3_prepare_v2(db, up, -1, &u, nil) == SQLITE_OK else { throw UserContextError.db }
+        bindText(u, 1, latestNote)
+        if let latestRating { sqlite3_bind_int(u, 2, Int32(latestRating)) }
+        else { sqlite3_bind_null(u, 2) }
+        sqlite3_bind_double(u, 3, latestTs)
+        bindText(u, 4, idStr)
+        let urc = sqlite3_step(u)
+        sqlite3_finalize(u)
+        guard urc == SQLITE_DONE else { throw UserContextError.db }
 
-        // Detail JSON for ops audit (also readable in UI timeline).
         var detailObj: [String: Any] = [
-            "fields": changeBits,
-            "stage": newStage as Any,
-            "rating": newRating as Any
+            "evaluationId": eid,
+            "rating": latestRating as Any
         ]
-        if let newNote { detailObj["note"] = newNote }
-        let detailData = (try? JSONSerialization.data(withJSONObject: detailObj)) ?? Data()
-        let detailStr = String(data: detailData, encoding: .utf8)
+        if let noteNorm { detailObj["note"] = noteNorm }
+        else if let latestNote { detailObj["note"] = latestNote }
+        let detailStr = String(
+            data: (try? JSONSerialization.data(withJSONObject: detailObj)) ?? Data(),
+            encoding: .utf8
+        )
 
-        _ = appendOperationLogSync(
-            action: "user_context",
-            itemId: idStr,
-            contentHash: contentHash,
-            detail: detailStr,
+        if !exists {
+            _ = appendOperationLogSync(
+                action: "user_evaluation",
+                itemId: idStr,
+                contentHash: contentHash,
+                detail: detailStr,
+                source: source
+            )
+            _ = recordClipboardEvent(
+                itemId: idStr,
+                contentHash: contentHash,
+                eventTs: now,
+                type: typeRaw,
+                sourceApp: source,
+                kind: "user_evaluation",
+                detail: detailStr
+            )
+        }
+
+        guard let item = fetchItemByIdLocked(idStr) else { throw UserContextError.db }
+        return (item, eid)
+    }
+
+    /// Sync path: apply peer evaluation as a history row (idempotent by evaluationId).
+    @discardableResult
+    func applyUserContextLocked(
+        id: UUID,
+        note: String?,
+        rating: Int?,
+        evaluationId: UUID?,
+        source: String
+    ) throws -> ClipboardItem {
+        try submitEvaluationLocked(
+            id: id,
+            rating: rating,
+            note: note,
+            evaluationId: evaluationId,
             source: source
-        )
-        _ = recordClipboardEvent(
-            itemId: idStr,
-            contentHash: contentHash,
-            eventTs: now,
-            type: typeRaw,
-            sourceApp: source,
-            kind: "user_context",
-            detail: detailStr
-        )
+        ).item
+    }
 
-        // Re-fetch full item for caller
-        var out: ClipboardItem?
+    private func fetchItemByIdLocked(_ idStr: String) -> ClipboardItem? {
+        guard let db = db else { return nil }
         var f: OpaquePointer?
         let fetchSQL = """
         SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text,
                COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at
         FROM clipboard_items WHERE id = ? LIMIT 1;
         """
+        var out: ClipboardItem?
         if sqlite3_prepare_v2(db, fetchSQL, -1, &f, nil) == SQLITE_OK {
             bindText(f, 1, idStr)
             if sqlite3_step(f) == SQLITE_ROW {
@@ -1674,8 +1701,45 @@ final class DatabaseManager: ObservableObject {
             }
         }
         sqlite3_finalize(f)
-        guard let item = out else { throw UserContextError.db }
-        return item
+        return out
+    }
+
+    func fetchEvaluations(itemId: UUID, limit: Int = 50, completion: @escaping ([[String: Any]]) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            let lim = max(1, min(limit, 200))
+            let sql = """
+            SELECT id, item_id, content_hash, ts, rating, note, source
+            FROM user_evaluations WHERE item_id = ?
+            ORDER BY ts DESC LIMIT ?;
+            """
+            var stmt: OpaquePointer?
+            var rows: [[String: Any]] = []
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                self.bindText(stmt, 1, itemId.uuidString)
+                sqlite3_bind_int(stmt, 2, Int32(lim))
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    var row: [String: Any] = [:]
+                    row["id"] = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                    row["itemId"] = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                    row["contentHash"] = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+                    row["ts"] = sqlite3_column_double(stmt, 3)
+                    if sqlite3_column_type(stmt, 4) != SQLITE_NULL {
+                        row["rating"] = Int(sqlite3_column_int(stmt, 4))
+                    }
+                    if sqlite3_column_type(stmt, 5) != SQLITE_NULL {
+                        row["note"] = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
+                    }
+                    row["source"] = sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? ""
+                    rows.append(row)
+                }
+            }
+            sqlite3_finalize(stmt)
+            DispatchQueue.main.async { completion(rows) }
+        }
     }
 
     // MARK: - Soft delete / recycle bin (TTL 30d)

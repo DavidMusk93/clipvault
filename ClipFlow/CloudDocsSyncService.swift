@@ -219,29 +219,42 @@ final class CloudDocsSyncService {
         }
     }
 
-    /// Multi-device fan-out for user judgment (note/stage/rating). Capture payload stays immutable.
-    func recordLocalUserContext(item: ClipboardItem) {
+    /// Multi-device fan-out for one evaluation submission (history row). Capture payload stays immutable.
+    func recordLocalUserEvaluation(item: ClipboardItem, evaluationId: String, rating: Int?, note: String?) {
         guard config.enabled else { return }
         queue.async { [weak self] in
             guard let self = self else { return }
             var op = self.makeOp(
-                kind: "user_context",
+                kind: "user_evaluation",
                 itemId: item.id.uuidString,
                 item: item,
                 blobKeys: nil
             )
-            // Avoid re-shipping full capture body for judgment-only ops.
+            // Use evaluation id as op_id for idempotent peer insert.
+            if let eid = UUID(uuidString: evaluationId) {
+                op.opId = eid.uuidString
+            }
             op.textContent = nil
             op.htmlContent = nil
             op.ocrText = nil
             op.blobKeys = nil
-            op.userNote = item.userNote
-            op.userStage = item.userStage
-            op.userRating = item.userRating
-            op.note = "user_context"
+            op.userNote = note ?? item.userNote
+            op.userStage = nil
+            op.userRating = rating ?? item.userRating
+            op.note = "user_evaluation"
             self.enqueue(op)
-            self.scheduleDrain(reason: "user_context")
+            self.scheduleDrain(reason: "user_evaluation")
         }
+    }
+
+    @available(*, deprecated, message: "Use recordLocalUserEvaluation")
+    func recordLocalUserContext(item: ClipboardItem) {
+        recordLocalUserEvaluation(
+            item: item,
+            evaluationId: UUID().uuidString,
+            rating: item.userRating,
+            note: item.userNote
+        )
     }
 
     func runNow(completion: ((Bool, String) -> Void)? = nil) {
@@ -645,19 +658,22 @@ final class CloudDocsSyncService {
         switch op.kind {
         case "tombstone":
             return database.applySyncTombstoneLocked(id: uuid)
-        case "user_context":
-            // Full projection replace for note/stage/rating from peer (including clears).
-            var update = DatabaseManager.UserContextUpdate()
-            update.note = .some(op.userNote)
-            update.stage = .some(op.userStage)
-            update.rating = .some(op.userRating)
+        case "user_context", "user_evaluation":
+            // Each peer evaluation is one history row (idempotent by op_id / evaluation id).
+            let evalId = UUID(uuidString: op.opId)
             do {
-                _ = try database.applyUserContextLocked(id: uuid, update: update, source: "sync:\(op.host)")
+                _ = try database.applyUserContextLocked(
+                    id: uuid,
+                    note: op.userNote,
+                    rating: op.userRating,
+                    evaluationId: evalId,
+                    source: "sync:\(op.host)"
+                )
                 return true
             } catch DatabaseManager.UserContextError.emptyUpdate {
                 return false
             } catch {
-                print("[Sync] user_context apply failed \(op.itemId): \(error)")
+                print("[Sync] user_evaluation apply failed \(op.itemId): \(error)")
                 return false
             }
         case "upsert", "touch":

@@ -70,7 +70,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 
 | Do | Don't |
 | --- | --- |
-| **Capture payload 不可变**：`text/html/image/ocr` 等捕获字段创建后不 UPDATE；用户想法走 `user_*` 投影 + append-only `operation_logs` / `clipboard_events`（kind=`user_context`） | 把备注写进 `text_content`、提供「编辑剪贴板正文」 |
+| **Capture payload 不可变**：捕获字段创建后不 UPDATE；用户评价走 **append-only** `user_evaluations`（每次提交一条历史）+ 最新投影 `user_note`/`user_rating`；UI 仅在 sheet 展示评价，禁止写进主卡片 body 触发 masonry 重排 | 把备注写进 `text_content`；阶段芯片多状态机；评价内容塞进主卡片 |
 | 一次做对：分页、多档图、备份一致性、CI 对齐生产路径 | P0/P1 菜单式半吊子交付 |
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |
