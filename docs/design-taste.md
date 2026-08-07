@@ -113,3 +113,7 @@ Exact `content_hash` latest-alive 仍是主规则。额外：
 | 全文再拷 | 仍 `copy_count++` |
 
 UI：列表只见 haystack；时间线 toast 可显示「片段引用」。
+
+## 历史 substr 折叠
+
+启动后分批 `drainHistoricalSubstrFolds`：对已有 text/url/rtf/html 用 **去标签 plain** 做 contains 合并（短→长 soft-delete + substr_absorb）。维护 tick 继续扫。

@@ -161,6 +161,16 @@ final class DatabaseManager: ObservableObject {
                 self.migrateInlineBlobsToFiles(maxBatches: 200)
                 self.maybeVacuumAfterBlobMigration()
                 self.drainDuplicates(maxBatches: 40)
+                // One-shot historical substr collapse (text/html/url fragments).
+                var folded = 0
+                for _ in 0..<12 {
+                    let n = self.drainHistoricalSubstrFolds(limit: 200)
+                    folded += n
+                    if n == 0 { break }
+                }
+                if folded > 0 {
+                    print("[DatabaseManager] historical substr_folded=\(folded)")
+                }
                 self.runAnalyze()
             }
         } else {
@@ -567,6 +577,13 @@ final class DatabaseManager: ObservableObject {
         }
         _ = pruneOperationLogs(maxAgeDays: 90, limit: 500)
 
+        // Historical substr fold (html/text/url needles → longer hosts), short writer batches.
+        if maintenanceTicks % 2 == 0 {
+            let folded = drainHistoricalSubstrFolds(limit: 120)
+            if folded > 0 {
+                print("[DatabaseManager] maintenance: substr_folded=\(folded)")
+            }
+        }
 
         // Passive WAL checkpoint every tick (cheap).
         execQuiet("PRAGMA wal_checkpoint(PASSIVE);")
@@ -1687,22 +1704,67 @@ final class DatabaseManager: ObservableObject {
     /// Needle must be strictly shorter than host (ratio).
     private static let substrMaxNeedleRatio = 0.90
 
-    private func foldablePlainText(_ item: ClipboardItem) -> String? {
-        switch item.type {
-        case .text, .rtf:
-            let t = item.textContent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return t.isEmpty ? nil : t
-        case .url:
-            if let u = item.url?.absoluteString, !u.isEmpty { return u }
-            let t = item.textContent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return t.isEmpty ? nil : t
-        case .html:
-            // Prefer extracted plain; skip pure HTML markup folds for safety.
-            let t = item.textContent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return t.isEmpty ? nil : t
-        default:
-            return nil
+    private struct FoldRow {
+        let id: String
+        let type: String
+        let contentHash: String
+        let body: String
+        let timestamp: Date
+        let sourceApp: String?
+    }
+
+    /// Strip tags/entities so HTML and plain text can share fold space.
+    private func stripHTMLToPlain(_ html: String) -> String {
+        var s = html
+        // Drop script/style blocks roughly.
+        s = s.replacingOccurrences(
+            of: "(?is)<(script|style)[^>]*>.*?</\\1>",
+            with: " ",
+            options: .regularExpression
+        )
+        s = s.replacingOccurrences(of: "(?is)<br\\s*/?>", with: "\n", options: .regularExpression)
+        s = s.replacingOccurrences(of: "(?is)</p\\s*>", with: "\n", options: .regularExpression)
+        s = s.replacingOccurrences(of: "(?is)<[^>]+>", with: " ", options: .regularExpression)
+        let entities: [(String, String)] = [
+            ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+            ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'"),
+        ]
+        for (a, b) in entities {
+            s = s.replacingOccurrences(of: a, with: b)
         }
+        // Collapse whitespace but keep enough structure for contains.
+        s = s.replacingOccurrences(of: "[ \\t\\u00a0]+", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func foldableBody(type: String, text: String?, url: String?, html: String?) -> String? {
+        let t = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return t }
+        if type == "url" {
+            let u = (url ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !u.isEmpty { return u }
+        }
+        if type == "html" || type == "rtf" {
+            let h = html ?? ""
+            if !h.isEmpty {
+                let plain = stripHTMLToPlain(h)
+                if !plain.isEmpty { return plain }
+            }
+        }
+        // HTML sometimes only in html_content; text empty — already handled.
+        // Last resort: url field for non-url types.
+        let u = (url ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return u.isEmpty ? nil : u
+    }
+
+    private func foldablePlainText(_ item: ClipboardItem) -> String? {
+        foldableBody(
+            type: item.type.rawValue,
+            text: item.textContent,
+            url: item.url?.absoluteString,
+            html: item.htmlContent
+        )
     }
 
     private func isFoldableType(_ type: ClipboardType) -> Bool {
@@ -1712,56 +1774,124 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    private func canFold(needle: String, host: String) -> Bool {
+        let nLen = needle.count
+        let hLen = host.count
+        guard nLen >= Self.substrMinNeedle, hLen > nLen else { return false }
+        guard Double(nLen) / Double(hLen) <= Self.substrMaxNeedleRatio else { return false }
+        return host.contains(needle)
+    }
+
+    /// Load alive foldable rows with computed plain bodies (html stripped).
+    private func loadFoldRows(limit: Int) -> [FoldRow] {
+        guard let db = db else { return [] }
+        let lim = max(1, min(limit, 2000))
+        let sql = """
+        SELECT id, type, content_hash, text_content, url, html_content, timestamp, source_app
+        FROM clipboard_items
+        WHERE deleted_at IS NULL AND type IN ('text','url','rtf','html')
+        ORDER BY timestamp DESC
+        LIMIT ?;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_int(stmt, 1, Int32(lim))
+        var rows: [FoldRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                  let type = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
+                  let hash = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) else { continue }
+            let text = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+            let url = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+            let html = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
+            guard let body = foldableBody(type: type, text: text, url: url, html: html),
+                  body.count >= Self.substrMinNeedle else { continue }
+            let ts = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
+            let src = sqlite3_column_text(stmt, 7).map { String(cString: $0) }
+            rows.append(FoldRow(id: id, type: type, contentHash: hash, body: body, timestamp: ts, sourceApp: src))
+        }
+        sqlite3_finalize(stmt)
+        return rows
+    }
+
+    /// Historical batch: shorter fragments absorbed into longer hosts (text↔html included).
+    @discardableResult
+    private func drainHistoricalSubstrFolds(limit: Int) -> Int {
+        let rows = loadFoldRows(limit: max(limit * 4, 200))
+        guard rows.count >= 2 else { return 0 }
+        // Short → long: each needle finds a longer host.
+        let ordered = rows.sorted { $0.body.count < $1.body.count }
+        var alive = Set(ordered.map(\.id))
+        var folded = 0
+        let budget = max(1, limit)
+
+        for needle in ordered {
+            if folded >= budget { break }
+            guard alive.contains(needle.id) else { continue }
+            // Prefer longest host that still contains needle.
+            var bestHost: FoldRow?
+            for host in ordered.reversed() {
+                guard alive.contains(host.id), host.id != needle.id else { continue }
+                guard host.body.count > needle.body.count else { break } // rest are shorter or equal
+                if canFold(needle: needle.body, host: host.body) {
+                    bestHost = host
+                    break // reversed = longest first
+                }
+            }
+            guard let host = bestHost else { continue }
+            let preview = needle.body.count > 80 ? String(needle.body.prefix(80)) + "…" : needle.body
+            if softDeleteLocked(
+                id: needle.id,
+                contentHash: needle.contentHash,
+                source: "substr_fold",
+                detail: "historical_absorbed_by=\(host.id)"
+            ) {
+                _ = recordClipboardEvent(
+                    itemId: host.id,
+                    contentHash: needle.contentHash,
+                    eventTs: needle.timestamp,
+                    type: needle.type,
+                    sourceApp: needle.sourceApp,
+                    kind: "substr_absorb",
+                    detail: "needle=\(preview)"
+                )
+                alive.remove(needle.id)
+                folded += 1
+            }
+        }
+        if folded > 0 {
+            appendOperationLogSync(
+                action: "substr_historical",
+                itemId: nil,
+                contentHash: nil,
+                detail: "folded=\(folded) scanned=\(rows.count)",
+                source: "maintenance"
+            )
+        }
+        return folded
+    }
+
     /// If `item` text is a fragment of a longer alive item, record substr_ref on host and skip insert.
-    /// Returns host id on success.
     private func foldNeedleIntoHaystack(_ item: ClipboardItem) -> String? {
         guard isFoldableType(item.type), let needle = foldablePlainText(item) else { return nil }
         let nLen = needle.count
         guard nLen >= Self.substrMinNeedle else { return nil }
-        guard let db = db else { return nil }
 
-        // Candidate hosts: longer text/url bodies that contain needle (exact instr).
-        let sql = """
-        SELECT id, content_hash, IFNULL(text_content, ''), IFNULL(url, '')
-        FROM clipboard_items
-        WHERE deleted_at IS NULL
-          AND type IN ('text','url','rtf','html')
-          AND (
-            (text_content IS NOT NULL AND length(text_content) > ? AND instr(text_content, ?) > 0)
-            OR (url IS NOT NULL AND length(url) > ? AND instr(url, ?) > 0)
-          )
-        ORDER BY MAX(length(IFNULL(text_content,'')), length(IFNULL(url,''))) DESC, timestamp DESC
-        LIMIT 8;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        sqlite3_bind_int(stmt, 1, Int32(nLen))
-        bindText(stmt, 2, needle)
-        sqlite3_bind_int(stmt, 3, Int32(nLen))
-        bindText(stmt, 4, needle)
-
-        var hostId: String?
-        var hostHash: String?
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
-                  let hash = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) else { continue }
-            let text = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
-            let url = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
-            let hostBody = text.count >= url.count ? text : url
-            let hLen = hostBody.count
-            guard hLen > nLen else { continue }
-            guard Double(nLen) / Double(hLen) <= Self.substrMaxNeedleRatio else { continue }
-            guard hostBody.contains(needle) else { continue }
-            hostId = id
-            hostHash = hash
-            break
+        // Compare against recent foldable hosts in Swift (html stripped) — SQL instr on raw HTML misses plain needles.
+        let candidates = loadFoldRows(limit: 400)
+        var best: FoldRow?
+        for host in candidates.sorted(by: { $0.body.count > $1.body.count }) {
+            guard host.contentHash != item.contentHash else { continue }
+            if canFold(needle: needle, host: host.body) {
+                best = host
+                break
+            }
         }
-        sqlite3_finalize(stmt)
-        guard let hostId, let hostHash else { return nil }
+        guard let host = best else { return nil }
 
         let preview = needle.count > 80 ? String(needle.prefix(80)) + "…" : needle
         _ = recordClipboardEvent(
-            itemId: hostId,
+            itemId: host.id,
             contentHash: item.contentHash,
             eventTs: item.timestamp,
             type: item.type.rawValue,
@@ -1769,23 +1899,24 @@ final class DatabaseManager: ObservableObject {
             kind: "substr_ref",
             detail: "needle=\(preview)"
         )
-        // Touch host timestamp so it floats in list; do not inflate copy_count (different body).
-        let bumpSQL = "UPDATE clipboard_items SET timestamp = MAX(timestamp, ?) WHERE id = ?;"
-        var u: OpaquePointer?
-        if sqlite3_prepare_v2(db, bumpSQL, -1, &u, nil) == SQLITE_OK {
-            sqlite3_bind_double(u, 1, item.timestamp.timeIntervalSince1970)
-            bindText(u, 2, hostId)
-            _ = sqlite3_step(u)
+        if let db = db {
+            let bumpSQL = "UPDATE clipboard_items SET timestamp = MAX(timestamp, ?) WHERE id = ?;"
+            var u: OpaquePointer?
+            if sqlite3_prepare_v2(db, bumpSQL, -1, &u, nil) == SQLITE_OK {
+                sqlite3_bind_double(u, 1, item.timestamp.timeIntervalSince1970)
+                bindText(u, 2, host.id)
+                _ = sqlite3_step(u)
+            }
+            sqlite3_finalize(u)
         }
-        sqlite3_finalize(u)
         appendOperationLogSync(
             action: "substr_ref",
-            itemId: hostId,
+            itemId: host.id,
             contentHash: item.contentHash,
-            detail: "host=\(hostHash.prefix(12))… needle_len=\(nLen)",
+            detail: "host=\(host.contentHash.prefix(12))… needle_len=\(nLen)",
             source: "clipboard"
         )
-        return hostId
+        return host.id
     }
 
     /// After inserting/updating a long host, soft-delete shorter alive fragments it contains.
@@ -1794,46 +1925,22 @@ final class DatabaseManager: ObservableObject {
         guard isFoldableType(hostItem.type), let hostText = foldablePlainText(hostItem) else { return 0 }
         let hLen = hostText.count
         guard hLen > Self.substrMinNeedle else { return 0 }
-        guard let db = db else { return 0 }
 
-        let minHostForNeedle = Int(Double(hLen) * Self.substrMaxNeedleRatio) // needle max len under ratio
-        let sql = """
-        SELECT id, content_hash, IFNULL(text_content, url)
-        FROM clipboard_items
-        WHERE deleted_at IS NULL
-          AND id != ?
-          AND type IN ('text','url','rtf','html')
-          AND IFNULL(text_content, url) IS NOT NULL
-          AND length(IFNULL(text_content, url)) >= ?
-          AND length(IFNULL(text_content, url)) <= ?
-          AND instr(?, IFNULL(text_content, url)) > 0
-        ORDER BY length(IFNULL(text_content, url)) ASC
-        LIMIT 24;
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
-        bindText(stmt, 1, hostId)
-        sqlite3_bind_int(stmt, 2, Int32(Self.substrMinNeedle))
-        sqlite3_bind_int(stmt, 3, Int32(min(minHostForNeedle, hLen - 1)))
-        bindText(stmt, 4, hostText)
-
-        var victims: [(String, String, String)] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
-                  let hash = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
-                  let body = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) else { continue }
-            guard hostText.contains(body), body.count < hLen else { continue }
-            victims.append((id, hash, body))
-        }
-        sqlite3_finalize(stmt)
-
+        let candidates = loadFoldRows(limit: 500)
         var n = 0
-        for (id, hash, body) in victims {
-            if softDeleteLocked(id: id, contentHash: hash, source: "substr_fold", detail: "absorbed_by=\(hostId)") {
-                let preview = body.count > 80 ? String(body.prefix(80)) + "…" : body
+        for row in candidates {
+            guard row.id != hostId else { continue }
+            guard canFold(needle: row.body, host: hostText) else { continue }
+            let preview = row.body.count > 80 ? String(row.body.prefix(80)) + "…" : row.body
+            if softDeleteLocked(
+                id: row.id,
+                contentHash: row.contentHash,
+                source: "substr_fold",
+                detail: "absorbed_by=\(hostId)"
+            ) {
                 _ = recordClipboardEvent(
                     itemId: hostId,
-                    contentHash: hash,
+                    contentHash: row.contentHash,
                     eventTs: Date(),
                     type: hostItem.type.rawValue,
                     sourceApp: hostItem.sourceApp,
@@ -1841,6 +1948,7 @@ final class DatabaseManager: ObservableObject {
                     detail: "needle=\(preview)"
                 )
                 n += 1
+                if n >= 24 { break }
             }
         }
         if n > 0 {
