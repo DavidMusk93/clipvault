@@ -987,8 +987,11 @@ private fun DetailScreen(
                     Box(Modifier.weight(1f, fill = true).fillMaxWidth()) {
                         DetailContent(row = row, repo = repo, modifier = Modifier.fillMaxSize())
                     }
-                    Spacer(Modifier.height(10.dp))
-                    ItemEventsSection(itemId = row.id, repo = repo)
+                    // Lightweight: single-ref items skip event timeline chrome (design-taste).
+                    if (row.copyCount > 1) {
+                        Spacer(Modifier.height(10.dp))
+                        ItemEventsSection(itemId = row.id, repo = repo, expectedCount = row.copyCount)
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -1028,10 +1031,15 @@ private fun DetailScreen(
 
 
 @Composable
-private fun ItemEventsSection(itemId: String, repo: BackupRepository) {
+private fun ItemEventsSection(
+    itemId: String,
+    repo: BackupRepository,
+    expectedCount: Int = 2,
+) {
     var events by remember(itemId) { mutableStateOf<List<ClipEvent>>(emptyList()) }
     var loaded by remember(itemId) { mutableStateOf(false) }
     var expanded by remember(itemId) { mutableStateOf(false) }
+    // Lazy: fetch only when user expands (not on detail open).
     LaunchedEffect(itemId, expanded) {
         if (expanded && !loaded) {
             events = repo.queryItemEvents(itemId, limit = 100)
@@ -1054,7 +1062,7 @@ private fun ItemEventsSection(itemId: String, repo: BackupRepository) {
             Icon(Icons.Default.History, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(6.dp))
             Text(
-                if (expanded) "事件时间线" else "展开事件时间线",
+                if (expanded) "事件时间线 · $expectedCount 次" else "事件时间线 · $expectedCount 次",
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),

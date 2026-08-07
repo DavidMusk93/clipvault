@@ -304,8 +304,10 @@
       list-style: none; margin: 8px 0 0; padding: 0 0 0 10px;
       border-left: 2px solid rgba(0,0,0,0.08);
       display: none; flex-direction: column; gap: 8px;
+      /* expand in place — column grows; no wall rebuild */
     }
     .event-list.open { display: flex; }
+    .event-panel.is-meta-only { margin-top: 6px; padding-top: 0; border-top: 0; }
     .event-item { position: relative; padding-left: 10px; }
     .event-item::before {
       content: ''; position: absolute; left: -15px; top: 6px;
@@ -1529,6 +1531,33 @@ window.ClipViewMasonry = Masonry;
 
     const eventsCache = new Map(); // id -> events[]
 
+    /**
+     * After in-card height change: only remeasure that column's running height.
+     * Never rebuildFromData — full remount is the ugly flash.
+     */
+    function reflowColumnAfterCard(card) {
+      const col = card.closest('.masonry-col');
+      if (!col) return;
+      const host = document.getElementById('grid');
+      if (!host) return;
+      const colEls = [...host.querySelectorAll(':scope > .masonry-col')];
+      const idx = colEls.indexOf(col);
+      if (idx < 0) return;
+      // Live measure this column only; leave pack order alone (taste: expand in place).
+      let h = 0;
+      [...col.children].forEach((el, i) => {
+        h += Masonry.measureHeight(el) + (i > 0 ? MASONRY_GAP : 0);
+      });
+      if (Array.isArray(colHeights) && colHeights.length === colEls.length) {
+        colHeights[idx] = h;
+      }
+    }
+
+    /** Multi-ref only: copyCount>1. Single capture stays light (no timeline chrome). */
+    function itemHasMultiRef(item) {
+      return Math.max(1, Number(item && item.copyCount) || 1) > 1;
+    }
+
     async function toggleCardEvents(card, id, btn) {
       const list = card.querySelector(`[data-events-list="${CSS.escape(id)}"]`);
       if (!list) return;
@@ -1536,19 +1565,17 @@ window.ClipViewMasonry = Masonry;
       if (open) {
         list.classList.remove('open');
         list.hidden = true;
+        list.innerHTML = '';
         btn.setAttribute('aria-expanded', 'false');
-        const lab = btn.querySelector('.event-toggle-label');
-        if (lab && !lab.textContent.includes('事件时间线')) {
-          /* keep */
-        }
-        scheduleMasonrySync();
+        // Double-rAF: measure after browser paints collapsed height
+        requestAnimationFrame(() => requestAnimationFrame(() => reflowColumnAfterCard(card)));
         return;
       }
       list.hidden = false;
       list.classList.add('open');
       btn.setAttribute('aria-expanded', 'true');
       list.innerHTML = '<li class="event-item"><div class="ev-sub">加载中…</div></li>';
-      scheduleMasonrySync();
+      requestAnimationFrame(() => requestAnimationFrame(() => reflowColumnAfterCard(card)));
       try {
         let rows = eventsCache.get(id);
         if (!rows) {
@@ -1558,24 +1585,39 @@ window.ClipViewMasonry = Masonry;
           rows = data.events || [];
           eventsCache.set(id, rows);
         }
-        if (!rows.length) {
-          list.innerHTML = '<li class="event-item"><div class="ev-sub">暂无事件记录</div></li>';
-        } else {
-          list.innerHTML = rows.map(ev => {
-            const ts = formatLocalTime(ev.eventTs);
-            const kind = ev.kind || 'capture';
-            const src = ev.sourceApp || '';
-            const type = ev.type || '';
-            return `<li class="event-item">
-              <div class="ev-time">${esc(ts)}</div>
-              <div class="ev-sub">${esc(kind)}${type ? ' · ' + esc(type) : ''}${src ? ' · ' + esc(src) : ''}</div>
-            </li>`;
-          }).join('');
+        // Lazy truth: if server only has ≤1 capture event, collapse chrome away
+        const captureLike = rows.filter(r => {
+          const k = String(r.kind || 'capture');
+          return k === 'capture' || k === 'seed' || k === 'capture_bump' || k === 'capture_insert';
+        });
+        if (rows.length <= 1 || captureLike.length <= 1) {
+          list.classList.remove('open');
+          list.hidden = true;
+          list.innerHTML = '';
+          btn.setAttribute('aria-expanded', 'false');
+          // Hide the whole panel for this card — single ref after all
+          const panel = card.querySelector('.event-panel');
+          if (panel) {
+            const toggle = panel.querySelector('.event-toggle');
+            if (toggle) toggle.hidden = true;
+          }
+          requestAnimationFrame(() => requestAnimationFrame(() => reflowColumnAfterCard(card)));
+          return;
         }
+        list.innerHTML = rows.map(ev => {
+          const ts = formatLocalTime(ev.eventTs);
+          const kind = ev.kind || 'capture';
+          const src = ev.sourceApp || '';
+          const type = ev.type || '';
+          return `<li class="event-item">
+            <div class="ev-time">${esc(ts)}</div>
+            <div class="ev-sub">${esc(kind)}${type ? ' · ' + esc(type) : ''}${src ? ' · ' + esc(src) : ''}</div>
+          </li>`;
+        }).join('');
       } catch (err) {
         list.innerHTML = '<li class="event-item"><div class="ev-sub">加载失败</div></li>';
       }
-      scheduleMasonrySync();
+      requestAnimationFrame(() => requestAnimationFrame(() => reflowColumnAfterCard(card)));
     }
 
 
@@ -1677,6 +1719,18 @@ window.ClipViewMasonry = Masonry;
         spanLine = `<div class="event-meta-line">首次 ${formatLocalTime(item.firstSeenAt)}</div>`;
       }
       const tm = typeMeta(item.type);
+      const multiRef = itemHasMultiRef(item);
+      // Lightweight default: single-ref cards carry time in header only — no timeline chrome.
+      const eventPanelHtml = multiRef
+        ? `<div class="event-panel" data-events-for="${escAttr(item.id)}">
+          ${spanLine}
+          <button type="button" class="event-toggle" data-events-toggle="${escAttr(item.id)}" aria-expanded="false">
+            <span class="material-symbols-outlined">timeline</span>
+            <span class="event-toggle-label">事件时间线 · ${count} 次</span>
+          </button>
+          <ul class="event-list" data-events-list="${escAttr(item.id)}" hidden></ul>
+        </div>`
+        : (spanLine ? `<div class="event-panel is-meta-only">${spanLine}</div>` : '');
       card.innerHTML = `
         <div class="card-header">
           <span class="badge ${tm.cls}"><span class="material-symbols-outlined">${tm.icon}</span>${esc(tm.label)}</span>
@@ -1684,14 +1738,7 @@ window.ClipViewMasonry = Masonry;
           ${trashMeta}
         </div>
         <div class="card-body">${body}</div>
-        <div class="event-panel" data-events-for="${escAttr(item.id)}">
-          ${spanLine}
-          <button type="button" class="event-toggle" data-events-toggle="${escAttr(item.id)}" aria-expanded="false">
-            <span class="material-symbols-outlined">timeline</span>
-            <span class="event-toggle-label">事件时间线${count > 1 ? ' · ' + count + ' 次' : ''}</span>
-          </button>
-          <ul class="event-list" data-events-list="${escAttr(item.id)}" hidden></ul>
-        </div>
+        ${eventPanelHtml}
         <div class="card-actions">
           <div class="source">${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size:14px">apps</span>${esc(item.sourceApp)}` : ''}</div>
           ${actions}
