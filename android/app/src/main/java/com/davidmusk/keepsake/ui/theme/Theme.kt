@@ -7,6 +7,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
+/** Brand Honey — docs/design-taste.md */
 private val Honey = Color(0xFFC47A2C)
 private val Cream = Color(0xFFF8F1E7)
 private val Ink = Color(0xFF1C1410)

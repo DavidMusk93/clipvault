@@ -27,6 +27,9 @@
 
 Owner 要的是 **独立产品气质 + 终局工程**，不是 demo 合集。
 
+**可执行视觉真源**：[`docs/design-taste.md`](docs/design-taste.md)（类型标签色、ops 来源色、品牌 Honey）。
+改 badge / 来源色必须先改该文档，再同步 Web + Android，禁止一端私调。
+
 ### 2.1 品牌与叙事
 
 | Do | Don't |

@@ -34,6 +34,15 @@
       --warn-soft: rgba(178, 80, 0, 0.12);
       --danger: #d70015;
       --danger-soft: rgba(215, 0, 21, 0.12);
+      /* Type badge palette — shared with Android typeStyle() · docs/design-taste.md */
+      --type-text: #C47A2C;
+      --type-image: #2E7D32;
+      --type-url: #1565C0;
+      --type-html: #6A1B9A;
+      --type-rtf: #EF6C00;
+      --type-pdf: #C62828;
+      --type-file: #455A64;
+      --type-other: #5D4037;
       --radius: 16px;
       --radius-sm: 12px;
       --radius-pill: 980px;
@@ -346,11 +355,20 @@
     .m3-card.is-compact { padding: 12px 13px; gap: 8px; }
     .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .badge {
-      font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 7px;
+      font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 8px;
       background: var(--fill); color: var(--muted);
-      display: inline-flex; align-items: center; gap: 3px;
-      text-transform: lowercase; letter-spacing: 0.01em;
+      display: inline-flex; align-items: center; gap: 4px;
+      text-transform: none; letter-spacing: -0.01em;
     }
+    .badge .material-symbols-outlined { font-size: 14px; opacity: 0.95; }
+    .badge.type-text  { color: var(--type-text);  background: rgba(196, 122, 44, 0.12); }
+    .badge.type-image { color: var(--type-image); background: rgba(46, 125, 50, 0.12); }
+    .badge.type-url   { color: var(--type-url);   background: rgba(21, 101, 192, 0.12); }
+    .badge.type-html  { color: var(--type-html);  background: rgba(106, 27, 154, 0.12); }
+    .badge.type-rtf   { color: var(--type-rtf);   background: rgba(239, 108, 0, 0.12); }
+    .badge.type-pdf   { color: var(--type-pdf);   background: rgba(198, 40, 40, 0.12); }
+    .badge.type-file  { color: var(--type-file);  background: rgba(69, 90, 100, 0.12); }
+    .badge.type-other { color: var(--type-other); background: rgba(93, 64, 55, 0.12); }
     .time {
       font-size: 12px; color: var(--muted); white-space: nowrap;
       font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
@@ -1560,6 +1578,23 @@ window.ClipViewMasonry = Masonry;
       scheduleMasonrySync();
     }
 
+
+    /** Clipboard type → label/icon/class. Shared palette: docs/design-taste.md + Android typeStyle(). */
+    function typeMeta(type) {
+      const t = String(type || 'other').toLowerCase();
+      const map = {
+        text:  { label: '文本', icon: 'text_fields', cls: 'type-text' },
+        image: { label: '图片', icon: 'image', cls: 'type-image' },
+        url:   { label: '链接', icon: 'link', cls: 'type-url' },
+        html:  { label: 'HTML', icon: 'code', cls: 'type-html' },
+        rtf:   { label: '富文本', icon: 'description', cls: 'type-rtf' },
+        pdf:   { label: 'PDF', icon: 'picture_as_pdf', cls: 'type-pdf' },
+        file:  { label: '文件', icon: 'folder', cls: 'type-file' },
+        other: { label: '其他', icon: 'label', cls: 'type-other' },
+      };
+      return map[t] || { label: t || '其他', icon: 'label', cls: 'type-other' };
+    }
+
     function buildCard(item) {
       const card = document.createElement('article');
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
@@ -1641,9 +1676,10 @@ window.ClipViewMasonry = Masonry;
       } else if (firstDiffers) {
         spanLine = `<div class="event-meta-line">首次 ${formatLocalTime(item.firstSeenAt)}</div>`;
       }
+      const tm = typeMeta(item.type);
       card.innerHTML = `
         <div class="card-header">
-          <span class="badge"><span class="material-symbols-outlined" style="font-size:14px">label</span>${esc(item.type)}</span>
+          <span class="badge ${tm.cls}"><span class="material-symbols-outlined">${tm.icon}</span>${esc(tm.label)}</span>
           ${countBadge}
           ${trashMeta}
         </div>

@@ -33,6 +33,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -78,14 +79,23 @@ data class TypeStyle(
     val color: Color,
 )
 
+/**
+ * Clipboard type colors — **must match** Web `.badge.type-*` and `docs/design-taste.md`.
+ * Hex table is the product token source of truth.
+ */
 fun typeStyle(type: String): TypeStyle = when (type.lowercase()) {
     "image" -> TypeStyle("图片", Icons.Default.Image, Color(0xFF2E7D32))
     "url" -> TypeStyle("链接", Icons.Default.Link, Color(0xFF1565C0))
     "html" -> TypeStyle("HTML", Icons.Default.Code, Color(0xFF6A1B9A))
     "rtf" -> TypeStyle("富文本", Icons.Default.Description, Color(0xFFEF6C00))
     "pdf" -> TypeStyle("PDF", Icons.Default.PictureAsPdf, Color(0xFFC62828))
-    "text" -> TypeStyle("文本", Icons.Default.TextFields, Color(0xFFC47A2C))
-    else -> TypeStyle(type.uppercase(), Icons.Default.Description, Color(0xFF5D4037))
+    "text" -> TypeStyle("文本", Icons.Default.TextFields, Color(0xFFC47A2C)) // Honey brand
+    "file" -> TypeStyle("文件", Icons.Default.FolderOpen, Color(0xFF455A64))
+    else -> TypeStyle(
+        if (type.isBlank()) "其他" else type,
+        Icons.Default.Description,
+        Color(0xFF5D4037),
+    )
 }
 
 @Composable
