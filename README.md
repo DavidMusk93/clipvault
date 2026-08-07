@@ -56,7 +56,7 @@ Keepsake (product)
 | 网络 | Network.framework · 自研 HTTP/1.1 |
 | OCR | Vision |
 | 备份 | iCloud Drive CloudDocs（**无** App iCloud entitlement） |
-| CI | `swift build` + `node --test tests/masonry.test.mjs` |
+| CI | `swift build` + `node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.test.mjs` |
 
 历史文档若仍写 DuckDB / 仅 Xcode App，以本 README 与 `Package.swift` 为准。
 
@@ -90,7 +90,7 @@ swift build -c release --product ClipFlowServer
 
 ```bash
 swift build --product ClipFlowServer
-node --test tests/masonry.test.mjs
+node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.test.mjs
 ```
 
 ---

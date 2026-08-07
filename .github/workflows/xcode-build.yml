@@ -54,7 +54,7 @@ jobs:
           file "$BIN"
 
   frontend-tests:
-    name: Web · masonry unit tests
+    name: Web · unit regression tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -68,7 +68,7 @@ jobs:
           node-version: "22"
 
       - name: Run masonry regression tests
-        run: node --test tests/masonry.test.mjs tests/pagination.test.mjs
+        run: node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.test.mjs
 
   # Android lives under android/; dedicated APK publish workflow also runs on path filters.
   # Keep a lightweight compile on full CI so monorepo PRs don't ship broken Gradle.

@@ -535,22 +535,23 @@
      * Notes-like rich text surface (RTF/HTML from Cocoa / Notes)
      * Preserve list hierarchy & indent; kill Writer spacer chrome.
      */
+    /* Apple Notes–like prose surface: natural wrap, tight spacing, no spacer holes */
     .notes-rich, .snippet-html {
       background: rgba(245, 245, 247, 0.88);
-      padding: 11px 13px 14px;
+      padding: 10px 12px 12px;
       border-radius: var(--radius-sm);
       border: 0.5px solid var(--separator);
       max-height: min(42vh, 340px);
-      overflow: auto; /* XY pan — no soft wrap (product: unwrap rich text) */
+      overflow: auto;
       min-width: 0;
       max-width: 100%;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      word-break: normal;
-      overflow-wrap: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       font-family: var(--font-ui);
       font-size: 14px;
-      line-height: 1.38;
+      line-height: 1.35;
       letter-spacing: -0.016em;
       color: var(--ink);
       -webkit-font-smoothing: antialiased;
@@ -558,12 +559,11 @@
       scrollbar-width: thin;
       scrollbar-color: rgba(60, 60, 67, 0.35) transparent;
     }
-    /* Content wider than card → horizontal pan; hard newlines only */
     .notes-rich-inner, .snippet-html-inner {
       display: block;
-      width: max-content;
-      min-width: 100%;
-      max-width: none;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
     }
     .notes-rich::-webkit-scrollbar,
     .snippet-html::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -586,20 +586,30 @@
       padding: 0;
     }
 
-    .notes-rich p, .snippet-html p,
-    .notes-rich li, .snippet-html li,
-    .notes-rich div, .snippet-html div {
-      margin: 0 0 0.32em;
+    .notes-rich p, .snippet-html p {
+      margin: 0 0 0.28em;
       min-height: 0 !important;
-      /* hard newlines only — long lines pan, do not soft-wrap (no regression to wrap) */
-      white-space: pre;
-      word-break: normal;
-      overflow-wrap: normal;
+      /* Notes prose wraps; empty holes killed in renderNotesFragment */
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
     }
-    .notes-rich li, .snippet-html li { margin: 0.14em 0; }
     .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
     .notes-rich p:empty, .snippet-html p:empty,
-    .notes-rich p > br:only-child, .snippet-html p > br:only-child { display: none; }
+    .notes-rich div:empty, .snippet-html div:empty,
+    .notes-rich p > br:only-child, .snippet-html p > br:only-child { display: none !important; }
+    /* Mono / SQL dumps: unwrap + horizontal pan inside the notes card */
+    .notes-rich .is-mono, .snippet-html .is-mono {
+      white-space: pre !important;
+      word-break: normal !important;
+      overflow-wrap: normal !important;
+      overflow-x: auto;
+      max-width: 100%;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.4;
+      letter-spacing: 0;
+    }
 
     /* Hierarchical lists — Apple Notes feel */
     .notes-rich ul, .snippet-html ul,
@@ -1530,18 +1540,28 @@ window.ClipViewMasonry = Masonry;
     function renderNotesFragment(html) {
       if (!html) return '';
       let raw = String(html);
+      const collapseEmptyHtmlBlocks = (htmlStr) => {
+        let s = String(htmlStr || '');
+        let prev = null;
+        let guard = 0;
+        while (s !== prev && guard++ < 12) {
+          prev = s;
+          s = s.replace(
+            /<(p|div|li|h[1-6])(\s[^>]*)?>\s*(?:<br\s*\/?>|&nbsp;|\u00a0|\s|<\/?(?:span|font|b|i|u|em|strong)[^>]*>)*<\/\1>/gi,
+            ''
+          );
+          s = s.replace(/<(p|div)(\s[^>]*)?>[\s\u00a0]*<\/\1>/gi, '');
+          s = s.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br>');
+        }
+        return s.trim();
+      };
       try {
         const doc = new DOMParser().parseFromString(raw, 'text/html');
-        // Prefer body; if none, use full document body still
         const root = doc.body || doc;
 
-        // Drop style/script
         root.querySelectorAll('style, script, meta, title, link').forEach(el => el.remove());
-
-        // Apple tab markers only add holes — remove
         root.querySelectorAll('.Apple-tab-span, span[class*="Apple-tab"]').forEach(el => el.remove());
 
-        // Unwrap converted-space spans (preserve nbsp indent for code)
         root.querySelectorAll('.Apple-converted-space, span[class*="Apple-converted-space"]').forEach(el => {
           const parent = el.parentNode;
           if (!parent) return;
@@ -1549,15 +1569,20 @@ window.ClipViewMasonry = Masonry;
           parent.removeChild(el);
         });
 
-        // Remove empty spacer paragraphs / empty list items
-        root.querySelectorAll('p, li, div').forEach(el => {
-          const t = (el.textContent || '').replace(/\u00a0/g, ' ').trim();
-          const hasMedia = el.querySelector('img, video, svg');
-          if (!t && !hasMedia) el.remove();
-        });
+        const isVisuallyEmpty = (el) => {
+          if (el.querySelector('img, video, svg, canvas')) return false;
+          const t = (el.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, '');
+          return t.length === 0;
+        };
+        for (let pass = 0; pass < 8; pass++) {
+          let removed = 0;
+          root.querySelectorAll('p, li, div, h1, h2, h3, h4, h5, h6').forEach(el => {
+            if (isVisuallyEmpty(el)) { el.remove(); removed++; }
+          });
+          if (!removed) break;
+        }
 
-        // Normalize list style: drop Writer custom glyphs via class/style
-        root.querySelectorAll('ul, ol, li, p, span, div').forEach(el => {
+        root.querySelectorAll('ul, ol, li, p, span, div, h1, h2, h3, h4, h5, h6').forEach(el => {
           el.removeAttribute('style');
           el.removeAttribute('class');
           el.removeAttribute('face');
@@ -1565,8 +1590,6 @@ window.ClipViewMasonry = Masonry;
           el.removeAttribute('color');
         });
 
-        // Mark monospaced-ish blocks: paragraphs that are mostly ASCII/code after cleanup
-        // (heuristic for Notes SQL dumps)
         root.querySelectorAll('p').forEach(p => {
           const t = (p.textContent || '');
           if (/^\s*(SELECT|FROM|WHERE|AND|OR|JOIN|GROUP|ORDER|LIMIT|INSERT|UPDATE|DELETE|CREATE|WITH)\b/i.test(t)
@@ -1576,7 +1599,6 @@ window.ClipViewMasonry = Masonry;
           }
         });
 
-        // Fix deeply invalid: unwrap empty spans
         root.querySelectorAll('span').forEach(span => {
           if (!span.attributes.length) {
             const parent = span.parentNode;
@@ -1586,9 +1608,8 @@ window.ClipViewMasonry = Masonry;
           }
         });
 
-        return (root.innerHTML || '').trim();
+        return collapseEmptyHtmlBlocks((root.innerHTML || '').trim());
       } catch (_) {
-        // Regex fallback
         let s = raw;
         const body = s.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
         if (body) s = body[1];
@@ -1600,7 +1621,7 @@ window.ClipViewMasonry = Masonry;
           .replace(/<span class="Apple-converted-space"[^>]*>([\s\S]*?)<\/span>/gi, '$1')
           .replace(/\sclass="[^"]*"/gi, '')
           .replace(/\sstyle="[^"]*"/gi, '');
-        return s.trim();
+        return collapseEmptyHtmlBlocks(s.trim());
       }
     }
 
