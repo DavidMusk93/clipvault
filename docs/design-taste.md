@@ -102,18 +102,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | 轻 scrim + 毛玻璃小卡 | 重遮罩抢戏 |
 | transform-origin 来自触发点 | 从屏幕中心 scale |
 
-## 片段折叠（substr fold）
+## 片段折叠（已移除）
 
-Exact `content_hash` latest-alive 仍是主规则。额外：
+**已回滚。** substr fold 过于激进，误伤独立剪贴片段。主规则仅 **exact content_hash latest-alive**。历史被 soft-delete 的条目在启动时按 operation_logs(`source=substr_fold`) 自动 restore。
 
-| 条件 | 行为 |
-| --- | --- |
-| 新捕获是更长存活项的**精确子串**（≥8 字、长度比 ≤0.9） | **不建独立行**；在 haystack 记 `substr_ref` 事件 |
-| 新捕获更长且包含已有短项 | 短项 **soft-delete**；haystack 记 `substr_absorb` |
-| 全文再拷 | 仍 `copy_count++` |
-
-UI：列表只见 haystack；时间线 toast 可显示「片段引用」。
-
-## 历史 substr 折叠
-
-启动后分批 `drainHistoricalSubstrFolds`：对已有 text/url/rtf/html 用 **去标签 plain** 做 contains 合并（短→长 soft-delete + substr_absorb）。维护 tick 继续扫。
