@@ -31,6 +31,23 @@ Owner 要的是 **独立产品气质 + 终局工程**，不是 demo 合集。
 **可执行视觉真源**：[`docs/design-taste.md`](docs/design-taste.md)（类型标签色、ops 来源色、品牌 Honey）。
 改 badge / 来源色必须先改该文档，再同步 Web + Android，禁止一端私调。
 
+### 2.0 作者 taste → 个性化设计语言（持续沉淀）
+
+Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原材料**。Agent / 协作者必须双写沉淀：
+
+| 落点 | 写什么 | 何时写 |
+| --- | --- | --- |
+| **本仓库** | `AGENTS.md` §2（叙事/体验/工程原则）；可执行 token 进 [`docs/design-taste.md`](docs/design-taste.md) | 用户明确偏好、否决某风格、锁定色/动效/文案气质时 |
+| **nmem** | `preference` / `decision` / `learning`：一句话结论 + 证据（原话/commit）+ 下次该怎么做 | 同上；跨会话、跨机恢复时优先 `memory_search` ClipVault/taste |
+
+| Do | Don't |
+| --- | --- |
+| 每次可复用的 taste 判断写进文档或 nmem（或两者） | 只改一处 UI 颜色却不回写真源 |
+| 冲突时：**更新文档/nmem 为新裁决**，旧记忆 supersede 或标注过时 | 靠「我记得上次好像…」口头延续 |
+| 逐渐收敛为稳定语言：色板、密度、动效禁区、文案语气、跨端一致性 | 每轮按 agent 默认审美重开一盘 |
+
+**目标**：随着批评与取舍累积，ClipVault 形成 **Owner 个性化的设计语言**，而不是通用 Material/工具腔皮肤。
+
 ### 2.1 品牌与叙事
 
 | Do | Don't |
