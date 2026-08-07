@@ -541,13 +541,13 @@
       border-radius: var(--radius-sm);
       border: 0.5px solid var(--separator);
       max-height: min(42vh, 340px);
-      overflow: auto;
+      overflow: auto; /* XY pan — no soft wrap (product: unwrap rich text) */
       min-width: 0;
       max-width: 100%;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      word-break: break-word;
-      overflow-wrap: anywhere;
+      word-break: normal;
+      overflow-wrap: normal;
       font-family: var(--font-ui);
       font-size: 14px;
       line-height: 1.38;
@@ -557,6 +557,13 @@
       scrollbar-gutter: stable;
       scrollbar-width: thin;
       scrollbar-color: rgba(60, 60, 67, 0.35) transparent;
+    }
+    /* Content wider than card → horizontal pan; hard newlines only */
+    .notes-rich-inner, .snippet-html-inner {
+      display: block;
+      width: max-content;
+      min-width: 100%;
+      max-width: none;
     }
     .notes-rich::-webkit-scrollbar,
     .snippet-html::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -579,11 +586,17 @@
       padding: 0;
     }
 
-    .notes-rich p, .snippet-html p {
+    .notes-rich p, .snippet-html p,
+    .notes-rich li, .snippet-html li,
+    .notes-rich div, .snippet-html div {
       margin: 0 0 0.32em;
       min-height: 0 !important;
-      white-space: pre-wrap; /* keep SQL / code indent from Apple-converted-space */
+      /* hard newlines only — long lines pan, do not soft-wrap (no regression to wrap) */
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
     }
+    .notes-rich li, .snippet-html li { margin: 0.14em 0; }
     .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
     .notes-rich p:empty, .snippet-html p:empty,
     .notes-rich p > br:only-child, .snippet-html p > br:only-child { display: none; }
@@ -637,11 +650,13 @@
       font-size: 14px;
       line-height: 1.4;
       letter-spacing: -0.016em;
-      /* multi-line notes plain: soft wrap ok; single-line overridden below */
-      white-space: pre-wrap;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-      min-width: 0;
+      /* multi-line too: no soft wrap — pan (same as plain text cards) */
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      min-width: min-content;
+      width: max-content;
+      max-width: none;
       tab-size: 2;
     }
     .card-body .text-scroll.is-rtf.is-single pre.plain {
@@ -652,7 +667,7 @@
       width: max-content;
       max-width: none;
     }
-    .card-body .text-scroll.is-rtf.is-tiny pre.plain { padding: 0 12px 10px 0; font-size: 14px; }
+    .card-body .text-scroll.is-rtf.is-tiny pre.plain { padding: 0 12px 8px 4px; font-size: 14px; }
 
     .thumb-wrap {
       position: relative; border-radius: 14px; overflow: hidden;
@@ -1780,7 +1795,7 @@ window.ClipViewMasonry = Masonry;
         const tinyBase = (plain || plainFromHtml || '');
         const tiny = tinyBase.length > 0 && tinyBase.length <= 80 && !tinyBase.includes('\n') ? ' is-tiny' : '';
         if (notesFragmentUseful(fragment)) {
-          body = `<div class="notes-rich${tiny}">${fragment}</div>`;
+          body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
         } else if (plain) {
           const mode = textLineModeClass(plain);
           body = `<div class="text-scroll is-rtf${mode}"><pre class="plain">${esc(plain)}</pre></div>`;
