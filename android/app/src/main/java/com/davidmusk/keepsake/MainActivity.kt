@@ -14,17 +14,25 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -66,6 +74,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -80,12 +89,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -471,7 +482,7 @@ private fun KeepsakeRoot(
                     )
                 } else {
                     Text(
-                        "操作日志来自 Mac 备份库 operation_logs，全量字段展示、不截断。",
+                        "操作日志来自 Mac 备份库；来源着色；正文不换行，可上下左右滑动。",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         modifier = Modifier.padding(vertical = 6.dp),
@@ -686,51 +697,156 @@ private fun ItemCard(
     }
 }
 
+/** Align with web ops drawer: source rail + pill colors. */
+private data class OpsSourceStyle(
+    val key: String,
+    val rail: Color,
+    val ink: Color,
+    val soft: Color,
+)
+
+private fun opsSourceStyle(source: String): OpsSourceStyle {
+    val s = source.lowercase().trim()
+    val key = when {
+        s == "web" || s.contains("web") || s.contains("ui") -> "web"
+        s == "clipboard" || s.contains("clip") -> "clipboard"
+        s == "backup" || s.contains("back") -> "backup"
+        s == "maintenance" || s.contains("maint") || s.contains("purge") || s.contains("cron") -> "maintenance"
+        s == "app" || s.contains("app") -> "app"
+        s == "sync" || s.contains("sync") -> "sync"
+        else -> "system"
+    }
+    return when (key) {
+        // Match web/index.html .ops-item.src-*
+        "web" -> OpsSourceStyle(key, Color(0xFF007AFF), Color(0xFF0056B3), Color(0x24007AFF))
+        "clipboard" -> OpsSourceStyle(key, Color(0xFF34C759), Color(0xFF1B7A34), Color(0x2934C759))
+        "backup" -> OpsSourceStyle(key, Color(0xFFAF52DE), Color(0xFF7A2FA8), Color(0x24AF52DE))
+        "maintenance" -> OpsSourceStyle(key, Color(0xFFFF9500), Color(0xFFB56A00), Color(0x29FF9500))
+        "app" -> OpsSourceStyle(key, Color(0xFF5856D6), Color(0xFF3B3A9A), Color(0x245856D6))
+        "sync" -> OpsSourceStyle(key, Color(0xFF32ADE6), Color(0xFF1A6F99), Color(0x2932ADE6))
+        else -> OpsSourceStyle("system", Color(0xFF8E8E93), Color(0xFF3A3A3C), Color(0x298E8E93))
+    }
+}
+
 @Composable
 private fun OpLogCard(log: OperationLog) {
+    val style = opsSourceStyle(log.source)
+    val hScroll = rememberScrollState()
+    val vScroll = rememberScrollState()
+    val fields = buildList {
+        add("时间" to log.displayTime)
+        add("动作" to log.action)
+        add("来源" to log.source)
+        log.itemId?.takeIf { it.isNotBlank() }?.let { add("条目 ID" to it) }
+        log.contentHash?.takeIf { it.isNotBlank() }?.let { add("contentHash" to it) }
+        add("日志 ID" to log.id)
+        log.detail?.takeIf { it.isNotBlank() }?.let { add("详情" to it) }
+    }
+
     Card(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(1.dp),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    log.action,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    log.displayTime,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+        ) {
+            // Left color rail (web .ops-item border-left)
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .background(style.rail),
+            )
+            Column(Modifier.weight(1f)) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        log.action,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = style.soft,
+                    ) {
+                        Text(
+                            log.source.ifBlank { "system" },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = style.ink,
+                            maxLines = 1,
+                        )
+                    }
+                    Text(
+                        log.displayTime,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        maxLines = 1,
+                    )
+                }
+                // XY pan, no soft wrap — mirror web .ops-scroll + white-space:pre
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 160.dp)
+                        .padding(start = 12.dp, end = 4.dp, bottom = 10.dp)
+                        .horizontalScroll(hScroll)
+                        .verticalScroll(vScroll),
+                ) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(end = 8.dp),
+                    ) {
+                        fields.forEach { (label, value) ->
+                            OpFieldRow(
+                                label = label,
+                                value = value,
+                                mono = label in setOf("条目 ID", "contentHash", "日志 ID"),
+                            )
+                        }
+                    }
+                }
             }
-            OpField("来源", log.source)
-            log.itemId?.takeIf { it.isNotBlank() }?.let { OpField("条目 ID", it, mono = true) }
-            log.contentHash?.takeIf { it.isNotBlank() }?.let { OpField("contentHash", it, mono = true) }
-            OpField("日志 ID", log.id, mono = true)
-            log.detail?.takeIf { it.isNotBlank() }?.let { OpField("详情", it) }
         }
     }
 }
 
 @Composable
-private fun OpField(label: String, value: String, mono: Boolean = false) {
-    Column {
+private fun OpFieldRow(label: String, value: String, mono: Boolean) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            fontWeight = FontWeight.Medium,
+            softWrap = false,
+            maxLines = 1,
+            modifier = Modifier.width(72.dp),
         )
         Text(
             value,
             style = MaterialTheme.typography.bodySmall,
-            fontFamily = if (mono) androidx.compose.ui.text.font.FontFamily.Monospace else null,
-            // Full detail — never ellipsize
-            softWrap = true,
+            fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+            // Hard newlines OK; no soft wrap — pan horizontally for long IDs/hashes
+            softWrap = false,
+            overflow = TextOverflow.Visible,
         )
     }
 }
