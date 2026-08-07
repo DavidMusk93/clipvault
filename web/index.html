@@ -365,6 +365,8 @@
     }
     .event-item .ev-time { font-size: 12px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
     .event-item .ev-sub { font-size: 11px; color: var(--muted); margin-top: 1px; word-break: break-all; }
+    .event-item .ev-sub.is-substr { color: var(--type-html, #6A1B9A); }
+    .event-item.is-substr::before { background: var(--type-html, #6A1B9A); }
     @media (prefers-reduced-motion: reduce) {
       .event-toast-card { transition: opacity 0.15s ease; transform: none !important; }
     }
@@ -509,8 +511,18 @@
     }
     .card-body .text-scroll.is-tiny pre code,
     .card-body .text-scroll.is-tiny > code {
-      padding: 0 12px 10px 0;
+      /* keep left pad — 0 caused first glyph clip against card edge */
+      padding: 0 12px 8px 2px;
       font-size: 14px;
+    }
+    .card-body .text-scroll.is-single pre code,
+    .card-body .text-scroll.is-single > code {
+      /* extra start inset for pan origin / border-box clip */
+      padding-left: max(2px, 10px);
+    }
+    .card-body .text-scroll.is-tiny.is-single pre code,
+    .card-body .text-scroll.is-tiny.is-single > code {
+      padding: 0 12px 8px 4px;
     }
     .card-body .text-scroll pre {
       margin: 0;
@@ -1691,9 +1703,12 @@ window.ClipViewMasonry = Masonry;
           const kind = ev.kind || 'capture';
           const src = ev.sourceApp || '';
           const type = ev.type || '';
-          return `<li class="event-item">
+          const isSub = kind === 'substr_ref' || kind === 'substr_absorb';
+          const kindLabel = isSub ? '片段引用' : kind;
+          const detail = (ev.detail != null && ev.detail !== '') ? String(ev.detail) : '';
+          return `<li class="event-item${isSub ? ' is-substr' : ''}">
             <div class="ev-time">${esc(ts)}</div>
-            <div class="ev-sub">${esc(kind)}${type ? ' · ' + esc(type) : ''}${src ? ' · ' + esc(src) : ''}</div>
+            <div class="ev-sub${isSub ? ' is-substr' : ''}">${esc(kindLabel)}${type ? ' · ' + esc(type) : ''}${src ? ' · ' + esc(src) : ''}${detail ? ' · ' + esc(detail) : ''}</div>
           </li>`;
         }).join('');
       } catch (err) {

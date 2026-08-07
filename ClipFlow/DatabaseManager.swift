@@ -218,7 +218,8 @@ final class DatabaseManager: ObservableObject {
             event_ts REAL NOT NULL,
             type TEXT NOT NULL,
             source_app TEXT,
-            kind TEXT NOT NULL DEFAULT 'capture'
+            kind TEXT NOT NULL DEFAULT 'capture',
+            detail TEXT
         );
         CREATE TABLE IF NOT EXISTS operation_logs (
             id TEXT PRIMARY KEY,
@@ -256,6 +257,9 @@ final class DatabaseManager: ObservableObject {
             // Backfill from timestamp for existing rows.
             execQuiet("UPDATE clipboard_items SET first_seen_at = timestamp WHERE first_seen_at IS NULL;")
         }
+        if !columnExists("clipboard_events", "detail") {
+            execQuiet("ALTER TABLE clipboard_events ADD COLUMN detail TEXT;")
+        }
         // Ensure aux tables exist on upgraded DBs.
         execQuiet("""
         CREATE TABLE IF NOT EXISTS clipboard_events (
@@ -265,7 +269,8 @@ final class DatabaseManager: ObservableObject {
             event_ts REAL NOT NULL,
             type TEXT NOT NULL,
             source_app TEXT,
-            kind TEXT NOT NULL DEFAULT 'capture'
+            kind TEXT NOT NULL DEFAULT 'capture',
+            detail TEXT
         );
         CREATE TABLE IF NOT EXISTS operation_logs (
             id TEXT PRIMARY KEY,
@@ -686,7 +691,8 @@ final class DatabaseManager: ObservableObject {
         var stmt: OpaquePointer?
         defer { if stmt != nil { sqlite3_finalize(stmt) } }
         // Prefer newest if residual dups exist before cleanup drains them.
-        let sql = "SELECT id FROM clipboard_items WHERE content_hash = ? ORDER BY timestamp DESC, id DESC LIMIT 1;"
+        // Prefer alive row; fall back to any (bump restores soft-deleted).
+        let sql = "SELECT id FROM clipboard_items WHERE content_hash = ? ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, timestamp DESC, id DESC LIMIT 1;"
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         bindText(stmt, 1, hash)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
@@ -781,6 +787,8 @@ final class DatabaseManager: ObservableObject {
 
             if let existingId = self.findIdByContentHash(item.contentHash) {
                 let ok = self.bumpLatestAlive(id: existingId, item: item)
+                // Longer body may absorb shorter needles even on exact bump path no-op.
+                if ok { _ = self.absorbContainedNeedles(hostItem: item, hostId: existingId) }
                 let uuid = UUID(uuidString: existingId)
                 DispatchQueue.main.async {
                     if ok, let uuid {
@@ -792,7 +800,20 @@ final class DatabaseManager: ObservableObject {
                 return
             }
 
+            // Substr fold: if this capture is a fragment of a longer alive item, attach as ref.
+            if let hostId = self.foldNeedleIntoHaystack(item) {
+                let uuid = UUID(uuidString: hostId)
+                DispatchQueue.main.async {
+                    if let uuid { completion?(.bumped(existingId: uuid)) }
+                    else { completion?(.failed) }
+                }
+                return
+            }
+
             let ok = self.insertNewItem(item, db: db)
+            if ok {
+                _ = self.absorbContainedNeedles(hostItem: item, hostId: item.id.uuidString)
+            }
             DispatchQueue.main.async { completion?(ok ? .inserted : .failed) }
         }
     }
@@ -1658,6 +1679,205 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+
+    // MARK: - Substr fold (needle → haystack)
+
+    /// Min needle length to avoid swallowing the world with "a"/"10".
+    private static let substrMinNeedle = 8
+    /// Needle must be strictly shorter than host (ratio).
+    private static let substrMaxNeedleRatio = 0.90
+
+    private func foldablePlainText(_ item: ClipboardItem) -> String? {
+        switch item.type {
+        case .text, .rtf:
+            let t = item.textContent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return t.isEmpty ? nil : t
+        case .url:
+            if let u = item.url?.absoluteString, !u.isEmpty { return u }
+            let t = item.textContent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return t.isEmpty ? nil : t
+        case .html:
+            // Prefer extracted plain; skip pure HTML markup folds for safety.
+            let t = item.textContent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return t.isEmpty ? nil : t
+        default:
+            return nil
+        }
+    }
+
+    private func isFoldableType(_ type: ClipboardType) -> Bool {
+        switch type {
+        case .text, .url, .rtf, .html: return true
+        default: return false
+        }
+    }
+
+    /// If `item` text is a fragment of a longer alive item, record substr_ref on host and skip insert.
+    /// Returns host id on success.
+    private func foldNeedleIntoHaystack(_ item: ClipboardItem) -> String? {
+        guard isFoldableType(item.type), let needle = foldablePlainText(item) else { return nil }
+        let nLen = needle.count
+        guard nLen >= Self.substrMinNeedle else { return nil }
+        guard let db = db else { return nil }
+
+        // Candidate hosts: longer text/url bodies that contain needle (exact instr).
+        let sql = """
+        SELECT id, content_hash, IFNULL(text_content, ''), IFNULL(url, '')
+        FROM clipboard_items
+        WHERE deleted_at IS NULL
+          AND type IN ('text','url','rtf','html')
+          AND (
+            (text_content IS NOT NULL AND length(text_content) > ? AND instr(text_content, ?) > 0)
+            OR (url IS NOT NULL AND length(url) > ? AND instr(url, ?) > 0)
+          )
+        ORDER BY MAX(length(IFNULL(text_content,'')), length(IFNULL(url,''))) DESC, timestamp DESC
+        LIMIT 8;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        sqlite3_bind_int(stmt, 1, Int32(nLen))
+        bindText(stmt, 2, needle)
+        sqlite3_bind_int(stmt, 3, Int32(nLen))
+        bindText(stmt, 4, needle)
+
+        var hostId: String?
+        var hostHash: String?
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                  let hash = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) else { continue }
+            let text = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+            let url = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+            let hostBody = text.count >= url.count ? text : url
+            let hLen = hostBody.count
+            guard hLen > nLen else { continue }
+            guard Double(nLen) / Double(hLen) <= Self.substrMaxNeedleRatio else { continue }
+            guard hostBody.contains(needle) else { continue }
+            hostId = id
+            hostHash = hash
+            break
+        }
+        sqlite3_finalize(stmt)
+        guard let hostId, let hostHash else { return nil }
+
+        let preview = needle.count > 80 ? String(needle.prefix(80)) + "…" : needle
+        _ = recordClipboardEvent(
+            itemId: hostId,
+            contentHash: item.contentHash,
+            eventTs: item.timestamp,
+            type: item.type.rawValue,
+            sourceApp: item.sourceApp,
+            kind: "substr_ref",
+            detail: "needle=\(preview)"
+        )
+        // Touch host timestamp so it floats in list; do not inflate copy_count (different body).
+        let bumpSQL = "UPDATE clipboard_items SET timestamp = MAX(timestamp, ?) WHERE id = ?;"
+        var u: OpaquePointer?
+        if sqlite3_prepare_v2(db, bumpSQL, -1, &u, nil) == SQLITE_OK {
+            sqlite3_bind_double(u, 1, item.timestamp.timeIntervalSince1970)
+            bindText(u, 2, hostId)
+            _ = sqlite3_step(u)
+        }
+        sqlite3_finalize(u)
+        appendOperationLogSync(
+            action: "substr_ref",
+            itemId: hostId,
+            contentHash: item.contentHash,
+            detail: "host=\(hostHash.prefix(12))… needle_len=\(nLen)",
+            source: "clipboard"
+        )
+        return hostId
+    }
+
+    /// After inserting/updating a long host, soft-delete shorter alive fragments it contains.
+    @discardableResult
+    private func absorbContainedNeedles(hostItem: ClipboardItem, hostId: String) -> Int {
+        guard isFoldableType(hostItem.type), let hostText = foldablePlainText(hostItem) else { return 0 }
+        let hLen = hostText.count
+        guard hLen > Self.substrMinNeedle else { return 0 }
+        guard let db = db else { return 0 }
+
+        let minHostForNeedle = Int(Double(hLen) * Self.substrMaxNeedleRatio) // needle max len under ratio
+        let sql = """
+        SELECT id, content_hash, IFNULL(text_content, url)
+        FROM clipboard_items
+        WHERE deleted_at IS NULL
+          AND id != ?
+          AND type IN ('text','url','rtf','html')
+          AND IFNULL(text_content, url) IS NOT NULL
+          AND length(IFNULL(text_content, url)) >= ?
+          AND length(IFNULL(text_content, url)) <= ?
+          AND instr(?, IFNULL(text_content, url)) > 0
+        ORDER BY length(IFNULL(text_content, url)) ASC
+        LIMIT 24;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        bindText(stmt, 1, hostId)
+        sqlite3_bind_int(stmt, 2, Int32(Self.substrMinNeedle))
+        sqlite3_bind_int(stmt, 3, Int32(min(minHostForNeedle, hLen - 1)))
+        bindText(stmt, 4, hostText)
+
+        var victims: [(String, String, String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                  let hash = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
+                  let body = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) else { continue }
+            guard hostText.contains(body), body.count < hLen else { continue }
+            victims.append((id, hash, body))
+        }
+        sqlite3_finalize(stmt)
+
+        var n = 0
+        for (id, hash, body) in victims {
+            if softDeleteLocked(id: id, contentHash: hash, source: "substr_fold", detail: "absorbed_by=\(hostId)") {
+                let preview = body.count > 80 ? String(body.prefix(80)) + "…" : body
+                _ = recordClipboardEvent(
+                    itemId: hostId,
+                    contentHash: hash,
+                    eventTs: Date(),
+                    type: hostItem.type.rawValue,
+                    sourceApp: hostItem.sourceApp,
+                    kind: "substr_absorb",
+                    detail: "needle=\(preview)"
+                )
+                n += 1
+            }
+        }
+        if n > 0 {
+            appendOperationLogSync(
+                action: "substr_absorb",
+                itemId: hostId,
+                contentHash: hostItem.contentHash,
+                detail: "absorbed=\(n)",
+                source: "clipboard"
+            )
+        }
+        return n
+    }
+
+    /// Soft-delete on dbQueue (no nested async).
+    @discardableResult
+    private func softDeleteLocked(id: String, contentHash: String?, source: String, detail: String?) -> Bool {
+        guard let db = db else { return false }
+        let sql = "UPDATE clipboard_items SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+        bindText(stmt, 2, id)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else { return false }
+        deleteFTS(id: id)
+        appendOperationLogSync(
+            action: "soft_delete",
+            itemId: id,
+            contentHash: contentHash,
+            detail: detail,
+            source: source
+        )
+        return true
+    }
+
     // MARK: - Clipboard events + frequency
 
     @discardableResult
@@ -1667,12 +1887,13 @@ final class DatabaseManager: ObservableObject {
         eventTs: Date,
         type: String,
         sourceApp: String?,
-        kind: String
+        kind: String,
+        detail: String? = nil
     ) -> Bool {
         guard let db = db else { return false }
         let sql = """
-        INSERT INTO clipboard_events (id, item_id, content_hash, event_ts, type, source_app, kind)
-        VALUES (?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO clipboard_events (id, item_id, content_hash, event_ts, type, source_app, kind, detail)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
@@ -1684,6 +1905,7 @@ final class DatabaseManager: ObservableObject {
         bindText(stmt, 5, type)
         bindText(stmt, 6, sourceApp)
         bindText(stmt, 7, kind)
+        bindText(stmt, 8, detail)
         let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
         return rc == SQLITE_DONE
@@ -1697,7 +1919,7 @@ final class DatabaseManager: ObservableObject {
             }
             let lim = max(1, min(limit, 500))
             let sql = """
-            SELECT id, item_id, content_hash, event_ts, type, source_app, kind
+            SELECT id, item_id, content_hash, event_ts, type, source_app, kind, detail
             FROM clipboard_events WHERE item_id = ?
             ORDER BY event_ts DESC LIMIT ?;
             """
@@ -1715,6 +1937,7 @@ final class DatabaseManager: ObservableObject {
                     row["type"] = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? ""
                     row["sourceApp"] = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
                     row["kind"] = sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? ""
+                    row["detail"] = sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? ""
                     rows.append(row)
                 }
             }
