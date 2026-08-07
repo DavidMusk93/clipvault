@@ -182,8 +182,8 @@
       background: linear-gradient(180deg, rgba(248,248,250,0.95), rgba(242,242,247,0.9));
     }
     .badge-count {
-      display: inline-flex; align-items: center; gap: 3px;
-      height: 22px; padding: 0 8px; border-radius: 999px;
+      display: inline-flex; align-items: center; gap: 2px;
+      height: 20px; padding: 0 7px; border-radius: 999px;
       border: 0;
       background: var(--accent-soft); color: var(--accent);
       font: inherit; font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
@@ -300,88 +300,76 @@
       font-size: 12.5px;
       white-space: pre;
     }
-    .event-panel {
-      margin-top: 8px; border-top: 0.5px solid var(--separator);
-      padding-top: 8px;
-    }
-    .event-panel.is-meta-only { margin-top: 6px; padding-top: 0; border-top: 0; }
-    .event-toggle {
-      display: inline-flex; align-items: center; gap: 4px;
-      border: 0; background: transparent; padding: 0; margin: 0;
-      color: var(--muted); font: inherit; font-size: 12px; font-weight: 500;
-      cursor: pointer; letter-spacing: -0.01em;
-    }
-    .event-toggle:hover { color: var(--ink); }
-    .event-toggle .material-symbols-outlined { font-size: 16px; }
-    .event-meta-line {
-      color: var(--muted); font-size: 11.5px; margin-top: 4px;
-      letter-spacing: -0.01em; line-height: 1.4;
-    }
-    /* Interactive toast card — timeline without masonry reflow (design-taste: light + lazy) */
+    /* Popover timeline — anchored to ×N trigger (apple-design spatial consistency) */
     .event-toast {
       position: fixed; inset: 0; z-index: 3600;
-      display: none; align-items: flex-end; justify-content: center;
-      padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+      display: none;
       pointer-events: none;
     }
-    .event-toast.open { display: flex; pointer-events: auto; }
+    .event-toast.open { display: block; pointer-events: auto; }
     .event-toast-scrim {
       position: absolute; inset: 0;
-      background: rgba(0,0,0,0.22);
-      -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+      background: rgba(0, 0, 0, 0.10);
+      -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px);
     }
     .event-toast-card {
-      position: relative; z-index: 1;
-      width: min(420px, 100%);
-      max-height: min(52vh, 420px);
+      position: fixed; z-index: 1;
+      width: min(300px, calc(100vw - 20px));
+      max-height: min(36vh, 280px);
       display: flex; flex-direction: column;
-      border-radius: 18px;
-      background: rgba(255,255,255,0.90);
-      -webkit-backdrop-filter: blur(28px) saturate(180%);
-      backdrop-filter: blur(28px) saturate(180%);
-      border: 0.5px solid var(--separator);
-      box-shadow: var(--elev-3);
-      transform: translateY(18px); opacity: 0;
-      transition: transform 0.32s var(--spring), opacity 0.28s var(--spring);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.86);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      backdrop-filter: blur(24px) saturate(180%);
+      border: 0.5px solid var(--separator-strong);
+      box-shadow: var(--elev-2);
+      opacity: 0;
+      transform: scale(0.94);
+      transition: opacity 0.22s var(--spring), transform 0.28s var(--spring);
       overflow: hidden;
+      will-change: transform, opacity;
     }
     .event-toast.open .event-toast-card {
-      transform: translateY(0); opacity: 1;
+      opacity: 1;
+      transform: scale(1);
     }
     .event-toast-head {
-      display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      padding: 14px 16px 10px;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 10px 12px 8px;
       border-bottom: 0.5px solid var(--separator);
     }
     .event-toast-head h3 {
-      font-size: 16px; font-weight: 600; letter-spacing: -0.02em; margin: 0;
+      font-size: 14px; font-weight: 600; letter-spacing: -0.02em; margin: 0;
     }
     .event-toast-sub {
-      padding: 0 16px 8px; font-size: 12px; color: var(--muted);
+      padding: 0 12px 6px; font-size: 11px; color: var(--muted);
       letter-spacing: -0.01em;
     }
     .event-toast-body {
       flex: 1; min-height: 0;
       overflow: auto;
-      padding: 4px 16px 16px;
+      padding: 2px 12px 12px;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
     }
     .event-toast-list {
-      list-style: none; margin: 0; padding: 0 0 0 12px;
+      list-style: none; margin: 0; padding: 0 0 0 10px;
       border-left: 2px solid rgba(0,0,0,0.08);
-      display: flex; flex-direction: column; gap: 10px;
+      display: flex; flex-direction: column; gap: 8px;
     }
-    .event-item { position: relative; padding-left: 12px; }
+    .event-item { position: relative; padding-left: 10px; }
     .event-item::before {
-      content: ''; position: absolute; left: -16px; top: 6px;
-      width: 7px; height: 7px; border-radius: 50%;
-      background: var(--accent); box-shadow: 0 0 0 2px rgba(0,122,255,0.15);
+      content: ''; position: absolute; left: -14px; top: 5px;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 0 2px rgba(0,122,255,0.14);
     }
-    .event-item .ev-time { font-size: 13px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
-    .event-item .ev-sub { font-size: 12px; color: var(--muted); margin-top: 2px; word-break: break-all; }
+    .event-item .ev-time { font-size: 12px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+    .event-item .ev-sub { font-size: 11px; color: var(--muted); margin-top: 1px; word-break: break-all; }
     @media (prefers-reduced-motion: reduce) {
-      .event-toast-card { transition: none; }
+      .event-toast-card { transition: opacity 0.15s ease; transform: none !important; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .event-toast-card { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
     }
     .top-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
@@ -404,8 +392,8 @@
       background: var(--card);
       border: 0.5px solid var(--separator);
       border-radius: var(--radius);
-      padding: 14px 15px;
-      display: flex; flex-direction: column; gap: 10px;
+      padding: 11px 12px;
+      display: flex; flex-direction: column; gap: 7px;
       width: 100%;
       min-width: 0; /* flex item: allow inner overflow scroll */
       max-width: 100%;
@@ -421,10 +409,10 @@
       border-color: var(--separator-strong);
       z-index: 1;
     }
-    .m3-card.is-compact { padding: 12px 13px; gap: 8px; }
-    .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .m3-card.is-compact { padding: 10px 11px; gap: 6px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-width: 0; }
     .badge {
-      font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 8px;
+      font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 7px;
       background: var(--fill); color: var(--muted);
       display: inline-flex; align-items: center; gap: 4px;
       text-transform: none; letter-spacing: -0.01em;
@@ -439,8 +427,9 @@
     .badge.type-file  { color: var(--type-file);  background: rgba(69, 90, 100, 0.12); }
     .badge.type-other { color: var(--type-other); background: rgba(93, 64, 55, 0.12); }
     .time {
-      font-size: 12px; color: var(--muted); white-space: nowrap;
+      font-size: 11px; color: var(--muted); white-space: nowrap;
       font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+      flex-shrink: 0;
     }
     .card-body {
       font-size: 14px; line-height: 1.5; color: var(--ink);
@@ -733,6 +722,7 @@
     }
 
     .card-actions {
+      margin-top: 2px;
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
       border-top: 0.5px solid var(--separator); padding-top: 10px;
     }
@@ -1627,11 +1617,41 @@ window.ClipViewMasonry = Masonry;
       host.setAttribute('aria-hidden', 'true');
     }
 
+    /** Anchor popover under/above the ×N trigger (spatial consistency). */
+    function positionEventToastCard(anchorEl) {
+      const card = document.querySelector('#eventToast .event-toast-card');
+      if (!card || !anchorEl) return;
+      const pad = 8;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      // Temporarily show for measure
+      const prevVis = card.style.visibility;
+      card.style.visibility = 'hidden';
+      card.style.left = '0px';
+      card.style.top = '0px';
+      const cr = card.getBoundingClientRect();
+      const r = anchorEl.getBoundingClientRect();
+      let left = r.left + r.width / 2 - cr.width / 2;
+      let top = r.bottom + pad;
+      if (top + cr.height > vh - 10) {
+        top = r.top - cr.height - pad; // flip above
+      }
+      left = Math.max(10, Math.min(left, vw - cr.width - 10));
+      top = Math.max(10, Math.min(top, vh - cr.height - 10));
+      card.style.left = left + 'px';
+      card.style.top = top + 'px';
+      // Scale from trigger center
+      const ox = (r.left + r.width / 2) - left;
+      const oy = (r.top + r.height / 2) - top;
+      card.style.transformOrigin = `${Math.round(ox)}px ${Math.round(oy)}px`;
+      card.style.visibility = prevVis || '';
+    }
+
     /**
-     * Interactive toast card for timeline — never mutates masonry height.
-     * Taste: light list chrome + lazy fetch on open.
+     * Interactive popover for timeline — anchored to ×N, no masonry reflow.
+     * apple-design: originate from source control.
      */
-    async function openEventToast(itemId, meta = {}) {
+    async function openEventToast(itemId, meta = {}, anchorEl = null) {
       const host = document.getElementById('eventToast');
       const list = document.getElementById('eventToastList');
       const sub = document.getElementById('eventToastSub');
@@ -1641,13 +1661,17 @@ window.ClipViewMasonry = Masonry;
       const typeLabel = meta.typeLabel || meta.type || '';
       sub.textContent = [
         typeLabel,
-        count > 1 ? `×${count} 次捕获` : '',
+        count > 1 ? `×${count}` : '',
         meta.sourceApp || '',
       ].filter(Boolean).join(' · ');
 
       list.innerHTML = '<li class="event-item"><div class="ev-sub">加载中…</div></li>';
       host.classList.add('open');
       host.setAttribute('aria-hidden', 'false');
+      // Position after open so size is measurable
+      requestAnimationFrame(() => {
+        positionEventToastCard(anchorEl || document.querySelector(`[data-events-open="${CSS.escape(itemId)}"]`));
+      });
 
       try {
         let rows = eventsCache.get(itemId);
@@ -1675,6 +1699,9 @@ window.ClipViewMasonry = Masonry;
       } catch (err) {
         list.innerHTML = '<li class="event-item"><div class="ev-sub">加载失败</div></li>';
       }
+      requestAnimationFrame(() => {
+        positionEventToastCard(anchorEl || document.querySelector(`[data-events-open="${CSS.escape(itemId)}"]`));
+      });
     }
 
     function wireEventToastOnce() {
@@ -1757,7 +1784,7 @@ window.ClipViewMasonry = Masonry;
       const count = Math.max(1, Number(item.copyCount) || 1);
       const delTs = item.deletedAt ? formatLocalTime(item.deletedAt) : '';
       const trashMeta = inTrash
-        ? `<span class="time" title="删除时间">🗑 ${delTs || timeStr} · 30 天后清除</span>`
+        ? `<span class="time" title="删除 · 30 天后清除">${delTs || timeStr}</span>`
         : `<span class="time">${timeStr}</span>`;
       const actions = inTrash
         ? `<div class="action-pair">
@@ -1767,35 +1794,15 @@ window.ClipViewMasonry = Masonry;
             <button type="button" class="icon-btn" data-copy="${copyText}" title="复制" aria-label="复制"><svg class="icon-off" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button type="button" class="icon-btn is-danger" data-del="${item.id}" title="移入回收箱" aria-label="删除"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9.5 7.5V6.2A1.7 1.7 0 0 1 11.2 4.5h1.6a1.7 1.7 0 0 1 1.7 1.7v1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.2 7.5l.6 11.2a1.7 1.7 0 0 0 1.7 1.6h3a1.7 1.7 0 0 0 1.7-1.6l.6-11.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10.2 11v5.5M13.8 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           </div>`;
-      // Header already shows the primary time (last capture, or delete time in trash).
-      // Only add a secondary line when it conveys new info — never repeat the same timestamp.
-      let spanLine = '';
-      const firstSeenRaw = item.firstSeenAt != null ? Number(item.firstSeenAt) : null;
-      const lastRaw = Number(item.timestamp);
-      const firstDiffers = firstSeenRaw != null && Math.abs(firstSeenRaw - lastRaw) > 0.5;
-      if (inTrash) {
-        // Header = delete time; surface last capture once if present.
-        const parts = [];
-        if (timeStr && delTs && timeStr !== delTs) parts.push('最近捕获 ' + timeStr);
-        else if (timeStr && !delTs) parts.push('最近捕获 ' + timeStr);
-        if (firstDiffers) parts.push('首次 ' + formatLocalTime(item.firstSeenAt));
-        if (parts.length) spanLine = `<div class="event-meta-line">${parts.join(' · ')}</div>`;
-      } else if (firstDiffers) {
-        spanLine = `<div class="event-meta-line">首次 ${formatLocalTime(item.firstSeenAt)}</div>`;
-      }
+      // Compact: header = type + optional ×N + one time. No 「首次」 secondary line.
       const tm = typeMeta(item.type);
       const multiRef = itemHasMultiRef(item);
-      // Header ×N is the only timeline affordance (taste: no redundant button).
       const countBadge = multiRef
         ? `<button type="button" class="badge-count" data-events-open="${escAttr(item.id)}"
             data-copy-count="${count}" data-type-label="${escAttr(tm.label)}" data-source-app="${escAttr(item.sourceApp || '')}"
-            title="查看事件时间线（${count} 次捕获）" aria-label="事件时间线，${count} 次捕获">
+            title="事件（${count}）" aria-label="打开事件时间线，${count} 次">
             <span class="material-symbols-outlined">content_copy</span>×${count}
           </button>`
-        : '';
-      // Optional meta only (首次…); never a second timeline button.
-      const eventPanelHtml = spanLine
-        ? `<div class="event-panel is-meta-only">${spanLine}</div>`
         : '';
       card.innerHTML = `
         <div class="card-header">
@@ -1804,7 +1811,6 @@ window.ClipViewMasonry = Masonry;
           ${trashMeta}
         </div>
         <div class="card-body">${body}</div>
-        ${eventPanelHtml}
         <div class="card-actions">
           <div class="source">${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size:14px">apps</span>${esc(item.sourceApp)}` : ''}</div>
           ${actions}
@@ -1853,7 +1859,7 @@ window.ClipViewMasonry = Masonry;
           copyCount: Number(btn.getAttribute('data-copy-count') || 1),
           typeLabel: btn.getAttribute('data-type-label') || '',
           sourceApp: btn.getAttribute('data-source-app') || '',
-        });
+        }, btn);
       });
       const wrap = card.querySelector('.thumb-wrap');
       if (wrap) {

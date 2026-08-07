@@ -91,3 +91,13 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 瀑布流内 **禁止就地 expand**（列高/重排不稳）。多 ref 时间线用 **底部可交互 toast 卡片** （毛玻璃 sheet + scrim，lazy fetch，Esc/遮罩关闭）—— 列表零布局扰动。
 
 **入口**：不要单独「事件时间线」按钮；用 header 的 **×N 引用徽章** 作为唯一 affordance（单 ref 无徽章、无入口）。
+
+
+## 紧凑布局 + 锚定 popover
+
+| Do | Don't |
+| --- | --- |
+| 卡片只露：类型色 badge · 可选 ×N · **一个**时间 | 「首次 / 最近捕获」次要时间行 |
+| 时间线 popover **贴着 ×N** 弹出（可上下翻转） | 固定屏幕底大 sheet 脱离上下文 |
+| 轻 scrim + 毛玻璃小卡 | 重遮罩抢戏 |
+| transform-origin 来自触发点 | 从屏幕中心 scale |

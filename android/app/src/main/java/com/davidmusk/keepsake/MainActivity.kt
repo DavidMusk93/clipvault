@@ -663,16 +663,6 @@ private fun ItemCard(
                     maxLines = 1,
                 )
             }
-            val first = row.displayFirstSeen
-            if (first != null && first != row.displayTime) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "首次 $first",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                    maxLines = 1,
-                )
-            }
             if (row.inTrash) {
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -961,17 +951,6 @@ private fun DetailScreen(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                 )
-            }
-            // Top line already shows latest displayTime — only add first-seen when different.
-            row.displayFirstSeen?.let { first ->
-                if (first != row.displayTime) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "首次 $first",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    )
-                }
             }
             if (row.inTrash) {
                 Spacer(Modifier.height(2.dp))
