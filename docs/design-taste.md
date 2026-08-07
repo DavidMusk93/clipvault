@@ -101,3 +101,15 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | 时间线 popover **贴着 ×N** 弹出（可上下翻转） | 固定屏幕底大 sheet 脱离上下文 |
 | 轻 scrim + 毛玻璃小卡 | 重遮罩抢戏 |
 | transform-origin 来自触发点 | 从屏幕中心 scale |
+
+## 片段折叠（substr fold）
+
+Exact `content_hash` latest-alive 仍是主规则。额外：
+
+| 条件 | 行为 |
+| --- | --- |
+| 新捕获是更长存活项的**精确子串**（≥8 字、长度比 ≤0.9） | **不建独立行**；在 haystack 记 `substr_ref` 事件 |
+| 新捕获更长且包含已有短项 | 短项 **soft-delete**；haystack 记 `substr_absorb` |
+| 全文再拷 | 仍 `copy_count++` |
+
+UI：列表只见 haystack；时间线 toast 可显示「片段引用」。
