@@ -185,8 +185,50 @@
       border-radius: 12px; padding: 10px 12px;
       background: rgba(255,255,255,0.72);
     }
-    .ops-item .ops-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 13px; }
-    .ops-item .ops-meta { color: var(--muted); font-size: 11px; margin-top: 4px; word-break: break-all; }
+    .ops-item .ops-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 13px; align-items: baseline; flex-wrap: wrap; }
+    .ops-item .ops-row {
+      display: grid; grid-template-columns: 72px 1fr; gap: 6px 10px;
+      margin-top: 6px; font-size: 12px; line-height: 1.45;
+    }
+    .ops-item .ops-k { color: var(--muted); font-weight: 500; }
+    .ops-item .ops-v {
+      color: var(--ink); word-break: break-all; overflow-wrap: anywhere;
+      white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11.5px;
+    }
+    .ops-item .ops-v.is-plain {
+      font-family: inherit; font-size: 12.5px; white-space: pre-wrap;
+    }
+    .event-panel {
+      margin-top: 8px; border-top: 0.5px solid var(--separator);
+      padding-top: 8px;
+    }
+    .event-toggle {
+      display: inline-flex; align-items: center; gap: 4px;
+      border: 0; background: transparent; padding: 0; margin: 0;
+      color: var(--muted); font: inherit; font-size: 12px; font-weight: 500;
+      cursor: pointer; letter-spacing: -0.01em;
+    }
+    .event-toggle:hover { color: var(--ink); }
+    .event-toggle .material-symbols-outlined { font-size: 16px; }
+    .event-meta-line {
+      color: var(--muted); font-size: 11.5px; margin-top: 4px;
+      letter-spacing: -0.01em; line-height: 1.4;
+    }
+    .event-list {
+      list-style: none; margin: 8px 0 0; padding: 0 0 0 10px;
+      border-left: 2px solid rgba(0,0,0,0.08);
+      display: none; flex-direction: column; gap: 8px;
+    }
+    .event-list.open { display: flex; }
+    .event-item { position: relative; padding-left: 10px; }
+    .event-item::before {
+      content: ''; position: absolute; left: -15px; top: 6px;
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 0 2px rgba(0,122,255,0.15);
+    }
+    .event-item .ev-time { font-size: 12px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+    .event-item .ev-sub { font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-all; }
     .top-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
     main { flex: 1; padding: 6px var(--chrome-pad-x) 48px; }
@@ -326,22 +368,22 @@
     }
     .card-body pre { margin: 0; }
     /*
-     * Notes-like rich text (RTF/HTML from Cocoa / Notes)
-     * Same contract as .text-scroll / OCR: unwrap long lines + pan X/Y.
-     * Outer scrolls; inner is max-content so soft-wrap never steals horizontal room.
+     * Notes-like rich text surface (RTF/HTML from Cocoa / Notes)
+     * Preserve list hierarchy & indent; kill Writer spacer chrome.
      */
     .notes-rich, .snippet-html {
       background: rgba(245, 245, 247, 0.88);
-      padding: 11px 13px 12px;
+      padding: 11px 13px 14px;
       border-radius: var(--radius-sm);
       border: 0.5px solid var(--separator);
       max-height: min(42vh, 340px);
-      overflow-x: auto;
-      overflow-y: auto;
+      overflow: auto;
       min-width: 0;
       max-width: 100%;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       font-family: var(--font-ui);
       font-size: 14px;
       line-height: 1.38;
@@ -351,9 +393,6 @@
       scrollbar-gutter: stable;
       scrollbar-width: thin;
       scrollbar-color: rgba(60, 60, 67, 0.35) transparent;
-      /* never soft-wrap at the scrollport — wrapping lives nowhere */
-      word-break: normal;
-      overflow-wrap: normal;
     }
     .notes-rich::-webkit-scrollbar,
     .snippet-html::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -364,70 +403,33 @@
       border: 2px solid transparent;
       background-clip: padding-box;
     }
-    .notes-rich::-webkit-scrollbar-thumb:hover,
-    .snippet-html::-webkit-scrollbar-thumb:hover {
-      background: rgba(60, 60, 67, 0.42);
-      border: 2px solid transparent;
-      background-clip: padding-box;
-    }
     .notes-rich::-webkit-scrollbar-track,
     .snippet-html::-webkit-scrollbar-track,
     .notes-rich::-webkit-scrollbar-corner,
     .snippet-html::-webkit-scrollbar-corner { background: transparent; }
-
-    /* Inner: grow with content width so overflow-x can pan */
-    .notes-rich-inner, .snippet-html-inner {
-      display: block;
-      box-sizing: border-box;
-      /* pad so last glyphs clear scrollbar tracks */
-      padding: 0 8px 8px 0;
-      width: max-content;
-      min-width: 100%;
-      max-width: none;
-      word-break: normal;
-      overflow-wrap: normal;
-    }
-
     .notes-rich.is-tiny, .snippet-html.is-tiny {
       max-height: none;
-      overflow-x: auto;
-      overflow-y: hidden;
+      overflow: visible;
       border: 0;
       background: transparent;
-      padding: 0 0 6px 0;
-      scrollbar-gutter: auto;
-    }
-    .notes-rich.is-tiny .notes-rich-inner,
-    .snippet-html.is-tiny .snippet-html-inner {
-      padding: 0 12px 4px 0;
+      padding: 0;
     }
 
-    .notes-rich p, .snippet-html p,
-    .notes-rich div, .snippet-html div,
-    .notes-rich li, .snippet-html li,
-    .notes-rich pre, .snippet-html pre,
-    .notes-rich h1, .notes-rich h2, .notes-rich h3,
-    .snippet-html h1, .snippet-html h2, .snippet-html h3 {
+    .notes-rich p, .snippet-html p {
       margin: 0 0 0.32em;
       min-height: 0 !important;
-      /* unwrap: no soft wrap — pan horizontally like plain text / OCR */
-      white-space: pre;
-      word-break: normal;
-      overflow-wrap: normal;
-      max-width: none;
+      white-space: pre-wrap; /* keep SQL / code indent from Apple-converted-space */
     }
-    .notes-rich p:last-child, .snippet-html p:last-child,
-    .notes-rich div:last-child, .snippet-html div:last-child { margin-bottom: 0; }
+    .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
     .notes-rich p:empty, .snippet-html p:empty,
     .notes-rich p > br:only-child, .snippet-html p > br:only-child { display: none; }
 
-    /* Hierarchical lists — Apple Notes feel; keep indent, still unwrap lines */
+    /* Hierarchical lists — Apple Notes feel */
     .notes-rich ul, .snippet-html ul,
     .notes-rich ol, .snippet-html ol {
       margin: 0.08em 0 0.28em;
       padding-left: 1.4em;
       list-style-position: outside;
-      max-width: none;
     }
     .notes-rich ul, .snippet-html ul { list-style-type: disc; }
     .notes-rich ul ul, .snippet-html ul ul { list-style-type: circle; }
@@ -456,24 +458,11 @@
 
     /* Mono runs (Notes monospaced paragraphs / code) */
     .notes-rich .is-mono, .snippet-html .is-mono,
-    .notes-rich code, .snippet-html code,
-    .notes-rich pre, .snippet-html pre {
+    .notes-rich code, .snippet-html code {
       font-family: var(--font-mono);
       font-size: 0.9em;
       letter-spacing: 0;
       font-variant-ligatures: none;
-      font-feature-settings: "liga" 0, "calt" 0;
-      white-space: pre;
-    }
-    .notes-rich table, .snippet-html table {
-      border-collapse: collapse;
-      max-width: none;
-      width: max-content;
-    }
-    .notes-rich td, .notes-rich th, .snippet-html td, .snippet-html th {
-      white-space: pre;
-      padding: 0 0.6em 0.2em 0;
-      vertical-align: top;
     }
     .notes-rich .Apple-tab-span, .snippet-html .Apple-tab-span { display: none !important; }
 
@@ -1443,6 +1432,58 @@ window.ClipViewMasonry = Masonry;
       return cls;
     }
 
+
+    const eventsCache = new Map(); // id -> events[]
+
+    async function toggleCardEvents(card, id, btn) {
+      const list = card.querySelector(`[data-events-list="${CSS.escape(id)}"]`);
+      if (!list) return;
+      const open = list.classList.contains('open');
+      if (open) {
+        list.classList.remove('open');
+        list.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+        const lab = btn.querySelector('.event-toggle-label');
+        if (lab && !lab.textContent.includes('事件时间线')) {
+          /* keep */
+        }
+        scheduleMasonrySync();
+        return;
+      }
+      list.hidden = false;
+      list.classList.add('open');
+      btn.setAttribute('aria-expanded', 'true');
+      list.innerHTML = '<li class="event-item"><div class="ev-sub">加载中…</div></li>';
+      scheduleMasonrySync();
+      try {
+        let rows = eventsCache.get(id);
+        if (!rows) {
+          const res = await fetch(`${API}/api/items/${encodeURIComponent(id)}/events?limit=100`);
+          if (!res.ok) throw new Error('events ' + res.status);
+          const data = await res.json();
+          rows = data.events || [];
+          eventsCache.set(id, rows);
+        }
+        if (!rows.length) {
+          list.innerHTML = '<li class="event-item"><div class="ev-sub">暂无事件记录</div></li>';
+        } else {
+          list.innerHTML = rows.map(ev => {
+            const ts = formatLocalTime(ev.eventTs);
+            const kind = ev.kind || 'capture';
+            const src = ev.sourceApp || '';
+            const type = ev.type || '';
+            return `<li class="event-item">
+              <div class="ev-time">${esc(ts)}</div>
+              <div class="ev-sub">${esc(kind)}${type ? ' · ' + esc(type) : ''}${src ? ' · ' + esc(src) : ''}</div>
+            </li>`;
+          }).join('');
+        }
+      } catch (err) {
+        list.innerHTML = '<li class="event-item"><div class="ev-sub">加载失败</div></li>';
+      }
+      scheduleMasonrySync();
+    }
+
     function buildCard(item) {
       const card = document.createElement('article');
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
@@ -1474,11 +1515,9 @@ window.ClipViewMasonry = Masonry;
           plain = normalizePlainText(item.preview);
         }
         const tinyBase = (plain || plainFromHtml || '');
-        // Only truly short single-line snippets skip the tall scrollport.
-        // Multi-line / long HTML must keep max-height + XY pan (never soft-wrap).
         const tiny = tinyBase.length > 0 && tinyBase.length <= 80 && !tinyBase.includes('\n') ? ' is-tiny' : '';
         if (notesFragmentUseful(fragment)) {
-          body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
+          body = `<div class="notes-rich${tiny}">${fragment}</div>`;
         } else if (plain) {
           const mode = textLineModeClass(plain);
           body = `<div class="text-scroll is-rtf${mode}"><pre class="plain">${esc(plain)}</pre></div>`;
@@ -1510,6 +1549,12 @@ window.ClipViewMasonry = Masonry;
             <button type="button" class="icon-btn" data-copy="${copyText}" title="复制" aria-label="复制"><svg class="icon-off" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button type="button" class="icon-btn is-danger" data-del="${item.id}" title="移入回收箱" aria-label="删除"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9.5 7.5V6.2A1.7 1.7 0 0 1 11.2 4.5h1.6a1.7 1.7 0 0 1 1.7 1.7v1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.2 7.5l.6 11.2a1.7 1.7 0 0 0 1.7 1.6h3a1.7 1.7 0 0 0 1.7-1.6l.6-11.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10.2 11v5.5M13.8 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           </div>`;
+      const firstSeen = item.firstSeenAt != null ? formatLocalTime(item.firstSeenAt) : timeStr;
+      const lastSeen = timeStr;
+      const showSpan = item.firstSeenAt != null && Math.abs(Number(item.firstSeenAt) - Number(item.timestamp)) > 0.5;
+      const spanLine = showSpan
+        ? `<div class="event-meta-line">首次 ${firstSeen} · 最近 ${lastSeen}</div>`
+        : `<div class="event-meta-line">时间 ${lastSeen}</div>`;
       card.innerHTML = `
         <div class="card-header">
           <span class="badge"><span class="material-symbols-outlined" style="font-size:14px">label</span>${esc(item.type)}</span>
@@ -1517,6 +1562,14 @@ window.ClipViewMasonry = Masonry;
           ${trashMeta}
         </div>
         <div class="card-body">${body}</div>
+        <div class="event-panel" data-events-for="${escAttr(item.id)}">
+          ${spanLine}
+          <button type="button" class="event-toggle" data-events-toggle="${escAttr(item.id)}" aria-expanded="false">
+            <span class="material-symbols-outlined">timeline</span>
+            <span class="event-toggle-label">事件时间线${count > 1 ? ' · ' + count + ' 次' : ''}</span>
+          </button>
+          <ul class="event-list" data-events-list="${escAttr(item.id)}" hidden></ul>
+        </div>
         <div class="card-actions">
           <div class="source">${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size:14px">apps</span>${esc(item.sourceApp)}` : ''}</div>
           ${actions}
@@ -1554,6 +1607,12 @@ window.ClipViewMasonry = Masonry;
           btn.dataset.busy = '0';
           btn.disabled = false;
         });
+      });
+      card.querySelector('[data-events-toggle]')?.addEventListener('click', e => {
+        const btn = e.currentTarget;
+        const id = btn.getAttribute('data-events-toggle');
+        if (!id) return;
+        toggleCardEvents(card, id, btn);
       });
       const wrap = card.querySelector('.thumb-wrap');
       if (wrap) {
@@ -1803,6 +1862,7 @@ window.ClipViewMasonry = Masonry;
     async function deleteClip(id) {
       try {
         await fetch(`${API}/api/clips?id=${id}`, { method: 'DELETE' });
+        eventsCache.delete(id);
         clips = clips.filter(c => c.id !== id);
         cardCache.get(id)?.remove();
         cardCache.delete(id);
@@ -1819,6 +1879,7 @@ window.ClipViewMasonry = Masonry;
           body: JSON.stringify({ id })
         });
         if (!res.ok) throw new Error('restore ' + res.status);
+        eventsCache.delete(id);
         clips = clips.filter(c => c.id !== id);
         cardCache.get(id)?.remove();
         cardCache.delete(id);
@@ -1913,7 +1974,7 @@ window.ClipViewMasonry = Masonry;
       if (!host) return;
       host.innerHTML = '<li class="backup-label">加载中…</li>';
       try {
-        const res = await fetch(API + '/api/oplogs?limit=120');
+        const res = await fetch(API + '/api/oplogs?limit=300');
         if (!res.ok) throw new Error('oplogs ' + res.status);
         const data = await res.json();
         const items = data.items || [];
@@ -1925,11 +1986,26 @@ window.ClipViewMasonry = Masonry;
         items.forEach(row => {
           const li = document.createElement('li');
           li.className = 'ops-item';
-          const detail = row.detail && row.detail !== null ? String(row.detail) : '';
-          const itemId = row.itemId && row.itemId !== null ? String(row.itemId) : '';
+          const detail = (row.detail != null && row.detail !== '') ? String(row.detail) : '';
+          const itemId = (row.itemId != null && row.itemId !== '') ? String(row.itemId) : '';
+          const contentHash = (row.contentHash != null && row.contentHash !== '') ? String(row.contentHash) : '';
+          const source = row.source != null ? String(row.source) : '';
+          const action = row.action != null ? String(row.action) : '';
+          const id = row.id != null ? String(row.id) : '';
+          const rows = [];
+          rows.push(['时间', formatLocalTime(row.ts), true]);
+          rows.push(['动作', action, true]);
+          rows.push(['来源', source, true]);
+          if (itemId) rows.push(['条目 ID', itemId, false]);
+          if (contentHash) rows.push(['contentHash', contentHash, false]);
+          if (id) rows.push(['日志 ID', id, false]);
+          if (detail) rows.push(['详情', detail, true]);
+          const body = rows.map(([k, v, plain]) =>
+            `<div class="ops-row"><span class="ops-k">${esc(k)}</span><span class="ops-v${plain ? ' is-plain' : ''}">${esc(v)}</span></div>`
+          ).join('');
           li.innerHTML = `
-            <div class="ops-top"><span>${esc(row.action || '')}</span><span class="time">${formatLocalTime(row.ts)}</span></div>
-            <div class="ops-meta">source=${esc(row.source || '')}${itemId ? ' · item=' + esc(itemId.slice(0, 8)) + '…' : ''}${detail ? ' · ' + esc(detail) : ''}</div>`;
+            <div class="ops-top"><span>${esc(action)}</span><span class="time">${formatLocalTime(row.ts)}</span></div>
+            ${body}`;
           host.appendChild(li);
         });
       } catch (e) {

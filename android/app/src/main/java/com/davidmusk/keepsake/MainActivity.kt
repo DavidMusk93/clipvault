@@ -45,6 +45,15 @@ import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import com.davidmusk.keepsake.data.OperationLog
+import com.davidmusk.keepsake.data.ClipEvent
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AssistChip
+import androidx.compose.material.icons.filled.RestoreFromTrash
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -129,7 +138,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Tab { Backup, Captures }
+private enum class Tab { Backup, Captures, Ops }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,6 +159,8 @@ private fun KeepsakeRoot(
     var hasRoot by remember { mutableStateOf(app.backupRepo.hasBackupRoot()) }
     var offset by remember { mutableIntStateOf(0) }
     var endReached by remember { mutableStateOf(false) }
+    var trashOnly by remember { mutableStateOf(false) }
+    var opLogs by remember { mutableStateOf<List<OperationLog>>(emptyList()) }
 
     // Fully custom contract — subclassing OpenDocumentTree still got MIUI intent-hijack.
     val openTree = rememberLauncherForActivityResult(
@@ -210,10 +221,15 @@ private fun KeepsakeRoot(
             limit = 80,
             offset = if (reset) 0 else offset,
             q = query.ifBlank { null },
+            trashOnly = trashOnly,
         )
         items = if (reset) page else items + page
         offset = items.size
         if (page.size < 80) endReached = true
+    }
+
+    suspend fun refreshOpLogs() {
+        opLogs = app.backupRepo.queryOperationLogs(limit = 300)
     }
 
     suspend fun syncAndLoad(force: Boolean = false, quiet: Boolean = false) {
@@ -345,6 +361,17 @@ private fun KeepsakeRoot(
                         },
                         label = { Text("随手记") },
                     )
+                    FilterChip(
+                        selected = tab == Tab.Ops,
+                        onClick = {
+                            tab = Tab.Ops
+                            scope.launch { refreshOpLogs() }
+                        },
+                        label = { Text("操作") },
+                        leadingIcon = if (tab == Tab.Ops) {
+                            { Icon(Icons.Default.History, null, Modifier.size(16.dp)) }
+                        } else null,
+                    )
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -374,6 +401,40 @@ private fun KeepsakeRoot(
                             )
                         },
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !trashOnly,
+                            onClick = {
+                                if (trashOnly) {
+                                    trashOnly = false
+                                    scope.launch {
+                                        loading = true
+                                        refreshList(true)
+                                        loading = false
+                                    }
+                                }
+                            },
+                            label = { Text("主库") },
+                        )
+                        FilterChip(
+                            selected = trashOnly,
+                            onClick = {
+                                if (!trashOnly) {
+                                    trashOnly = true
+                                    scope.launch {
+                                        loading = true
+                                        refreshList(true)
+                                        loading = false
+                                    }
+                                }
+                            },
+                            label = { Text("回收箱") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
+                            },
+                        )
+                    }
                     statusMsg?.let {
                         Text(
                             it,
@@ -382,18 +443,50 @@ private fun KeepsakeRoot(
                             modifier = Modifier.padding(vertical = 6.dp),
                         )
                     }
-                } else {
+                    if (trashOnly) {
+                        Text(
+                            "只读展示云端备份中的回收箱（TTL 30 天）。恢复/删除请在 Mac Web 操作。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
+                    }
+                } else if (tab == Tab.Captures) {
                     Text(
                         "顶栏粘贴，或从其他 App 分享到这里。先保存在本机。",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         modifier = Modifier.padding(vertical = 6.dp),
                     )
+                } else {
+                    Text(
+                        "操作日志来自 Mac 备份库 operation_logs，全量字段展示、不截断。",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    )
                 }
 
-                if (loading && items.isEmpty() && captures.isEmpty()) {
+                if (loading && items.isEmpty() && captures.isEmpty() && opLogs.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
+                    }
+                } else if (tab == Tab.Ops) {
+                    if (opLogs.isEmpty()) {
+                        Text(
+                            "暂无操作日志。请先同步最新 Mac 备份（含 operation_logs 表）。",
+                            modifier = Modifier.padding(24.dp),
+                        )
+                    } else {
+                        LazyColumn(
+                            contentPadding = PaddingValues(bottom = 24.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(opLogs, key = { it.id }) { log ->
+                                OpLogCard(log)
+                            }
+                        }
                     }
                 } else if (tab == Tab.Backup) {
                     // Mature masonry: official LazyVerticalStaggeredGrid (Compose foundation).
@@ -501,22 +594,70 @@ private fun ItemCard(
     repo: BackupRepository,
     onClick: () -> Unit,
 ) {
+    val surface = if (row.inTrash) {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = surface),
         elevation = CardDefaults.cardElevation(1.dp),
+        border = if (row.inTrash) {
+            androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+            )
+        } else null,
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TypeBadge(row.type)
-                Spacer(Modifier.width(6.dp))
+                if (row.copyCount > 1) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "×${row.copyCount}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                if (row.inTrash) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "回收箱",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 Text(
-                    row.displayTime.substringAfter(' '), // HH:mm on card to save space
+                    row.displayTime,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                    maxLines = 1,
+                )
+            }
+            val first = row.displayFirstSeen
+            if (first != null && first != row.displayTime) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "首次 $first",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    maxLines = 1,
+                )
+            }
+            if (row.inTrash) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "删除 ${row.displayDeletedAt ?: "—"} · 30 天后清除",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    maxLines = 2,
                 )
             }
             row.sourceApp?.let {
@@ -531,6 +672,55 @@ private fun ItemCard(
             Spacer(Modifier.height(8.dp))
             ListItemBody(row = row, repo = repo)
         }
+    }
+}
+
+@Composable
+private fun OpLogCard(log: OperationLog) {
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(1.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    log.action,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    log.displayTime,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                )
+            }
+            OpField("来源", log.source)
+            log.itemId?.takeIf { it.isNotBlank() }?.let { OpField("条目 ID", it, mono = true) }
+            log.contentHash?.takeIf { it.isNotBlank() }?.let { OpField("contentHash", it, mono = true) }
+            OpField("日志 ID", log.id, mono = true)
+            log.detail?.takeIf { it.isNotBlank() }?.let { OpField("详情", it) }
+        }
+    }
+}
+
+@Composable
+private fun OpField(label: String, value: String, mono: Boolean = false) {
+    Column {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = if (mono) androidx.compose.ui.text.font.FontFamily.Monospace else null,
+            // Full detail — never ellipsize
+            softWrap = true,
+        )
     }
 }
 
@@ -636,9 +826,42 @@ private fun DetailScreen(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
             )
+            if (row.copyCount > 1) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "复制频次 ×${row.copyCount}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            row.displayFirstSeen?.let { first ->
+                if (first != row.displayTime) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "首次 $first · 最近 ${row.displayTime}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    )
+                }
+            }
+            if (row.inTrash) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "回收箱 · 删除于 ${row.displayDeletedAt ?: "—"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                )
+            }
             Spacer(Modifier.height(12.dp))
             Box(Modifier.weight(1f, fill = true).fillMaxWidth()) {
-                DetailContent(row = row, repo = repo, modifier = Modifier.fillMaxSize())
+                Column(Modifier.fillMaxSize()) {
+                    Box(Modifier.weight(1f, fill = true).fillMaxWidth()) {
+                        DetailContent(row = row, repo = repo, modifier = Modifier.fillMaxSize())
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    ItemEventsSection(itemId = row.id, repo = repo)
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -668,6 +891,71 @@ private fun DetailScreen(
                         Icon(Icons.Default.OpenInBrowser, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("打开")
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun ItemEventsSection(itemId: String, repo: BackupRepository) {
+    var events by remember(itemId) { mutableStateOf<List<ClipEvent>>(emptyList()) }
+    var loaded by remember(itemId) { mutableStateOf(false) }
+    var expanded by remember(itemId) { mutableStateOf(false) }
+    LaunchedEffect(itemId, expanded) {
+        if (expanded && !loaded) {
+            events = repo.queryItemEvents(itemId, limit = 100)
+            loaded = true
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.History, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (expanded) "事件时间线" else "展开事件时间线",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (expanded && loaded) "${events.size}" else "…",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            )
+        }
+        if (expanded) {
+            Spacer(Modifier.height(8.dp))
+            if (!loaded) {
+                Text("加载中…", style = MaterialTheme.typography.bodySmall)
+            } else if (events.isEmpty()) {
+                Text("暂无事件（需 Mac 备份含 clipboard_events）", style = MaterialTheme.typography.bodySmall)
+            } else {
+                events.forEach { ev ->
+                    Column(Modifier.padding(vertical = 4.dp)) {
+                        Text(ev.displayTime, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            buildString {
+                                append(ev.kind)
+                                if (ev.type.isNotBlank()) append(" · ").append(ev.type)
+                                if (!ev.sourceApp.isNullOrBlank()) append(" · ").append(ev.sourceApp)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                        )
                     }
                 }
             }

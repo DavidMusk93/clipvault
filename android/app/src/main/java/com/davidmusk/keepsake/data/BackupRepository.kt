@@ -578,52 +578,156 @@ class BackupRepository(
         null
     }
 
-    suspend fun queryItems(limit: Int = 80, offset: Int = 0, q: String? = null): List<ClipboardRow> =
+    /** Whether backup schema has soft-delete / first_seen columns. */
+    private fun hasTrashColumns(db: SQLiteDatabase): Boolean =
+        columnExists(db, "clipboard_items", "deleted_at")
+
+    private fun columnExists(db: SQLiteDatabase, table: String, column: String): Boolean {
+        db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+            val nameIdx = c.getColumnIndex("name")
+            while (c.moveToNext()) {
+                if (nameIdx >= 0 && c.getString(nameIdx) == column) return true
+            }
+        }
+        return false
+    }
+
+    private fun selectItemColumns(withTrash: Boolean): String {
+        val base = """
+            id, timestamp, type, content_hash, text_content, url, html_content,
+            source_app, ocr_text, IFNULL(copy_count,1), file_urls
+        """.trimIndent()
+        return if (withTrash) {
+            "$base, deleted_at, first_seen_at"
+        } else {
+            base
+        }
+    }
+
+    /**
+     * @param trashOnly when true and schema supports it, only soft-deleted rows.
+     *                  when false, only alive rows (deleted_at IS NULL) if column exists.
+     */
+    suspend fun queryItems(
+        limit: Int = 80,
+        offset: Int = 0,
+        q: String? = null,
+        trashOnly: Boolean = false,
+    ): List<ClipboardRow> =
         withContext(Dispatchers.IO) {
             val db = openDb() ?: return@withContext emptyList()
             db.use {
+                val withTrash = hasTrashColumns(it)
+                val cols = selectItemColumns(withTrash)
                 val hasQuery = !q.isNullOrBlank()
-                val sql = if (hasQuery) {
-                    """
-                    SELECT id, timestamp, type, content_hash, text_content, url, html_content,
-                           source_app, ocr_text, IFNULL(copy_count,1), file_urls
-                    FROM clipboard_items
-                    WHERE text_content LIKE ? OR ocr_text LIKE ? OR source_app LIKE ?
-                          OR html_content LIKE ? OR url LIKE ?
-                    ORDER BY timestamp DESC, id DESC
-                    LIMIT ? OFFSET ?
-                    """.trimIndent()
-                } else {
-                    """
-                    SELECT id, timestamp, type, content_hash, text_content, url, html_content,
-                           source_app, ocr_text, IFNULL(copy_count,1), file_urls
-                    FROM clipboard_items
-                    ORDER BY timestamp DESC, id DESC
-                    LIMIT ? OFFSET ?
-                    """.trimIndent()
+                val trashClause = when {
+                    !withTrash -> ""
+                    trashOnly -> "deleted_at IS NOT NULL"
+                    else -> "deleted_at IS NULL"
                 }
-                val args = if (hasQuery) {
+                val searchClause = if (hasQuery) {
+                    "(IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
+                } else ""
+                val whereParts = listOfNotNull(
+                    trashClause.takeIf { s -> s.isNotEmpty() },
+                    searchClause.takeIf { s -> s.isNotEmpty() },
+                )
+                val where = if (whereParts.isEmpty()) "" else "WHERE " + whereParts.joinToString(" AND ")
+                val order = if (withTrash && trashOnly) {
+                    "ORDER BY deleted_at DESC, id DESC"
+                } else {
+                    "ORDER BY timestamp DESC, id DESC"
+                }
+                val sql = "SELECT $cols FROM clipboard_items $where $order LIMIT ? OFFSET ?"
+                val args = mutableListOf<String>()
+                if (hasQuery) {
                     val like = "%${q!!.trim()}%"
-                    arrayOf(like, like, like, like, like, limit.toString(), offset.toString())
-                } else {
-                    arrayOf(limit.toString(), offset.toString())
+                    repeat(5) { args += like }
                 }
-                it.rawQuery(sql, args).use { c -> readRows(c) }
+                args += limit.toString()
+                args += offset.toString()
+                it.rawQuery(sql, args.toTypedArray()).use { c -> readRows(c, withTrash) }
             }
         }
 
     suspend fun getItem(id: String): ClipboardRow? = withContext(Dispatchers.IO) {
         val db = openDb() ?: return@withContext null
         db.use {
+            val withTrash = hasTrashColumns(it)
+            val cols = selectItemColumns(withTrash)
             it.rawQuery(
-                """
-                SELECT id, timestamp, type, content_hash, text_content, url, html_content,
-                       source_app, ocr_text, IFNULL(copy_count,1), file_urls
-                FROM clipboard_items WHERE id = ? LIMIT 1
-                """.trimIndent(),
-                arrayOf(id)
-            ).use { c -> readRows(c).firstOrNull() }
+                "SELECT $cols FROM clipboard_items WHERE id = ? LIMIT 1",
+                arrayOf(id),
+            ).use { c -> readRows(c, withTrash).firstOrNull() }
         }
+    }
+
+    suspend fun queryItemEvents(itemId: String, limit: Int = 100): List<ClipEvent> =
+        withContext(Dispatchers.IO) {
+            val db = openDb() ?: return@withContext emptyList()
+            db.use {
+                if (!tableExists(it, "clipboard_events")) return@withContext emptyList()
+                val lim = limit.coerceIn(1, 500)
+                it.rawQuery(
+                    """
+                    SELECT id, item_id, content_hash, event_ts, type, source_app, kind
+                    FROM clipboard_events WHERE item_id = ?
+                    ORDER BY event_ts DESC LIMIT ?
+                    """.trimIndent(),
+                    arrayOf(itemId, lim.toString()),
+                ).use { c ->
+                    val out = ArrayList<ClipEvent>(c.count)
+                    while (c.moveToNext()) {
+                        out += ClipEvent(
+                            id = c.getString(0) ?: "",
+                            itemId = c.getString(1) ?: "",
+                            contentHash = c.getString(2) ?: "",
+                            eventTs = c.getDouble(3),
+                            type = c.getString(4) ?: "",
+                            sourceApp = c.getString(5),
+                            kind = c.getString(6) ?: "capture",
+                        )
+                    }
+                    out
+                }
+            }
+        }
+
+    suspend fun queryOperationLogs(limit: Int = 200): List<OperationLog> =
+        withContext(Dispatchers.IO) {
+            val db = openDb() ?: return@withContext emptyList()
+            db.use {
+                if (!tableExists(it, "operation_logs")) return@withContext emptyList()
+                val lim = limit.coerceIn(1, 500)
+                it.rawQuery(
+                    """
+                    SELECT id, ts, action, item_id, content_hash, detail, source
+                    FROM operation_logs ORDER BY ts DESC LIMIT ?
+                    """.trimIndent(),
+                    arrayOf(lim.toString()),
+                ).use { c ->
+                    val out = ArrayList<OperationLog>(c.count)
+                    while (c.moveToNext()) {
+                        out += OperationLog(
+                            id = c.getString(0) ?: "",
+                            ts = c.getDouble(1),
+                            action = c.getString(2) ?: "",
+                            itemId = c.getString(3),
+                            contentHash = c.getString(4),
+                            detail = c.getString(5),
+                            source = c.getString(6) ?: "",
+                        )
+                    }
+                    out
+                }
+            }
+        }
+
+    private fun tableExists(db: SQLiteDatabase, name: String): Boolean {
+        db.rawQuery(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ? LIMIT 1",
+            arrayOf(name),
+        ).use { c -> return c.moveToFirst() }
     }
 
     private fun blobCandidateNames(row: ClipboardRow): List<String> = when (row.type.lowercase()) {
@@ -850,10 +954,12 @@ class BackupRepository(
         }
     }
 
-    private fun readRows(c: android.database.Cursor): List<ClipboardRow> {
+    private fun readRows(c: android.database.Cursor, withTrash: Boolean): List<ClipboardRow> {
         val out = ArrayList<ClipboardRow>(c.count)
         // Column order must match SELECT list in queryItems/getItem.
         while (c.moveToNext()) {
+            val deletedAt = if (withTrash && !c.isNull(11)) c.getDouble(11) else null
+            val firstSeen = if (withTrash && c.columnCount > 12 && !c.isNull(12)) c.getDouble(12) else null
             out += ClipboardRow(
                 id = c.getString(0),
                 timestamp = c.getDouble(1),
@@ -866,6 +972,8 @@ class BackupRepository(
                 ocrText = c.getString(8),
                 copyCount = c.getInt(9),
                 fileUrls = c.getString(10),
+                deletedAt = deletedAt,
+                firstSeenAt = firstSeen,
             )
         }
         return out

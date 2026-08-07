@@ -19,7 +19,13 @@ data class ClipboardRow(
     val ocrText: String?,
     val copyCount: Int,
     val fileUrls: String?,
+    /** Soft-delete unix seconds; null = alive. */
+    val deletedAt: Double? = null,
+    /** First capture event unix seconds. */
+    val firstSeenAt: Double? = null,
 ) {
+    val inTrash: Boolean get() = deletedAt != null
+
     val preview: String
         get() {
             val raw = when (type) {
@@ -36,12 +42,37 @@ data class ClipboardRow(
         }
 
     val displayTime: String
-        get() {
-            // Mac stores CF/Unix seconds as Double (timeIntervalSince1970).
-            val ms = (timestamp * 1000.0).toLong()
-            val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
-            return fmt.format(Date(ms))
-        }
+        get() = formatLocalUnix(timestamp)
+
+    val displayFirstSeen: String?
+        get() = firstSeenAt?.let { formatLocalUnix(it) }
+
+    val displayDeletedAt: String?
+        get() = deletedAt?.let { formatLocalUnix(it) }
+}
+
+data class ClipEvent(
+    val id: String,
+    val itemId: String,
+    val contentHash: String,
+    val eventTs: Double,
+    val type: String,
+    val sourceApp: String?,
+    val kind: String,
+) {
+    val displayTime: String get() = formatLocalUnix(eventTs)
+}
+
+data class OperationLog(
+    val id: String,
+    val ts: Double,
+    val action: String,
+    val itemId: String?,
+    val contentHash: String?,
+    val detail: String?,
+    val source: String,
+) {
+    val displayTime: String get() = formatLocalUnix(ts)
 }
 
 @Serializable
@@ -98,9 +129,15 @@ data class LocalCapture(
 
     val displayTime: String
         get() {
-            val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+            val fmt = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.getDefault())
             return fmt.format(Date(createdAtMs))
         }
+}
+
+fun formatLocalUnix(seconds: Double): String {
+    val ms = (seconds * 1000.0).toLong()
+    val fmt = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.getDefault())
+    return fmt.format(Date(ms))
 }
 
 fun isoNow(): String {
