@@ -89,3 +89,5 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 时间线 = **多捕获历史** 的二级细节，不是默认噪音。
 
 瀑布流内 **禁止就地 expand**（列高/重排不稳）。多 ref 时间线用 **底部可交互 toast 卡片** （毛玻璃 sheet + scrim，lazy fetch，Esc/遮罩关闭）—— 列表零布局扰动。
+
+**入口**：不要单独「事件时间线」按钮；用 header 的 **×N 引用徽章** 作为唯一 affordance（单 ref 无徽章、无入口）。

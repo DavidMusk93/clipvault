@@ -183,9 +183,25 @@
     }
     .badge-count {
       display: inline-flex; align-items: center; gap: 3px;
-      height: 20px; padding: 0 7px; border-radius: 999px;
+      height: 22px; padding: 0 8px; border-radius: 999px;
+      border: 0;
       background: var(--accent-soft); color: var(--accent);
-      font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
+      font: inherit; font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
+      cursor: default;
+    }
+    /* Multi-ref: header ×N is the timeline affordance (no extra button) */
+    button.badge-count {
+      cursor: pointer;
+      transition: background var(--press), transform var(--press), box-shadow var(--press);
+    }
+    button.badge-count:hover {
+      background: rgba(0, 113, 227, 0.18);
+      box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.10);
+    }
+    button.badge-count:active { transform: scale(0.96); }
+    button.badge-count:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.28);
     }
     .badge-count .material-symbols-outlined { font-size: 13px; }
     .ops-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -1739,9 +1755,6 @@ window.ClipViewMasonry = Masonry;
       const inTrash = !!(item.inTrash || item.deletedAt);
       if (inTrash) card.classList.add('in-trash');
       const count = Math.max(1, Number(item.copyCount) || 1);
-      const countBadge = count > 1
-        ? `<span class="badge-count" title="复制频次（latest-alive + 事件累计）"><span class="material-symbols-outlined">content_copy</span>×${count}</span>`
-        : '';
       const delTs = item.deletedAt ? formatLocalTime(item.deletedAt) : '';
       const trashMeta = inTrash
         ? `<span class="time" title="删除时间">🗑 ${delTs || timeStr} · 30 天后清除</span>`
@@ -1772,17 +1785,18 @@ window.ClipViewMasonry = Masonry;
       }
       const tm = typeMeta(item.type);
       const multiRef = itemHasMultiRef(item);
-      // Lightweight default: single-ref cards carry time in header only — no timeline chrome.
-      const eventPanelHtml = multiRef
-        ? `<div class="event-panel" data-events-for="${escAttr(item.id)}">
-          ${spanLine}
-          <button type="button" class="event-toggle" data-events-open="${escAttr(item.id)}"
-            data-copy-count="${count}" data-type-label="${escAttr(tm.label)}" data-source-app="${escAttr(item.sourceApp || '')}">
-            <span class="material-symbols-outlined">timeline</span>
-            <span class="event-toggle-label">事件时间线 · ${count} 次</span>
-          </button>
-        </div>`
-        : (spanLine ? `<div class="event-panel is-meta-only">${spanLine}</div>` : '');
+      // Header ×N is the only timeline affordance (taste: no redundant button).
+      const countBadge = multiRef
+        ? `<button type="button" class="badge-count" data-events-open="${escAttr(item.id)}"
+            data-copy-count="${count}" data-type-label="${escAttr(tm.label)}" data-source-app="${escAttr(item.sourceApp || '')}"
+            title="查看事件时间线（${count} 次捕获）" aria-label="事件时间线，${count} 次捕获">
+            <span class="material-symbols-outlined">content_copy</span>×${count}
+          </button>`
+        : '';
+      // Optional meta only (首次…); never a second timeline button.
+      const eventPanelHtml = spanLine
+        ? `<div class="event-panel is-meta-only">${spanLine}</div>`
+        : '';
       card.innerHTML = `
         <div class="card-header">
           <span class="badge ${tm.cls}"><span class="material-symbols-outlined">${tm.icon}</span>${esc(tm.label)}</span>
