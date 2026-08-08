@@ -1518,22 +1518,46 @@
   <script>
     const API = '';
 
+    /**
+     * Parse wire instants → Date (absolute).
+     * Supports: unix sec/ms, ISO with Z, ISO with ±offset, space-separated wall times.
+     * Bare `YYYY-MM-DDTHH:mm:ss` (no zone) is treated as **UTC** (legacy STATUS.json).
+     */
+    function parseInstant(input) {
+      if (input == null || input === '' || input === '—') return null;
+      if (input instanceof Date) return Number.isNaN(input.getTime()) ? null : input;
+      if (typeof input === 'number' && Number.isFinite(input)) {
+        return new Date(input > 1e12 ? input : input * 1000);
+      }
+      const s = String(input).trim();
+      if (!s) return null;
+      if (/^\d+(\.\d+)?$/.test(s)) {
+        const n = parseFloat(s);
+        return new Date(n > 1e12 ? n : n * 1000);
+      }
+      // ISO with explicit zone or Z
+      if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) {
+        const d = new Date(s);
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+      // "yyyy-MM-dd HH:mm:ss" → local wall (native UI / logs)
+      if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(s) && !/[zZ]|[+-]\d{2}/.test(s)) {
+        // Legacy Mac STATUS used UTC without offset; prefer Z for T-separator bare ISO.
+        if (s.includes('T')) {
+          const d = new Date(s.endsWith('Z') ? s : s + 'Z');
+          return Number.isNaN(d.getTime()) ? null : d;
+        }
+        const d = new Date(s.replace(' ', 'T')); // local parse fallback
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+      const d = new Date(s);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
     /** Display instants in the browser's local timezone (never raw UTC/Z). */
     function formatLocalTime(input) {
-      if (input == null || input === '' || input === '—') return '—';
-      let d;
-      if (typeof input === 'number' && Number.isFinite(input)) {
-        d = new Date(input > 1e12 ? input : input * 1000);
-      } else {
-        const s = String(input).trim();
-        if (/^\d+(\.\d+)?$/.test(s)) {
-          const n = parseFloat(s);
-          d = new Date(n > 1e12 ? n : n * 1000);
-        } else {
-          d = new Date(s);
-        }
-      }
-      if (Number.isNaN(d.getTime())) return String(input);
+      const d = parseInstant(input);
+      if (!d) return input == null || input === '' ? '—' : String(input);
       const p = n => String(n).padStart(2, '0');
       // Local wall clock: yyyy/mm/dd HH:MM:SS
       return (
@@ -1691,15 +1715,10 @@ window.ClipViewMasonry = Masonry;
       evalPreview = null;
     }
 
-    /** Relative + absolute time (Apple Mail / Files style). */
+    /** Relative + absolute time (Apple Mail / Files style) — always local zone. */
     function formatEvalTime(input) {
-      let d;
-      if (typeof input === 'number' && Number.isFinite(input)) {
-        d = new Date(input > 1e12 ? input : input * 1000);
-      } else {
-        d = new Date(input);
-      }
-      if (Number.isNaN(d.getTime())) return { rel: '—', abs: '—' };
+      const d = parseInstant(input);
+      if (!d) return { rel: '—', abs: '—' };
       const now = new Date();
       const sec = Math.round((now - d) / 1000);
       let rel;
@@ -1716,11 +1735,7 @@ window.ClipViewMasonry = Masonry;
       } else {
         rel = d.toLocaleString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' });
       }
-      const abs = d.toLocaleString('zh-CN', {
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-      }).replace(/\//g, '/');
-      return { rel, abs };
+      return { rel, abs: formatLocalTime(d) };
     }
 
     function paintEvalStars() {

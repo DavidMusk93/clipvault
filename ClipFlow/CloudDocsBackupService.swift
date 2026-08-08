@@ -512,7 +512,7 @@ final class CloudDocsBackupService {
                     let size = (try? self.fm.attributesOfItem(atPath: artifact.path)[.size] as? NSNumber)?.intValue ?? 0
                     let host = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
                     let created = Date()
-                    let iso = ISO8601DateFormatter().string(from: created)
+                    let iso = ClipTimeFormat.isoLocal(created)
 
                     self.database.itemCount { count in
                         self.queue.async {
@@ -1033,9 +1033,9 @@ final class CloudDocsBackupService {
                 ))
             }
         }
-        let lastISO = lastSuccessUnix.map { ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: $0)) }
+        let lastISO = lastSuccessUnix.map { ClipTimeFormat.isoLocal(unix: $0) }
         let lastSnapISO = (lastSnapshotUnix ?? newestSnapshotUnix()).map {
-            ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: $0))
+            ClipTimeFormat.isoLocal(unix: $0)
         }
         let destStatuses: [BackupDestinationStatus] = config.destinations.map { d in
             let rootURL = BackupDestinationResolver.backupRoot(for: d)
@@ -1048,7 +1048,7 @@ final class CloudDocsBackupService {
                 enabled: d.enabled,
                 available: avail,
                 rootPath: rootURL?.path,
-                lastSuccessAt: lastU.map { ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: $0)) },
+                lastSuccessAt: lastU.map { ClipTimeFormat.isoLocal(unix: $0) },
                 lastSuccessUnix: lastU,
                 lastError: destLastError[d.id],
                 lastPhase: destLastPhase[d.id],
@@ -1111,10 +1111,7 @@ final class CloudDocsBackupService {
     }
 
     private static func timestampId() -> String {
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.dateFormat = "yyyyMMdd-HHmmss"
-        return df.string(from: Date())
+        ClipTimeFormat.localTimestampId()
     }
 
     private static func sha256File(_ url: URL) throws -> String {

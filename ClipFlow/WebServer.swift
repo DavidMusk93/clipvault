@@ -674,7 +674,10 @@ class WebServer {
             }
             
             container.innerHTML = items.map(item => {
-                const time = new Date(item.timestamp * 1000).toLocaleString();
+                const d = new Date(item.timestamp * 1000);
+                const p = n => String(n).padStart(2, '0');
+                const time = d.getFullYear() + '/' + p(d.getMonth()+1) + '/' + p(d.getDate())
+                  + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
                 let contentHtml = '';
                 
                 // 优先展示图片

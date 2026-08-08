@@ -137,11 +137,59 @@ data class LocalCapture(
 fun formatLocalUnix(seconds: Double): String {
     val ms = (seconds * 1000.0).toLong()
     val fmt = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.getDefault())
+    // Explicit local zone — never leave SimpleDateFormat on default that can drift in tests.
+    fmt.timeZone = TimeZone.getDefault()
     return fmt.format(Date(ms))
 }
 
+/**
+ * Display wire instants (unix seconds or ISO-8601) in the device local zone.
+ * Accepts `…Z`, `…+08:00`, and legacy bare ISO (treated as UTC).
+ */
+fun formatDisplayInstant(raw: String?): String {
+    if (raw.isNullOrBlank()) return "—"
+    val s = raw.trim()
+    s.toDoubleOrNull()?.let { return formatLocalUnix(it) }
+    return try {
+        val normalized = when {
+            s.endsWith("Z", ignoreCase = true) || Regex("[+-]\\d{2}:?\\d{2}$").containsMatchIn(s) -> s
+            s.contains('T') -> s + "Z" // legacy STATUS.json UTC without offset
+            else -> s
+        }
+        // java.time is preferred but API may be older; SimpleDateFormat multi-pattern.
+        val patterns = arrayOf(
+            "yyyy-MM-dd'T'HH:mm:ssX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSX",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd HH:mm:ss",
+        )
+        var parsed: Date? = null
+        for (p in patterns) {
+            try {
+                val fmt = SimpleDateFormat(p, Locale.US)
+                if (p.contains("X") || p.contains("'Z'")) {
+                    fmt.timeZone = TimeZone.getTimeZone("UTC")
+                } else {
+                    fmt.timeZone = TimeZone.getDefault()
+                }
+                // For patterns with X, zone is in string; UTC default is fine as base.
+                parsed = fmt.parse(normalized)
+                if (parsed != null) break
+            } catch (_: Exception) {
+            }
+        }
+        if (parsed == null) return s
+        val out = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.getDefault())
+        out.timeZone = TimeZone.getDefault()
+        out.format(parsed)
+    } catch (_: Exception) {
+        s
+    }
+}
+
+/** Wire ISO with local offset (not bare Z mislabel). */
 fun isoNow(): String {
-    val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-    fmt.timeZone = TimeZone.getTimeZone("UTC")
+    val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
+    fmt.timeZone = TimeZone.getDefault()
     return fmt.format(Date())
 }

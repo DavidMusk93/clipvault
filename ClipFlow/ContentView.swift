@@ -351,6 +351,7 @@ struct ItemRowView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         formatter.locale = Locale.current
+        formatter.timeZone = .current
         return formatter
     }()
     

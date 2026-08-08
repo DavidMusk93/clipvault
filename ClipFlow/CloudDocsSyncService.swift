@@ -802,7 +802,7 @@ final class CloudDocsSyncService {
             lastOpId: lastOpId,
             wallTs: Date().timeIntervalSince1970,
             itemHint: nil,
-            updatedAt: ISO8601DateFormatter().string(from: Date())
+            updatedAt: ClipTimeFormat.isoLocal()
         )
         let url = headsDir(in: root).appendingPathComponent("\(hostId).json")
         guard let data = try? encoder.encode(head) else { return }
@@ -918,7 +918,6 @@ final class CloudDocsSyncService {
                 ))
             }
         }
-        let iso = ISO8601DateFormatter()
         return Status(
             enabled: config.enabled,
             hostId: hostId,
@@ -926,8 +925,8 @@ final class CloudDocsSyncService {
             outboxPending: outboxPendingCount(),
             cloudDocsAvailable: root != nil,
             syncRootPath: root?.path,
-            lastPushAt: lastPushUnix.map { iso.string(from: Date(timeIntervalSince1970: $0)) },
-            lastPullAt: lastPullUnix.map { iso.string(from: Date(timeIntervalSince1970: $0)) },
+            lastPushAt: lastPushUnix.map { ClipTimeFormat.isoLocal(unix: $0) },
+            lastPullAt: lastPullUnix.map { ClipTimeFormat.isoLocal(unix: $0) },
             lastPhase: lastPhase,
             lastError: lastError,
             inProgress: inProgress,
