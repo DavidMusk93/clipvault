@@ -44,8 +44,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let userNote: String?
     /// Workflow stage: inbox | useful | followup | archive | reject (nil = unset).
     let userStage: String?
-    /// Optional 1…5 rating; nil = unset.
-    let userRating: Int?
+    /// Optional 0.5…5 rating in half-star steps; nil = unset.
+    let userRating: Double?
     /// Last time user context projection changed.
     let userContextUpdatedAt: Date?
     
@@ -68,7 +68,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
          firstSeenAt: Date? = nil,
          userNote: String? = nil,
          userStage: String? = nil,
-         userRating: Int? = nil,
+         userRating: Double? = nil,
          userContextUpdatedAt: Date? = nil) {
         self.id = id
         self.timestamp = timestamp
@@ -93,10 +93,13 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.userContextUpdatedAt = userContextUpdatedAt
     }
 
-    /// Allowed multi-stage evaluation values (product invariant).
-    static let userStages: Set<String> = [
-        "inbox", "useful", "followup", "archive", "reject"
-    ]
+    /// Normalize to half-star steps in 0.5…5.0; nil if invalid.
+    static func normalizeRating(_ raw: Double?) -> Double? {
+        guard let raw, raw > 0 else { return nil }
+        let stepped = (raw * 2).rounded() / 2
+        guard stepped >= 0.5, stepped <= 5.0 else { return nil }
+        return stepped
+    }
     
     // swiftlint:disable cyclomatic_complexity
     func preview() -> String {

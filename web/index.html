@@ -837,24 +837,45 @@
       margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.02em;
       flex-shrink: 0;
     }
-    /* Compact stars in header — no full-width star row */
+    /* Compact stars in header — tight gap, half-star via gradient clip */
     .eval-stars {
       display: inline-flex; align-items: center; gap: 0;
       flex-shrink: 0;
+      margin-left: 2px;
     }
     .eval-star {
-      width: 28px; height: 28px; border: 0; padding: 0;
-      border-radius: 50%; background: transparent; cursor: pointer;
-      color: rgba(60, 60, 67, 0.20);
+      width: 20px; height: 22px; border: 0; padding: 0; margin: 0 -1px;
+      border-radius: 4px; background: transparent; cursor: pointer;
+      color: rgba(60, 60, 67, 0.18);
       display: inline-flex; align-items: center; justify-content: center;
-      transition: color 0.12s ease, transform 0.12s var(--spring);
+      transition: transform 0.12s var(--spring);
       -webkit-tap-highlight-color: transparent;
+      position: relative;
     }
-    .eval-star svg { width: 18px; height: 18px; display: block; }
-    .eval-star:hover { transform: scale(1.12); }
+    .eval-star svg {
+      width: 16px; height: 16px; display: block;
+      /* fill follows currentColor */
+    }
+    .eval-star:hover { transform: scale(1.14); }
     .eval-star:active { transform: scale(0.9); transition-duration: 60ms; }
     .eval-star.is-on { color: #FF9F0A; }
     .eval-star.is-on:hover { color: #FFB340; }
+    /* Half fill: left half orange, right half muted */
+    .eval-star.is-half {
+      color: transparent;
+      background: linear-gradient(90deg, #FF9F0A 0 50%, rgba(60, 60, 67, 0.18) 50% 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+    .eval-star.is-half:hover {
+      background: linear-gradient(90deg, #FFB340 0 50%, rgba(60, 60, 67, 0.22) 50% 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+    .eval-hist-stars {
+      color: #FF9F0A; font-size: 12px; letter-spacing: 0;
+      line-height: 1; font-variant-numeric: tabular-nums;
+    }
     .eval-sheet-sub {
       padding: 0 16px 8px; font-size: 12px; color: var(--muted);
       letter-spacing: -0.01em;
@@ -938,10 +959,7 @@
     .eval-hist-meta {
       display: flex; align-items: center; gap: 8px; margin-top: 4px;
     }
-    .eval-hist-stars {
-      color: #FF9F0A; font-size: 12px; letter-spacing: 0.5px;
-      line-height: 1;
-    }
+
     .eval-hist-badge {
       font-size: 11px; font-weight: 600; color: var(--muted);
       background: rgba(120, 120, 128, 0.12);
@@ -1651,15 +1669,17 @@ window.ClipViewMasonry = Masonry;
     function paintEvalStars() {
       const host = document.getElementById('evalStars');
       if (!host) return;
+      const r = Number(evalRating) || 0;
       host.querySelectorAll('.eval-star').forEach(btn => {
         const n = Number(btn.dataset.n);
-        btn.classList.toggle('is-on', n <= evalRating);
-        btn.setAttribute('aria-checked', n === evalRating ? 'true' : 'false');
+        btn.classList.remove('is-on', 'is-half');
+        if (r >= n) btn.classList.add('is-on');
+        else if (r >= n - 0.5) btn.classList.add('is-half');
+        btn.setAttribute('aria-checked', Math.abs(r - n) < 0.01 || Math.abs(r - (n - 0.5)) < 0.01 ? 'true' : 'false');
       });
       const submit = document.getElementById('evalSubmit');
       const note = (document.getElementById('evalNote')?.value || '').trim();
-      // Submit if stars or note — stars may be re-picked any time
-      if (submit) submit.disabled = !(evalRating > 0 || note.length > 0);
+      if (submit) submit.disabled = !(r > 0 || note.length > 0);
     }
 
     function ensureEvalStars() {
@@ -1671,21 +1691,28 @@ window.ClipViewMasonry = Masonry;
         b.className = 'eval-star';
         b.dataset.n = String(n);
         b.setAttribute('role', 'radio');
-        b.setAttribute('aria-label', n + ' 星');
+        b.setAttribute('aria-label', n + ' 星（左半为半星）');
         b.innerHTML = STAR_SVG;
-        b.addEventListener('click', () => {
-          // Toggle off if same star; otherwise set (re-rate anytime)
-          evalRating = evalRating === n ? 0 : n;
+        b.addEventListener('click', (e) => {
+          const rect = b.getBoundingClientRect();
+          const mid = rect.left + rect.width / 2;
+          // Left half → n-0.5, right half → n; re-click same value clears
+          const val = e.clientX < mid ? n - 0.5 : n;
+          evalRating = Math.abs(evalRating - val) < 0.01 ? 0 : val;
           paintEvalStars();
         });
         host.appendChild(b);
       }
     }
 
+    /** ★ / ☆ / ◐ for half-star display in history */
     function starsText(n) {
       const r = Math.max(0, Math.min(5, Number(n) || 0));
       if (!r) return '';
-      return '★'.repeat(r) + '☆'.repeat(5 - r);
+      const full = Math.floor(r);
+      const half = r - full >= 0.5 ? 1 : 0;
+      const empty = 5 - full - half;
+      return '★'.repeat(full) + (half ? '◐' : '') + '☆'.repeat(empty);
     }
 
     async function loadEvalHistory(itemId) {

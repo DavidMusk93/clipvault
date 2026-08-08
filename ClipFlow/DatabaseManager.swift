@@ -1425,7 +1425,7 @@ final class DatabaseManager: ObservableObject {
         var firstSeenAt: Date? = nil
         var userNote: String? = nil
         var userStage: String? = nil
-        var userRating: Int? = nil
+        var userRating: Double? = nil
         var userContextUpdatedAt: Date? = nil
         if colCount >= 11 {
             copyCount = max(1, Int(sqlite3_column_int(stmt, 10)))
@@ -1443,7 +1443,7 @@ final class DatabaseManager: ObservableObject {
             userStage = sqlite3_column_text(stmt, 14).map { String(cString: $0) }
         }
         if colCount >= 16, sqlite3_column_type(stmt, 15) != SQLITE_NULL {
-            userRating = Int(sqlite3_column_int(stmt, 15))
+            userRating = sqlite3_column_double(stmt, 15)
         }
         if colCount >= 17, sqlite3_column_type(stmt, 16) != SQLITE_NULL {
             userContextUpdatedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 16))
@@ -1475,7 +1475,7 @@ final class DatabaseManager: ObservableObject {
 
     enum UserContextError: Error, LocalizedError {
         case notFound
-        case invalidRating(Int)
+        case invalidRating(Double)
         case ratingLocked
         case needRating
         case emptyUpdate
@@ -1484,9 +1484,9 @@ final class DatabaseManager: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .notFound: return "条目不存在"
-            case .invalidRating(let r): return "请选择 1–5 星评分: \(r)"
+            case .invalidRating(let r): return "评分须为 0.5–5 星（半星步进）: \(r)"
             case .ratingLocked: return "评分更新失败"
-            case .needRating: return "请选择 1–5 星或填写备注"
+            case .needRating: return "请选择星级或填写备注"
             case .emptyUpdate: return "请填写评分或备注"
             case .db: return "数据库写入失败"
             }
@@ -1497,7 +1497,7 @@ final class DatabaseManager: ObservableObject {
     /// Updates projection columns to latest note/rating only. **Never** touches capture payload.
     func submitEvaluation(
         id: UUID,
-        rating: Int?,
+        rating: Double?,
         note: String?,
         evaluationId: UUID? = nil,
         source: String = "web",
@@ -1523,7 +1523,7 @@ final class DatabaseManager: ObservableObject {
     @discardableResult
     func submitEvaluationLocked(
         id: UUID,
-        rating: Int?,
+        rating: Double?,
         note: String?,
         evaluationId: UUID? = nil,
         source: String
@@ -1552,16 +1552,16 @@ final class DatabaseManager: ObservableObject {
             guard let n = note?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty else { return nil }
             return String(n.prefix(4000))
         }()
-        let ratingNorm: Int? = {
-            guard let r = rating else { return nil }
-            if r <= 0 { return nil }
-            return r
-        }()
-        if let r = ratingNorm, !(1...5).contains(r) {
-            throw UserContextError.invalidRating(r)
+        let ratingNorm: Double?
+        if let rating {
+            guard let n = ClipboardItem.normalizeRating(rating) else {
+                throw UserContextError.invalidRating(rating)
+            }
+            ratingNorm = n
+        } else {
+            ratingNorm = nil
         }
-        // Stars may be re-set any time; each submit is still one history row.
-        // Require at least a star change or a note.
+        // Stars may be re-set any time (half-star steps); each submit is still one history row.
         guard ratingNorm != nil || noteNorm != nil else { throw UserContextError.emptyUpdate }
 
         let eid = (evaluationId ?? UUID()).uuidString
@@ -1587,7 +1587,7 @@ final class DatabaseManager: ObservableObject {
             bindText(stmt, 2, idStr)
             bindText(stmt, 3, contentHash)
             sqlite3_bind_double(stmt, 4, now.timeIntervalSince1970)
-            if let ratingNorm { sqlite3_bind_int(stmt, 5, Int32(ratingNorm)) }
+            if let ratingNorm { sqlite3_bind_double(stmt, 5, ratingNorm) }
             else { sqlite3_bind_null(stmt, 5) }
             bindText(stmt, 6, noteNorm)
             bindText(stmt, 7, source)
@@ -1597,7 +1597,7 @@ final class DatabaseManager: ObservableObject {
         }
 
         // Projection: latest rating (if any) + latest note; always latest row ts.
-        var latestRating: Int?
+        var latestRating: Double?
         var latestNote: String?
         var latestTs = now.timeIntervalSince1970
         var lq: OpaquePointer?
@@ -1612,7 +1612,7 @@ final class DatabaseManager: ObservableObject {
                     latestNote = sqlite3_column_text(lq, 0).map { String(cString: $0) }
                 }
                 if sqlite3_column_type(lq, 1) != SQLITE_NULL {
-                    latestRating = Int(sqlite3_column_int(lq, 1))
+                    latestRating = sqlite3_column_double(lq, 1)
                 }
                 latestTs = sqlite3_column_double(lq, 2)
             }
@@ -1628,7 +1628,7 @@ final class DatabaseManager: ObservableObject {
             ) == SQLITE_OK {
                 bindText(rq, 1, idStr)
                 if sqlite3_step(rq) == SQLITE_ROW {
-                    latestRating = Int(sqlite3_column_int(rq, 0))
+                    latestRating = sqlite3_column_double(rq, 0)
                 }
             }
             sqlite3_finalize(rq)
@@ -1659,7 +1659,7 @@ final class DatabaseManager: ObservableObject {
         var u: OpaquePointer?
         guard sqlite3_prepare_v2(db, up, -1, &u, nil) == SQLITE_OK else { throw UserContextError.db }
         bindText(u, 1, latestNote)
-        if let latestRating { sqlite3_bind_int(u, 2, Int32(latestRating)) }
+        if let latestRating { sqlite3_bind_double(u, 2, latestRating) }
         else { sqlite3_bind_null(u, 2) }
         sqlite3_bind_double(u, 3, latestTs)
         bindText(u, 4, idStr)
@@ -1705,7 +1705,7 @@ final class DatabaseManager: ObservableObject {
     func applyUserContextLocked(
         id: UUID,
         note: String?,
-        rating: Int?,
+        rating: Double?,
         evaluationId: UUID?,
         source: String
     ) throws -> ClipboardItem {
@@ -1761,7 +1761,7 @@ final class DatabaseManager: ObservableObject {
                     row["contentHash"] = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
                     row["ts"] = sqlite3_column_double(stmt, 3)
                     if sqlite3_column_type(stmt, 4) != SQLITE_NULL {
-                        row["rating"] = Int(sqlite3_column_int(stmt, 4))
+                        row["rating"] = sqlite3_column_double(stmt, 4)
                     }
                     if sqlite3_column_type(stmt, 5) != SQLITE_NULL {
                         row["note"] = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""

@@ -846,9 +846,10 @@ class WebServer {
             sendJSON(["ok": false, "message": "expected {id, rating?, note?}"], connection: connection)
             return
         }
-        var rating: Int?
-        if let r = obj["rating"] as? Int { rating = r }
-        else if let r = obj["rating"] as? Double { rating = Int(r) }
+        var rating: Double?
+        if let r = obj["rating"] as? Double { rating = r }
+        else if let r = obj["rating"] as? Int { rating = Double(r) }
+        else if let r = obj["rating"] as? NSNumber { rating = r.doubleValue }
         let note = obj["note"] as? String
 
         database.submitEvaluation(id: uuid, rating: rating, note: note, source: "web") { [weak self] result in
@@ -858,7 +859,7 @@ class WebServer {
                 CloudDocsSyncService.shared?.recordLocalUserEvaluation(
                     item: pair.item,
                     evaluationId: pair.evaluationId,
-                    rating: rating,
+                    rating: pair.item.userRating ?? rating,
                     note: note
                 )
                 // Do not broadcast full-list SSE "update" — avoids masonry re-layout storm.

@@ -64,7 +64,7 @@ final class CloudDocsSyncService {
         /// User judgment layer (kind == user_context); never mutates capture payload.
         var userNote: String?
         var userStage: String?
-        var userRating: Int?
+        var userRating: Double?
 
         enum CodingKeys: String, CodingKey {
             case v, opId = "op_id", host, seq, kind
@@ -220,7 +220,7 @@ final class CloudDocsSyncService {
     }
 
     /// Multi-device fan-out for one evaluation submission (history row). Capture payload stays immutable.
-    func recordLocalUserEvaluation(item: ClipboardItem, evaluationId: String, rating: Int?, note: String?) {
+    func recordLocalUserEvaluation(item: ClipboardItem, evaluationId: String, rating: Double?, note: String?) {
         guard config.enabled else { return }
         queue.async { [weak self] in
             guard let self = self else { return }
