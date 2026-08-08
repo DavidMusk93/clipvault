@@ -1780,14 +1780,28 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
-    /** History display: full / half / empty stars */
-    function starsText(n) {
+    /**
+     * History stars: dual-layer SVG clip (same as header). No Unicode half glyphs —
+     * they render as boxes/garbled across fonts.
+     */
+    function renderStarsHTML(n) {
       const r = Math.max(0, Math.min(5, Number(n) || 0));
       if (!r) return '';
-      const full = Math.floor(r + 1e-9);
-      const half = r - full >= 0.49 ? 1 : 0;
-      const empty = 5 - full - half;
-      return '★'.repeat(full) + (half ? '⯨' : '') + '☆'.repeat(empty);
+      const label = (Math.round(r * 2) / 2).toFixed(r % 1 === 0 ? 0 : 1);
+      let html = '<span class="eval-hist-stars" title="' + escAttr(label) + ' 星" aria-label="' + escAttr(label) + ' 星">';
+      for (let i = 1; i <= 5; i++) {
+        let pct = 0;
+        if (r >= i) pct = 100;
+        else if (r >= i - 0.5) pct = 50;
+        html +=
+          '<span class="eval-hist-star">' +
+          '<svg class="base" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="' + STAR_PATH + '"/></svg>' +
+          '<span class="fill-wrap" style="width:' + pct + '%">' +
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="' + STAR_PATH + '"/></svg>' +
+          '</span></span>';
+      }
+      html += '<span class="eval-hist-score">' + label + '</span></span>';
+      return html;
     }
 
     async function loadEvalHistory(itemId) {
@@ -1805,11 +1819,11 @@ window.ClipViewMasonry = Masonry;
         host.innerHTML = '';
         rows.forEach(ev => {
           const li = document.createElement('li');
-          const hasStars = ev.rating != null;
+          const hasStars = ev.rating != null && Number(ev.rating) > 0;
           li.className = 'eval-hist-item' + (hasStars ? '' : ' is-note');
           const t = formatEvalTime(ev.ts);
           const stars = hasStars
-            ? `<span class="eval-hist-stars" title="${ev.rating} 星">${starsText(ev.rating)}</span>`
+            ? renderStarsHTML(ev.rating)
             : `<span class="eval-hist-badge">备注</span>`;
           const note = ev.note ? `<div class="eval-hist-note">${esc(ev.note)}</div>` : '';
           li.innerHTML =
