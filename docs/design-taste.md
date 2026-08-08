@@ -72,10 +72,10 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | 层 | 可变？ | 说明 |
 | --- | --- | --- |
 | Capture payload | **不可变** | 复制瞬间的事实；`content_hash` 锚定 |
-| User evaluation | **append-only 历史** | 表 `user_evaluations`：首次 **星级 1–5（仅一次）**；之后仅追加 note 行 |
-| Latest projection | 可覆盖 note | `user_rating` 锁定首次；`user_note` 取最新备注；入口高亮 |
+| User evaluation | **append-only 历史** | 表 `user_evaluations`：每次提交一行；**星级可多次修改**（每次写入历史） |
+| Latest projection | 可覆盖 | `user_rating` / `user_note` 取最新；铅笔入口高亮 |
 
-**UI（apple-design sheet）**：玻璃 sheet · 大号星（锁定后只读）· 备注 · 提交；历史时间线用相对时间 + 绝对时间。主卡片仅 **铅笔** 入口，**禁止**评价正文进 masonry。
+**UI（apple-design sheet）**：玻璃 sheet；**紧凑星级在 header**（非大块占位）；备注 + 提交；历史时间线（相对 + 绝对时间）。主卡片仅 **铅笔** 入口，**禁止**评价正文进 masonry。
 
 ## 品味禁区
 

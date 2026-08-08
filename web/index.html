@@ -828,11 +828,33 @@
     }
     .eval-sheet-head {
       display: flex; align-items: center; justify-content: space-between;
-      gap: 10px; padding: 6px 16px 10px;
+      gap: 8px; padding: 4px 12px 8px 16px;
+    }
+    .eval-sheet-head-main {
+      display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;
     }
     .eval-sheet-head h3 {
       margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.02em;
+      flex-shrink: 0;
     }
+    /* Compact stars in header — no full-width star row */
+    .eval-stars {
+      display: inline-flex; align-items: center; gap: 0;
+      flex-shrink: 0;
+    }
+    .eval-star {
+      width: 28px; height: 28px; border: 0; padding: 0;
+      border-radius: 50%; background: transparent; cursor: pointer;
+      color: rgba(60, 60, 67, 0.20);
+      display: inline-flex; align-items: center; justify-content: center;
+      transition: color 0.12s ease, transform 0.12s var(--spring);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .eval-star svg { width: 18px; height: 18px; display: block; }
+    .eval-star:hover { transform: scale(1.12); }
+    .eval-star:active { transform: scale(0.9); transition-duration: 60ms; }
+    .eval-star.is-on { color: #FF9F0A; }
+    .eval-star.is-on:hover { color: #FFB340; }
     .eval-sheet-sub {
       padding: 0 16px 8px; font-size: 12px; color: var(--muted);
       letter-spacing: -0.01em;
@@ -842,25 +864,8 @@
       padding: 0 16px 16px;
       overscroll-behavior: contain;
       -webkit-overflow-scrolling: touch;
-      display: flex; flex-direction: column; gap: 14px;
+      display: flex; flex-direction: column; gap: 12px;
     }
-    .eval-stars {
-      display: flex; justify-content: center; gap: 6px;
-      padding: 4px 0 2px;
-    }
-    .eval-star {
-      width: 44px; height: 44px; border: 0; padding: 0;
-      border-radius: 50%; background: transparent; cursor: pointer;
-      color: rgba(60, 60, 67, 0.22);
-      display: inline-flex; align-items: center; justify-content: center;
-      transition: color 0.14s ease, transform 0.14s var(--spring);
-      -webkit-tap-highlight-color: transparent;
-    }
-    .eval-star svg { width: 32px; height: 32px; display: block; }
-    .eval-star:hover { transform: scale(1.08); }
-    .eval-star:active { transform: scale(0.92); }
-    .eval-star.is-on { color: #FF9F0A; } /* Apple system orange */
-    .eval-star.is-on:hover { color: #FFB340; }
     .eval-note {
       width: 100%; min-height: 96px; resize: vertical; box-sizing: border-box;
       border-radius: 14px; border: 0.5px solid var(--separator-strong);
@@ -950,12 +955,6 @@
     .eval-hist-empty {
       font-size: 13px; color: var(--muted); padding: 12px 0 4px; text-align: center;
       letter-spacing: -0.01em;
-    }
-    .eval-star.is-locked { cursor: default; pointer-events: none; }
-    .eval-star.is-locked:hover { transform: none; }
-    .eval-locked-hint {
-      text-align: center; font-size: 12px; color: var(--muted);
-      letter-spacing: -0.01em; margin-top: -6px;
     }
     .icon-btn.has-ctx { color: var(--accent); }
     .icon-btn.has-ctx:hover { color: #0056b3; }
@@ -1419,17 +1418,18 @@
     <div class="eval-sheet-card" role="dialog" aria-modal="true" aria-labelledby="evalSheetTitle">
       <div class="eval-grabber" aria-hidden="true"></div>
       <div class="eval-sheet-head">
-        <h3 id="evalSheetTitle">评价</h3>
+        <div class="eval-sheet-head-main">
+          <h3 id="evalSheetTitle">评价</h3>
+          <div class="eval-stars" id="evalStars" role="radiogroup" aria-label="星级评分"></div>
+        </div>
         <button type="button" class="btn-icon" id="evalSheetClose" title="关闭" aria-label="关闭">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-      <div class="eval-sheet-sub" id="evalSheetSub">内容只读 · 星级仅一次 · 备注可追加</div>
+      <div class="eval-sheet-sub" id="evalSheetSub">内容只读 · 星级可改 · 每次提交一条记录</div>
       <div class="eval-sheet-body">
-        <div class="eval-stars" id="evalStars" role="radiogroup" aria-label="星级评分"></div>
-        <div class="eval-locked-hint" id="evalLockedHint" hidden>星级已锁定，可继续追加备注</div>
         <textarea id="evalNote" class="eval-note" rows="3" maxlength="4000"
-          placeholder="写下一句想法…"></textarea>
+          placeholder="写下一句想法（可选）…"></textarea>
         <div class="eval-actions">
           <button type="button" class="eval-cancel" id="evalCancel">取消</button>
           <button type="button" class="eval-submit" id="evalSubmit">提交</button>
@@ -1602,11 +1602,10 @@ window.ClipViewMasonry = Masonry;
       setTimeout(() => el.classList.remove('show'), 2400);
     }
 
-    // —— Evaluation sheet (apple-design): pencil entry, one-shot stars, elegant history ——
+    // —— Evaluation sheet (apple-design): pencil entry, compact header stars, history ——
     const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.6l2.7 6.2 6.7.6-5.1 4.4 1.5 6.5L12 16.9 6.2 20.3l1.5-6.5L2.6 9.4l6.7-.6L12 2.6z"/></svg>';
     let evalItemId = null;
     let evalRating = 0;
-    let evalRatingLocked = false;
 
     function closeEvalSheet() {
       const root = document.getElementById('evalSheet');
@@ -1615,7 +1614,6 @@ window.ClipViewMasonry = Masonry;
       root.setAttribute('aria-hidden', 'true');
       evalItemId = null;
       evalRating = 0;
-      evalRatingLocked = false;
     }
 
     /** Relative + absolute time (Apple Mail / Files style). */
@@ -1656,18 +1654,12 @@ window.ClipViewMasonry = Masonry;
       host.querySelectorAll('.eval-star').forEach(btn => {
         const n = Number(btn.dataset.n);
         btn.classList.toggle('is-on', n <= evalRating);
-        btn.classList.toggle('is-locked', evalRatingLocked);
-        btn.disabled = evalRatingLocked;
         btn.setAttribute('aria-checked', n === evalRating ? 'true' : 'false');
       });
-      const hint = document.getElementById('evalLockedHint');
-      if (hint) hint.hidden = !evalRatingLocked;
       const submit = document.getElementById('evalSubmit');
       const note = (document.getElementById('evalNote')?.value || '').trim();
-      if (submit) {
-        if (evalRatingLocked) submit.disabled = note.length === 0;
-        else submit.disabled = !(evalRating > 0);
-      }
+      // Submit if stars or note — stars may be re-picked any time
+      if (submit) submit.disabled = !(evalRating > 0 || note.length > 0);
     }
 
     function ensureEvalStars() {
@@ -1682,8 +1674,8 @@ window.ClipViewMasonry = Masonry;
         b.setAttribute('aria-label', n + ' 星');
         b.innerHTML = STAR_SVG;
         b.addEventListener('click', () => {
-          if (evalRatingLocked) return;
-          evalRating = n;
+          // Toggle off if same star; otherwise set (re-rate anytime)
+          evalRating = evalRating === n ? 0 : n;
           paintEvalStars();
         });
         host.appendChild(b);
@@ -1735,30 +1727,25 @@ window.ClipViewMasonry = Masonry;
     function openEvalSheet(item) {
       ensureEvalStars();
       evalItemId = item.id;
-      evalRatingLocked = !!(item.userRating != null && Number(item.userRating) > 0);
-      evalRating = evalRatingLocked ? Number(item.userRating) : 0;
+      // Prefill current rating (editable); note field starts empty for a new history row
+      evalRating = item.userRating != null && Number(item.userRating) > 0 ? Number(item.userRating) : 0;
       const noteEl = document.getElementById('evalNote');
       if (noteEl) {
         noteEl.value = '';
-        noteEl.placeholder = evalRatingLocked ? '追加备注…' : '写下一句想法（可选）';
+        noteEl.placeholder = '写下一句想法（可选）…';
       }
       const sub = document.getElementById('evalSheetSub');
       if (sub) {
         const tm = typeMeta(item.type);
-        sub.textContent = evalRatingLocked
-          ? (tm.label || item.type) + ' · 星级已锁定 · 可追加备注'
-          : (tm.label || item.type) + ' · 内容只读 · 星级仅设定一次';
+        sub.textContent = (tm.label || item.type) + ' · 内容只读 · 星级可改 · 每次提交一条记录';
       }
       const submit = document.getElementById('evalSubmit');
-      if (submit) submit.textContent = evalRatingLocked ? '追加备注' : '提交评价';
+      if (submit) submit.textContent = '提交';
       paintEvalStars();
       const root = document.getElementById('evalSheet');
       root?.classList.add('open');
       root?.setAttribute('aria-hidden', 'false');
       loadEvalHistory(item.id);
-      setTimeout(() => {
-        if (evalRatingLocked) noteEl?.focus();
-      }, 280);
     }
 
     /** Update in-memory clip + pencil accent only — never rebuild masonry card. */
@@ -1785,24 +1772,21 @@ window.ClipViewMasonry = Masonry;
     async function submitEvaluation() {
       if (!evalItemId) return;
       const note = (document.getElementById('evalNote')?.value || '').trim();
-      if (evalRatingLocked) {
-        if (!note) { toast('请填写备注'); return; }
-      } else if (!(evalRating > 0)) {
-        toast('请选择星级');
+      if (!(evalRating > 0 || note)) {
+        toast('请点选星级或填写备注');
         return;
       }
       const submit = document.getElementById('evalSubmit');
       if (submit) submit.disabled = true;
       try {
-        const body = {
-          id: evalItemId,
-          note: note || null,
-          rating: evalRatingLocked ? null : evalRating,
-        };
         const res = await fetch(API + '/api/clips/evaluate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            id: evalItemId,
+            note: note || null,
+            rating: evalRating > 0 ? evalRating : null,
+          }),
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok || j.ok === false) {
@@ -1811,21 +1795,11 @@ window.ClipViewMasonry = Masonry;
         }
         if (j.item) {
           patchCardEvalState(evalItemId, j.item);
-          if (j.item.userRating) {
-            evalRatingLocked = true;
-            evalRating = Number(j.item.userRating);
-          }
+          if (j.item.userRating != null) evalRating = Number(j.item.userRating);
         }
-        toast(evalRatingLocked && note ? '已追加备注' : '已提交评价');
+        toast('已提交');
         const noteEl = document.getElementById('evalNote');
-        if (noteEl) {
-          noteEl.value = '';
-          noteEl.placeholder = '追加备注…';
-        }
-        const submitBtn = document.getElementById('evalSubmit');
-        if (submitBtn) submitBtn.textContent = '追加备注';
-        const sub = document.getElementById('evalSheetSub');
-        if (sub) sub.textContent = '星级已锁定 · 可继续追加备注';
+        if (noteEl) noteEl.value = '';
         paintEvalStars();
         await loadEvalHistory(evalItemId);
       } catch (e) {

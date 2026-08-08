@@ -1485,8 +1485,8 @@ final class DatabaseManager: ObservableObject {
             switch self {
             case .notFound: return "条目不存在"
             case .invalidRating(let r): return "请选择 1–5 星评分: \(r)"
-            case .ratingLocked: return "评分只能设定一次，可继续追加备注"
-            case .needRating: return "请先选择 1–5 星评分"
+            case .ratingLocked: return "评分更新失败"
+            case .needRating: return "请选择 1–5 星或填写备注"
             case .emptyUpdate: return "请填写评分或备注"
             case .db: return "数据库写入失败"
             }
@@ -1533,11 +1533,10 @@ final class DatabaseManager: ObservableObject {
 
         var contentHash = ""
         var typeRaw = "text"
-        var existingRating: Int?
         var q: OpaquePointer?
         guard sqlite3_prepare_v2(
             db,
-            "SELECT content_hash, type, user_rating FROM clipboard_items WHERE id = ? LIMIT 1;",
+            "SELECT content_hash, type FROM clipboard_items WHERE id = ? LIMIT 1;",
             -1, &q, nil
         ) == SQLITE_OK else { throw UserContextError.db }
         bindText(q, 1, idStr)
@@ -1547,16 +1546,13 @@ final class DatabaseManager: ObservableObject {
         }
         contentHash = sqlite3_column_text(q, 0).map { String(cString: $0) } ?? ""
         typeRaw = sqlite3_column_text(q, 1).map { String(cString: $0) } ?? "text"
-        if sqlite3_column_type(q, 2) != SQLITE_NULL {
-            existingRating = Int(sqlite3_column_int(q, 2))
-        }
         sqlite3_finalize(q)
 
         let noteNorm: String? = {
             guard let n = note?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty else { return nil }
             return String(n.prefix(4000))
         }()
-        var ratingNorm: Int? = {
+        let ratingNorm: Int? = {
             guard let r = rating else { return nil }
             if r <= 0 { return nil }
             return r
@@ -1564,20 +1560,9 @@ final class DatabaseManager: ObservableObject {
         if let r = ratingNorm, !(1...5).contains(r) {
             throw UserContextError.invalidRating(r)
         }
-
-        // Rating is one-shot: lock after first non-null rating.
-        if let locked = existingRating {
-            if let r = ratingNorm, r != locked {
-                throw UserContextError.ratingLocked
-            }
-            // Subsequent history rows are note-only (rating column null in history).
-            ratingNorm = nil
-            guard noteNorm != nil else { throw UserContextError.emptyUpdate }
-        } else {
-            // First evaluation must set stars.
-            guard let r = ratingNorm else { throw UserContextError.needRating }
-            ratingNorm = r
-        }
+        // Stars may be re-set any time; each submit is still one history row.
+        // Require at least a star change or a note.
+        guard ratingNorm != nil || noteNorm != nil else { throw UserContextError.emptyUpdate }
 
         let eid = (evaluationId ?? UUID()).uuidString
         let now = Date()
@@ -1611,55 +1596,56 @@ final class DatabaseManager: ObservableObject {
             guard rc == SQLITE_DONE else { throw UserContextError.db }
         }
 
-        // Projection: rating = first non-null (immutable once set); note = latest non-empty note.
-        var lockedRating = existingRating
-        if lockedRating == nil {
-            var rq: OpaquePointer?
-            if sqlite3_prepare_v2(
-                db,
-                "SELECT rating FROM user_evaluations WHERE item_id = ? AND rating IS NOT NULL ORDER BY ts ASC LIMIT 1;",
-                -1, &rq, nil
-            ) == SQLITE_OK {
-                bindText(rq, 1, idStr)
-                if sqlite3_step(rq) == SQLITE_ROW {
-                    lockedRating = Int(sqlite3_column_int(rq, 0))
-                }
-            }
-            sqlite3_finalize(rq)
-        }
+        // Projection: latest rating (if any) + latest note; always latest row ts.
+        var latestRating: Int?
         var latestNote: String?
         var latestTs = now.timeIntervalSince1970
         var lq: OpaquePointer?
         if sqlite3_prepare_v2(
             db,
-            """
-            SELECT note, ts FROM user_evaluations
-            WHERE item_id = ? AND note IS NOT NULL AND length(note) > 0
-            ORDER BY ts DESC LIMIT 1;
-            """,
+            "SELECT note, rating, ts FROM user_evaluations WHERE item_id = ? ORDER BY ts DESC LIMIT 1;",
             -1, &lq, nil
         ) == SQLITE_OK {
             bindText(lq, 1, idStr)
             if sqlite3_step(lq) == SQLITE_ROW {
-                latestNote = sqlite3_column_text(lq, 0).map { String(cString: $0) }
-                latestTs = sqlite3_column_double(lq, 1)
+                if sqlite3_column_type(lq, 0) != SQLITE_NULL {
+                    latestNote = sqlite3_column_text(lq, 0).map { String(cString: $0) }
+                }
+                if sqlite3_column_type(lq, 1) != SQLITE_NULL {
+                    latestRating = Int(sqlite3_column_int(lq, 1))
+                }
+                latestTs = sqlite3_column_double(lq, 2)
             }
         }
         sqlite3_finalize(lq)
-        if latestNote == nil {
-            // fall back to any latest row timestamp
-            var tq: OpaquePointer?
+        // If latest row has no rating, keep last non-null rating for header display.
+        if latestRating == nil {
+            var rq: OpaquePointer?
             if sqlite3_prepare_v2(
                 db,
-                "SELECT ts FROM user_evaluations WHERE item_id = ? ORDER BY ts DESC LIMIT 1;",
-                -1, &tq, nil
+                "SELECT rating FROM user_evaluations WHERE item_id = ? AND rating IS NOT NULL ORDER BY ts DESC LIMIT 1;",
+                -1, &rq, nil
             ) == SQLITE_OK {
-                bindText(tq, 1, idStr)
-                if sqlite3_step(tq) == SQLITE_ROW {
-                    latestTs = sqlite3_column_double(tq, 0)
+                bindText(rq, 1, idStr)
+                if sqlite3_step(rq) == SQLITE_ROW {
+                    latestRating = Int(sqlite3_column_int(rq, 0))
                 }
             }
-            sqlite3_finalize(tq)
+            sqlite3_finalize(rq)
+        }
+        if latestNote == nil {
+            var nq: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "SELECT note FROM user_evaluations WHERE item_id = ? AND note IS NOT NULL AND length(note) > 0 ORDER BY ts DESC LIMIT 1;",
+                -1, &nq, nil
+            ) == SQLITE_OK {
+                bindText(nq, 1, idStr)
+                if sqlite3_step(nq) == SQLITE_ROW {
+                    latestNote = sqlite3_column_text(nq, 0).map { String(cString: $0) }
+                }
+            }
+            sqlite3_finalize(nq)
         }
 
         let up = """
@@ -1673,7 +1659,7 @@ final class DatabaseManager: ObservableObject {
         var u: OpaquePointer?
         guard sqlite3_prepare_v2(db, up, -1, &u, nil) == SQLITE_OK else { throw UserContextError.db }
         bindText(u, 1, latestNote)
-        if let lockedRating { sqlite3_bind_int(u, 2, Int32(lockedRating)) }
+        if let latestRating { sqlite3_bind_int(u, 2, Int32(latestRating)) }
         else { sqlite3_bind_null(u, 2) }
         sqlite3_bind_double(u, 3, latestTs)
         bindText(u, 4, idStr)
@@ -1683,8 +1669,7 @@ final class DatabaseManager: ObservableObject {
 
         var detailObj: [String: Any] = [
             "evaluationId": eid,
-            "rating": (ratingNorm ?? lockedRating) as Any,
-            "ratingLocked": existingRating != nil
+            "rating": ratingNorm as Any
         ]
         if let noteNorm { detailObj["note"] = noteNorm }
         let detailStr = String(
