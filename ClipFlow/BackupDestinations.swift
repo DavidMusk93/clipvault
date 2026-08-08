@@ -4,11 +4,11 @@ import Foundation
 /// Artifact is produced once (sqlite3_backup + CAS blobs), then fan-out to each enabled root.
 struct BackupDestinationConfig: Codable, Equatable, Identifiable {
     var id: String
-    /// `icloud` | `gdrive` | `folder`
+    /// `icloud` | `gdrive` | `quark` | `folder`
     var type: String
     var enabled: Bool
     var label: String?
-    /// Absolute path when type == folder
+    /// Absolute path when type == folder (or override for quark staging)
     var path: String?
 
     static let icloudDefault = BackupDestinationConfig(
@@ -17,9 +17,13 @@ struct BackupDestinationConfig: Codable, Equatable, Identifiable {
     static let gdriveDefault = BackupDestinationConfig(
         id: "gdrive", type: "gdrive", enabled: true, label: "Google Drive", path: nil
     )
+    /// Quark Netdisk: local staging folder for Quark client backup/sync.
+    static let quarkDefault = BackupDestinationConfig(
+        id: "quark", type: "quark", enabled: true, label: "夸克网盘", path: nil
+    )
 
     static var defaultList: [BackupDestinationConfig] {
-        [.icloudDefault, .gdriveDefault]
+        [.icloudDefault, .gdriveDefault, .quarkDefault]
     }
 }
 
@@ -89,6 +93,48 @@ enum BackupDestinationResolver {
         return nil
     }
 
+    /// Prefer configured path, else well-known Quark staging / sync folders.
+    /// Quark Desktop does not expose a File Provider mount like Google Drive;
+    /// it can **backup a local folder**. We write to a dedicated staging root that
+    /// the user adds once under 夸克 → 备份 / 上传位置.
+    static func quarkStagingURL(configuredPath: String? = nil) -> URL? {
+        if let p = configuredPath?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty {
+            let url = URL(fileURLWithPath: (p as NSString).expandingTildeInPath, isDirectory: true)
+            try? fm.createDirectory(at: url, withIntermediateDirectories: true)
+            return url.standardizedFileURL
+        }
+        // Prefer existing user-created sync roots (if Quark already backs them up).
+        let home = fm.homeDirectoryForCurrentUser
+        let candidates: [URL] = [
+            home.appendingPathComponent("夸克网盘", isDirectory: true),
+            home.appendingPathComponent("QuarkCloudDrive", isDirectory: true),
+            home.appendingPathComponent("QuarkNetDisk", isDirectory: true),
+            home.appendingPathComponent("Documents/夸克网盘", isDirectory: true),
+            home.appendingPathComponent("Documents/Quark", isDirectory: true),
+        ]
+        for c in candidates {
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: c.path, isDirectory: &isDir), isDir.boolValue {
+                return c.appendingPathComponent("ClipVault/backup", isDirectory: true)
+            }
+        }
+        // Default staging (always creatable; user maps it in Quark client).
+        let staging = home
+            .appendingPathComponent("ClipVault-Backups/Quark/backup", isDirectory: true)
+        try? fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        return staging.standardizedFileURL
+    }
+
+    /// True if Quark Desktop (or legacy installer) appears installed.
+    static func quarkAppInstalled() -> Bool {
+        let apps = [
+            "/Applications/Quark.app",
+            "/Applications/夸克网盘.app",
+            "/Applications/夸克.app",
+        ]
+        return apps.contains { fm.fileExists(atPath: $0) }
+    }
+
     /// Resolve backup root for a destination config.
     static func backupRoot(for dest: BackupDestinationConfig) -> URL? {
         switch dest.type {
@@ -102,6 +148,8 @@ enum BackupDestinationResolver {
             let legacy = my.appendingPathComponent("Keepsake/backup", isDirectory: true)
             if FileManager.default.fileExists(atPath: legacy.path) { return legacy }
             return preferred
+        case "quark":
+            return quarkStagingURL(configuredPath: dest.path)
         case "folder":
             guard let p = dest.path, !p.isEmpty else { return nil }
             return URL(fileURLWithPath: p, isDirectory: true).standardizedFileURL
@@ -115,6 +163,7 @@ enum BackupDestinationResolver {
         switch dest.type {
         case "icloud": return "iCloud Drive"
         case "gdrive": return "Google Drive"
+        case "quark": return "夸克网盘"
         case "folder": return dest.path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Folder"
         default: return dest.id
         }
@@ -126,6 +175,15 @@ enum BackupDestinationResolver {
         }
         if dest.type == "icloud", cloudDocsURL() == nil {
             return "请登录 iCloud 并开启「iCloud 云盘」"
+        }
+        if dest.type == "quark" {
+            if !quarkAppInstalled() {
+                return "请安装夸克客户端（Quark.app），并在「备份/上传」中加入本机目录 ClipVault-Backups/Quark"
+            }
+            if let root = backupRoot(for: dest) {
+                return "本地暂存：\(root.path) · 请在夸克中开启对该目录的备份/同步"
+            }
+            return "无法创建夸克暂存目录"
         }
         if dest.type == "folder", backupRoot(for: dest) == nil {
             return "路径无效或未配置"
@@ -145,6 +203,9 @@ enum BackupDestinationResolver {
         }
         if !dests.contains(where: { $0.id == "gdrive" }) {
             dests.append(.gdriveDefault)
+        }
+        if !dests.contains(where: { $0.id == "quark" }) {
+            dests.append(.quarkDefault)
         }
         return dests
     }

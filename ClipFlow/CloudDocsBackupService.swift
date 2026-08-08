@@ -236,9 +236,10 @@ final class CloudDocsBackupService {
     }
 
     private var localWorkDir: URL {
-        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? fm.temporaryDirectory
-        let dir = docs.appendingPathComponent("ClipFlow/.backup_work", isDirectory: true)
+        // Prefer KEEPSAKE/CLIPVAULT home (Application Support) — LaunchAgent has no
+        // Documents TCC grant; sqlite journal fsync under ~/Documents can stall forever.
+        let dir = DatabaseManager.resolveDataRoot()
+            .appendingPathComponent(".backup_work", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -548,8 +549,9 @@ final class CloudDocsBackupService {
 
                                     // GDrive File Provider: APFS clonefile often "succeeds" locally but
                                     // does not upload real bytes → Android SAF sees incomplete blobs/.
-                                    // Always full-copy to cloud destinations.
-                                    let forceFull = (dest.type == "gdrive" || dest.type == "icloud")
+                                    // Always full-copy to cloud / remote-sync destinations
+                                    // (APFS clonefile often does not upload through File Providers).
+                                    let forceFull = (dest.type == "gdrive" || dest.type == "icloud" || dest.type == "quark")
                                     let cas = self.syncBlobsToCAS(destRoot: blobs, forceFullCopy: forceFull)
                                     lastBlobCount = cas.total
                                     lastBlobBytes = cas.bytes
