@@ -1759,7 +1759,9 @@ final class DatabaseManager: ObservableObject {
                     row["id"] = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
                     row["itemId"] = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
                     row["contentHash"] = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
-                    row["ts"] = sqlite3_column_double(stmt, 3)
+                    let ets = sqlite3_column_double(stmt, 3)
+                    row["ts"] = ets
+                    row["timeLocal"] = ClipTimeFormat.displayWall(unix: ets)
                     if sqlite3_column_type(stmt, 4) != SQLITE_NULL {
                         row["rating"] = sqlite3_column_double(stmt, 4)
                     }
@@ -2169,7 +2171,9 @@ final class DatabaseManager: ObservableObject {
                     row["id"] = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
                     row["itemId"] = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
                     row["contentHash"] = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
-                    row["eventTs"] = sqlite3_column_double(stmt, 3)
+                    let ets = sqlite3_column_double(stmt, 3)
+                    row["eventTs"] = ets
+                    row["timeLocal"] = ClipTimeFormat.displayWall(unix: ets)
                     row["type"] = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? ""
                     row["sourceApp"] = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
                     row["kind"] = sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? ""
@@ -2306,7 +2310,9 @@ final class DatabaseManager: ObservableObject {
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     var row: [String: Any] = [:]
                     row["id"] = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
-                    row["ts"] = sqlite3_column_double(stmt, 1)
+                    let ots = sqlite3_column_double(stmt, 1)
+                    row["ts"] = ots
+                    row["timeLocal"] = ClipTimeFormat.displayWall(unix: ots)
                     row["action"] = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
                     row["itemId"] = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? NSNull()
                     row["contentHash"] = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? NSNull()

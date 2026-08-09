@@ -134,11 +134,19 @@ data class LocalCapture(
         }
 }
 
+/** Display zone: device default, but never silent UTC for CN users. */
+fun displayTimeZone(): TimeZone {
+    val def = TimeZone.getDefault()
+    if (def.rawOffset == 0 && (def.id == "UTC" || def.id == "GMT" || def.id.startsWith("Etc/UTC"))) {
+        return TimeZone.getTimeZone("Asia/Shanghai")
+    }
+    return def
+}
+
 fun formatLocalUnix(seconds: Double): String {
     val ms = (seconds * 1000.0).toLong()
     val fmt = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.getDefault())
-    // Explicit local zone — never leave SimpleDateFormat on default that can drift in tests.
-    fmt.timeZone = TimeZone.getDefault()
+    fmt.timeZone = displayTimeZone()
     return fmt.format(Date(ms))
 }
 
@@ -180,7 +188,7 @@ fun formatDisplayInstant(raw: String?): String {
         }
         if (parsed == null) return s
         val out = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.getDefault())
-        out.timeZone = TimeZone.getDefault()
+        out.timeZone = displayTimeZone()
         out.format(parsed)
     } catch (_: Exception) {
         s
@@ -190,6 +198,6 @@ fun formatDisplayInstant(raw: String?): String {
 /** Wire ISO with local offset (not bare Z mislabel). */
 fun isoNow(): String {
     val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
-    fmt.timeZone = TimeZone.getDefault()
+    fmt.timeZone = displayTimeZone()
     return fmt.format(Date())
 }

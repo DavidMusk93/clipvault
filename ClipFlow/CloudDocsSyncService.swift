@@ -103,6 +103,8 @@ final class CloudDocsSyncService {
         var syncRootPath: String?
         var lastPushAt: String?
         var lastPullAt: String?
+        var lastPushUnix: Double? = nil
+        var lastPullUnix: Double? = nil
         var lastPhase: String?
         var lastError: String?
         var inProgress: Bool
@@ -927,6 +929,8 @@ final class CloudDocsSyncService {
             syncRootPath: root?.path,
             lastPushAt: lastPushUnix.map { ClipTimeFormat.isoLocal(unix: $0) },
             lastPullAt: lastPullUnix.map { ClipTimeFormat.isoLocal(unix: $0) },
+            lastPushUnix: lastPushUnix,
+            lastPullUnix: lastPullUnix,
             lastPhase: lastPhase,
             lastError: lastError,
             inProgress: inProgress,

@@ -1519,8 +1519,29 @@
     const API = '';
 
     /**
+     * Display zone for wall clocks.
+     * Prefer server-injected __CLIP_TZ. If the browser claims UTC (common with locked
+     * privacy TZ / remote WebViews) but this is a zh product, fall back to Asia/Shanghai
+     * so cards never show UTC wall time by accident.
+     */
+    function displayTimeZone() {
+      if (typeof window !== 'undefined' && window.__CLIP_TZ) return window.__CLIP_TZ;
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        const offMin = -new Date().getTimezoneOffset(); // minutes east of UTC
+        const lang = (navigator.language || navigator.userLanguage || '').toLowerCase();
+        if ((tz === 'UTC' || tz === 'Etc/UTC' || tz === 'GMT' || offMin === 0) && lang.startsWith('zh')) {
+          return 'Asia/Shanghai';
+        }
+        return tz || 'Asia/Shanghai';
+      } catch (_) {
+        return 'Asia/Shanghai';
+      }
+    }
+
+    /**
      * Parse wire instants → Date (absolute).
-     * Supports: unix sec/ms, ISO with Z, ISO with ±offset, space-separated wall times.
+     * Supports: unix sec/ms, ISO with Z/offset, preformatted wall `yyyy/mm/dd HH:mm:ss`.
      * Bare `YYYY-MM-DDTHH:mm:ss` (no zone) is treated as **UTC** (legacy STATUS.json).
      */
     function parseInstant(input) {
@@ -1531,6 +1552,10 @@
       }
       const s = String(input).trim();
       if (!s) return null;
+      // Already a display wall string from server — parse in display zone via components.
+      if (/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}(:\d{2})?$/.test(s)) {
+        return null; // signal: use as-is in formatLocalTime
+      }
       if (/^\d+(\.\d+)?$/.test(s)) {
         const n = parseFloat(s);
         return new Date(n > 1e12 ? n : n * 1000);
@@ -1540,34 +1565,73 @@
         const d = new Date(s);
         return Number.isNaN(d.getTime()) ? null : d;
       }
-      // "yyyy-MM-dd HH:mm:ss" → local wall (native UI / logs)
+      // "yyyy-MM-dd HH:mm:ss" or bare ISO T without zone
       if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(s) && !/[zZ]|[+-]\d{2}/.test(s)) {
-        // Legacy Mac STATUS used UTC without offset; prefer Z for T-separator bare ISO.
         if (s.includes('T')) {
           const d = new Date(s.endsWith('Z') ? s : s + 'Z');
           return Number.isNaN(d.getTime()) ? null : d;
         }
-        const d = new Date(s.replace(' ', 'T')); // local parse fallback
+        const d = new Date(s.replace(' ', 'T'));
         return Number.isNaN(d.getTime()) ? null : d;
       }
       const d = new Date(s);
       return Number.isNaN(d.getTime()) ? null : d;
     }
 
-    /** Display instants in the browser's local timezone (never raw UTC/Z). */
+    /**
+     * Format for UI cards / drawers. Never show raw ISO/Z.
+     * Prefer server `timeLocal` / already-formatted walls; otherwise format absolute
+     * instant in `displayTimeZone()` (not browser getHours, which follows UTC if TZ=UTC).
+     */
     function formatLocalTime(input) {
+      if (input == null || input === '' || input === '—') return '—';
+      // Server-preformatted or already wall
+      if (typeof input === 'string') {
+        const s = input.trim();
+        if (/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}/.test(s)) return s.slice(0, 19);
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+          return s.replace(/-/g, '/');
+        }
+      }
       const d = parseInstant(input);
-      if (!d) return input == null || input === '' ? '—' : String(input);
-      const p = n => String(n).padStart(2, '0');
-      // Local wall clock: yyyy/mm/dd HH:MM:SS
-      return (
-        d.getFullYear() + '/' +
-        p(d.getMonth() + 1) + '/' +
-        p(d.getDate()) + ' ' +
-        p(d.getHours()) + ':' +
-        p(d.getMinutes()) + ':' +
-        p(d.getSeconds())
-      );
+      if (!d) return String(input);
+      try {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: displayTimeZone(),
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        }).formatToParts(d);
+        const get = t => (parts.find(p => p.type === t) || {}).value || '00';
+        // en-CA yields yyyy-mm-dd; normalize to yyyy/mm/dd HH:mm:ss
+        return get('year') + '/' + get('month') + '/' + get('day') + ' '
+          + get('hour') + ':' + get('minute') + ':' + get('second');
+      } catch (_) {
+        // Last resort: still avoid getUTC*
+        const p = n => String(n).padStart(2, '0');
+        return (
+          d.getFullYear() + '/' +
+          p(d.getMonth() + 1) + '/' +
+          p(d.getDate()) + ' ' +
+          p(d.getHours()) + ':' +
+          p(d.getMinutes()) + ':' +
+          p(d.getSeconds())
+        );
+      }
+    }
+
+    /** Card/event helper: prefer server wall string, then unix, then ISO. */
+    function formatItemTime(item) {
+      if (!item) return '—';
+      if (item.timeLocal) return formatLocalTime(item.timeLocal);
+      if (item.timestamp != null) return formatLocalTime(item.timestamp);
+      if (item.ts != null) return formatLocalTime(item.ts);
+      if (item.eventTs != null) return formatLocalTime(item.eventTs);
+      return '—';
     }
 
 
@@ -1715,25 +1779,30 @@ window.ClipViewMasonry = Masonry;
       evalPreview = null;
     }
 
-    /** Relative + absolute time (Apple Mail / Files style) — always local zone. */
+    /** Relative + absolute time (Apple Mail / Files style) — displayTimeZone wall. */
     function formatEvalTime(input) {
+      // Prefer preformatted wall from server
+      if (typeof input === 'string' && /^\d{4}\/\d{2}\/\d{2} /.test(input.trim())) {
+        return { rel: input.trim().slice(11, 16), abs: formatLocalTime(input) };
+      }
       const d = parseInstant(input);
       if (!d) return { rel: '—', abs: '—' };
       const now = new Date();
       const sec = Math.round((now - d) / 1000);
+      const tz = displayTimeZone();
       let rel;
       if (sec < 45) rel = '刚刚';
       else if (sec < 3600) rel = Math.max(1, Math.round(sec / 60)) + ' 分钟前';
       else if (sec < 86400) rel = Math.max(1, Math.round(sec / 3600)) + ' 小时前';
       else if (sec < 86400 * 2) {
-        const hm = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const hm = d.toLocaleTimeString('zh-CN', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
         rel = '昨天 ' + hm;
       } else if (sec < 86400 * 7) {
         rel = Math.max(1, Math.round(sec / 86400)) + ' 天前';
       } else if (d.getFullYear() === now.getFullYear()) {
-        rel = d.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+        rel = d.toLocaleString('zh-CN', { timeZone: tz, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
       } else {
-        rel = d.toLocaleString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' });
+        rel = d.toLocaleString('zh-CN', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric' });
       }
       return { rel, abs: formatLocalTime(d) };
     }
@@ -2319,7 +2388,7 @@ window.ClipViewMasonry = Masonry;
           return;
         }
         list.innerHTML = rows.map(ev => {
-          const ts = formatLocalTime(ev.eventTs);
+          const ts = ev.timeLocal ? formatLocalTime(ev.timeLocal) : formatLocalTime(ev.eventTs);
           const kind = ev.kind || 'capture';
           const src = ev.sourceApp || '';
           const type = ev.type || '';
@@ -2372,7 +2441,7 @@ window.ClipViewMasonry = Masonry;
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
       card.dataset.id = item.id;
       card.dataset.type = item.type;
-      const timeStr = formatLocalTime(item.timestamp);
+      const timeStr = formatItemTime(item);
 
       let body = '';
       if (item.type === 'image') {
@@ -2418,7 +2487,9 @@ window.ClipViewMasonry = Masonry;
       const inTrash = !!(item.inTrash || item.deletedAt);
       if (inTrash) card.classList.add('in-trash');
       const count = Math.max(1, Number(item.copyCount) || 1);
-      const delTs = item.deletedAt ? formatLocalTime(item.deletedAt) : '';
+      const delTs = item.deletedAtLocal
+        ? formatLocalTime(item.deletedAtLocal)
+        : (item.deletedAt ? formatLocalTime(item.deletedAt) : '');
       const trashMeta = inTrash
         ? `<span class="time" title="删除 · 30 天后清除">${delTs || timeStr}</span>`
         : `<span class="time">${timeStr}</span>`;
@@ -2901,7 +2972,7 @@ window.ClipViewMasonry = Masonry;
           const srcKey = opsSourceKey(source);
           li.className = 'ops-item src-' + srcKey;
           const rows = [];
-          rows.push(['时间', formatLocalTime(row.ts), true]);
+          rows.push(['时间', row.timeLocal ? formatLocalTime(row.timeLocal) : formatLocalTime(row.ts), true]);
           rows.push(['动作', action, true]);
           rows.push(['来源', source, true]);
           if (itemId) rows.push(['条目 ID', itemId, false]);
@@ -2917,7 +2988,7 @@ window.ClipViewMasonry = Masonry;
                 <span class="ops-action">${esc(action)}</span>
                 <span class="ops-source-pill">${esc(source || 'system')}</span>
               </div>
-              <span class="time">${formatLocalTime(row.ts)}</span>
+              <span class="time">${row.timeLocal ? formatLocalTime(row.timeLocal) : formatLocalTime(row.ts)}</span>
             </div>
             <div class="ops-scroll">
               <div class="ops-grid">${body}</div>
@@ -2969,13 +3040,19 @@ window.ClipViewMasonry = Masonry;
         document.getElementById('backupEnabled').checked = !!s.enabled;
         const bkRootEl = document.getElementById('bkRoot');
         if (bkRootEl) bkRootEl.textContent = s.backupRootPath || '—';
-        document.getElementById('bkLast').textContent = s.lastSuccessAt ? formatLocalTime(s.lastSuccessAt) : '尚未成功';
+        document.getElementById('bkLast').textContent = s.lastSuccessUnix != null
+          ? formatLocalTime(s.lastSuccessUnix)
+          : (s.lastSuccessAt ? formatLocalTime(s.lastSuccessAt) : '尚未成功');
         const pol = document.getElementById('bkPolicy');
         if (pol) pol.textContent = s.policy || '—';
         const sc = document.getElementById('bkSnapCount');
         if (sc) sc.textContent = (s.snapshotCount != null ? s.snapshotCount : (s.snapshots||[]).length) + ' / keep ' + (s.config && s.config.keepSnapshots != null ? s.config.keepSnapshots : '—');
         const ls = document.getElementById('bkLastSnap');
-        if (ls) ls.textContent = s.lastSnapshotAt ? formatLocalTime(s.lastSnapshotAt) : '—';
+        if (ls) {
+          ls.textContent = s.lastSnapshotUnix != null
+            ? formatLocalTime(s.lastSnapshotUnix)
+            : (s.lastSnapshotAt ? formatLocalTime(s.lastSnapshotAt) : '—');
+        }
         let phase = s.lastPhase || '—';
         if (s.inProgress) phase = '进行中 · ' + phase;
         if (s.dirty) phase += ' · dirty';
@@ -3000,7 +3077,7 @@ window.ClipViewMasonry = Masonry;
               '<div class="backup-label" style="word-break:break-all;margin-top:4px">' + esc(d.rootPath || d.hint || '—') + '</div>' +
               '<div class="backup-label">' +
               (d.lastSuccessAt || d.lastSuccessUnix != null
-                ? ('上次: ' + esc(formatLocalTime(d.lastSuccessAt || d.lastSuccessUnix)) + (d.lastPhase ? ' · ' : ''))
+                ? ('上次: ' + esc(formatLocalTime(d.lastSuccessUnix != null ? d.lastSuccessUnix : d.lastSuccessAt)) + (d.lastPhase ? ' · ' : ''))
                 : '') +
               (d.lastPhase ? 'phase: ' + esc(d.lastPhase) : '') +
               (d.lastError ? ' · ' + esc(d.lastError) : '') +
@@ -3038,7 +3115,7 @@ window.ClipViewMasonry = Masonry;
                 <strong>${snap.isLatest ? 'latest' : snap.id}</strong>
                 <button type="button" class="secondary" data-restore="${snap.id}" style="height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--md-outline-v);background:var(--md-surface-c);cursor:pointer;font-size:12px">恢复</button>
               </div>
-              <div class="snap-meta">${snap.createdAt ? formatLocalTime(snap.createdAt) : ''} · ${fmtBytes(snap.byteSize)} · items ${snap.itemCount ?? '—'}</div>
+              <div class="snap-meta">${snap.createdAtUnix != null ? formatLocalTime(snap.createdAtUnix) : (snap.createdAt ? formatLocalTime(snap.createdAt) : '')} · ${fmtBytes(snap.byteSize)} · items ${snap.itemCount ?? '—'}</div>
               <div class="snap-meta" style="word-break:break-all">${(snap.sha256||'').slice(0,16)}…</div>`;
             li.querySelector('[data-restore]')?.addEventListener('click', async (e) => {
               const id = e.currentTarget.getAttribute('data-restore');
@@ -3081,7 +3158,11 @@ window.ClipViewMasonry = Masonry;
         set('syHost', s.hostId || '—');
         set('sySeq', s.localSeq != null ? String(s.localSeq) : '—');
         set('syOutbox', s.outboxPending != null ? String(s.outboxPending) : '—');
-        set('syTimes', (s.lastPushAt ? formatLocalTime(s.lastPushAt) : '—') + ' / ' + (s.lastPullAt ? formatLocalTime(s.lastPullAt) : '—'));
+        set('syTimes',
+          (s.lastPushUnix != null ? formatLocalTime(s.lastPushUnix) : (s.lastPushAt ? formatLocalTime(s.lastPushAt) : '—'))
+          + ' / '
+          + (s.lastPullUnix != null ? formatLocalTime(s.lastPullUnix) : (s.lastPullAt ? formatLocalTime(s.lastPullAt) : '—'))
+        );
         let phase = s.lastPhase || '—';
         if (s.inProgress) phase = '进行中 · ' + phase;
         set('syPhase', phase);

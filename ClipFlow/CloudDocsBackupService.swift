@@ -102,6 +102,7 @@ final class CloudDocsBackupService {
         /// Human policy summary for UI
         var policy: String = ""
         var lastSnapshotAt: String? = nil
+        var lastSnapshotUnix: Double? = nil
         var snapshotCount: Int = 0
         /// Per-destination health (iCloud / Google Drive / …)
         var destinations: [BackupDestinationStatus] = []
@@ -1073,6 +1074,7 @@ final class CloudDocsBackupService {
             config: config,
             policy: policy,
             lastSnapshotAt: lastSnapISO,
+            lastSnapshotUnix: lastSnapshotUnix ?? newestSnapshotUnix(),
             snapshotCount: snaps.count,
             destinations: destStatuses,
             googleDriveAvailable: gdrive != nil,

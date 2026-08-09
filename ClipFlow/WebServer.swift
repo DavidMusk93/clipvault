@@ -500,15 +500,41 @@ class WebServer {
                 html = customHTML
             }
         }
-        let response = """
-        HTTP/1.1 200 OK
-        Access-Control-Allow-Origin: *
-        Content-Type: text/html; charset=utf-8
-        Content-Length: \(html.utf8.count)
-        
-        \(html)
+        // Inject server display zone so clients never depend on browser TZ alone.
+        let tzBoot = """
+        <script>window.__CLIP_TZ=\(jsonStringLiteral(ClipTimeFormat.timeZoneId));window.__CLIP_TZ_OFFSET_MIN=\(ClipTimeFormat.displayTimeZone.secondsFromGMT() / 60);</script>
         """
-        sendResponse(response, connection: connection)
+        if let range = html.range(of: "<head>") {
+            html.replaceSubrange(range, with: "<head>\n  " + tzBoot)
+        } else if let range = html.range(of: "<head ") {
+            // rare
+            _ = range
+            html = tzBoot + html
+        } else {
+            html = tzBoot + html
+        }
+        let body = Data(html.utf8)
+        let response = """
+        HTTP/1.1 200 OK\r
+        Access-Control-Allow-Origin: *\r
+        Content-Type: text/html; charset=utf-8\r
+        Cache-Control: no-store, no-cache, must-revalidate\r
+        Pragma: no-cache\r
+        Content-Length: \(body.count)\r
+        \r
+        """
+        var payload = Data(response.utf8)
+        payload.append(body)
+        connection.send(content: payload, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    private func jsonStringLiteral(_ s: String) -> String {
+        let escaped = s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 
     private static var indexHTML: String {
@@ -796,18 +822,26 @@ class WebServer {
     }
     
     private func itemToJSON(_ item: ClipboardItem) -> [String: Any] {
+        let ts = item.timestamp.timeIntervalSince1970
+        let first = (item.firstSeenAt ?? item.timestamp).timeIntervalSince1970
         var dict: [String: Any] = [
             "id": item.id.uuidString,
-            "timestamp": item.timestamp.timeIntervalSince1970,
+            "timestamp": ts,
+            // Preformatted wall clock — UI must prefer this over client TZ math.
+            "timeLocal": ClipTimeFormat.displayWall(unix: ts),
+            "timeZone": ClipTimeFormat.timeZoneId,
             "type": item.type.rawValue,
             "preview": item.preview(),
             "sourceApp": item.sourceApp ?? "",
             "copyCount": item.copyCount,
             "contentHash": item.contentHash,
-            "firstSeenAt": (item.firstSeenAt ?? item.timestamp).timeIntervalSince1970
+            "firstSeenAt": first,
+            "firstSeenLocal": ClipTimeFormat.displayWall(unix: first),
         ]
         if let deleted = item.deletedAt {
-            dict["deletedAt"] = deleted.timeIntervalSince1970
+            let d = deleted.timeIntervalSince1970
+            dict["deletedAt"] = d
+            dict["deletedAtLocal"] = ClipTimeFormat.displayWall(unix: d)
             dict["inTrash"] = true
         } else {
             dict["inTrash"] = false
@@ -824,7 +858,9 @@ class WebServer {
         if let stage = item.userStage { dict["userStage"] = stage }
         if let rating = item.userRating { dict["userRating"] = rating }
         if let uat = item.userContextUpdatedAt {
-            dict["userContextUpdatedAt"] = uat.timeIntervalSince1970
+            let u = uat.timeIntervalSince1970
+            dict["userContextUpdatedAt"] = u
+            dict["userContextUpdatedAtLocal"] = ClipTimeFormat.displayWall(unix: u)
         }
         dict["hasUserContext"] = (item.userNote != nil)
             || (item.userStage != nil)
