@@ -501,33 +501,24 @@ class WebServer {
             }
         }
         // Inject server display zone so clients never depend on browser TZ alone.
-        let tzBoot = """
-        <script>window.__CLIP_TZ=\(jsonStringLiteral(ClipTimeFormat.timeZoneId));window.__CLIP_TZ_OFFSET_MIN=\(ClipTimeFormat.displayTimeZone.secondsFromGMT() / 60);</script>
-        """
+        let tzBoot = "<script>window.__CLIP_TZ=\(jsonStringLiteral(ClipTimeFormat.timeZoneId));window.__CLIP_TZ_OFFSET_MIN=\(ClipTimeFormat.displayTimeZone.secondsFromGMT() / 60);</script>\n"
         if let range = html.range(of: "<head>") {
-            html.replaceSubrange(range, with: "<head>\n  " + tzBoot)
-        } else if let range = html.range(of: "<head ") {
-            // rare
-            _ = range
-            html = tzBoot + html
+            html.replaceSubrange(range, with: "<head>\n" + tzBoot)
         } else {
             html = tzBoot + html
         }
         let body = Data(html.utf8)
-        let response = """
-        HTTP/1.1 200 OK\r
-        Access-Control-Allow-Origin: *\r
-        Content-Type: text/html; charset=utf-8\r
-        Cache-Control: no-store, no-cache, must-revalidate\r
-        Pragma: no-cache\r
-        Content-Length: \(body.count)\r
-        \r
-        """
-        var payload = Data(response.utf8)
-        payload.append(body)
-        connection.send(content: payload, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: "text/html; charset=utf-8",
+            body: body,
+            connection: connection,
+            extraHeaders: [
+                ("Cache-Control", "no-store, no-cache, must-revalidate"),
+                ("Pragma", "no-cache"),
+            ]
+        )
     }
 
     private func jsonStringLiteral(_ s: String) -> String {
