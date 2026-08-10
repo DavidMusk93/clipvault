@@ -116,6 +116,18 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 
 ---
 
+
+### 前端部署门禁（必过）
+
+改 `web/index.html` 后、**push / 同步到本机 :8080 前**必须：
+
+```bash
+./scripts/check-frontend.sh
+# 或: node --test tests/*.test.mjs
+```
+
+`tests/frontend-smoke.test.mjs` 会用 `node --check` 校验主脚本语法，并回归 `anyAvail` 等易被注入截断的表达式。**语法不过禁止上线。**
+
 ## 3. 技术真源（防过时）
 
 | 层 | 真源 |
