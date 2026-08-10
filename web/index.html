@@ -3034,6 +3034,7 @@ window.ClipViewMasonry = Masonry;
         const label = document.getElementById('backupBtnLabel');
         const dests = s.destinations || [];
         const anyAvail = dests.some(d => d.enabled && d.available)
+          || s.cloudDocsAvailable || s.googleDriveAvailable;
         const qd = s.quarkDiscovery;
         const qrow = document.getElementById('bkQuarkRow');
         const qel = document.getElementById('bkQuarkDiscover');
@@ -3045,8 +3046,6 @@ window.ClipViewMasonry = Masonry;
             qrow.style.display = 'none';
           }
         }
-
-          || s.cloudDocsAvailable || s.googleDriveAvailable;
         btn.classList.remove('on', 'warn');
         if (!anyAvail) { btn.classList.add('warn'); label.textContent = '无备份源'; }
         else if (s.enabled) { btn.classList.add('on'); label.textContent = s.inProgress ? '备份中…' : '已备份'; }
