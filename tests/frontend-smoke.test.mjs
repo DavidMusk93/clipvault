@@ -74,12 +74,16 @@ test('product brand is ClipVault in title', () => {
 });
 
 test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {
-  const i = indexHtml.indexOf("item.type === 'rtf' || item.type === 'html'");
-  assert.ok(i > 0);
-  const slice = indexHtml.slice(i, i + 1200);
-  assert.match(slice, /notes-rich/, 'structured HTML may use notes-rich');
-  assert.match(slice, /renderPlainBody|looksLikeCode/, 'code path uses detection helpers');
+  assert.match(indexHtml, /notes-rich\$\{tiny\}/, 'structured HTML may use notes-rich');
   assert.match(indexHtml, /function looksLikeCode/);
   assert.match(indexHtml, /function detectCodeLang/);
   assert.match(indexHtml, /hljs\.highlightElement/);
+  assert.match(indexHtml, /renderSearchableText|highlightEscaped/);
+});
+
+test('search highlight helpers present', () => {
+  assert.match(indexHtml, /function highlightEscaped/);
+  assert.match(indexHtml, /function fieldMatchesQuery/);
+  assert.match(indexHtml, /search-hit/);
+  assert.match(indexHtml, /命中 OCR/);
 });

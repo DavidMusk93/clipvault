@@ -1331,6 +1331,28 @@
       }
       .top-bar, .chips { border-bottom: 1px solid rgba(0,0,0,0.25); }
     }
+  
+    /* Search hit highlight on result fields */
+    mark.search-hit {
+      background: rgba(255, 214, 10, 0.55);
+      color: inherit;
+      border-radius: 3px;
+      padding: 0 2px;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+    .search-field-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10px; font-weight: 600; letter-spacing: -0.01em;
+      color: var(--accent); background: var(--accent-soft);
+      border-radius: 999px; padding: 1px 7px; margin-left: 6px;
+      vertical-align: middle;
+    }
+    .ocr-panel.is-search-hit {
+      outline: 1.5px solid rgba(0, 113, 227, 0.35);
+      background: rgba(0, 113, 227, 0.04);
+    }
+
   </style>
 </head>
 <body>
@@ -1755,6 +1777,57 @@ window.ClipViewMasonry = Masonry;
     function escAttr(s) {
       return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
     }
+
+    function escapeRegExp(s) {
+      return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    function searchTokens(q) {
+      const raw = String(q || '').trim();
+      if (!raw) return [];
+      // Prefer longer tokens first so multi-char CJK wins over singles.
+      const parts = raw.split(/\s+/).filter(Boolean);
+      const set = new Set(parts);
+      // Also keep full query as a phrase token
+      set.add(raw);
+      return [...set].sort((a, b) => b.length - a.length);
+    }
+    function fieldMatchesQuery(text, q) {
+      if (!q || !text) return false;
+      const hay = String(text).toLowerCase();
+      return searchTokens(q).some(tok => tok && hay.includes(tok.toLowerCase()));
+    }
+    /** Escape text then wrap search hits in <mark class="search-hit">. */
+    function highlightEscaped(text, q) {
+      const s = String(text ?? '');
+      if (!s) return '';
+      const tokens = searchTokens(q).filter(t => t.length >= 1);
+      if (!tokens.length) return esc(s);
+      const re = new RegExp('(' + tokens.map(escapeRegExp).join('|') + ')', 'gi');
+      let out = '';
+      let last = 0;
+      let m;
+      while ((m = re.exec(s)) !== null) {
+        out += esc(s.slice(last, m.index));
+        out += '<mark class="search-hit">' + esc(m[0]) + '</mark>';
+        last = m.index + m[0].length;
+        // avoid zero-length loops
+        if (m[0].length === 0) re.lastIndex++;
+      }
+      out += esc(s.slice(last));
+      return out;
+    }
+    /** For building body HTML: when searching, show hits; else normal esc/hljs path. */
+    function renderSearchableText(text, { asCode = false } = {}) {
+      const s = String(text || '');
+      if (searchQuery && fieldMatchesQuery(s, searchQuery)) {
+        // Search mode: mark hits (skip hljs so marks stay intact)
+        const mode = textLineModeClass(s);
+        return `<div class="text-scroll${mode}"><pre><code data-hljs="skip">${highlightEscaped(s, searchQuery)}</code></pre></div>`;
+      }
+      if (asCode || looksLikeCode(s)) return renderPlainBody(s);
+      return renderPlainBody(s);
+    }
+
 
     function toast(msg) {
       const el = document.getElementById('snackbar');
@@ -2493,9 +2566,13 @@ window.ClipViewMasonry = Masonry;
           </div>`;
         const ocr = item.ocrText || (item.preview && item.preview !== 'Image' ? item.preview : '');
         if (ocr) {
-          body += `<div class="ocr-panel">
-            <div class="ocr-panel-header"><span class="material-symbols-outlined" style="font-size:16px">find_in_page</span>OCR 识别结果</div>
-            <div class="ocr-body"><span class="ocr-body-inner">${esc(ocrDisplayText(ocr))}</span></div>
+          const ocrDisp = ocrDisplayText(ocr);
+          const ocrHit = !!(searchQuery && fieldMatchesQuery(ocrDisp, searchQuery));
+          const ocrHtml = ocrHit ? highlightEscaped(ocrDisp, searchQuery) : esc(ocrDisp);
+          const badge = ocrHit ? '<span class="search-field-badge">命中 OCR</span>' : '';
+          body += `<div class="ocr-panel${ocrHit ? ' is-search-hit' : ''}">
+            <div class="ocr-panel-header"><span class="material-symbols-outlined" style="font-size:16px">find_in_page</span>OCR 识别结果${badge}</div>
+            <div class="ocr-body"><span class="ocr-body-inner">${ocrHtml}</span></div>
           </div>`;
         }
       } else if (item.type === 'rtf' || item.type === 'html' || item.htmlContent) {
@@ -2511,7 +2588,14 @@ window.ClipViewMasonry = Masonry;
         }
         const tinyBase = (plain || plainFromHtml || '');
         const tiny = tinyBase.length > 0 && tinyBase.length <= 80 && !tinyBase.includes('\n') ? ' is-tiny' : '';
-        if (notesFragmentUseful(fragment) && !looksLikeCode(plain || plainFromHtml)) {
+        // Search: always plain+highlight so matches are visible (incl. text from HTML strip).
+        if (searchQuery && plain) {
+          body = renderSearchableText(plain, { asCode: looksLikeCode(plain) });
+          if (fieldMatchesQuery(plainFromHtml, searchQuery) && !fieldMatchesQuery(item.textContent || '', searchQuery)) {
+            // Match came mainly from HTML body
+            body = '<div class="search-field-badge" style="margin:0 0 6px">命中正文</div>' + body;
+          }
+        } else if (notesFragmentUseful(fragment) && !looksLikeCode(plain || plainFromHtml)) {
           body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
         } else if (plain) {
           body = renderPlainBody(plain, ' is-rtf');
@@ -2520,7 +2604,18 @@ window.ClipViewMasonry = Masonry;
         }
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
-        body = plain ? renderPlainBody(plain) : renderPlainBody('（无正文）');
+        if (plain) {
+          body = searchQuery ? renderSearchableText(plain) : renderPlainBody(plain);
+        } else {
+          body = renderPlainBody('（无正文）');
+        }
+        // Text item with OCR field (rare) — still surface OCR hits
+        if (item.ocrText && searchQuery && fieldMatchesQuery(item.ocrText, searchQuery)) {
+          body += `<div class="ocr-panel is-search-hit" style="margin-top:8px">
+            <div class="ocr-panel-header"><span class="material-symbols-outlined" style="font-size:16px">find_in_page</span>OCR<span class="search-field-badge">命中 OCR</span></div>
+            <div class="ocr-body"><span class="ocr-body-inner">${highlightEscaped(ocrDisplayText(item.ocrText), searchQuery)}</span></div>
+          </div>`;
+        }
       }
 
       // Evaluation content lives only in eval sheet — never mount into card body (masonry reflow).
@@ -2564,7 +2659,7 @@ window.ClipViewMasonry = Masonry;
         </div>
         <div class="card-body">${body}</div>
         <div class="card-actions">
-          <div class="source">${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size:14px">apps</span>${esc(item.sourceApp)}` : ''}</div>
+          <div class="source">${item.sourceApp ? `<span class="material-symbols-outlined" style="font-size:14px">apps</span>${searchQuery && fieldMatchesQuery(item.sourceApp, searchQuery) ? highlightEscaped(item.sourceApp, searchQuery) : esc(item.sourceApp)}` : ''}</div>
           ${actions}
         </div>`;
 
@@ -2952,6 +3047,9 @@ window.ClipViewMasonry = Masonry;
         searchQuery = e.target.value.trim();
         nextCursor = null;
         exhausted = false;
+        // Rebuild cards so OCR panels / <mark> reflect current query
+        cardCache.clear();
+        colHeights = null;
         fetchPage({ reset: true });
       }, 280);
     });

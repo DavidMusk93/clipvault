@@ -1239,9 +1239,26 @@ final class DatabaseManager: ObservableObject {
                 }
             } else if hasQuery, let match = ftsMatch {
                 items = self.runSearchFTS(db: db, match: match, cursor: cursor, fetchLimit: fetchLimit)
-                // Hybrid: if FTS empty (e.g. odd tokens), fall back to LIKE once.
+                // Hybrid: always merge LIKE (text/ocr/html/source/note) so OCR hits are never
+                // lost when FTS tokenizer/ranking under-matches CJK or short tokens.
+                let likeItems = self.runSearchLike(db: db, q: q!, cursor: cursor, fetchLimit: fetchLimit)
                 if items.isEmpty {
-                    items = self.runSearchLike(db: db, q: q!, cursor: cursor, fetchLimit: fetchLimit)
+                    items = likeItems
+                } else if !likeItems.isEmpty {
+                    var seen = Set(items.map { $0.id })
+                    for it in likeItems where !seen.contains(it.id) {
+                        items.append(it)
+                        seen.insert(it.id)
+                        if items.count >= fetchLimit { break }
+                    }
+                    // Keep recency for overflow — re-sort by timestamp desc
+                    items.sort { a, b in
+                        if a.timestamp != b.timestamp { return a.timestamp > b.timestamp }
+                        return a.id.uuidString > b.id.uuidString
+                    }
+                    if items.count > fetchLimit {
+                        items = Array(items.prefix(fetchLimit))
+                    }
                 }
             } else if hasQuery, let q = q {
                 // Short query (<3) with trigram: LIKE path.
