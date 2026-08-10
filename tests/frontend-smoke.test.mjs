@@ -73,16 +73,13 @@ test('product brand is ClipVault in title', () => {
   assert.match(indexHtml, /<title>ClipVault<\/title>/);
 });
 
-test('html/rtf card path does not use notes-rich (plain text only)', () => {
-  // Product: rich HTML fragment rendering off — avoid Cocoa spacer blank lines.
+test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {
   const i = indexHtml.indexOf("item.type === 'rtf' || item.type === 'html'");
   assert.ok(i > 0);
-  const slice = indexHtml.slice(i, i + 900);
-  assert.doesNotMatch(
-    slice,
-    /notes-rich[\s\S]{0,40}\$\{fragment\}|class="notes-rich/,
-    'html/rtf branch must not inject notes-rich DOM',
-  );
-  assert.match(slice, /stripHtmlToText/, 'must strip HTML to plain when textContent empty');
-  assert.match(slice, /text-scroll/, 'must use text-scroll plain path');
+  const slice = indexHtml.slice(i, i + 1200);
+  assert.match(slice, /notes-rich/, 'structured HTML may use notes-rich');
+  assert.match(slice, /renderPlainBody|looksLikeCode/, 'code path uses detection helpers');
+  assert.match(indexHtml, /function looksLikeCode/);
+  assert.match(indexHtml, /function detectCodeLang/);
+  assert.match(indexHtml, /hljs\.highlightElement/);
 });

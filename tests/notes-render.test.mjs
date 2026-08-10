@@ -71,15 +71,16 @@ test('notesFragmentUseful rejects pure empty chrome', () => {
 test('index.html CSS: rich text must not soft-wrap (pre + pan)', () => {
   // Product: dont wrap lines — pan instead. Empty holes are JS cleanup, not soft-wrap.
   // Multi-selector block may span >120 chars before white-space; allow a generous window.
+  // Prose: normal wrap (blank-line friendly). Mono remains pre (see .is-mono).
   assert.match(
     indexHtml,
-    /\.notes-rich p[\s\S]{0,400}?white-space:\s*pre\s*;/,
-    'notes-rich p must use white-space:pre (no soft wrap)',
+    /\.notes-rich p[\s\S]{0,400}?white-space:\s*normal\s*;/,
+    'notes-rich p prose uses white-space:normal',
   );
-  assert.doesNotMatch(
+  assert.match(
     indexHtml,
-    /\.notes-rich p[\s\S]{0,400}?white-space:\s*(?:normal|pre-wrap)\s*;/,
-    'notes-rich p must not soft-wrap (normal/pre-wrap forbidden)',
+    /\.notes-rich \.is-mono[\s\S]{0,200}?white-space:\s*pre/,
+    'notes-rich mono keeps white-space:pre',
   );
   assert.match(indexHtml, /\.notes-rich-inner[\s\S]{0,120}?width:\s*max-content/);
   assert.doesNotMatch(

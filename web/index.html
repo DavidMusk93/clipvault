@@ -599,10 +599,10 @@
     .notes-rich li, .snippet-html li {
       margin: 0 0 0.28em;
       min-height: 0 !important;
-      /* hard newlines only — long lines pan, never soft-wrap */
-      white-space: pre;
+      /* Prose: normal wrap — empty Cocoa holes are JS-collapsed, not pre-preserved */
+      white-space: normal;
       word-break: normal;
-      overflow-wrap: normal;
+      overflow-wrap: anywhere;
     }
     .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
     .notes-rich p:empty, .snippet-html p:empty,
@@ -2439,6 +2439,44 @@ window.ClipViewMasonry = Masonry;
       return map[t] || { label: t || '其他', icon: 'label', cls: 'type-other' };
     }
 
+
+    /** Heuristic: treat as code/SQL for keyword highlight (hljs). */
+    function looksLikeCode(text) {
+      const s = String(text || '');
+      if (s.length < 8) return false;
+      if (/^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXPLAIN)\b/im.test(s)) return true;
+      if (/^\s*(function|const|let|var|class|import|export|def |async |package |fn |pub )\b/m.test(s)) return true;
+      if (/[{;]\s*$/m.test(s) && /[{}=<>]/.test(s) && s.split('\n').length >= 2) return true;
+      if (/```|^\s*#!\//m.test(s)) return true;
+      return false;
+    }
+
+    function detectCodeLang(text) {
+      const s = String(text || '');
+      if (/^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXPLAIN|PRAGMA)\b/im.test(s)
+          || /\bFROM\s+\w+/i.test(s) && /\bWHERE\b/i.test(s)) return 'sql';
+      if (/\b(def |import |from \w+ import|async def |elif )\b/.test(s)) return 'python';
+      if (/\b(func |package |fmt\.|:=)\b/.test(s)) return 'go';
+      if (/\b(fn |let mut |println!|pub fn)\b/.test(s)) return 'rust';
+      if (/\b(function |const |let |=>|export |import )\b/.test(s) || /<\/?[a-zA-Z][^>]*>/.test(s) && /[{;]/.test(s)) return 'javascript';
+      if (/^\s*#include\b|std::|int main\s*\(/.test(s)) return 'cpp';
+      if (/\b(public class |System\.out|void main)\b/.test(s)) return 'java';
+      if (/^\s*\{[\s\S]*"[\w-]+"\s*:/.test(s.trim())) return 'json';
+      if (/^\s*(diff --git|@@ |\+\+\+ |--- )/m.test(s)) return 'diff';
+      return 'plaintext';
+    }
+
+    /** Plain / code body with optional hljs language class. */
+    function renderPlainBody(plain, extraClass = '') {
+      const text = String(plain || '');
+      const mode = textLineModeClass(text);
+      const codey = looksLikeCode(text);
+      const lang = codey ? detectCodeLang(text) : '';
+      const langCls = lang && lang !== 'plaintext' ? ` language-${lang}` : '';
+      const codeAttr = codey ? '' : ' data-hljs="skip"';
+      return `<div class="text-scroll${mode}${extraClass}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
+    }
+
     function buildCard(item) {
       const card = document.createElement('article');
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
@@ -2461,24 +2499,28 @@ window.ClipViewMasonry = Masonry;
           </div>`;
         }
       } else if (item.type === 'rtf' || item.type === 'html' || item.htmlContent) {
-        // Product: disable notes-rich / HTML fragment rendering (excess blank lines &
-        // whitespace from Cocoa Writer HTML + white-space:pre). Always plain text:
-        // prefer textContent, else strip tags from htmlContent.
+        // Rich structure when useful (lists/emphasis); empty Cocoa holes collapsed in renderNotesFragment.
+        // Prose CSS is white-space:normal — not pre — so blank lines do not explode.
+        // Code-like plain falls through to hljs keyword highlight.
+        const fragment = renderNotesFragment(item.htmlContent || '');
+        const plainFromHtml = stripHtmlToText(fragment || item.htmlContent || '');
         let plain = normalizePlainText(item.textContent || '');
-        if (!plain && item.htmlContent) plain = stripHtmlToText(item.htmlContent);
+        if (!plain) plain = plainFromHtml;
         if (!plain && item.preview && item.preview !== 'Rich Text' && item.preview !== 'HTML') {
           plain = normalizePlainText(item.preview);
         }
-        if (plain) {
-          const mode = textLineModeClass(plain);
-          body = `<div class="text-scroll${mode}"><pre><code>${esc(plain)}</code></pre></div>`;
+        const tinyBase = (plain || plainFromHtml || '');
+        const tiny = tinyBase.length > 0 && tinyBase.length <= 80 && !tinyBase.includes('\n') ? ' is-tiny' : '';
+        if (notesFragmentUseful(fragment) && !looksLikeCode(plain || plainFromHtml)) {
+          body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
+        } else if (plain) {
+          body = renderPlainBody(plain, ' is-rtf');
         } else {
-          body = `<div class="text-scroll is-tiny is-single"><pre><code>（无正文）</code></pre></div>`;
+          body = renderPlainBody('（富文本无正文，请重新复制）', ' is-rtf');
         }
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
-        const mode = textLineModeClass(plain);
-        body = `<div class="text-scroll${mode}"><pre><code>${esc(plain)}</code></pre></div>`;
+        body = plain ? renderPlainBody(plain) : renderPlainBody('（无正文）');
       }
 
       // Evaluation content lives only in eval sheet — never mount into card body (masonry reflow).
@@ -2592,8 +2634,41 @@ window.ClipViewMasonry = Masonry;
     }
 
     function highlightCard(card) {
+      if (typeof hljs === 'undefined') return;
       card.querySelectorAll('pre code:not([data-hljs])').forEach(block => {
-        try { hljs.highlightElement(block); block.setAttribute('data-hljs', '1'); } catch (_) {}
+        if (block.getAttribute('data-hljs') === 'skip') return;
+        // Skip tiny non-code one-liners
+        const raw = block.textContent || '';
+        if (!looksLikeCode(raw) && !/\blanguage-/.test(block.className)) {
+          block.setAttribute('data-hljs', 'skip');
+          return;
+        }
+        try {
+          if (!/\blanguage-/.test(block.className)) {
+            const lang = detectCodeLang(raw);
+            if (lang && lang !== 'plaintext') block.classList.add('language-' + lang);
+          }
+          hljs.highlightElement(block);
+          block.setAttribute('data-hljs', '1');
+        } catch (_) {
+          block.setAttribute('data-hljs', 'err');
+        }
+      });
+      // Notes mono blocks: promote to highlighted pre/code if still plain p.is-mono
+      card.querySelectorAll('.notes-rich .is-mono:not([data-hljs])').forEach(el => {
+        const raw = el.textContent || '';
+        if (!looksLikeCode(raw)) return;
+        try {
+          const lang = detectCodeLang(raw);
+          const pre = document.createElement('pre');
+          const code = document.createElement('code');
+          if (lang && lang !== 'plaintext') code.className = 'language-' + lang;
+          code.textContent = raw;
+          pre.appendChild(code);
+          el.replaceWith(pre);
+          hljs.highlightElement(code);
+          code.setAttribute('data-hljs', '1');
+        } catch (_) {}
       });
     }
 
