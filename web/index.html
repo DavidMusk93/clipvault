@@ -1020,7 +1020,13 @@
     .eval-hist-note {
       margin-top: 6px; font-size: 14px; line-height: 1.45; color: var(--ink);
       letter-spacing: -0.01em;
-      white-space: pre-wrap; word-break: break-word;
+      /* Hard newlines only — soft wrap blurs real \n (product: 备注展示) */
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+      overflow-x: auto;
+      max-width: 100%;
+      -webkit-overflow-scrolling: touch;
     }
     .eval-hist-empty {
       font-size: 13px; color: var(--muted); padding: 12px 0 4px; text-align: center;
@@ -1985,7 +1991,7 @@ window.ClipViewMasonry = Masonry;
           const stars = hasStars
             ? renderStarsHTML(ev.rating)
             : `<span class="eval-hist-badge">备注</span>`;
-          const note = ev.note ? `<div class="eval-hist-note">${esc(ev.note)}</div>` : '';
+          const note = ev.note ? `<div class="eval-hist-note" title="备注（不 soft-wrap，可横向滑动）">${esc(ev.note)}</div>` : '';
           li.innerHTML =
             `<div class="eval-hist-time-row">` +
             `<span class="eval-hist-rel">${esc(t.rel)}</span>` +

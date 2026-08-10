@@ -87,3 +87,16 @@ test('search highlight helpers present', () => {
   assert.match(indexHtml, /search-hit/);
   assert.match(indexHtml, /命中 OCR/);
 });
+
+test('eval history note display does not soft-wrap', () => {
+  assert.match(
+    indexHtml,
+    /\.eval-hist-note\s*\{[\s\S]{0,280}?white-space:\s*pre\s*;/,
+    '备注展示 must use white-space:pre so real newlines stay obvious',
+  );
+  assert.doesNotMatch(
+    indexHtml,
+    /\.eval-hist-note\s*\{[\s\S]{0,200}?white-space:\s*pre-wrap/,
+    'eval-hist-note must not use pre-wrap soft wrap',
+  );
+});
