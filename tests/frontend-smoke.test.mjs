@@ -91,12 +91,27 @@ test('search highlight helpers present', () => {
 test('eval history note display does not soft-wrap', () => {
   assert.match(
     indexHtml,
-    /\.eval-hist-note\s*\{[\s\S]{0,280}?white-space:\s*pre\s*;/,
+    /\.eval-hist-note\s*\{[\s\S]{0,320}?white-space:\s*pre\s*;/,
     '备注展示 must use white-space:pre so real newlines stay obvious',
   );
   assert.doesNotMatch(
     indexHtml,
     /\.eval-hist-note\s*\{[\s\S]{0,200}?white-space:\s*pre-wrap/,
     'eval-hist-note must not use pre-wrap soft wrap',
+  );
+});
+
+test('eval history note has copy button (scrollbar may obscure long lines)', () => {
+  assert.match(indexHtml, /eval-hist-note-copy/);
+  assert.match(indexHtml, /复制备注/);
+  assert.match(
+    indexHtml,
+    /await copyClip\(noteText\)/,
+    'note copy uses same macOS clipboard path as card copy',
+  );
+  assert.match(
+    indexHtml,
+    /\.eval-hist-note\s*\{[\s\S]{0,800}?padding:\s*2px 34px 14px 0/,
+    'note body pads for copy chip + scrollbar so text is not covered',
   );
 });

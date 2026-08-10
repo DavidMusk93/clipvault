@@ -1017,8 +1017,26 @@
       background: rgba(120, 120, 128, 0.12);
       border-radius: 999px; padding: 2px 8px;
     }
+    .eval-hist-note-block {
+      position: relative;
+      margin-top: 6px;
+      max-width: 100%;
+    }
+    .eval-hist-note-block .eval-hist-note-copy {
+      position: absolute;
+      top: -2px;
+      right: 0;
+      z-index: 2;
+      width: 28px; height: 28px;
+      --icon-size: 15px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    }
+    .eval-hist-note-block .eval-hist-note-copy:hover {
+      background: #fff;
+    }
     .eval-hist-note {
-      margin-top: 6px; font-size: 14px; line-height: 1.45; color: var(--ink);
+      margin-top: 0; font-size: 14px; line-height: 1.45; color: var(--ink);
       letter-spacing: -0.01em;
       /* Hard newlines only — soft wrap blurs real \n (product: 备注展示) */
       white-space: pre;
@@ -1027,6 +1045,9 @@
       overflow-x: auto;
       max-width: 100%;
       -webkit-overflow-scrolling: touch;
+      /* Leave room so macOS/overlay scrollbar does not cover last line */
+      padding: 2px 34px 14px 0;
+      box-sizing: border-box;
     }
     .eval-hist-empty {
       font-size: 13px; color: var(--muted); padding: 12px 0 4px; text-align: center;
@@ -1040,6 +1061,7 @@
     @media (prefers-reduced-transparency: reduce) {
       .eval-sheet-card { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
       .eval-sheet-scrim { backdrop-filter: none; -webkit-backdrop-filter: none; }
+      .eval-hist-note-block .eval-hist-note-copy { background: #fff; }
     }
     @media (min-width: 560px) {
       .eval-sheet { align-items: center; }
@@ -1991,7 +2013,14 @@ window.ClipViewMasonry = Masonry;
           const stars = hasStars
             ? renderStarsHTML(ev.rating)
             : `<span class="eval-hist-badge">备注</span>`;
-          const note = ev.note ? `<div class="eval-hist-note" title="备注（不 soft-wrap，可横向滑动）">${esc(ev.note)}</div>` : '';
+          const note = ev.note
+            ? (`<div class="eval-hist-note-block">` +
+               `<button type="button" class="icon-btn eval-hist-note-copy" title="复制备注" aria-label="复制备注">` +
+               `<svg class="icon-off" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>` +
+               `</button>` +
+               `<div class="eval-hist-note" title="备注（不 soft-wrap；过长可横滑或点复制）">${esc(ev.note)}</div>` +
+               `</div>`)
+            : '';
           li.innerHTML =
             `<div class="eval-hist-time-row">` +
             `<span class="eval-hist-rel">${esc(t.rel)}</span>` +
@@ -1999,6 +2028,24 @@ window.ClipViewMasonry = Masonry;
             `</div>` +
             `<div class="eval-hist-meta">${stars}</div>` +
             note;
+          const copyBtn = li.querySelector('.eval-hist-note-copy');
+          if (copyBtn) {
+            const noteText = String(ev.note || '');
+            copyBtn.addEventListener('click', async e => {
+              e.preventDefault();
+              e.stopPropagation();
+              const btn = e.currentTarget;
+              const ok = await copyClip(noteText);
+              if (!ok) return;
+              btn.classList.add('is-copied');
+              btn.setAttribute('aria-label', '已复制');
+              clearTimeout(btn._copiedTimer);
+              btn._copiedTimer = setTimeout(() => {
+                btn.classList.remove('is-copied');
+                btn.setAttribute('aria-label', '复制备注');
+              }, 1400);
+            });
+          }
           host.appendChild(li);
         });
       } catch (_) {
