@@ -42,6 +42,22 @@ struct BackupDestinationStatus: Codable, Equatable {
     var hint: String?
 }
 
+
+/// Auto-discovered Quark client state (no File Provider mount).
+struct QuarkDiscoveryReport: Codable, Equatable {
+    var appInstalled: Bool
+    var appPath: String?
+    var accountConfigFound: Bool
+    /// Named backup switches from Quark account.json (desktop/documents/downloads/…).
+    var categoryBackupEnabled: [String: Bool]
+    var anyCategoryBackupEnabled: Bool
+    var menuAutoBackupEnable: Bool?
+    var stagingPath: String?
+    var stagingHasArtifact: Bool
+    var cloudListedClipVaultBackups: Bool
+    var summary: String
+}
+
 enum BackupDestinationResolver {
     private static let fm = FileManager.default
 
@@ -94,47 +110,6 @@ enum BackupDestinationResolver {
         return nil
     }
 
-    /// Prefer configured path, else well-known Quark staging / sync folders.
-    /// Quark Desktop does not expose a File Provider mount like Google Drive;
-    /// it can **backup a local folder**. We write to a dedicated staging root that
-    /// the user adds once under 夸克 → 备份 / 上传位置.
-    static func quarkStagingURL(configuredPath: String? = nil) -> URL? {
-        if let p = configuredPath?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty {
-            let url = URL(fileURLWithPath: (p as NSString).expandingTildeInPath, isDirectory: true)
-            try? fm.createDirectory(at: url, withIntermediateDirectories: true)
-            return url.standardizedFileURL
-        }
-        // Prefer existing user-created sync roots (if Quark already backs them up).
-        let home = fm.homeDirectoryForCurrentUser
-        let candidates: [URL] = [
-            home.appendingPathComponent("夸克网盘", isDirectory: true),
-            home.appendingPathComponent("QuarkCloudDrive", isDirectory: true),
-            home.appendingPathComponent("QuarkNetDisk", isDirectory: true),
-            home.appendingPathComponent("Documents/夸克网盘", isDirectory: true),
-            home.appendingPathComponent("Documents/Quark", isDirectory: true),
-        ]
-        for c in candidates {
-            var isDir: ObjCBool = false
-            if fm.fileExists(atPath: c.path, isDirectory: &isDir), isDir.boolValue {
-                return c.appendingPathComponent("ClipVault/backup", isDirectory: true)
-            }
-        }
-        // Default staging (always creatable; user maps it in Quark client).
-        let staging = home
-            .appendingPathComponent("ClipVault-Backups/Quark/backup", isDirectory: true)
-        try? fm.createDirectory(at: staging, withIntermediateDirectories: true)
-        return staging.standardizedFileURL
-    }
-
-    /// True if Quark Desktop (or legacy installer) appears installed.
-    static func quarkAppInstalled() -> Bool {
-        let apps = [
-            "/Applications/Quark.app",
-            "/Applications/夸克网盘.app",
-            "/Applications/夸克.app",
-        ]
-        return apps.contains { fm.fileExists(atPath: $0) }
-    }
 
     /// Resolve backup root for a destination config.
     static func backupRoot(for dest: BackupDestinationConfig) -> URL? {
@@ -171,17 +146,159 @@ enum BackupDestinationResolver {
     }
 
     /// Whether ClipVault can **meaningfully** use this destination right now.
-    /// Quark is special: a local staging folder can always be created, but that is
-    /// **not** cloud readiness — require Quark.app so UI does not show a false green.
+    /// Quark: require app; staging path alone is not cloud readiness.
     static func isDestinationReady(_ dest: BackupDestinationConfig) -> Bool {
-        guard let root = backupRoot(for: dest) else { return false }
-        _ = root
+        guard backupRoot(for: dest) != nil else { return false }
         switch dest.type {
         case "quark":
             return quarkAppInstalled()
         default:
             return true
         }
+    }
+
+    // MARK: - Quark auto-discovery
+
+    private static var quarkAppCandidates: [String] {
+        [
+            "/Applications/Quark.app",
+            "/Applications/夸克网盘.app",
+            "/Applications/夸克.app",
+        ]
+    }
+
+    /// True if Quark Desktop (or legacy installer) appears installed.
+    static func quarkAppInstalled() -> Bool {
+        quarkAppPath() != nil
+    }
+
+    static func quarkAppPath() -> String? {
+        quarkAppCandidates.first { fm.fileExists(atPath: $0) }
+    }
+
+    /// Prefer configured path, else well-known Quark staging / sync folders.
+    /// Quark Desktop does not expose a File Provider mount like Google Drive;
+    /// it can **backup a local folder**. We write to a dedicated staging root that
+    /// the user adds once under 夸克 → 备份 / 上传位置 — path is **auto**, not manual.
+    static func quarkStagingURL(configuredPath: String? = nil) -> URL? {
+        if let p = configuredPath?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty {
+            let url = URL(fileURLWithPath: (p as NSString).expandingTildeInPath, isDirectory: true)
+            try? fm.createDirectory(at: url, withIntermediateDirectories: true)
+            return url.standardizedFileURL
+        }
+        let home = fm.homeDirectoryForCurrentUser
+        let candidates: [URL] = [
+            home.appendingPathComponent("夸克网盘", isDirectory: true),
+            home.appendingPathComponent("QuarkCloudDrive", isDirectory: true),
+            home.appendingPathComponent("QuarkNetDisk", isDirectory: true),
+            home.appendingPathComponent("Documents/夸克网盘", isDirectory: true),
+            home.appendingPathComponent("Documents/Quark", isDirectory: true),
+        ]
+        for c in candidates {
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: c.path, isDirectory: &isDir), isDir.boolValue {
+                let nested = c.appendingPathComponent("ClipVault/backup", isDirectory: true)
+                try? fm.createDirectory(at: nested, withIntermediateDirectories: true)
+                return nested.standardizedFileURL
+            }
+        }
+        // Default staging — always auto-created; no user path hunting.
+        let staging = home
+            .appendingPathComponent("ClipVault-Backups/Quark/backup", isDirectory: true)
+        try? fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        return staging.standardizedFileURL
+    }
+
+    /// Parse Quark client configs so UI does not ask users to "find" paths.
+    static func discoverQuark() -> QuarkDiscoveryReport {
+        let appPath = quarkAppPath()
+        let appInstalled = appPath != nil
+        let home = fm.homeDirectoryForCurrentUser
+        let accountURL = home.appendingPathComponent("Library/Application Support/Quark/account.json")
+        let prefURL = home.appendingPathComponent("Library/Application Support/Quark/preference.json")
+        var categories: [String: Bool] = [:]
+        var accountFound = false
+        if let data = try? Data(contentsOf: accountURL),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            accountFound = true
+            // account.json is { "<uid>": { desktopBackup: {enable:bool}, ... } }
+            for (_, val) in root {
+                guard let user = val as? [String: Any] else { continue }
+                for key in ["desktopBackup", "documentsBackup", "downloadsBackup", "officeBackup", "qqBackup", "weixinBackup"] {
+                    if let box = user[key] as? [String: Any], let en = box["enable"] as? Bool {
+                        categories[key] = en
+                    }
+                }
+                // specify custom folders if present
+                if let specify = user["specify"] as? [String: Any] {
+                    if let folders = specify["folders"] as? [[String: Any]] {
+                        categories["specifyCustomFolders"] = !folders.isEmpty
+                    } else if let paths = specify["paths"] as? [String] {
+                        categories["specifyCustomFolders"] = !paths.isEmpty
+                    } else if specify["setting"] != nil {
+                        // setting exists but categories may still be off
+                        categories["specifySettingPresent"] = true
+                    }
+                }
+            }
+        }
+        var menuAuto: Bool? = nil
+        if let data = try? Data(contentsOf: prefURL),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let global = root["global:setting"] as? [String: Any],
+           let menu = global["menuSwitch"] as? [String: Any],
+           let ab = menu["autoBackupEnable"] as? Bool {
+            menuAuto = ab
+        }
+        let staging = quarkStagingURL(configuredPath: nil)
+        var hasArtifact = false
+        if let s = staging {
+            let db = s.appendingPathComponent("latest/clipflow.db")
+            hasArtifact = fm.fileExists(atPath: db.path)
+        }
+        // Best-effort: IndexedDB cloud listing mentions ClipVault-Backups (user uploaded/synced name).
+        var cloudListed = false
+        let idb = home.appendingPathComponent(
+            "Library/Application Support/Quark/Default/IndexedDB/uccd_cloud.quark_0.indexeddb.leveldb"
+        )
+        if let files = try? fm.contentsOfDirectory(at: idb, includingPropertiesForKeys: nil) {
+            for f in files where f.pathExtension == "log" || f.pathExtension == "ldb" {
+                if let data = try? Data(contentsOf: f), data.count < 8_000_000 {
+                    if data.range(of: Data("ClipVault-Backups".utf8)) != nil {
+                        cloudListed = true
+                        break
+                    }
+                }
+            }
+        }
+        let anyCat = categories.contains { $0.key.hasSuffix("Backup") && $0.value == true }
+        var parts: [String] = []
+        if appInstalled { parts.append("已安装客户端") } else { parts.append("未安装客户端") }
+        if accountFound {
+            let on = categories.filter { $0.key.hasSuffix("Backup") && $0.value }.map(\.key)
+            if on.isEmpty {
+                parts.append("电脑备份分类均未开启（桌面/文档/下载…）")
+            } else {
+                parts.append("已开启: " + on.joined(separator: ", "))
+            }
+        }
+        if hasArtifact { parts.append("本机暂存已有 ClipVault 制品") }
+        if cloudListed { parts.append("夸克云端目录列表出现 ClipVault-Backups") }
+        if let staging {
+            parts.append("暂存: \(staging.path)")
+        }
+        return QuarkDiscoveryReport(
+            appInstalled: appInstalled,
+            appPath: appPath,
+            accountConfigFound: accountFound,
+            categoryBackupEnabled: categories,
+            anyCategoryBackupEnabled: anyCat,
+            menuAutoBackupEnable: menuAuto,
+            stagingPath: staging?.path,
+            stagingHasArtifact: hasArtifact,
+            cloudListedClipVaultBackups: cloudListed,
+            summary: parts.joined(separator: " · ")
+        )
     }
 
     static func availabilityHint(for dest: BackupDestinationConfig) -> String? {
@@ -192,13 +309,25 @@ enum BackupDestinationResolver {
             return "请登录 iCloud 并开启「iCloud 云盘」"
         }
         if dest.type == "quark" {
-            if !quarkAppInstalled() {
-                return "未检测到夸克客户端。安装后才能同步到云端；本地暂存目录可先创建，但不代表已上云"
+            let d = discoverQuark()
+            if !d.appInstalled {
+                return "未检测到夸克客户端。安装后 ClipVault 会自动写入暂存目录（无需手填路径）"
             }
-            if let root = backupRoot(for: dest) {
-                return "本地暂存：\(root.path) · ClipVault 只写本机；需在夸克里把该目录加入「备份/同步」才会上云"
+            // Auto path — never ask user to hunt folders.
+            var lines: [String] = []
+            if let p = d.stagingPath {
+                lines.append("自动暂存: \(p)")
             }
-            return "无法创建夸克暂存目录"
+            if d.stagingHasArtifact {
+                lines.append("本机制品已就位")
+            }
+            if d.accountConfigFound && !d.anyCategoryBackupEnabled {
+                lines.append("夸克「电脑备份」分类当前均为关；若要云端增量，请在夸克开启对应备份或确认已上传 ClipVault-Backups")
+            }
+            if d.cloudListedClipVaultBackups {
+                lines.append("已在夸克云端看到 ClipVault-Backups 条目")
+            }
+            return lines.isEmpty ? d.summary : lines.joined(separator: " · ")
         }
         if dest.type == "folder", backupRoot(for: dest) == nil {
             return "路径无效或未配置"
@@ -206,7 +335,7 @@ enum BackupDestinationResolver {
         return nil
     }
 
-    /// Merge legacy single-root configs with default multi-dest list.
+/// Merge legacy single-root configs with default multi-dest list.
     static func normalizeDestinations(_ list: [BackupDestinationConfig]?) -> [BackupDestinationConfig] {
         var dests = list ?? []
         if dests.isEmpty {

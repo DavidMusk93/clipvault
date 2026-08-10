@@ -1382,6 +1382,8 @@
       <div id="bkDestList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
       <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>
       <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
+      <div class="backup-row" id="bkQuarkRow" style="display:none"><span class="backup-label">夸克自动发现</span><span class="backup-value" id="bkQuarkDiscover">—</span></div>
+
       <div class="backup-row"><span class="backup-label">状态</span><span class="backup-value" id="bkPhase">—</span></div>
       <div class="backup-row"><span class="backup-label">错误</span><span class="backup-value" id="bkErr">—</span></div>
       <div class="backup-actions">
@@ -3032,6 +3034,18 @@ window.ClipViewMasonry = Masonry;
         const label = document.getElementById('backupBtnLabel');
         const dests = s.destinations || [];
         const anyAvail = dests.some(d => d.enabled && d.available)
+        const qd = s.quarkDiscovery;
+        const qrow = document.getElementById('bkQuarkRow');
+        const qel = document.getElementById('bkQuarkDiscover');
+        if (qrow && qel) {
+          if (qd && (qd.appInstalled || qd.stagingPath)) {
+            qrow.style.display = '';
+            qel.textContent = qd.summary || '—';
+          } else {
+            qrow.style.display = 'none';
+          }
+        }
+
           || s.cloudDocsAvailable || s.googleDriveAvailable;
         btn.classList.remove('on', 'warn');
         if (!anyAvail) { btn.classList.add('warn'); label.textContent = '无备份源'; }

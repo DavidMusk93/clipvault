@@ -106,6 +106,8 @@ final class CloudDocsBackupService {
         var snapshotCount: Int = 0
         /// Per-destination health (iCloud / Google Drive / …)
         var destinations: [BackupDestinationStatus] = []
+        /// Auto-probed Quark client + staging (path never requires manual browse).
+        var quarkDiscovery: QuarkDiscoveryReport? = nil
         var googleDriveAvailable: Bool = false
         var googleDrivePath: String? = nil
     }
@@ -1087,6 +1089,7 @@ final class CloudDocsBackupService {
             lastSnapshotUnix: lastSnapshotUnix ?? newestSnapshotUnix(),
             snapshotCount: snaps.count,
             destinations: destStatuses,
+            quarkDiscovery: BackupDestinationResolver.discoverQuark(),
             googleDriveAvailable: gdrive != nil,
             googleDrivePath: gdrive?.path
         )
