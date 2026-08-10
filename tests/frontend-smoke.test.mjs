@@ -72,3 +72,17 @@ test('quarkDiscovery UI hooks stay wired', () => {
 test('product brand is ClipVault in title', () => {
   assert.match(indexHtml, /<title>ClipVault<\/title>/);
 });
+
+test('html/rtf card path does not use notes-rich (plain text only)', () => {
+  // Product: rich HTML fragment rendering off — avoid Cocoa spacer blank lines.
+  const i = indexHtml.indexOf("item.type === 'rtf' || item.type === 'html'");
+  assert.ok(i > 0);
+  const slice = indexHtml.slice(i, i + 900);
+  assert.doesNotMatch(
+    slice,
+    /notes-rich[\s\S]{0,40}\$\{fragment\}|class="notes-rich/,
+    'html/rtf branch must not inject notes-rich DOM',
+  );
+  assert.match(slice, /stripHtmlToText/, 'must strip HTML to plain when textContent empty');
+  assert.match(slice, /text-scroll/, 'must use text-scroll plain path');
+});

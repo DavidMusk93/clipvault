@@ -2461,23 +2461,19 @@ window.ClipViewMasonry = Masonry;
           </div>`;
         }
       } else if (item.type === 'rtf' || item.type === 'html' || item.htmlContent) {
-        // Apple Notes–like rich layout when we have HTML; plain text only as fallback.
-        const fragment = renderNotesFragment(item.htmlContent || '');
-        const plainFromHtml = stripHtmlToText(fragment || item.htmlContent || '');
+        // Product: disable notes-rich / HTML fragment rendering (excess blank lines &
+        // whitespace from Cocoa Writer HTML + white-space:pre). Always plain text:
+        // prefer textContent, else strip tags from htmlContent.
         let plain = normalizePlainText(item.textContent || '');
-        if (!plain) plain = plainFromHtml;
+        if (!plain && item.htmlContent) plain = stripHtmlToText(item.htmlContent);
         if (!plain && item.preview && item.preview !== 'Rich Text' && item.preview !== 'HTML') {
           plain = normalizePlainText(item.preview);
         }
-        const tinyBase = (plain || plainFromHtml || '');
-        const tiny = tinyBase.length > 0 && tinyBase.length <= 80 && !tinyBase.includes('\n') ? ' is-tiny' : '';
-        if (notesFragmentUseful(fragment)) {
-          body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
-        } else if (plain) {
+        if (plain) {
           const mode = textLineModeClass(plain);
-          body = `<div class="text-scroll is-rtf${mode}"><pre class="plain">${esc(plain)}</pre></div>`;
+          body = `<div class="text-scroll${mode}"><pre><code>${esc(plain)}</code></pre></div>`;
         } else {
-          body = `<div class="text-scroll is-rtf is-tiny is-single"><pre class="plain">（富文本无正文，请重新复制）</pre></div>`;
+          body = `<div class="text-scroll is-tiny is-single"><pre><code>（无正文）</code></pre></div>`;
         }
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
