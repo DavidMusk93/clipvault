@@ -463,11 +463,12 @@ final class CloudDocsBackupService {
 
         // Resolve destinations up front
         let dests = enabledDestinations.compactMap { d -> (BackupDestinationConfig, URL)? in
-            guard let root = BackupDestinationResolver.backupRoot(for: d) else { return nil }
+            guard BackupDestinationResolver.isDestinationReady(d),
+                  let root = BackupDestinationResolver.backupRoot(for: d) else { return nil }
             return (d, root)
         }
         if dests.isEmpty {
-            lastError = "没有可用的备份目标。请启用 iCloud 云盘或登录 Google Drive for Desktop。"
+            lastError = "没有可用的备份目标。请启用 iCloud 云盘、登录 Google Drive，或安装夸克并在客户端开启目录同步。"
             lastPhase = "error:no_destination"
             publishStatus()
             completion?(false, lastError!)
@@ -630,7 +631,8 @@ final class CloudDocsBackupService {
                                     self.pruneSnapshots(in: snaps, keep: self.config.keepSnapshots)
                                     self.destLastSuccessUnix[dest.id] = created.timeIntervalSince1970
                                     self.destLastError[dest.id] = nil
-                                    self.destLastPhase[dest.id] = "ok"
+                                    // Quark: success means local staging write only — not cloud confirm.
+                                    self.destLastPhase[dest.id] = (dest.type == "quark") ? "ok:local_staging" : "ok"
                                     anyOk = true
                                     let repairedNote = cas.repaired > 0 ? " repair=\(cas.repaired)" : ""
                                     messages.append(
@@ -1040,8 +1042,15 @@ final class CloudDocsBackupService {
         }
         let destStatuses: [BackupDestinationStatus] = config.destinations.map { d in
             let rootURL = BackupDestinationResolver.backupRoot(for: d)
-            let avail = rootURL != nil
+            // Path alone is not enough for quark (staging is always creatable).
+            let avail = BackupDestinationResolver.isDestinationReady(d)
             let lastU = destLastSuccessUnix[d.id]
+            var phase = destLastPhase[d.id]
+            // Clarify local-only success for quark in UI.
+            if d.type == "quark", phase == "ok" {
+                phase = "ok:local_staging"
+            }
+            let hint = BackupDestinationResolver.availabilityHint(for: d)
             return BackupDestinationStatus(
                 id: d.id,
                 type: d.type,
@@ -1052,8 +1061,9 @@ final class CloudDocsBackupService {
                 lastSuccessAt: lastU.map { ClipTimeFormat.isoLocal(unix: $0) },
                 lastSuccessUnix: lastU,
                 lastError: destLastError[d.id],
-                lastPhase: destLastPhase[d.id],
-                hint: avail ? nil : BackupDestinationResolver.availabilityHint(for: d)
+                lastPhase: phase,
+                // Always surface quark hint (local ≠ cloud); others only when not ready.
+                hint: (d.type == "quark") ? hint : (avail ? nil : hint)
             )
         }
         let onLabels = destStatuses.filter { $0.enabled && $0.available }.map(\.label)

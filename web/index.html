@@ -1295,6 +1295,7 @@
       font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
     }
     .pill.ok { background: var(--ok-soft); color: var(--ok); }
+    .pill.warn { background: var(--warn-soft); color: var(--warn); }
     .pill.bad { background: var(--danger-soft); color: var(--danger); }
     .pill.muted { background: var(--fill); color: var(--muted); }
 
@@ -3070,11 +3071,15 @@ window.ClipViewMasonry = Masonry;
             const row = document.createElement('div');
             row.className = 'backup-row';
             row.style.alignItems = 'flex-start';
-            const pill = d.available ? '<span class="pill ok">可用</span>' : '<span class="pill bad">未就绪</span>';
+            let pill;
+            if (!d.available) pill = '<span class="pill bad">未就绪</span>';
+            else if (d.type === 'quark' && String(d.lastPhase || '').startsWith('ok')) pill = '<span class="pill warn">本地暂存</span>';
+            else pill = '<span class="pill ok">可用</span>';
             row.innerHTML =
               '<div style="min-width:0;flex:1">' +
               '<div style="font-weight:600;display:flex;gap:8px;align-items:center">' + esc(d.label || d.id) + ' ' + pill + '</div>' +
-              '<div class="backup-label" style="word-break:break-all;margin-top:4px">' + esc(d.rootPath || d.hint || '—') + '</div>' +
+              '<div class="backup-label" style="word-break:break-all;margin-top:4px">' + esc(d.rootPath || '—') + '</div>' +
+              (d.hint ? ('<div class="backup-label" style="margin-top:4px;color:var(--warn)">' + esc(d.hint) + '</div>') : '') +
               '<div class="backup-label">' +
               (d.lastSuccessAt || d.lastSuccessUnix != null
                 ? ('上次: ' + esc(formatLocalTime(d.lastSuccessUnix != null ? d.lastSuccessUnix : d.lastSuccessAt)) + (d.lastPhase ? ' · ' : ''))

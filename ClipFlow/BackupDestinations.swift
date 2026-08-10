@@ -18,8 +18,9 @@ struct BackupDestinationConfig: Codable, Equatable, Identifiable {
         id: "gdrive", type: "gdrive", enabled: true, label: "Google Drive", path: nil
     )
     /// Quark Netdisk: local staging folder for Quark client backup/sync.
+    /// Default **off** until user installs Quark and enables the destination.
     static let quarkDefault = BackupDestinationConfig(
-        id: "quark", type: "quark", enabled: true, label: "夸克网盘", path: nil
+        id: "quark", type: "quark", enabled: false, label: "夸克网盘", path: nil
     )
 
     static var defaultList: [BackupDestinationConfig] {
@@ -169,6 +170,20 @@ enum BackupDestinationResolver {
         }
     }
 
+    /// Whether ClipVault can **meaningfully** use this destination right now.
+    /// Quark is special: a local staging folder can always be created, but that is
+    /// **not** cloud readiness — require Quark.app so UI does not show a false green.
+    static func isDestinationReady(_ dest: BackupDestinationConfig) -> Bool {
+        guard let root = backupRoot(for: dest) else { return false }
+        _ = root
+        switch dest.type {
+        case "quark":
+            return quarkAppInstalled()
+        default:
+            return true
+        }
+    }
+
     static func availabilityHint(for dest: BackupDestinationConfig) -> String? {
         if dest.type == "gdrive", googleDriveMyDriveURL() == nil {
             return "请安装并登录 Google Drive for Desktop，登录后出现 CloudStorage/GoogleDrive-* 即可"
@@ -178,10 +193,10 @@ enum BackupDestinationResolver {
         }
         if dest.type == "quark" {
             if !quarkAppInstalled() {
-                return "请安装夸克客户端（Quark.app），并在「备份/上传」中加入本机目录 ClipVault-Backups/Quark"
+                return "未检测到夸克客户端。安装后才能同步到云端；本地暂存目录可先创建，但不代表已上云"
             }
             if let root = backupRoot(for: dest) {
-                return "本地暂存：\(root.path) · 请在夸克中开启对该目录的备份/同步"
+                return "本地暂存：\(root.path) · ClipVault 只写本机；需在夸克里把该目录加入「备份/同步」才会上云"
             }
             return "无法创建夸克暂存目录"
         }
