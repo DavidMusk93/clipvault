@@ -194,16 +194,45 @@ class ClipboardViewModel: ObservableObject {
                 pasteboard.setString(url.absoluteString, forType: .URL)
             }
         case .rtf:
-            if let rtfData = item.rtfData {
-                pasteboard.setData(rtfData, forType: .rtf)
+            // Product: copy-out is always plain text (所见即所得), never re-emit RTF/HTML type.
+            if let text = item.textContent, !text.isEmpty {
+                pasteboard.declareTypes([.string], owner: nil)
+                pasteboard.setString(text, forType: .string)
+            } else if let rtfData = item.rtfData,
+                      let attr = try? NSAttributedString(
+                        data: rtfData,
+                        options: [.documentType: NSAttributedString.DocumentType.rtf],
+                        documentAttributes: nil
+                      ) {
+                let plain = attr.string
+                pasteboard.declareTypes([.string], owner: nil)
+                pasteboard.setString(plain, forType: .string)
             }
         case .pdf:
             if let pdfData = item.pdfData {
                 pasteboard.setData(pdfData, forType: .pdf)
             }
         case .html:
-            if let html = item.htmlContent {
-                pasteboard.setString(html, forType: .html)
+            // Always public.utf8-plain-text — never public.html (avoids re-capture as type=html).
+            let plain: String? = {
+                if let t = item.textContent, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return t
+                }
+                if let html = item.htmlContent, !html.isEmpty {
+                    // Lightweight tag strip for native path (web uses stripHtmlToText).
+                    let noTags = html.replacingOccurrences(
+                        of: "<[^>]+>",
+                        with: " ",
+                        options: .regularExpression
+                    )
+                    let trimmed = noTags.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                }
+                return nil
+            }()
+            if let plain {
+                pasteboard.declareTypes([.string], owner: nil)
+                pasteboard.setString(plain, forType: .string)
             }
         case .other:
             if let rawData = item.rawData {

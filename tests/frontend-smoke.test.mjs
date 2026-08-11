@@ -123,12 +123,23 @@ test('html/rtf card copy uses plain text (所见即所得), not raw HTML attr', 
   assert.match(indexHtml, /plainTextForCopy\(item,\s*card\)/);
   assert.match(
     indexHtml,
-    /JSON\.stringify\(\{\s*text,\s*type:\s*'text'\s*\}\)/,
+    /JSON\.stringify\(\{\s*text:\s*plain,\s*type:\s*'text'\s*\}\)/,
     'copyClip must write type:text plain to pasteboard API',
   );
   assert.doesNotMatch(
     indexHtml,
     /data-copy=\"\$\{copyText\}\"/,
     'must not put copy body in HTML attribute (newlines/spaces collapse)',
+  );
+});
+
+test('card copy forces plain text only (no text/html re-capture as type=html)', () => {
+  assert.match(indexHtml, /function wireForcePlainCopyOnce/);
+  assert.match(indexHtml, /clipboardData\.setData\(\s*['"]text\/plain['"]/);
+  assert.match(indexHtml, /navigator\.clipboard\.writeText/);
+  assert.match(
+    indexHtml,
+    /JSON\.stringify\(\{\s*text:\s*plain,\s*type:\s*'text'\s*\}\)/,
+    'copyClip posts plain + type text',
   );
 });

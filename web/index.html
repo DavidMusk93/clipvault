@@ -2772,8 +2772,10 @@ window.ClipViewMasonry = Masonry;
         </div>`;
 
       card.querySelector('[data-copy-plain]')?.addEventListener('click', async e => {
+        e.preventDefault();
+        e.stopPropagation();
         const btn = e.currentTarget;
-        // 所见即所得 plain text → macOS public.utf8-plain-text (never re-write as HTML type)
+        // Always plain text type — never re-emit source html/rtf flavor
         const ok = await copyClip(plainTextForCopy(item, card));
         if (!ok) return;
         btn.classList.add('is-copied');
@@ -3084,22 +3086,72 @@ window.ClipViewMasonry = Masonry;
       if (e.key === 'Escape') closeLightbox();
     });
 
-    /** Write plain text to macOS clipboard as public.utf8-plain-text (type:text only). */
+    /**
+     * Write PLAIN TEXT ONLY to macOS pasteboard (public.utf8-plain-text).
+     * Never writes public.html / RTF — capture type must be `text`, not `html`.
+     */
     async function copyClip(text) {
       if (!text) return false;
+      const plain = normalizeCopyText(text);
+      if (!plain) return false;
       try {
-        await fetch(API + '/api/clips', {
+        // Server path: ClipFlowServer declares only .string on NSPasteboard.
+        const res = await fetch(API + '/api/clips', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, type: 'text' })
+          body: JSON.stringify({ text: plain, type: 'text' })
         });
-        toast('已写入纯文本剪贴板');
+        if (!res.ok) throw new Error('copy ' + res.status);
+        // Best-effort browser path: text/plain only (no text/html).
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(plain);
+          }
+        } catch (_) { /* server already wrote system pasteboard */ }
+        toast('已复制为纯文本');
         return true;
       } catch (_) {
         toast('复制失败');
         return false;
       }
     }
+
+    /**
+     * Intercept browser Cmd/Ctrl-C inside a card.
+     * Default browser copy of .notes-rich emits text/html → monitor stores type=html.
+     * Force text/plain only so capture type is `text`.
+     */
+    function wireForcePlainCopyOnce() {
+      if (wireForcePlainCopyOnce._done) return;
+      wireForcePlainCopyOnce._done = true;
+      document.addEventListener('copy', e => {
+        const card = e.target && e.target.closest ? e.target.closest('.m3-card') : null;
+        if (!card) return;
+        const id = card.dataset.id;
+        const item = id ? clips.find(c => c.id === id) : null;
+        const sel = window.getSelection && window.getSelection();
+        let plain = '';
+        if (sel && !sel.isCollapsed) {
+          // Selection string is plain; do NOT let browser also attach text/html.
+          plain = String(sel.toString() || '');
+        } else if (item) {
+          plain = plainTextForCopy(item, card);
+        }
+        plain = normalizeCopyText(plain);
+        if (!plain) return;
+        e.preventDefault();
+        try {
+          e.clipboardData.setData('text/plain', plain);
+          // Explicitly avoid text/html (some engines keep prior html if not cleared).
+          if (e.clipboardData.types && typeof e.clipboardData.clearData === 'function') {
+            try { e.clipboardData.clearData('text/html'); } catch (_) {}
+          }
+        } catch (_) {}
+        // Also sync via server so NSPasteboard has only public.utf8-plain-text.
+        copyClip(plain);
+      }, true);
+    }
+    wireForcePlainCopyOnce();
 
     async function deleteClip(id) {
       try {

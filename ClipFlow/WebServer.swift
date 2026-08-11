@@ -244,15 +244,20 @@ class WebServer {
             if let bodyData = bodyString.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
                let text = json["text"] as? String {
+                // Force PLAIN TEXT only on system pasteboard.
+                // clearContents + declareTypes([.string]) so public.html / RTF cannot linger;
+                // monitor then classifies the capture as type=text (not html).
                 DispatchQueue.main.async {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.declareTypes([.string], owner: nil)
+                    pb.setString(text, forType: .string)
                 }
                 self.database.appendOperationLog(
                     action: "copy_ui",
                     itemId: nil,
                     contentHash: nil,
-                    detail: "len=\(text.count)",
+                    detail: "plain_only len=\(text.count)",
                     source: "web"
                 )
                 let resp = """
