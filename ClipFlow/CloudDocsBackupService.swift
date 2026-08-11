@@ -633,8 +633,15 @@ final class CloudDocsBackupService {
                                     self.pruneSnapshots(in: snaps, keep: self.config.keepSnapshots)
                                     self.destLastSuccessUnix[dest.id] = created.timeIntervalSince1970
                                     self.destLastError[dest.id] = nil
-                                    // Quark: success means local staging write only — not cloud confirm.
-                                    self.destLastPhase[dest.id] = (dest.type == "quark") ? "ok:local_staging" : "ok"
+                                    // Quark: only local staging write is guaranteed. Cloud list is a soft signal.
+                                    if dest.type == "quark" {
+                                        let qd = BackupDestinationResolver.discoverQuark()
+                                        self.destLastPhase[dest.id] = qd.cloudListedClipVaultBackups
+                                            ? "ok:staging_cloud_listed"
+                                            : "ok:local_staging"
+                                    } else {
+                                        self.destLastPhase[dest.id] = "ok"
+                                    }
                                     anyOk = true
                                     let repairedNote = cas.repaired > 0 ? " repair=\(cas.repaired)" : ""
                                     messages.append(
@@ -1048,9 +1055,14 @@ final class CloudDocsBackupService {
             let avail = BackupDestinationResolver.isDestinationReady(d)
             let lastU = destLastSuccessUnix[d.id]
             var phase = destLastPhase[d.id]
-            // Clarify local-only success for quark in UI.
-            if d.type == "quark", phase == "ok" {
-                phase = "ok:local_staging"
+            // Quark honesty: local write ≠ full cloud CAS verify.
+            if d.type == "quark" {
+                let qd = BackupDestinationResolver.discoverQuark()
+                if phase == "ok" || phase == nil {
+                    phase = qd.cloudListedClipVaultBackups ? "ok:staging_cloud_listed" : "ok:local_staging"
+                } else if phase == "ok:local_staging", qd.cloudListedClipVaultBackups {
+                    phase = "ok:staging_cloud_listed"
+                }
             }
             let hint = BackupDestinationResolver.availabilityHint(for: d)
             return BackupDestinationStatus(

@@ -3372,7 +3372,14 @@ window.ClipViewMasonry = Masonry;
         if (qrow && qel) {
           if (qd && (qd.appInstalled || qd.stagingPath)) {
             qrow.style.display = '';
-            qel.textContent = qd.summary || '—';
+            // Prefer short status: cloud list is soft evidence only.
+            let bits = [];
+            if (qd.appInstalled) bits.push('客户端已装');
+            if (qd.stagingHasArtifact) bits.push('本机制品就绪');
+            if (qd.cloudListedClipVaultBackups) bits.push('云端列表可见 ClipVault-Backups');
+            else bits.push('云端列表未见（仍只算本机暂存）');
+            if (qd.accountConfigFound && !qd.anyCategoryBackupEnabled) bits.push('电脑备份分类均为关');
+            qel.textContent = bits.join(' · ') + (qd.stagingPath ? (' · ' + qd.stagingPath) : '');
           } else {
             qrow.style.display = 'none';
           }
@@ -3417,6 +3424,7 @@ window.ClipViewMasonry = Masonry;
             row.style.alignItems = 'flex-start';
             let pill;
             if (!d.available) pill = '<span class="pill bad">未就绪</span>';
+            else if (d.type === 'quark' && String(d.lastPhase || '') === 'ok:staging_cloud_listed') pill = '<span class="pill ok">云端可见</span>';
             else if (d.type === 'quark' && String(d.lastPhase || '').startsWith('ok')) pill = '<span class="pill warn">本地暂存</span>';
             else pill = '<span class="pill ok">可用</span>';
             row.innerHTML =

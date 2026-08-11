@@ -313,21 +313,24 @@ enum BackupDestinationResolver {
             if !d.appInstalled {
                 return "未检测到夸克客户端。安装后 ClipVault 会自动写入暂存目录（无需手填路径）"
             }
-            // Auto path — never ask user to hunt folders.
+            // Honest model: ClipVault only writes local staging. Quark client must upload.
             var lines: [String] = []
+            lines.append("ClipVault→本机暂存（无夸克 File Provider，无法整包校验云端）")
             if let p = d.stagingPath {
-                lines.append("自动暂存: \(p)")
+                lines.append("路径: \(p)")
             }
             if d.stagingHasArtifact {
                 lines.append("本机制品已就位")
             }
-            if d.accountConfigFound && !d.anyCategoryBackupEnabled {
-                lines.append("夸克「电脑备份」分类当前均为关；若要云端增量，请在夸克开启对应备份或确认已上传 ClipVault-Backups")
-            }
             if d.cloudListedClipVaultBackups {
-                lines.append("已在夸克云端看到 ClipVault-Backups 条目")
+                lines.append("夸克云端列表可见 ClipVault-Backups（不等于 blobs 全量校验）")
+            } else {
+                lines.append("尚未在夸克云端列表看到 ClipVault-Backups")
             }
-            return lines.isEmpty ? d.summary : lines.joined(separator: " · ")
+            if d.accountConfigFound && !d.anyCategoryBackupEnabled {
+                lines.append("夸克「电脑备份」分类均为关：请在夸克将 ClipVault-Backups 加入备份/上传，或手动上传该文件夹")
+            }
+            return lines.joined(separator: " · ")
         }
         if dest.type == "folder", backupRoot(for: dest) == nil {
             return "路径无效或未配置"
