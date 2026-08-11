@@ -176,3 +176,38 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | 定位 | 备份阅读器 + 前台粘贴/分享；**不做**后台剪贴板监听 |
 | 数据 | SAF 读 `ClipVault/backup`（兼容旧目录 `Keepsake/backup`；与 Mac GDrive fan-out 一致） |
 | 发布 | `.github/workflows/android-apk.yml` → artifact / tag Release |
+
+---
+
+## 6. 数据目录铁律（incident 2026-08-11）
+
+**真库默认：`KEEPSAKE_HOME=~/Documents/ClipFlow`（`clipflow.db` + `blobs/`）。**  
+`~/Library/Application Support/Keepsake` 只是历史/回落路径；**无 env 裸启会打开空库，UI 像「历史全丢」。**
+
+### 禁止
+
+- `nohup ClipFlowServer &` / 直接跑二进制替代 LaunchAgent  
+- `launchctl` 重启后不跑校验  
+- 未确认路径就对 db 做删除、覆盖、migration「修复」  
+
+### 必须
+
+```bash
+# 唯一支持的重启 / 换二进制
+./scripts/deploy-server.sh          # build release + install + launchctl + verify
+# 或已装好二进制时：
+./scripts/restart-clipflow.sh
+./scripts/verify-data-home.sh       # 失败 = 禁止告诉用户「已恢复」
+```
+
+### 用户报「历史丢失」时 30 秒分流
+
+```text
+对比:
+  ~/Documents/ClipFlow/clipflow.db          体积 / sqlite COUNT(*)
+  ~/Library/Application Support/Keepsake/clipflow.db
+若 Documents 大而 API 空 → 错 home → restart-clipflow.sh
+若两边都空 → 再查 ~/ClipVault-Backups/Quark/backup/snapshots/
+```
+
+完整复盘：`docs/incident-20260811-wrong-data-home.md`

@@ -78,37 +78,111 @@ final class DatabaseManager: ObservableObject {
         print("[Database] data root: \(appDir.path)")
 
         initializeDatabase()
+        assertDataHomeSaneOrExit()
         startMaintenanceTimer()
     }
 
     /// Local data root (db + CAS blobs + config).
-    /// - `CLIPVAULT_HOME` or legacy `KEEPSAKE_HOME` env wins (recommended for LaunchAgent).
-    /// - Under launchd (`XPC_SERVICE_NAME`): always Application Support — macOS TCC
-    ///   blocks Documents for agents and can hang forever on `sqlite3_open`.
-    /// - Interactive shell: prefer existing `~/Documents/ClipFlow` for backward compat,
-    ///   else Application Support (`~/Library/Application Support/Keepsake` — legacy folder name; product brand is ClipVault).
+    /// - `CLIPVAULT_HOME` or legacy `KEEPSAKE_HOME` env wins (LaunchAgent **must** set one).
+    /// - Never silently open an empty App Support library when `~/Documents/ClipFlow/clipflow.db`
+    ///   already holds the real corpus (incident 2026-08-11: bare `nohup` → wrong home → “history lost”).
+    /// - Under launchd without env: refuse empty App Support fallback; prefer Documents if a
+    ///   non-trivial db is visible, else exit so KeepAlive cannot serve a blank UI.
     static func resolveDataRoot() -> URL {
         let fm = FileManager.default
+        let appSupport = (fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support"))
+            .appendingPathComponent("Keepsake", isDirectory: true)
+        let docs = (fm.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents"))
+            .appendingPathComponent("ClipFlow", isDirectory: true)
+
+        func dbFileSize(_ root: URL) -> Int {
+            let url = root.appendingPathComponent("clipflow.db")
+            guard fm.fileExists(atPath: url.path) else { return 0 }
+            return (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        }
+        /// Empty / freshly created SQLite is ~4KB; real libraries are multi‑MB.
+        let nontrivial = 65_536
+
         if let raw = (ProcessInfo.processInfo.environment["CLIPVAULT_HOME"]
             ?? ProcessInfo.processInfo.environment["KEEPSAKE_HOME"])?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !raw.isEmpty {
-            return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath, isDirectory: true)
+            let chosen = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath, isDirectory: true)
+            let chosenSize = dbFileSize(chosen)
+            let docsSize = dbFileSize(docs)
+            let asSize = dbFileSize(appSupport)
+            // If env points at a tiny/new db but another known home holds the corpus, hard-fail.
+            if chosenSize < nontrivial {
+                if docsSize >= nontrivial && chosen.standardizedFileURL != docs.standardizedFileURL {
+                    fputs("[Database] FATAL: \(chosen.path) looks empty (clipflow.db \(chosenSize)B) but \(docs.path) has \(docsSize)B. Fix CLIPVAULT_HOME/KEEPSAKE_HOME (incident 2026-08-11).\n", stderr)
+                    exit(1)
+                }
+                if asSize >= nontrivial && chosen.standardizedFileURL != appSupport.standardizedFileURL {
+                    fputs("[Database] FATAL: \(chosen.path) looks empty (clipflow.db \(chosenSize)B) but \(appSupport.path) has \(asSize)B. Fix CLIPVAULT_HOME/KEEPSAKE_HOME.\n", stderr)
+                    exit(1)
+                }
+            }
+            return chosen
         }
-        let appSupport = (fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support"))
-            .appendingPathComponent("Keepsake", isDirectory: true)
-        let underLaunchd = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] != nil
-        if underLaunchd {
+
+        let docsSize = dbFileSize(docs)
+        let asSize = dbFileSize(appSupport)
+        // Prefer whichever known root already holds the larger non-trivial library.
+        if docsSize >= nontrivial || asSize >= nontrivial {
+            if docsSize >= asSize {
+                print("[Database] resolveDataRoot: prefer Documents/ClipFlow (db \(docsSize)B >= AppSupport \(asSize)B)")
+                return docs
+            }
+            print("[Database] resolveDataRoot: prefer App Support/Keepsake (db \(asSize)B > Documents \(docsSize)B)")
             return appSupport
         }
-        let docs = (fm.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents"))
-            .appendingPathComponent("ClipFlow", isDirectory: true)
+
+        let underLaunchd = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] != nil
+        if underLaunchd {
+            fputs("[Database] FATAL: under launchd without CLIPVAULT_HOME/KEEPSAKE_HOME and no non-trivial clipflow.db found. Refusing to create empty App Support library (incident 2026-08-11). Set env in LaunchAgent plist.\n", stderr)
+            exit(1)
+        }
         if fm.fileExists(atPath: docs.appendingPathComponent("clipflow.db").path) {
             return docs
         }
         return appSupport
+    }
+
+    /// Boot-time corpus sanity: log path + refuse to serve a blank library when alternate home has data.
+    func assertDataHomeSaneOrExit() {
+        var itemCount: Int = -1
+        dbQueue.sync {
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM clipboard_items;", -1, &stmt, nil) == SQLITE_OK {
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    itemCount = Int(sqlite3_column_int(stmt, 0))
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+        let size = (try? dbPath.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        print("[Database] open ok path=\(appDir.path) dbBytes=\(size) items=\(itemCount)")
+        // If this home is essentially empty, check the other canonical path.
+        if itemCount >= 0 && itemCount < 5 {
+            let fm = FileManager.default
+            let docs = (fm.urls(for: .documentDirectory, in: .userDomainMask).first
+                ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents"))
+                .appendingPathComponent("ClipFlow", isDirectory: true)
+            let appSupport = (fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support"))
+                .appendingPathComponent("Keepsake", isDirectory: true)
+            let altRoots = [docs, appSupport].filter { $0.standardizedFileURL != appDir.standardizedFileURL }
+            for alt in altRoots {
+                let altDb = alt.appendingPathComponent("clipflow.db")
+                let altSize = (try? altDb.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                if altSize >= 65_536 {
+                    fputs("[Database] FATAL: this data root has only \(itemCount) items but \(altDb.path) is \(altSize)B — wrong home (incident 2026-08-11). Set KEEPSAKE_HOME to the real library and restart via LaunchAgent.\n", stderr)
+                    exit(1)
+                }
+            }
+        }
     }
 
     var dbFileURL: URL { dbPath }
