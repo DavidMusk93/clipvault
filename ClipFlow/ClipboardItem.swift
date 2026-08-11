@@ -139,8 +139,18 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         case .pdf:
             return "PDF"
         case .html:
-            if let html = htmlContent {
-                return String(html.prefix(100))
+            if let text = textContent, !text.isEmpty {
+                return String(text.prefix(200))
+            }
+            if let html = htmlContent, !html.isEmpty {
+                // Strip tags for list preview only (copy path uses plain companion / UI strip).
+                let plain = html.replacingOccurrences(
+                    of: "<[^>]+>",
+                    with: " ",
+                    options: .regularExpression
+                )
+                let trimmed = plain.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return String(trimmed.prefix(200)) }
             }
         case .other:
             return "Other"

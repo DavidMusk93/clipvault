@@ -115,3 +115,20 @@ test('eval history note has copy button (scrollbar may obscure long lines)', () 
     'note body pads for copy chip + scrollbar so text is not covered',
   );
 });
+
+test('html/rtf card copy uses plain text (所见即所得), not raw HTML attr', () => {
+  assert.match(indexHtml, /function plainTextForCopy/);
+  assert.match(indexHtml, /function normalizeCopyText/);
+  assert.match(indexHtml, /data-copy-plain/);
+  assert.match(indexHtml, /plainTextForCopy\(item,\s*card\)/);
+  assert.match(
+    indexHtml,
+    /JSON\.stringify\(\{\s*text,\s*type:\s*'text'\s*\}\)/,
+    'copyClip must write type:text plain to pasteboard API',
+  );
+  assert.doesNotMatch(
+    indexHtml,
+    /data-copy=\"\$\{copyText\}\"/,
+    'must not put copy body in HTML attribute (newlines/spaces collapse)',
+  );
+});

@@ -425,9 +425,16 @@ class ClipboardMonitor: ObservableObject {
 
     private func createHTMLItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
         guard let html = getHTML() else { return nil }
+        // Companion public.utf8-plain-text often has correct newlines/spaces (所见即所得).
+        // Prefer it as textContent so copy/search stay type:text without stripping HTML markup.
+        var plain = getText()
+        if let p = plain, p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            plain = nil
+        }
         let hash = computeHash(for: html)
         return ClipboardItem(
             timestamp: timestamp, type: .html, contentHash: hash,
+            textContent: plain,
             htmlContent: html, sourceApp: sourceApp
         )
     }
