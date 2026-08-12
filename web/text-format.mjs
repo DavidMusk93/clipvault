@@ -267,15 +267,77 @@ function looksLikeSql(t) {
   );
 }
 
-function formatSqlFallback(t) {
-  return t
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(
-      /\s+(SELECT|FROM|WHERE|AND|OR|JOIN|LEFT JOIN|RIGHT JOIN|INNER JOIN|OUTER JOIN|GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|UNION|VALUES|SET)\b/gi,
-      '\n$1'
-    )
-    .replace(/\s*,\s*/g, ',\n  ');
+function formatSqlFallback(sql) {
+  // Quote + paren aware: never break inside strings or function call args.
+  const s = String(sql || '').replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
+  const keywords = [
+    'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'OUTER JOIN', 'CROSS JOIN', 'UNION ALL',
+    'GROUP BY', 'ORDER BY', 'INSERT INTO', 'DELETE FROM', 'CREATE TABLE',
+    'SELECT', 'FROM', 'WHERE', 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'VALUES', 'SET',
+    'JOIN', 'AND', 'OR', 'WITH', 'UPDATE',
+  ];
+  let out = '';
+  let i = 0;
+  let inS = false;
+  let inD = false;
+  let depth = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === "'" && !inD) { inS = !inS; out += ch; i++; continue; }
+    if (ch === '"' && !inS) { inD = !inD; out += ch; i++; continue; }
+    if (!inS && !inD) {
+      if (ch === '(') { depth++; out += ch; i++; continue; }
+      if (ch === ')') { depth = Math.max(0, depth - 1); out += ch; i++; continue; }
+      if (ch === ' ' || ch === '\t') {
+        let matched = null;
+        const upper = s.slice(i).toUpperCase();
+        for (const kw of keywords) {
+          const pad = ' ' + kw;
+          if (upper.startsWith(pad)) {
+            const after = s[i + pad.length] || ' ';
+            if (/[\s,(]/.test(after) || i + pad.length >= s.length) {
+              matched = kw;
+              break;
+            }
+          }
+        }
+        if (matched) {
+          out += '\n' + matched;
+          i += 1 + matched.length;
+          continue;
+        }
+      }
+      if (ch === ',' && depth === 0) {
+        out += ',\n  ';
+        i++;
+        while (i < s.length && s[i] === ' ') i++;
+        continue;
+      }
+    }
+    out += ch;
+    i++;
+  }
+  const lines = out.split('\n');
+  const fixed = [];
+  let inSelect = false;
+  for (let line of lines) {
+    const t = line.trim();
+    const up = t.toUpperCase();
+    if (up === 'SELECT' || up.startsWith('SELECT ')) {
+      inSelect = true;
+      if (t.toUpperCase().startsWith('SELECT ')) fixed.push('SELECT\n  ' + t.slice(7));
+      else fixed.push(t);
+      continue;
+    }
+    if (/^(FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|OFFSET|UNION|JOIN|LEFT|RIGHT|INNER|OUTER|SET|VALUES)\b/i.test(up)) {
+      inSelect = false;
+      fixed.push(t);
+      continue;
+    }
+    if (inSelect && !t.startsWith('  ')) fixed.push('  ' + t);
+    else fixed.push(t);
+  }
+  return fixed.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function looksLikeMarkdown(t) {

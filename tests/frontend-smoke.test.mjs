@@ -174,12 +174,16 @@ test('structured text format covers multiple kinds + chips', () => {
   assert.match(indexHtml, /复制始终为原文/);
 });
 
-test('pretty toggle + url open + beautifier CDNs', () => {
-  assert.match(indexHtml, /prettyToggle/);
-  assert.match(indexHtml, /cv\.displayPretty/);
+test('per-clip pretty + url open + beautifier CDNs', () => {
+  assert.match(indexHtml, /clipDisplayMode/);
+  assert.match(indexHtml, /data-raw-card/);
+  assert.match(indexHtml, /data-pretty-card/);
   assert.match(indexHtml, /data-open-url/);
   assert.match(indexHtml, /js-beautify/);
   assert.match(indexHtml, /sql-formatter/);
   assert.match(indexHtml, /function renderFormatToolbar/);
-  assert.match(indexHtml, /function browserBeautifiers/);
+  assert.match(indexHtml, /function wireFormatToolbarDelegateOnce/);
+  assert.match(indexHtml, /getSqlFormatFn/);
+  assert.doesNotMatch(indexHtml, /id="prettyToggle"/);
+  assert.doesNotMatch(indexHtml, /cv\.displayPretty/);
 });

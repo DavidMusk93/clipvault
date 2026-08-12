@@ -11,6 +11,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify-html.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sql-formatter@2.3.4/dist/sql-formatter.min.js"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -557,48 +560,79 @@
     .format-chip--csv, .format-chip--env, .format-chip--yaml { color: #455A64; background: rgba(69, 90, 100, 0.12); }
     .format-chip--stack { color: #C62828; background: rgba(198, 40, 40, 0.10); }
     .format-chip--markdown { color: #37474F; background: rgba(55, 71, 79, 0.10); }
+    /* Format toolbar: one control row — equal height chips/buttons (Apple spatial consistency) */
     .format-toolbar {
       display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
       margin: 0 0 8px;
+      min-height: 28px;
+    }
+    .format-toolbar .format-chip {
+      margin: 0; /* kill default chip bottom margin inside toolbar */
+      height: 28px;
+      box-sizing: border-box;
+      padding: 0 10px;
+      line-height: 1;
+      display: inline-flex; align-items: center; gap: 4px;
+      flex-shrink: 0;
     }
     .format-toolbar .fmt-btn {
-      height: 24px; padding: 0 9px; border-radius: 999px; border: 0.5px solid var(--separator-strong);
-      background: rgba(255,255,255,0.85); color: var(--ink);
-      font: inherit; font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
-      cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
-      transition: background var(--press), transform var(--press);
+      height: 28px; padding: 0 10px; border-radius: 999px;
+      border: 0.5px solid var(--separator-strong);
+      background: rgba(255,255,255,0.92); color: var(--ink);
+      font: inherit; font-size: 12px; font-weight: 600; letter-spacing: -0.01em;
+      cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+      flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 100ms ease-out, transform 100ms ease-out, color 100ms ease-out;
     }
     .format-toolbar .fmt-btn:hover { background: #fff; }
-    .format-toolbar .fmt-btn:active { transform: scale(0.97); }
-    .format-toolbar .fmt-btn .material-symbols-outlined { font-size: 14px; }
+    .format-toolbar .fmt-btn:active { transform: scale(0.96); transition-duration: 60ms; }
+    .format-toolbar .fmt-btn:focus { outline: none; }
+    .format-toolbar .fmt-btn:focus-visible {
+      box-shadow: 0 0 0 3px var(--accent-soft);
+      color: var(--accent);
+    }
+    .format-toolbar .fmt-btn .material-symbols-outlined {
+      font-size: 15px; line-height: 1; opacity: 0.9;
+    }
     .format-toolbar .fmt-btn.is-primary {
       background: var(--accent-soft); color: var(--accent); border-color: transparent;
     }
     .format-toolbar .fmt-btn.is-primary:hover { background: rgba(0, 113, 227, 0.18); }
+    .format-toolbar .fmt-btn.is-active {
+      background: var(--ink); color: #fff; border-color: transparent;
+    }
     .url-canonical {
-      display: block; font-size: 12px; line-height: 1.35; margin: 0 0 8px;
+      display: block; font-size: 12px; line-height: 1.4; margin: 0 0 8px;
       word-break: break-all; color: var(--accent); text-decoration: none;
-      font-family: var(--font-mono);
+      font-family: var(--font-mono); letter-spacing: 0;
     }
-    .url-canonical:hover { text-decoration: underline; }
-    .chip.pretty-toggle.on {
-      background: var(--accent-soft); color: var(--accent); border-color: transparent;
-    }
+    .url-canonical:hover { text-decoration: underline; text-underline-offset: 2px; }
 
+    /* Pretty code: hard newlines only — long tokens pan horizontally (never mid-token soft wrap) */
     .card-body .text-scroll.is-pretty {
       overflow-x: auto;
       overflow-y: auto;
-      max-height: min(420px, 55vh);
+      max-height: min(480px, 58vh);
+      -webkit-overflow-scrolling: touch;
     }
-    .card-body .text-scroll.is-pretty pre,
+    .card-body .text-scroll.is-pretty pre {
+      margin: 0;
+      width: max-content;
+      min-width: 100%;
+      max-width: none;
+    }
     .card-body .text-scroll.is-pretty pre code {
-      /* pretty multi-line: fill card width, wrap only if a single token is huge */
-      width: 100%;
-      max-width: 100%;
-      min-width: 0;
-      white-space: pre;
-      word-break: normal;
-      overflow-wrap: normal;
+      display: block;
+      width: max-content;
+      min-width: 100%;
+      max-width: none;
+      white-space: pre !important; /* hard newlines only */
+      word-break: normal !important;
+      overflow-wrap: normal !important;
+      tab-size: 2;
+      line-height: 1.5;
+      font-size: 12.5px;
     }
     .card-body pre { margin: 0; }
     /*
@@ -1547,10 +1581,7 @@
   </aside>
 
   <div class="chips">
-    <button type="button" class="chip pretty-toggle on" id="prettyToggle" title="结构化文本排版（js-beautify / sql-formatter）；关闭则显示原文">
-      <span class="material-symbols-outlined">auto_fix_high</span>排版
-    </button>
-    <button class="chip active" data-type="all" data-view="library"><span class="material-symbols-outlined">grid_view</span>全部</button>
+<button class="chip active" data-type="all" data-view="library"><span class="material-symbols-outlined">grid_view</span>全部</button>
     <button class="chip" data-type="text" data-view="library"><span class="material-symbols-outlined">description</span>纯文本</button>
     <button class="chip" data-type="html" data-view="library"><span class="material-symbols-outlined">code</span>富文本/HTML</button>
     <button class="chip" data-type="image" data-view="library"><span class="material-symbols-outlined">image</span>图片 OCR</button>
@@ -2676,6 +2707,7 @@ window.ClipViewMasonry = Masonry;
       });
     }
     wireEventToastOnce();
+    wireFormatToolbarDelegateOnce();
 
 
     /** Clipboard type → label/icon/class. Shared palette: docs/design-taste.md + Android typeStyle(). */
@@ -2965,15 +2997,77 @@ window.ClipViewMasonry = Masonry;
       );
     }
 
-    function formatSqlFallback(t) {
-      return t
-        .replace(/\s+/g, ' ')
-        .trim()
-        .replace(
-          /\s+(SELECT|FROM|WHERE|AND|OR|JOIN|LEFT JOIN|RIGHT JOIN|INNER JOIN|OUTER JOIN|GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|UNION|VALUES|SET)\b/gi,
-          '\n$1'
-        )
-        .replace(/\s*,\s*/g, ',\n  ');
+        function formatSqlFallback(sql) {
+      // Quote + paren aware: never break inside strings or function call args.
+      const s = String(sql || '').replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
+      const keywords = [
+        'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'OUTER JOIN', 'CROSS JOIN', 'UNION ALL',
+        'GROUP BY', 'ORDER BY', 'INSERT INTO', 'DELETE FROM', 'CREATE TABLE',
+        'SELECT', 'FROM', 'WHERE', 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'VALUES', 'SET',
+        'JOIN', 'AND', 'OR', 'WITH', 'UPDATE',
+      ];
+      let out = '';
+      let i = 0;
+      let inS = false;
+      let inD = false;
+      let depth = 0;
+      while (i < s.length) {
+        const ch = s[i];
+        if (ch === "'" && !inD) { inS = !inS; out += ch; i++; continue; }
+        if (ch === '"' && !inS) { inD = !inD; out += ch; i++; continue; }
+        if (!inS && !inD) {
+          if (ch === '(') { depth++; out += ch; i++; continue; }
+          if (ch === ')') { depth = Math.max(0, depth - 1); out += ch; i++; continue; }
+          if (ch === ' ' || ch === '\t') {
+            let matched = null;
+            const upper = s.slice(i).toUpperCase();
+            for (const kw of keywords) {
+              const pad = ' ' + kw;
+              if (upper.startsWith(pad)) {
+                const after = s[i + pad.length] || ' ';
+                if (/[\s,(]/.test(after) || i + pad.length >= s.length) {
+                  matched = kw;
+                  break;
+                }
+              }
+            }
+            if (matched) {
+              out += '\n' + matched;
+              i += 1 + matched.length;
+              continue;
+            }
+          }
+          if (ch === ',' && depth === 0) {
+            out += ',\n  ';
+            i++;
+            while (i < s.length && s[i] === ' ') i++;
+            continue;
+          }
+        }
+        out += ch;
+        i++;
+      }
+      const lines = out.split('\n');
+      const fixed = [];
+      let inSelect = false;
+      for (let line of lines) {
+        const t = line.trim();
+        const up = t.toUpperCase();
+        if (up === 'SELECT' || up.startsWith('SELECT ')) {
+          inSelect = true;
+          if (t.toUpperCase().startsWith('SELECT ')) fixed.push('SELECT\n  ' + t.slice(7));
+          else fixed.push(t);
+          continue;
+        }
+        if (/^(FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|OFFSET|UNION|JOIN|LEFT|RIGHT|INNER|OUTER|SET|VALUES)\b/i.test(up)) {
+          inSelect = false;
+          fixed.push(t);
+          continue;
+        }
+        if (inSelect && !t.startsWith('  ')) fixed.push('  ' + t);
+        else fixed.push(t);
+      }
+      return fixed.join('\n').replace(/\n{3,}/g, '\n\n').trim();
     }
 
     function looksLikeMarkdown(t) {
@@ -3272,82 +3366,90 @@ window.ClipViewMasonry = Masonry;
       return 'plaintext';
     }
 
-    // —— Display pretty preference (localStorage); copy always uses raw ——
-    const PRETTY_KEY = 'cv.displayPretty';
-    function isDisplayPrettyEnabled() {
-      try {
-        const v = localStorage.getItem(PRETTY_KEY);
-        if (v === null || v === undefined || v === '') return true;
-        return v !== '0' && v !== 'false';
-      } catch (_) {
-        return true;
+    // —— Per-clip display mode: pretty | raw (never global) ——
+    /** @type {Map<string, 'pretty'|'raw'>} */
+    const clipDisplayMode = new Map();
+    function getClipDisplayMode(itemId, kind) {
+      if (!itemId) return kind && kind !== 'plain' ? 'pretty' : 'raw';
+      if (clipDisplayMode.has(itemId)) return clipDisplayMode.get(itemId);
+      // Default: structured kinds open pretty; prose stays raw
+      return kind && kind !== 'plain' ? 'pretty' : 'raw';
+    }
+    function setClipDisplayMode(itemId, mode) {
+      if (!itemId) return;
+      clipDisplayMode.set(itemId, mode);
+    }
+
+    function getSqlFormatFn() {
+      // sql-formatter UMD (v2): window.sqlFormatter.format
+      // some builds: default export on self
+      const g = typeof window !== 'undefined' ? window : globalThis;
+      const sf = g.sqlFormatter || g.sql_formatter || null;
+      if (!sf) return null;
+      if (typeof sf.format === 'function') {
+        return (s) => sf.format(s, { language: 'sql', indent: '  ', uppercase: true });
       }
-    }
-    function setDisplayPrettyEnabled(on) {
-      try { localStorage.setItem(PRETTY_KEY, on ? '1' : '0'); } catch (_) {}
-    }
-    function paintPrettyToggle() {
-      const btn = document.getElementById('prettyToggle');
-      if (!btn) return;
-      const on = isDisplayPrettyEnabled();
-      btn.classList.toggle('on', on);
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      btn.title = on
-        ? '排版开：JSON/SQL/XML 等用 js-beautify、sql-formatter 美化（复制仍为原文）'
-        : '排版关：按捕获原文展示';
-    }
-    function wirePrettyToggleOnce() {
-      if (wirePrettyToggleOnce._done) return;
-      wirePrettyToggleOnce._done = true;
-      paintPrettyToggle();
-      document.getElementById('prettyToggle')?.addEventListener('click', () => {
-        setDisplayPrettyEnabled(!isDisplayPrettyEnabled());
-        paintPrettyToggle();
-        // Rebuild visible cards
-        try { rebuildFromData(); } catch (_) {
-          try { cardCache.clear(); rebuildFromData(); } catch (__) {}
-        }
-        toast(isDisplayPrettyEnabled() ? '已开启文本排版' : '已关闭文本排版（原文）');
-      });
+      if (typeof sf === 'function') return (s) => sf(s);
+      return null;
     }
 
     function browserBeautifiers() {
+      const sqlFormat = getSqlFormatFn();
       return resolveBeautifiers({
         jsBeautify: typeof js_beautify === 'function' ? js_beautify : null,
         htmlBeautify: typeof html_beautify === 'function' ? html_beautify : null,
-        sqlFormat:
-          typeof sqlFormatter !== 'undefined' && sqlFormatter && typeof sqlFormatter.format === 'function'
-            ? (s, opts) => sqlFormatter.format(s, opts || { language: 'sql', tabWidth: 2, keywordCase: 'upper' })
-            : null,
+        sqlFormat: sqlFormat
+          ? (s, opts) => {
+              try {
+                // v2 API
+                return sqlFormat(s);
+              } catch (_) {
+                try {
+                  return sqlFormat(s, opts);
+                } catch (__) {
+                  return null;
+                }
+              }
+            }
+          : null,
       });
     }
 
-    /** Plain / code body + structured pretty (DSL formatters when loaded). */
+    /** Plain / code body + per-clip pretty (DSL formatters when loaded). */
     function renderPlainBody(plain, extraClass = '', opts = {}) {
       const raw = String(plain || '');
-      // Per-card or global raw
-      if (opts.cardRaw === true || opts.forceRaw === true || opts.pretty === false || !isDisplayPrettyEnabled()) {
-        const det = detectStructuredText(raw);
-        // Still show URL open affordance even in raw mode
-        return renderPlainBodyRaw(raw, extraClass, det);
+      const itemId = opts.itemId || '';
+      const det = detectStructuredText(raw);
+      const modePref = opts.forceMode || getClipDisplayMode(itemId, det.kind);
+      const wantPretty = modePref === 'pretty' && det.kind !== 'plain' && opts.pretty !== false;
+
+      if (!wantPretty) {
+        return renderPlainBodyRaw(raw, extraClass, det, itemId);
       }
+
       const fmt = formatTextForDisplay(raw, { beautifiers: browserBeautifiers(), enabled: true });
       const text = fmt.display;
       const mode = textLineModeClass(text) + (fmt.pretty ? ' is-pretty' : '');
       const codey = looksLikeCode(raw) || (fmt.pretty && structuredKindIsCodey(fmt.kind));
       let lang = fmt.lang && fmt.lang !== 'plaintext' ? fmt.lang : (codey ? detectCodeLang(raw) : '');
       if (fmt.kind === 'json' || fmt.kind === 'ndjson' || fmt.kind === 'jwt') lang = 'json';
+      if (fmt.kind === 'sql') lang = 'sql';
       const langCls = lang && lang !== 'plaintext' ? ` language-${lang}` : '';
       const codeAttr = codey || fmt.pretty ? '' : ' data-hljs="skip"';
-      const toolbar = renderFormatToolbar(raw, fmt, { showRawToggle: fmt.pretty || detectStructuredText(raw).kind !== 'plain' });
-      const urlLink = fmt.kind === 'url' && fmt.openHref
-        ? `<a class="url-canonical" href="${escAttr(fmt.openHref)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开">${esc(fmt.openHref)}</a>`
-        : '';
-      return `${toolbar}${urlLink}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}" data-raw-len="${raw.length}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
+      const toolbar = renderFormatToolbar(raw, fmt, {
+        itemId,
+        showRawToggle: true,
+        rawMode: false,
+      });
+      const urlLink =
+        fmt.kind === 'url' && fmt.openHref
+          ? `<a class="url-canonical" href="${escAttr(fmt.openHref)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开">${esc(fmt.openHref)}</a>`
+          : '';
+      return `${toolbar}${urlLink}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}" data-engine="${escAttr(fmt.engine || '')}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
     }
 
-    function renderPlainBodyRaw(raw, extraClass, detOrFmt) {
-      const kind = (detOrFmt && detOrFmt.kind) || 'plain';
+    function renderPlainBodyRaw(raw, extraClass, det, itemId) {
+      const kind = (det && det.kind) || 'plain';
       const meta = kindMeta(kind);
       const mode = textLineModeClass(raw);
       const codey = looksLikeCode(raw) || structuredKindIsCodey(kind);
@@ -3355,43 +3457,74 @@ window.ClipViewMasonry = Masonry;
       if (kind === 'json' || kind === 'ndjson') lang = 'json';
       if (kind === 'sql') lang = 'sql';
       const langCls = lang && lang !== 'plaintext' ? ` language-${lang}` : '';
-      const fmtStub = { kind, pretty: false, label: meta.label ? meta.label + ' · 原文' : '原文', icon: meta.icon || 'notes', openHref: kind === 'url' ? (() => { try { return new URL(raw.trim()).href; } catch (_) { return ''; } })() : '', engine: '' };
-      const toolbar = renderFormatToolbar(raw, fmtStub, { showRawToggle: true, rawMode: true });
-      const urlLink = fmtStub.openHref
-        ? `<a class="url-canonical" href="${escAttr(fmtStub.openHref)}" target="_blank" rel="noopener noreferrer">${esc(fmtStub.openHref)}</a>`
+      let openHref = '';
+      if (kind === 'url') {
+        try {
+          openHref = new URL(raw.trim()).href;
+        } catch (_) {}
+      }
+      const fmtStub = {
+        kind,
+        pretty: false,
+        label: meta.label ? meta.label + ' · 原文' : (kind !== 'plain' ? '原文' : ''),
+        icon: meta.icon || 'subject',
+        openHref,
+        engine: '',
+      };
+      const toolbar = renderFormatToolbar(raw, fmtStub, {
+        itemId,
+        showRawToggle: kind !== 'plain',
+        rawMode: true,
+      });
+      const urlLink = openHref
+        ? `<a class="url-canonical" href="${escAttr(openHref)}" target="_blank" rel="noopener noreferrer">${esc(openHref)}</a>`
         : '';
       const codeAttr = codey ? '' : ' data-hljs="skip"';
       return `${toolbar}${urlLink}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(kind)}" data-raw="1"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(raw)}</code></pre></div>`;
     }
 
-    function renderFormatToolbar(raw, fmt, { showRawToggle = false, rawMode = false } = {}) {
-      if (!fmt || (fmt.kind === 'plain' && !fmt.openHref && !showRawToggle)) return '';
+    function renderFormatToolbar(raw, fmt, { itemId = '', showRawToggle = false, rawMode = false } = {}) {
+      if (!fmt) return '';
       const bits = [];
       if (fmt.label || (fmt.kind && fmt.kind !== 'plain')) {
         const label = fmt.label || kindMeta(fmt.kind).label;
         const icon = fmt.icon || kindMeta(fmt.kind).icon || 'data_object';
         if (label) {
-          bits.push(`<span class="format-chip format-chip--${escAttr(fmt.kind || 'plain')}" title="引擎: ${escAttr(fmt.engine || 'builtin')} · 复制始终为原文"><span class="material-symbols-outlined">${esc(icon)}</span>${esc(label)}</span>`);
+          const eng = fmt.engine ? ` · ${fmt.engine}` : '';
+          bits.push(
+            `<span class="format-chip format-chip--${escAttr(fmt.kind || 'plain')}" title="复制始终为原文${escAttr(eng)}"><span class="material-symbols-outlined">${esc(icon)}</span>${esc(label)}</span>`
+          );
         }
       }
-      if (fmt.openHref || (fmt.kind === 'url')) {
+      if (fmt.openHref || fmt.kind === 'url') {
         const href = fmt.openHref || raw.trim();
-        bits.push(`<button type="button" class="fmt-btn is-primary" data-open-url="${escAttr(href)}" title="新标签页打开"><span class="material-symbols-outlined">open_in_new</span>打开</button>`);
-        bits.push(`<button type="button" class="fmt-btn" data-copy-text="${escAttr(href)}" title="复制完整 URL"><span class="material-symbols-outlined">link</span>复制链接</button>`);
-      }
-      if (showRawToggle) {
         bits.push(
-          rawMode
-            ? `<button type="button" class="fmt-btn" data-pretty-card="1" title="使用格式化器排版"><span class="material-symbols-outlined">auto_fix_high</span>排版</button>`
-            : `<button type="button" class="fmt-btn" data-raw-card="1" title="显示捕获原文"><span class="material-symbols-outlined">subject</span>原文</button>`
+          `<button type="button" class="fmt-btn is-primary" data-open-url="${escAttr(href)}" title="新标签页打开"><span class="material-symbols-outlined">open_in_new</span>打开</button>`
+        );
+        bits.push(
+          `<button type="button" class="fmt-btn" data-copy-text="${escAttr(href)}" title="复制完整 URL"><span class="material-symbols-outlined">link</span>复制链接</button>`
         );
       }
+      if (showRawToggle && fmt.kind && fmt.kind !== 'plain') {
+        if (rawMode) {
+          bits.push(
+            `<button type="button" class="fmt-btn is-active" data-pretty-card="1" data-item-id="${escAttr(itemId)}" title="使用格式化器排版"><span class="material-symbols-outlined">auto_fix_high</span>排版</button>`
+          );
+        } else {
+          bits.push(
+            `<button type="button" class="fmt-btn" data-raw-card="1" data-item-id="${escAttr(itemId)}" title="显示捕获原文"><span class="material-symbols-outlined">subject</span>原文</button>`
+          );
+        }
+      }
       if (!bits.length) return '';
-      return `<div class="format-toolbar">${bits.join('')}</div>`;
+      return `<div class="format-toolbar" role="toolbar" aria-label="文本展示">${bits.join('')}</div>`;
     }
 
     function wireFormatToolbar(card, item) {
+      // Prefer delegated handlers (wired once); keep per-card bind as safety for dynamic nodes
       card.querySelectorAll('[data-open-url]').forEach((btn) => {
+        if (btn._fmtWired) return;
+        btn._fmtWired = true;
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -3400,6 +3533,8 @@ window.ClipViewMasonry = Masonry;
         });
       });
       card.querySelectorAll('[data-copy-text]').forEach((btn) => {
+        if (btn._fmtWired) return;
+        btn._fmtWired = true;
         btn.addEventListener('click', async (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -3409,44 +3544,106 @@ window.ClipViewMasonry = Masonry;
         });
       });
       card.querySelectorAll('[data-raw-card]').forEach((btn) => {
+        if (btn._fmtWired) return;
+        btn._fmtWired = true;
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          card.dataset.forceRaw = '1';
+          const id = item?.id || card.dataset.id || btn.getAttribute('data-item-id');
+          setClipDisplayMode(id, 'raw');
           repaintCardBody(card, item);
         });
       });
       card.querySelectorAll('[data-pretty-card]').forEach((btn) => {
+        if (btn._fmtWired) return;
+        btn._fmtWired = true;
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          delete card.dataset.forceRaw;
+          const id = item?.id || card.dataset.id || btn.getAttribute('data-item-id');
+          setClipDisplayMode(id, 'pretty');
           repaintCardBody(card, item);
         });
       });
     }
 
+    /** One-time delegation so per-clip 原文/排版 always works after masonry rebuilds. */
+    function wireFormatToolbarDelegateOnce() {
+      if (wireFormatToolbarDelegateOnce._done) return;
+      wireFormatToolbarDelegateOnce._done = true;
+      document.addEventListener(
+        'click',
+        (e) => {
+          const rawBtn = e.target.closest && e.target.closest('[data-raw-card]');
+          const prettyBtn = e.target.closest && e.target.closest('[data-pretty-card]');
+          const openBtn = e.target.closest && e.target.closest('[data-open-url]');
+          const copyBtn = e.target.closest && e.target.closest('[data-copy-text]');
+          if (!rawBtn && !prettyBtn && !openBtn && !copyBtn) return;
+          const card = e.target.closest('.m3-card');
+          if (!card) return;
+          const id = card.dataset.id;
+          const item = (typeof clips !== 'undefined' && clips.find((c) => c.id === id)) || { id, textContent: '', type: card.dataset.type };
+          if (rawBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            setClipDisplayMode(id, 'raw');
+            // Prefer live item from clips
+            const live = clips.find((c) => c.id === id) || item;
+            repaintCardBody(card, live);
+            return;
+          }
+          if (prettyBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            setClipDisplayMode(id, 'pretty');
+            const live = clips.find((c) => c.id === id) || item;
+            repaintCardBody(card, live);
+            return;
+          }
+          if (openBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const href = openBtn.getAttribute('data-open-url');
+            if (href) window.open(href, '_blank', 'noopener,noreferrer');
+            return;
+          }
+          if (copyBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const text = copyBtn.getAttribute('data-copy-text') || '';
+            copyClip(text).then((ok) => {
+              if (ok) toast('已复制链接');
+            });
+          }
+        },
+        true
+      );
+    }
+
     function repaintCardBody(card, item) {
+      if (!card || !item) return;
       const bodyEl = card.querySelector('.card-body');
       if (!bodyEl) return;
-      // Rebuild only body via buildCard path is heavy; re-run text branch locally
-      const plain = normalizePlainText(item.textContent || item.preview || '');
-      let body;
-      if (item.type === 'image' || item.type === 'rtf' || item.type === 'html' || item.htmlContent) {
-        // fall back full rebuild
+      // Full rebuild keeps masonry height correct
+      try {
         const next = buildCard(item);
         const nb = next.querySelector('.card-body');
-        if (nb) bodyEl.innerHTML = nb.innerHTML;
-        wireFormatToolbar(card, item);
-        highlightCard(card);
-        return;
+        if (nb) {
+          bodyEl.innerHTML = nb.innerHTML;
+          // preserve dataset force markers none — mode is in clipDisplayMode
+          wireFormatToolbar(card, item);
+          highlightCard(card);
+          // remeasure masonry if available
+          try {
+            if (typeof scheduleMasonry === 'function') scheduleMasonry();
+            else if (window.ClipViewMasonry && typeof window.ClipViewMasonry.relayout === 'function') {
+              window.ClipViewMasonry.relayout();
+            }
+          } catch (_) {}
+        }
+      } catch (err) {
+        console.warn('repaintCardBody', err);
       }
-      if (!plain) body = renderPlainBody('（无正文）');
-      else if (card.dataset.forceRaw === '1') body = renderPlainBody(plain, '', { forceRaw: true, cardRaw: true });
-      else body = renderPlainBody(plain);
-      bodyEl.innerHTML = body;
-      wireFormatToolbar(card, item);
-      highlightCard(card);
     }
 
     function buildCard(item) {
@@ -3497,31 +3694,33 @@ window.ClipViewMasonry = Masonry;
         } else if (notesFragmentUseful(fragment) && !looksLikeCode(plain || plainFromHtml)) {
           body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
         } else if (plain) {
-          body = renderPlainBody(plain, ' is-rtf');
+          body = renderPlainBody(plain, ' is-rtf', { itemId: item.id });
         } else {
-          body = renderPlainBody('（富文本无正文，请重新复制）', ' is-rtf');
+          body = renderPlainBody('（富文本无正文，请重新复制）', ' is-rtf', { itemId: item.id });
         }
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
         if (plain) {
           if (searchQuery) {
-            // Prefer pretty display string for hit visibility on single-line JSON.
-            const fmt = formatTextForDisplay(plain);
+            const fmt = formatTextForDisplay(plain, { beautifiers: browserBeautifiers(), enabled: getClipDisplayMode(item.id, detectStructuredText(plain).kind) === 'pretty' });
             const forHit = fmt.pretty ? fmt.display : plain;
             if (fieldMatchesQuery(forHit, searchQuery) || fieldMatchesQuery(plain, searchQuery)) {
-              const mode = textLineModeClass(forHit) + (fmt.pretty ? ' is-pretty' : '');
-              const chip = fmt.pretty
-                ? `<span class="format-chip" title="仅展示排版，复制仍为原始文本"><span class="material-symbols-outlined">data_object</span>${esc(fmt.label)}</span>`
-                : '';
-              body = chip + `<div class="text-scroll${mode}"><pre><code data-hljs="skip">${highlightEscaped(forHit, searchQuery)}</code></pre></div>`;
+              // Search hit view still honors per-clip mode + URL actions
+              body = renderPlainBody(plain, '', { itemId: item.id, pretty: getClipDisplayMode(item.id, fmt.kind) === 'pretty' });
+              // Overlay marks: if pretty, re-highlight display; else raw
+              // Keep simple: full pretty body without marks is ok; marks on raw path:
+              if (!fmt.pretty) {
+                body = renderFormatToolbar(plain, fmt, { itemId: item.id, showRawToggle: fmt.kind !== 'plain', rawMode: true })
+                  + `<div class="text-scroll${textLineModeClass(plain)}"><pre><code data-hljs="skip">${highlightEscaped(plain, searchQuery)}</code></pre></div>`;
+              }
             } else {
-              body = renderPlainBody(plain);
+              body = renderPlainBody(plain, '', { itemId: item.id });
             }
           } else {
-            body = renderPlainBody(plain);
+            body = renderPlainBody(plain, '', { itemId: item.id });
           }
         } else {
-          body = renderPlainBody('（无正文）');
+          body = renderPlainBody('（无正文）', '', { itemId: item.id });
         }
         // Text item with OCR field (rare) — still surface OCR hits
         if (item.ocrText && searchQuery && fieldMatchesQuery(item.ocrText, searchQuery)) {
