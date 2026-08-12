@@ -1,7 +1,7 @@
 /**
  * ClipVault — display-only structured text formatting.
- * Philosophy: clipboard is for humans; pretty render raises efficiency.
- * Never mutate stored capture; copy must use raw payload.
+ * Prefer real formatters (js-beautify / sql-formatter) when available;
+ * fall back to conservative builtins. Copy path must use raw payload.
  */
 
 export const TEXT_PRETTY_MAX = 200000;
@@ -26,6 +26,20 @@ const KIND_META = {
 
 export function kindMeta(kind) {
   return KIND_META[kind] || KIND_META.plain;
+}
+
+/** Optional engines: { jsBeautify, htmlBeautify, sqlFormat } */
+export function resolveBeautifiers(custom) {
+  if (custom && typeof custom === 'object') return custom;
+  const g = typeof globalThis !== 'undefined' ? globalThis : {};
+  return {
+    jsBeautify: typeof g.js_beautify === 'function' ? g.js_beautify : null,
+    htmlBeautify: typeof g.html_beautify === 'function' ? g.html_beautify : null,
+    sqlFormat:
+      g.sqlFormatter && typeof g.sqlFormatter.format === 'function'
+        ? (s, opts) => g.sqlFormatter.format(s, opts || { language: 'sql', tabWidth: 2, keywordCase: 'upper' })
+        : null,
+  };
 }
 
 function tryParseJson(s) {
@@ -71,24 +85,24 @@ function looksLikeJwt(t) {
   }
 }
 
-function formatJwt(t) {
+function formatJwt(t, beautifyJson) {
   const [h, p, sig] = t.split('.');
-  const header = JSON.stringify(JSON.parse(b64ToUtf8(h)), null, 2);
-  let payload;
+  const headerObj = JSON.parse(b64ToUtf8(h));
+  let payloadStr;
   try {
-    payload = JSON.stringify(JSON.parse(b64ToUtf8(p)), null, 2);
+    payloadStr = beautifyJson(JSON.stringify(JSON.parse(b64ToUtf8(p))));
   } catch (_) {
-    payload = b64ToUtf8(p);
+    payloadStr = b64ToUtf8(p);
   }
   return [
     '// header',
-    header,
+    beautifyJson(JSON.stringify(headerObj)),
     '',
     '// payload',
-    payload,
+    payloadStr,
     '',
     '// signature',
-    sig.slice(0, 24) + (sig.length > 24 ? '…' : ''),
+    sig.slice(0, 32) + (sig.length > 32 ? '…' : ''),
   ].join('\n');
 }
 
@@ -102,19 +116,25 @@ function looksLikeUrl(t) {
   }
 }
 
-function formatUrl(t) {
+/** Structured URL for display + openHref for new tab. */
+export function formatUrlParts(t) {
   const u = new URL(t);
-  const lines = [`${u.protocol}//${u.host}${u.pathname}`];
+  const openHref = u.href;
+  const lines = [];
+  lines.push(`${u.protocol}//${u.host}${u.pathname}`);
   if (u.search && u.search.length > 1) {
-    lines.push('', '# query');
-    const params = [...u.searchParams.entries()];
-    if (!params.length) lines.push(u.search);
-    else for (const [k, v] of params) lines.push(`${k}=${v}`);
+    lines.push('');
+    lines.push('# query');
+    for (const [k, v] of u.searchParams.entries()) {
+      lines.push(`${k} = ${v}`);
+    }
   }
   if (u.hash && u.hash.length > 1) {
-    lines.push('', '# hash', u.hash.slice(1));
+    lines.push('');
+    lines.push('# hash');
+    lines.push(u.hash.slice(1));
   }
-  return lines.join('\n');
+  return { openHref, display: lines.join('\n'), host: u.host, path: u.pathname };
 }
 
 function looksLikeFormBody(t) {
@@ -144,17 +164,14 @@ function formatFormBody(t) {
     .map((pair) => {
       const i = pair.indexOf('=');
       if (i < 0) return decodeURIComponentSafe(pair);
-      return `${decodeURIComponentSafe(pair.slice(0, i))}=${decodeURIComponentSafe(pair.slice(i + 1))}`;
+      return `${decodeURIComponentSafe(pair.slice(0, i))} = ${decodeURIComponentSafe(pair.slice(i + 1))}`;
     })
     .join('\n');
 }
 
 function looksLikeNdjson(t) {
   if (!t.includes('\n')) return false;
-  const lines = t
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (lines.length < 2 || lines.length > 5000) return false;
   let n = 0;
   for (const line of lines.slice(0, 40)) {
@@ -166,14 +183,14 @@ function looksLikeNdjson(t) {
   return n >= 2;
 }
 
-function formatNdjson(t) {
+function formatNdjson(t, beautifyJson) {
   return t
     .split(/\r?\n/)
     .map((line) => {
       const s = line.trim();
       if (!s) return '';
       const r = tryParseJson(s);
-      return r.ok ? JSON.stringify(r.value, null, 2) : line;
+      return r.ok ? beautifyJson(JSON.stringify(r.value)) : line;
     })
     .join('\n\n');
 }
@@ -187,7 +204,7 @@ function looksLikeXml(t) {
   return false;
 }
 
-function prettyXml(xml) {
+function prettyXmlFallback(xml) {
   const s = String(xml).trim().replace(/>\s*</g, '>\n<');
   const lines = s.split('\n');
   let ind = 0;
@@ -198,9 +215,9 @@ function prettyXml(xml) {
     if (/^<\//.test(line)) ind = Math.max(0, ind - 1);
     out.push(`${'  '.repeat(ind)}${line}`);
     if (/^<\?/.test(line) || /^<!/.test(line) || /\/>$/.test(line) || /^<\//.test(line)) {
-      /* no + */
+      /* keep */
     } else if (/^<[^>]+>.*<\/[^>]+>$/.test(line)) {
-      /* same line open close */
+      /* same line */
     } else if (/^</.test(line) && !/^<\//.test(line)) {
       ind++;
     }
@@ -220,15 +237,8 @@ function looksLikeCsv(t) {
   return true;
 }
 
-function formatCsv(t) {
-  return t.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter((l) => l.length).join('\n');
-}
-
 function looksLikeEnv(t) {
-  const lines = t
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'));
+  const lines = t.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   if (lines.length < 2) return false;
   let ok = 0;
   for (const line of lines.slice(0, 40)) {
@@ -253,11 +263,11 @@ function looksLikeStack(t) {
 function looksLikeSql(t) {
   return (
     /^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXPLAIN|PRAGMA|REPLACE|MERGE)\b/im.test(t) &&
-    t.length >= 12
+    t.length >= 24
   );
 }
 
-function formatSql(t) {
+function formatSqlFallback(t) {
   return t
     .replace(/\s+/g, ' ')
     .trim()
@@ -319,92 +329,217 @@ function looksLikeBase64Blob(t) {
   }
 }
 
-function formatBase64(t) {
-  const s = t.trim().replace(/\s+/g, '');
-  const utf = b64ToUtf8(s);
-  const inner = detectStructuredText(utf);
-  if (inner.kind === 'json') {
-    try {
-      return '// decoded UTF-8 → JSON\n' + JSON.stringify(JSON.parse(utf.trim()), null, 2);
-    } catch (_) {}
-  }
-  return '// decoded UTF-8\n' + utf;
-}
-
 export function detectStructuredText(text) {
   const raw = String(text ?? '');
   const t = raw.trim();
   if (t.length < 2 || t.length > TEXT_PRETTY_MAX) return { kind: 'plain' };
 
   if (looksLikeJwt(t)) return { kind: 'jwt' };
-
   if (t[0] === '{' || t[0] === '[') {
     const r = tryParseJson(t);
     if (r.ok && isPlainObjectOrArray(r.value)) return { kind: 'json' };
   }
-
   if (looksLikeNdjson(t)) return { kind: 'ndjson' };
   if (looksLikeUrl(t)) return { kind: 'url' };
   if (looksLikeFormBody(t)) return { kind: 'form' };
-
   const xmlKind = looksLikeXml(t);
   if (xmlKind === 'html') return { kind: 'html' };
   if (xmlKind === 'xml') return { kind: 'xml' };
-
   if (looksLikeStack(t)) return { kind: 'stack' };
-  if (looksLikeSql(t) && t.length >= 40) return { kind: 'sql' };
+  if (looksLikeSql(t)) return { kind: 'sql' };
   if (looksLikeEnv(t)) return { kind: 'env' };
   if (looksLikeCsv(t)) return { kind: 'csv' };
   if (looksLikeMarkdown(t)) return { kind: 'markdown' };
   if (looksLikeYaml(t)) return { kind: 'yaml' };
   if (looksLikeBase64Blob(t)) return { kind: 'base64' };
-
   return { kind: 'plain' };
 }
 
-export function formatTextForDisplay(text) {
+/**
+ * @param {string} text
+ * @param {{ beautifiers?: object, enabled?: boolean }} [options]
+ */
+export function formatTextForDisplay(text, options = {}) {
   const raw = String(text ?? '');
+  if (options.enabled === false) {
+    return { kind: 'plain', display: raw, pretty: false, label: '', icon: '', lang: 'plaintext', openHref: '', engine: '' };
+  }
+
+  const b = resolveBeautifiers(options.beautifiers);
+  const beautifyJson = (jsonStr) => {
+    try {
+      const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+      const compact = JSON.stringify(obj);
+      if (b.jsBeautify) {
+        try {
+          return b.jsBeautify(compact, {
+            indent_size: 2,
+            space_in_empty_paren: true,
+            keep_array_indentation: false,
+          });
+        } catch (_) {}
+      }
+      return JSON.stringify(obj, null, 2);
+    } catch (_) {
+      return String(jsonStr);
+    }
+  };
+  const beautifyHtmlXml = (s, kind) => {
+    if (b.htmlBeautify) {
+      try {
+        return b.htmlBeautify(s, {
+          indent_size: 2,
+          preserve_newlines: true,
+          max_preserve_newlines: 2,
+          wrap_line_length: 0,
+          extra_liners: [],
+          content_unformatted: ['pre', 'code', 'textarea'],
+          // xml-ish
+          indent_inner_html: true,
+          end_with_newline: false,
+        });
+      } catch (_) {}
+    }
+    return prettyXmlFallback(s);
+  };
+  const beautifySql = (s) => {
+    if (b.sqlFormat) {
+      try {
+        return b.sqlFormat(s, {
+          language: 'sql',
+          tabWidth: 2,
+          keywordCase: 'upper',
+          linesBetweenQueries: 1,
+        });
+      } catch (_) {}
+    }
+    return formatSqlFallback(s);
+  };
+
   const det = detectStructuredText(raw);
   const meta = kindMeta(det.kind);
   const chip = (extra) => (extra ? `${meta.label} · ${extra}` : meta.label);
+  const out = (fields) => ({
+    kind: det.kind,
+    display: raw,
+    pretty: false,
+    label: '',
+    icon: meta.icon,
+    lang: meta.lang,
+    openHref: '',
+    engine: '',
+    ...fields,
+  });
 
   try {
     switch (det.kind) {
       case 'json': {
-        const pretty = JSON.stringify(JSON.parse(raw.trim()), null, 2);
-        return { kind: 'json', display: pretty, pretty: true, label: chip('已排版'), icon: meta.icon, lang: 'json' };
+        const pretty = beautifyJson(raw.trim());
+        return out({
+          display: pretty,
+          pretty: true,
+          label: chip(b.jsBeautify ? 'Beautify' : '已排版'),
+          engine: b.jsBeautify ? 'js-beautify' : 'json',
+        });
       }
       case 'ndjson':
-        return { kind: 'ndjson', display: formatNdjson(raw), pretty: true, label: chip('已排版'), icon: meta.icon, lang: 'json' };
+        return out({
+          display: formatNdjson(raw, beautifyJson),
+          pretty: true,
+          label: chip(b.jsBeautify ? 'Beautify' : '已排版'),
+          engine: b.jsBeautify ? 'js-beautify' : 'json',
+        });
       case 'jwt':
-        return { kind: 'jwt', display: formatJwt(raw.trim()), pretty: true, label: chip('已解码'), icon: meta.icon, lang: 'json' };
-      case 'url':
-        return { kind: 'url', display: formatUrl(raw.trim()), pretty: true, label: chip('参数展开'), icon: meta.icon, lang: 'plaintext' };
+        return out({
+          display: formatJwt(raw.trim(), beautifyJson),
+          pretty: true,
+          label: chip('已解码'),
+          engine: b.jsBeautify ? 'js-beautify' : 'json',
+        });
+      case 'url': {
+        const parts = formatUrlParts(raw.trim());
+        return out({
+          display: parts.display,
+          pretty: true,
+          label: chip('参数'),
+          openHref: parts.openHref,
+          engine: 'url',
+        });
+      }
       case 'form':
-        return { kind: 'form', display: formatFormBody(raw.trim()), pretty: true, label: chip('已展开'), icon: meta.icon, lang: 'plaintext' };
+        return out({ display: formatFormBody(raw.trim()), pretty: true, label: chip('已展开'), engine: 'form' });
       case 'xml':
-        return { kind: 'xml', display: prettyXml(raw), pretty: true, label: chip('已缩进'), icon: meta.icon, lang: 'xml' };
+        return out({
+          display: beautifyHtmlXml(raw, 'xml'),
+          pretty: true,
+          label: chip(b.htmlBeautify ? 'Beautify' : '已缩进'),
+          engine: b.htmlBeautify ? 'js-beautify' : 'xml',
+        });
       case 'html':
-        return { kind: 'html', display: prettyXml(raw), pretty: true, label: chip('已缩进'), icon: meta.icon, lang: 'xml' };
+        return out({
+          display: beautifyHtmlXml(raw, 'html'),
+          pretty: true,
+          label: chip(b.htmlBeautify ? 'Beautify' : '已缩进'),
+          engine: b.htmlBeautify ? 'js-beautify' : 'html',
+        });
       case 'csv':
-        return { kind: 'csv', display: formatCsv(raw), pretty: true, label: chip('表格文本'), icon: meta.icon, lang: 'plaintext' };
+        return out({
+          display: raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
+          pretty: true,
+          label: chip('表格'),
+          engine: 'csv',
+        });
       case 'env':
-        return { kind: 'env', display: raw.replace(/\r\n/g, '\n').trim() + '\n', pretty: true, label: chip('配置'), icon: meta.icon, lang: 'plaintext' };
+        return out({
+          display: raw.replace(/\r\n/g, '\n').trim() + '\n',
+          pretty: true,
+          label: chip('配置'),
+          engine: 'env',
+        });
       case 'stack':
-        return { kind: 'stack', display: raw.replace(/\r\n/g, '\n'), pretty: true, label: chip('堆栈'), icon: meta.icon, lang: 'plaintext' };
+        return out({
+          display: raw.replace(/\r\n/g, '\n'),
+          pretty: true,
+          label: chip('堆栈'),
+          engine: 'stack',
+        });
       case 'sql':
-        return { kind: 'sql', display: formatSql(raw), pretty: true, label: chip('已断行'), icon: meta.icon, lang: 'sql' };
+        return out({
+          display: beautifySql(raw),
+          pretty: true,
+          label: chip(b.sqlFormat ? 'sql-formatter' : '已断行'),
+          engine: b.sqlFormat ? 'sql-formatter' : 'sql',
+        });
       case 'markdown':
-        return { kind: 'markdown', display: raw.replace(/\r\n/g, '\n'), pretty: true, label: chip('文档'), icon: meta.icon, lang: 'markdown' };
+        return out({
+          display: raw.replace(/\r\n/g, '\n'),
+          pretty: true,
+          label: chip('文档'),
+          engine: 'md',
+        });
       case 'yaml':
-        return { kind: 'yaml', display: raw.replace(/\r\n/g, '\n'), pretty: true, label: chip('配置'), icon: meta.icon, lang: 'yaml' };
-      case 'base64':
-        return { kind: 'base64', display: formatBase64(raw), pretty: true, label: chip('已解码'), icon: meta.icon, lang: 'plaintext' };
+        return out({
+          display: raw.replace(/\r\n/g, '\n'),
+          pretty: true,
+          label: chip('配置'),
+          engine: 'yaml',
+        });
+      case 'base64': {
+        const utf = b64ToUtf8(raw.trim().replace(/\s+/g, ''));
+        const inner = detectStructuredText(utf);
+        let display = '// decoded UTF-8\n' + utf;
+        if (inner.kind === 'json') {
+          try {
+            display = '// decoded UTF-8 → JSON\n' + beautifyJson(utf.trim());
+          } catch (_) {}
+        }
+        return out({ display, pretty: true, label: chip('已解码'), engine: 'base64' });
+      }
       default:
-        return { kind: 'plain', display: raw, pretty: false, label: '', icon: '', lang: 'plaintext' };
+        return out({ kind: 'plain', icon: '', lang: 'plaintext' });
     }
   } catch (_) {
-    return { kind: 'plain', display: raw, pretty: false, label: '', icon: '', lang: 'plaintext' };
+    return out({ kind: 'plain', icon: '', lang: 'plaintext' });
   }
 }
 

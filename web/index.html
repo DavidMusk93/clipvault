@@ -557,6 +557,34 @@
     .format-chip--csv, .format-chip--env, .format-chip--yaml { color: #455A64; background: rgba(69, 90, 100, 0.12); }
     .format-chip--stack { color: #C62828; background: rgba(198, 40, 40, 0.10); }
     .format-chip--markdown { color: #37474F; background: rgba(55, 71, 79, 0.10); }
+    .format-toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+      margin: 0 0 8px;
+    }
+    .format-toolbar .fmt-btn {
+      height: 24px; padding: 0 9px; border-radius: 999px; border: 0.5px solid var(--separator-strong);
+      background: rgba(255,255,255,0.85); color: var(--ink);
+      font: inherit; font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
+      transition: background var(--press), transform var(--press);
+    }
+    .format-toolbar .fmt-btn:hover { background: #fff; }
+    .format-toolbar .fmt-btn:active { transform: scale(0.97); }
+    .format-toolbar .fmt-btn .material-symbols-outlined { font-size: 14px; }
+    .format-toolbar .fmt-btn.is-primary {
+      background: var(--accent-soft); color: var(--accent); border-color: transparent;
+    }
+    .format-toolbar .fmt-btn.is-primary:hover { background: rgba(0, 113, 227, 0.18); }
+    .url-canonical {
+      display: block; font-size: 12px; line-height: 1.35; margin: 0 0 8px;
+      word-break: break-all; color: var(--accent); text-decoration: none;
+      font-family: var(--font-mono);
+    }
+    .url-canonical:hover { text-decoration: underline; }
+    .chip.pretty-toggle.on {
+      background: var(--accent-soft); color: var(--accent); border-color: transparent;
+    }
+
     .card-body .text-scroll.is-pretty {
       overflow-x: auto;
       overflow-y: auto;
@@ -1519,6 +1547,9 @@
   </aside>
 
   <div class="chips">
+    <button type="button" class="chip pretty-toggle on" id="prettyToggle" title="结构化文本排版（js-beautify / sql-formatter）；关闭则显示原文">
+      <span class="material-symbols-outlined">auto_fix_high</span>排版
+    </button>
     <button class="chip active" data-type="all" data-view="library"><span class="material-symbols-outlined">grid_view</span>全部</button>
     <button class="chip" data-type="text" data-view="library"><span class="material-symbols-outlined">description</span>纯文本</button>
     <button class="chip" data-type="html" data-view="library"><span class="material-symbols-outlined">code</span>富文本/HTML</button>
@@ -2667,8 +2698,8 @@ window.ClipViewMasonry = Masonry;
 
     /**
      * ClipVault — display-only structured text formatting.
-     * Philosophy: clipboard is for humans; pretty render raises efficiency.
-     * Never mutate stored capture; copy must use raw payload.
+     * Prefer real formatters (js-beautify / sql-formatter) when available;
+     * fall back to conservative builtins. Copy path must use raw payload.
      */
 
     const TEXT_PRETTY_MAX = 200000;
@@ -2693,6 +2724,20 @@ window.ClipViewMasonry = Masonry;
 
     function kindMeta(kind) {
       return KIND_META[kind] || KIND_META.plain;
+    }
+
+    /** Optional engines: { jsBeautify, htmlBeautify, sqlFormat } */
+    function resolveBeautifiers(custom) {
+      if (custom && typeof custom === 'object') return custom;
+      const g = typeof globalThis !== 'undefined' ? globalThis : {};
+      return {
+        jsBeautify: typeof g.js_beautify === 'function' ? g.js_beautify : null,
+        htmlBeautify: typeof g.html_beautify === 'function' ? g.html_beautify : null,
+        sqlFormat:
+          g.sqlFormatter && typeof g.sqlFormatter.format === 'function'
+            ? (s, opts) => g.sqlFormatter.format(s, opts || { language: 'sql', tabWidth: 2, keywordCase: 'upper' })
+            : null,
+      };
     }
 
     function tryParseJson(s) {
@@ -2738,24 +2783,24 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
-    function formatJwt(t) {
+    function formatJwt(t, beautifyJson) {
       const [h, p, sig] = t.split('.');
-      const header = JSON.stringify(JSON.parse(b64ToUtf8(h)), null, 2);
-      let payload;
+      const headerObj = JSON.parse(b64ToUtf8(h));
+      let payloadStr;
       try {
-        payload = JSON.stringify(JSON.parse(b64ToUtf8(p)), null, 2);
+        payloadStr = beautifyJson(JSON.stringify(JSON.parse(b64ToUtf8(p))));
       } catch (_) {
-        payload = b64ToUtf8(p);
+        payloadStr = b64ToUtf8(p);
       }
       return [
         '// header',
-        header,
+        beautifyJson(JSON.stringify(headerObj)),
         '',
         '// payload',
-        payload,
+        payloadStr,
         '',
         '// signature',
-        sig.slice(0, 24) + (sig.length > 24 ? '…' : ''),
+        sig.slice(0, 32) + (sig.length > 32 ? '…' : ''),
       ].join('\n');
     }
 
@@ -2769,19 +2814,25 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
-    function formatUrl(t) {
+    /** Structured URL for display + openHref for new tab. */
+    function formatUrlParts(t) {
       const u = new URL(t);
-      const lines = [`${u.protocol}//${u.host}${u.pathname}`];
+      const openHref = u.href;
+      const lines = [];
+      lines.push(`${u.protocol}//${u.host}${u.pathname}`);
       if (u.search && u.search.length > 1) {
-        lines.push('', '# query');
-        const params = [...u.searchParams.entries()];
-        if (!params.length) lines.push(u.search);
-        else for (const [k, v] of params) lines.push(`${k}=${v}`);
+        lines.push('');
+        lines.push('# query');
+        for (const [k, v] of u.searchParams.entries()) {
+          lines.push(`${k} = ${v}`);
+        }
       }
       if (u.hash && u.hash.length > 1) {
-        lines.push('', '# hash', u.hash.slice(1));
+        lines.push('');
+        lines.push('# hash');
+        lines.push(u.hash.slice(1));
       }
-      return lines.join('\n');
+      return { openHref, display: lines.join('\n'), host: u.host, path: u.pathname };
     }
 
     function looksLikeFormBody(t) {
@@ -2811,17 +2862,14 @@ window.ClipViewMasonry = Masonry;
         .map((pair) => {
           const i = pair.indexOf('=');
           if (i < 0) return decodeURIComponentSafe(pair);
-          return `${decodeURIComponentSafe(pair.slice(0, i))}=${decodeURIComponentSafe(pair.slice(i + 1))}`;
+          return `${decodeURIComponentSafe(pair.slice(0, i))} = ${decodeURIComponentSafe(pair.slice(i + 1))}`;
         })
         .join('\n');
     }
 
     function looksLikeNdjson(t) {
       if (!t.includes('\n')) return false;
-      const lines = t
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
+      const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       if (lines.length < 2 || lines.length > 5000) return false;
       let n = 0;
       for (const line of lines.slice(0, 40)) {
@@ -2833,14 +2881,14 @@ window.ClipViewMasonry = Masonry;
       return n >= 2;
     }
 
-    function formatNdjson(t) {
+    function formatNdjson(t, beautifyJson) {
       return t
         .split(/\r?\n/)
         .map((line) => {
           const s = line.trim();
           if (!s) return '';
           const r = tryParseJson(s);
-          return r.ok ? JSON.stringify(r.value, null, 2) : line;
+          return r.ok ? beautifyJson(JSON.stringify(r.value)) : line;
         })
         .join('\n\n');
     }
@@ -2854,7 +2902,7 @@ window.ClipViewMasonry = Masonry;
       return false;
     }
 
-    function prettyXml(xml) {
+    function prettyXmlFallback(xml) {
       const s = String(xml).trim().replace(/>\s*</g, '>\n<');
       const lines = s.split('\n');
       let ind = 0;
@@ -2865,9 +2913,9 @@ window.ClipViewMasonry = Masonry;
         if (/^<\//.test(line)) ind = Math.max(0, ind - 1);
         out.push(`${'  '.repeat(ind)}${line}`);
         if (/^<\?/.test(line) || /^<!/.test(line) || /\/>$/.test(line) || /^<\//.test(line)) {
-          /* no + */
+          /* keep */
         } else if (/^<[^>]+>.*<\/[^>]+>$/.test(line)) {
-          /* same line open close */
+          /* same line */
         } else if (/^</.test(line) && !/^<\//.test(line)) {
           ind++;
         }
@@ -2887,15 +2935,8 @@ window.ClipViewMasonry = Masonry;
       return true;
     }
 
-    function formatCsv(t) {
-      return t.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter((l) => l.length).join('\n');
-    }
-
     function looksLikeEnv(t) {
-      const lines = t
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter((l) => l && !l.startsWith('#'));
+      const lines = t.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
       if (lines.length < 2) return false;
       let ok = 0;
       for (const line of lines.slice(0, 40)) {
@@ -2920,11 +2961,11 @@ window.ClipViewMasonry = Masonry;
     function looksLikeSql(t) {
       return (
         /^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXPLAIN|PRAGMA|REPLACE|MERGE)\b/im.test(t) &&
-        t.length >= 12
+        t.length >= 24
       );
     }
 
-    function formatSql(t) {
+    function formatSqlFallback(t) {
       return t
         .replace(/\s+/g, ' ')
         .trim()
@@ -2986,92 +3027,217 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
-    function formatBase64(t) {
-      const s = t.trim().replace(/\s+/g, '');
-      const utf = b64ToUtf8(s);
-      const inner = detectStructuredText(utf);
-      if (inner.kind === 'json') {
-        try {
-          return '// decoded UTF-8 → JSON\n' + JSON.stringify(JSON.parse(utf.trim()), null, 2);
-        } catch (_) {}
-      }
-      return '// decoded UTF-8\n' + utf;
-    }
-
     function detectStructuredText(text) {
       const raw = String(text ?? '');
       const t = raw.trim();
       if (t.length < 2 || t.length > TEXT_PRETTY_MAX) return { kind: 'plain' };
 
       if (looksLikeJwt(t)) return { kind: 'jwt' };
-
       if (t[0] === '{' || t[0] === '[') {
         const r = tryParseJson(t);
         if (r.ok && isPlainObjectOrArray(r.value)) return { kind: 'json' };
       }
-
       if (looksLikeNdjson(t)) return { kind: 'ndjson' };
       if (looksLikeUrl(t)) return { kind: 'url' };
       if (looksLikeFormBody(t)) return { kind: 'form' };
-
       const xmlKind = looksLikeXml(t);
       if (xmlKind === 'html') return { kind: 'html' };
       if (xmlKind === 'xml') return { kind: 'xml' };
-
       if (looksLikeStack(t)) return { kind: 'stack' };
-      if (looksLikeSql(t) && t.length >= 40) return { kind: 'sql' };
+      if (looksLikeSql(t)) return { kind: 'sql' };
       if (looksLikeEnv(t)) return { kind: 'env' };
       if (looksLikeCsv(t)) return { kind: 'csv' };
       if (looksLikeMarkdown(t)) return { kind: 'markdown' };
       if (looksLikeYaml(t)) return { kind: 'yaml' };
       if (looksLikeBase64Blob(t)) return { kind: 'base64' };
-
       return { kind: 'plain' };
     }
 
-    function formatTextForDisplay(text) {
+    /**
+     * @param {string} text
+     * @param {{ beautifiers?: object, enabled?: boolean }} [options]
+     */
+    function formatTextForDisplay(text, options = {}) {
       const raw = String(text ?? '');
+      if (options.enabled === false) {
+        return { kind: 'plain', display: raw, pretty: false, label: '', icon: '', lang: 'plaintext', openHref: '', engine: '' };
+      }
+
+      const b = resolveBeautifiers(options.beautifiers);
+      const beautifyJson = (jsonStr) => {
+        try {
+          const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+          const compact = JSON.stringify(obj);
+          if (b.jsBeautify) {
+            try {
+              return b.jsBeautify(compact, {
+                indent_size: 2,
+                space_in_empty_paren: true,
+                keep_array_indentation: false,
+              });
+            } catch (_) {}
+          }
+          return JSON.stringify(obj, null, 2);
+        } catch (_) {
+          return String(jsonStr);
+        }
+      };
+      const beautifyHtmlXml = (s, kind) => {
+        if (b.htmlBeautify) {
+          try {
+            return b.htmlBeautify(s, {
+              indent_size: 2,
+              preserve_newlines: true,
+              max_preserve_newlines: 2,
+              wrap_line_length: 0,
+              extra_liners: [],
+              content_unformatted: ['pre', 'code', 'textarea'],
+              // xml-ish
+              indent_inner_html: true,
+              end_with_newline: false,
+            });
+          } catch (_) {}
+        }
+        return prettyXmlFallback(s);
+      };
+      const beautifySql = (s) => {
+        if (b.sqlFormat) {
+          try {
+            return b.sqlFormat(s, {
+              language: 'sql',
+              tabWidth: 2,
+              keywordCase: 'upper',
+              linesBetweenQueries: 1,
+            });
+          } catch (_) {}
+        }
+        return formatSqlFallback(s);
+      };
+
       const det = detectStructuredText(raw);
       const meta = kindMeta(det.kind);
       const chip = (extra) => (extra ? `${meta.label} · ${extra}` : meta.label);
+      const out = (fields) => ({
+        kind: det.kind,
+        display: raw,
+        pretty: false,
+        label: '',
+        icon: meta.icon,
+        lang: meta.lang,
+        openHref: '',
+        engine: '',
+        ...fields,
+      });
 
       try {
         switch (det.kind) {
           case 'json': {
-            const pretty = JSON.stringify(JSON.parse(raw.trim()), null, 2);
-            return { kind: 'json', display: pretty, pretty: true, label: chip('已排版'), icon: meta.icon, lang: 'json' };
+            const pretty = beautifyJson(raw.trim());
+            return out({
+              display: pretty,
+              pretty: true,
+              label: chip(b.jsBeautify ? 'Beautify' : '已排版'),
+              engine: b.jsBeautify ? 'js-beautify' : 'json',
+            });
           }
           case 'ndjson':
-            return { kind: 'ndjson', display: formatNdjson(raw), pretty: true, label: chip('已排版'), icon: meta.icon, lang: 'json' };
+            return out({
+              display: formatNdjson(raw, beautifyJson),
+              pretty: true,
+              label: chip(b.jsBeautify ? 'Beautify' : '已排版'),
+              engine: b.jsBeautify ? 'js-beautify' : 'json',
+            });
           case 'jwt':
-            return { kind: 'jwt', display: formatJwt(raw.trim()), pretty: true, label: chip('已解码'), icon: meta.icon, lang: 'json' };
-          case 'url':
-            return { kind: 'url', display: formatUrl(raw.trim()), pretty: true, label: chip('参数展开'), icon: meta.icon, lang: 'plaintext' };
+            return out({
+              display: formatJwt(raw.trim(), beautifyJson),
+              pretty: true,
+              label: chip('已解码'),
+              engine: b.jsBeautify ? 'js-beautify' : 'json',
+            });
+          case 'url': {
+            const parts = formatUrlParts(raw.trim());
+            return out({
+              display: parts.display,
+              pretty: true,
+              label: chip('参数'),
+              openHref: parts.openHref,
+              engine: 'url',
+            });
+          }
           case 'form':
-            return { kind: 'form', display: formatFormBody(raw.trim()), pretty: true, label: chip('已展开'), icon: meta.icon, lang: 'plaintext' };
+            return out({ display: formatFormBody(raw.trim()), pretty: true, label: chip('已展开'), engine: 'form' });
           case 'xml':
-            return { kind: 'xml', display: prettyXml(raw), pretty: true, label: chip('已缩进'), icon: meta.icon, lang: 'xml' };
+            return out({
+              display: beautifyHtmlXml(raw, 'xml'),
+              pretty: true,
+              label: chip(b.htmlBeautify ? 'Beautify' : '已缩进'),
+              engine: b.htmlBeautify ? 'js-beautify' : 'xml',
+            });
           case 'html':
-            return { kind: 'html', display: prettyXml(raw), pretty: true, label: chip('已缩进'), icon: meta.icon, lang: 'xml' };
+            return out({
+              display: beautifyHtmlXml(raw, 'html'),
+              pretty: true,
+              label: chip(b.htmlBeautify ? 'Beautify' : '已缩进'),
+              engine: b.htmlBeautify ? 'js-beautify' : 'html',
+            });
           case 'csv':
-            return { kind: 'csv', display: formatCsv(raw), pretty: true, label: chip('表格文本'), icon: meta.icon, lang: 'plaintext' };
+            return out({
+              display: raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n'),
+              pretty: true,
+              label: chip('表格'),
+              engine: 'csv',
+            });
           case 'env':
-            return { kind: 'env', display: raw.replace(/\r\n/g, '\n').trim() + '\n', pretty: true, label: chip('配置'), icon: meta.icon, lang: 'plaintext' };
+            return out({
+              display: raw.replace(/\r\n/g, '\n').trim() + '\n',
+              pretty: true,
+              label: chip('配置'),
+              engine: 'env',
+            });
           case 'stack':
-            return { kind: 'stack', display: raw.replace(/\r\n/g, '\n'), pretty: true, label: chip('堆栈'), icon: meta.icon, lang: 'plaintext' };
+            return out({
+              display: raw.replace(/\r\n/g, '\n'),
+              pretty: true,
+              label: chip('堆栈'),
+              engine: 'stack',
+            });
           case 'sql':
-            return { kind: 'sql', display: formatSql(raw), pretty: true, label: chip('已断行'), icon: meta.icon, lang: 'sql' };
+            return out({
+              display: beautifySql(raw),
+              pretty: true,
+              label: chip(b.sqlFormat ? 'sql-formatter' : '已断行'),
+              engine: b.sqlFormat ? 'sql-formatter' : 'sql',
+            });
           case 'markdown':
-            return { kind: 'markdown', display: raw.replace(/\r\n/g, '\n'), pretty: true, label: chip('文档'), icon: meta.icon, lang: 'markdown' };
+            return out({
+              display: raw.replace(/\r\n/g, '\n'),
+              pretty: true,
+              label: chip('文档'),
+              engine: 'md',
+            });
           case 'yaml':
-            return { kind: 'yaml', display: raw.replace(/\r\n/g, '\n'), pretty: true, label: chip('配置'), icon: meta.icon, lang: 'yaml' };
-          case 'base64':
-            return { kind: 'base64', display: formatBase64(raw), pretty: true, label: chip('已解码'), icon: meta.icon, lang: 'plaintext' };
+            return out({
+              display: raw.replace(/\r\n/g, '\n'),
+              pretty: true,
+              label: chip('配置'),
+              engine: 'yaml',
+            });
+          case 'base64': {
+            const utf = b64ToUtf8(raw.trim().replace(/\s+/g, ''));
+            const inner = detectStructuredText(utf);
+            let display = '// decoded UTF-8\n' + utf;
+            if (inner.kind === 'json') {
+              try {
+                display = '// decoded UTF-8 → JSON\n' + beautifyJson(utf.trim());
+              } catch (_) {}
+            }
+            return out({ display, pretty: true, label: chip('已解码'), engine: 'base64' });
+          }
           default:
-            return { kind: 'plain', display: raw, pretty: false, label: '', icon: '', lang: 'plaintext' };
+            return out({ kind: 'plain', icon: '', lang: 'plaintext' });
         }
       } catch (_) {
-        return { kind: 'plain', display: raw, pretty: false, label: '', icon: '', lang: 'plaintext' };
+        return out({ kind: 'plain', icon: '', lang: 'plaintext' });
       }
     }
 
@@ -3106,13 +3272,66 @@ window.ClipViewMasonry = Masonry;
       return 'plaintext';
     }
 
-    /** Plain / code body + structured pretty display (clipboard is for humans). */
+    // —— Display pretty preference (localStorage); copy always uses raw ——
+    const PRETTY_KEY = 'cv.displayPretty';
+    function isDisplayPrettyEnabled() {
+      try {
+        const v = localStorage.getItem(PRETTY_KEY);
+        if (v === null || v === undefined || v === '') return true;
+        return v !== '0' && v !== 'false';
+      } catch (_) {
+        return true;
+      }
+    }
+    function setDisplayPrettyEnabled(on) {
+      try { localStorage.setItem(PRETTY_KEY, on ? '1' : '0'); } catch (_) {}
+    }
+    function paintPrettyToggle() {
+      const btn = document.getElementById('prettyToggle');
+      if (!btn) return;
+      const on = isDisplayPrettyEnabled();
+      btn.classList.toggle('on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.title = on
+        ? '排版开：JSON/SQL/XML 等用 js-beautify、sql-formatter 美化（复制仍为原文）'
+        : '排版关：按捕获原文展示';
+    }
+    function wirePrettyToggleOnce() {
+      if (wirePrettyToggleOnce._done) return;
+      wirePrettyToggleOnce._done = true;
+      paintPrettyToggle();
+      document.getElementById('prettyToggle')?.addEventListener('click', () => {
+        setDisplayPrettyEnabled(!isDisplayPrettyEnabled());
+        paintPrettyToggle();
+        // Rebuild visible cards
+        try { rebuildFromData(); } catch (_) {
+          try { cardCache.clear(); rebuildFromData(); } catch (__) {}
+        }
+        toast(isDisplayPrettyEnabled() ? '已开启文本排版' : '已关闭文本排版（原文）');
+      });
+    }
+
+    function browserBeautifiers() {
+      return resolveBeautifiers({
+        jsBeautify: typeof js_beautify === 'function' ? js_beautify : null,
+        htmlBeautify: typeof html_beautify === 'function' ? html_beautify : null,
+        sqlFormat:
+          typeof sqlFormatter !== 'undefined' && sqlFormatter && typeof sqlFormatter.format === 'function'
+            ? (s, opts) => sqlFormatter.format(s, opts || { language: 'sql', tabWidth: 2, keywordCase: 'upper' })
+            : null,
+      });
+    }
+
+    /** Plain / code body + structured pretty (DSL formatters when loaded). */
     function renderPlainBody(plain, extraClass = '', opts = {}) {
       const raw = String(plain || '');
-      const doPretty = opts.pretty !== false;
-      const fmt = doPretty
-        ? formatTextForDisplay(raw)
-        : { kind: 'plain', display: raw, pretty: false, label: '', icon: '', lang: 'plaintext' };
+      // Per-card or global raw
+      if (opts.cardRaw === true || opts.forceRaw === true || opts.pretty === false || !isDisplayPrettyEnabled()) {
+        const det = detectStructuredText(raw);
+        // Still show URL open affordance even in raw mode
+        return renderPlainBodyRaw(raw, extraClass, det);
+      }
+      const fmt = formatTextForDisplay(raw, { beautifiers: browserBeautifiers(), enabled: true });
       const text = fmt.display;
       const mode = textLineModeClass(text) + (fmt.pretty ? ' is-pretty' : '');
       const codey = looksLikeCode(raw) || (fmt.pretty && structuredKindIsCodey(fmt.kind));
@@ -3120,11 +3339,114 @@ window.ClipViewMasonry = Masonry;
       if (fmt.kind === 'json' || fmt.kind === 'ndjson' || fmt.kind === 'jwt') lang = 'json';
       const langCls = lang && lang !== 'plaintext' ? ` language-${lang}` : '';
       const codeAttr = codey || fmt.pretty ? '' : ' data-hljs="skip"';
-      const icon = fmt.icon || 'data_object';
-      const chip = fmt.pretty && fmt.label
-        ? `<span class="format-chip format-chip--${escAttr(fmt.kind)}" title="仅展示排版，复制仍为原始捕获"><span class="material-symbols-outlined">${esc(icon)}</span>${esc(fmt.label)}</span>`
+      const toolbar = renderFormatToolbar(raw, fmt, { showRawToggle: fmt.pretty || detectStructuredText(raw).kind !== 'plain' });
+      const urlLink = fmt.kind === 'url' && fmt.openHref
+        ? `<a class="url-canonical" href="${escAttr(fmt.openHref)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开">${esc(fmt.openHref)}</a>`
         : '';
-      return `${chip}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
+      return `${toolbar}${urlLink}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}" data-raw-len="${raw.length}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
+    }
+
+    function renderPlainBodyRaw(raw, extraClass, detOrFmt) {
+      const kind = (detOrFmt && detOrFmt.kind) || 'plain';
+      const meta = kindMeta(kind);
+      const mode = textLineModeClass(raw);
+      const codey = looksLikeCode(raw) || structuredKindIsCodey(kind);
+      let lang = codey ? detectCodeLang(raw) : '';
+      if (kind === 'json' || kind === 'ndjson') lang = 'json';
+      if (kind === 'sql') lang = 'sql';
+      const langCls = lang && lang !== 'plaintext' ? ` language-${lang}` : '';
+      const fmtStub = { kind, pretty: false, label: meta.label ? meta.label + ' · 原文' : '原文', icon: meta.icon || 'notes', openHref: kind === 'url' ? (() => { try { return new URL(raw.trim()).href; } catch (_) { return ''; } })() : '', engine: '' };
+      const toolbar = renderFormatToolbar(raw, fmtStub, { showRawToggle: true, rawMode: true });
+      const urlLink = fmtStub.openHref
+        ? `<a class="url-canonical" href="${escAttr(fmtStub.openHref)}" target="_blank" rel="noopener noreferrer">${esc(fmtStub.openHref)}</a>`
+        : '';
+      const codeAttr = codey ? '' : ' data-hljs="skip"';
+      return `${toolbar}${urlLink}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(kind)}" data-raw="1"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(raw)}</code></pre></div>`;
+    }
+
+    function renderFormatToolbar(raw, fmt, { showRawToggle = false, rawMode = false } = {}) {
+      if (!fmt || (fmt.kind === 'plain' && !fmt.openHref && !showRawToggle)) return '';
+      const bits = [];
+      if (fmt.label || (fmt.kind && fmt.kind !== 'plain')) {
+        const label = fmt.label || kindMeta(fmt.kind).label;
+        const icon = fmt.icon || kindMeta(fmt.kind).icon || 'data_object';
+        if (label) {
+          bits.push(`<span class="format-chip format-chip--${escAttr(fmt.kind || 'plain')}" title="引擎: ${escAttr(fmt.engine || 'builtin')} · 复制始终为原文"><span class="material-symbols-outlined">${esc(icon)}</span>${esc(label)}</span>`);
+        }
+      }
+      if (fmt.openHref || (fmt.kind === 'url')) {
+        const href = fmt.openHref || raw.trim();
+        bits.push(`<button type="button" class="fmt-btn is-primary" data-open-url="${escAttr(href)}" title="新标签页打开"><span class="material-symbols-outlined">open_in_new</span>打开</button>`);
+        bits.push(`<button type="button" class="fmt-btn" data-copy-text="${escAttr(href)}" title="复制完整 URL"><span class="material-symbols-outlined">link</span>复制链接</button>`);
+      }
+      if (showRawToggle) {
+        bits.push(
+          rawMode
+            ? `<button type="button" class="fmt-btn" data-pretty-card="1" title="使用格式化器排版"><span class="material-symbols-outlined">auto_fix_high</span>排版</button>`
+            : `<button type="button" class="fmt-btn" data-raw-card="1" title="显示捕获原文"><span class="material-symbols-outlined">subject</span>原文</button>`
+        );
+      }
+      if (!bits.length) return '';
+      return `<div class="format-toolbar">${bits.join('')}</div>`;
+    }
+
+    function wireFormatToolbar(card, item) {
+      card.querySelectorAll('[data-open-url]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const href = btn.getAttribute('data-open-url');
+          if (href) window.open(href, '_blank', 'noopener,noreferrer');
+        });
+      });
+      card.querySelectorAll('[data-copy-text]').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const text = btn.getAttribute('data-copy-text') || '';
+          const ok = await copyClip(text);
+          if (ok) toast('已复制链接');
+        });
+      });
+      card.querySelectorAll('[data-raw-card]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          card.dataset.forceRaw = '1';
+          repaintCardBody(card, item);
+        });
+      });
+      card.querySelectorAll('[data-pretty-card]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          delete card.dataset.forceRaw;
+          repaintCardBody(card, item);
+        });
+      });
+    }
+
+    function repaintCardBody(card, item) {
+      const bodyEl = card.querySelector('.card-body');
+      if (!bodyEl) return;
+      // Rebuild only body via buildCard path is heavy; re-run text branch locally
+      const plain = normalizePlainText(item.textContent || item.preview || '');
+      let body;
+      if (item.type === 'image' || item.type === 'rtf' || item.type === 'html' || item.htmlContent) {
+        // fall back full rebuild
+        const next = buildCard(item);
+        const nb = next.querySelector('.card-body');
+        if (nb) bodyEl.innerHTML = nb.innerHTML;
+        wireFormatToolbar(card, item);
+        highlightCard(card);
+        return;
+      }
+      if (!plain) body = renderPlainBody('（无正文）');
+      else if (card.dataset.forceRaw === '1') body = renderPlainBody(plain, '', { forceRaw: true, cardRaw: true });
+      else body = renderPlainBody(plain);
+      bodyEl.innerHTML = body;
+      wireFormatToolbar(card, item);
+      highlightCard(card);
     }
 
     function buildCard(item) {
@@ -3320,6 +3642,8 @@ window.ClipViewMasonry = Masonry;
           scheduleMasonrySync();
         }, { once: true });
       }
+      wireFormatToolbar(card, item);
+
       return card;
     }
 

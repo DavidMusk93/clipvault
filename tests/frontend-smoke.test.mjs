@@ -166,10 +166,20 @@ test('structured text format covers multiple kinds + chips', () => {
   assert.match(indexHtml, /function looksLikeUrl/);
   assert.match(indexHtml, /function looksLikeFormBody/);
   assert.match(indexHtml, /function looksLikeNdjson/);
-  assert.match(indexHtml, /function prettyXml/);
+  assert.match(indexHtml, /function prettyXmlFallback|function prettyXml/);
   assert.match(indexHtml, /function formatSql/);
   assert.match(indexHtml, /format-chip--json/);
   assert.match(indexHtml, /format-chip--url/);
   assert.match(indexHtml, /structuredKindIsCodey/);
-  assert.match(indexHtml, /仅展示排版，复制仍为原始捕获/);
+  assert.match(indexHtml, /复制始终为原文/);
+});
+
+test('pretty toggle + url open + beautifier CDNs', () => {
+  assert.match(indexHtml, /prettyToggle/);
+  assert.match(indexHtml, /cv\.displayPretty/);
+  assert.match(indexHtml, /data-open-url/);
+  assert.match(indexHtml, /js-beautify/);
+  assert.match(indexHtml, /sql-formatter/);
+  assert.match(indexHtml, /function renderFormatToolbar/);
+  assert.match(indexHtml, /function browserBeautifiers/);
 });
