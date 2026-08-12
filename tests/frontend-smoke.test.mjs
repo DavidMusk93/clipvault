@@ -148,12 +148,28 @@ test('text display pretty-prints JSON (display only, copy stays raw)', () => {
   assert.match(indexHtml, /function detectStructuredText/);
   assert.match(indexHtml, /function formatTextForDisplay/);
   assert.match(indexHtml, /TEXT_PRETTY_MAX/);
-  assert.match(indexHtml, /JSON · 已排版/);
+  assert.match(indexHtml, /label: 'JSON'/);
+  assert.match(indexHtml, /已排版/);
   assert.match(indexHtml, /is-pretty/);
   assert.match(
     indexHtml,
     /item\.type === 'text' \|\| item\.type === 'url'/,
     'plainTextForCopy prefers stored payload for text (not pretty DOM)',
   );
-  assert.match(indexHtml, /detectStructuredText\(s\)\.kind === 'json'/);
+  assert.match(indexHtml, /structuredKindIsCodey/);
+});
+
+test('structured text format covers multiple kinds + chips', () => {
+  assert.match(indexHtml, /function detectStructuredText/);
+  assert.match(indexHtml, /function formatTextForDisplay/);
+  assert.match(indexHtml, /function looksLikeJwt/);
+  assert.match(indexHtml, /function looksLikeUrl/);
+  assert.match(indexHtml, /function looksLikeFormBody/);
+  assert.match(indexHtml, /function looksLikeNdjson/);
+  assert.match(indexHtml, /function prettyXml/);
+  assert.match(indexHtml, /function formatSql/);
+  assert.match(indexHtml, /format-chip--json/);
+  assert.match(indexHtml, /format-chip--url/);
+  assert.match(indexHtml, /structuredKindIsCodey/);
+  assert.match(indexHtml, /仅展示排版，复制仍为原始捕获/);
 });
