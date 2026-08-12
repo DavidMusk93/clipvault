@@ -143,3 +143,17 @@ test('card copy forces plain text only (no text/html re-capture as type=html)', 
     'copyClip posts plain + type text',
   );
 });
+
+test('text display pretty-prints JSON (display only, copy stays raw)', () => {
+  assert.match(indexHtml, /function detectStructuredText/);
+  assert.match(indexHtml, /function formatTextForDisplay/);
+  assert.match(indexHtml, /TEXT_PRETTY_MAX/);
+  assert.match(indexHtml, /JSON · 已排版/);
+  assert.match(indexHtml, /is-pretty/);
+  assert.match(
+    indexHtml,
+    /item\.type === 'text' \|\| item\.type === 'url'/,
+    'plainTextForCopy prefers stored payload for text (not pretty DOM)',
+  );
+  assert.match(indexHtml, /detectStructuredText\(s\)\.kind === 'json'/);
+});

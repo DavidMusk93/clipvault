@@ -539,6 +539,31 @@
       width: max-content;
       max-width: none;
     }
+    /* Structured text display (pretty JSON etc.) — vertical read, still mono pre */
+    .format-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      background: rgba(120, 120, 128, 0.12);
+      border-radius: 999px; padding: 2px 8px;
+      margin: 0 0 6px; letter-spacing: -0.01em;
+      font-family: var(--font-ui);
+    }
+    .format-chip .material-symbols-outlined { font-size: 13px; opacity: 0.85; }
+    .card-body .text-scroll.is-pretty {
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: min(420px, 55vh);
+    }
+    .card-body .text-scroll.is-pretty pre,
+    .card-body .text-scroll.is-pretty pre code {
+      /* pretty multi-line: fill card width, wrap only if a single token is huge */
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      white-space: pre;
+      word-break: normal;
+      overflow-wrap: normal;
+    }
     .card-body pre { margin: 0; }
     /*
      * Notes-like rich text surface (RTF/HTML from Cocoa / Notes)
@@ -2329,7 +2354,17 @@ window.ClipViewMasonry = Masonry;
       if (item.type === 'image') {
         return normalizeCopyText(item.ocrText || '');
       }
+      // text/url: always raw payload — card body may be pretty-printed JSON.
+      if (item.type === 'text' || item.type === 'url') {
+        const raw = String(item.textContent || item.preview || '');
+        if (raw.trim()) return normalizeCopyText(raw);
+      }
       if (cardEl) {
+        // If display was pretty-printed, do not copy formatted body.
+        if (cardEl.querySelector('.text-scroll.is-pretty, .format-chip')) {
+          const raw = String(item.textContent || '');
+          if (raw.trim()) return normalizeCopyText(raw);
+        }
         const pre = cardEl.querySelector('.text-scroll pre code, .text-scroll pre');
         if (pre) {
           const t = pre.textContent || '';
@@ -2621,10 +2656,48 @@ window.ClipViewMasonry = Masonry;
     }
 
 
+
+    /** Max chars for client-side pretty-print (avoid jank). */
+    const TEXT_PRETTY_MAX = 200000;
+
+    /**
+     * Detect structured plain text for *display* formatting only.
+     * v1: JSON object/array (parse-or-bust). Copy path must use raw payload.
+     */
+    function detectStructuredText(text) {
+      const raw = String(text ?? '');
+      const t = raw.trim();
+      if (t.length < 2 || t.length > TEXT_PRETTY_MAX) return { kind: 'plain' };
+      const c0 = t[0];
+      if (c0 !== '{' && c0 !== '[') return { kind: 'plain' };
+      try {
+        const v = JSON.parse(t);
+        if (v !== null && (typeof v === 'object')) return { kind: 'json' };
+      } catch (_) {}
+      return { kind: 'plain' };
+    }
+
+    /**
+     * Format text for card body only. Never mutate stored item.textContent.
+     * @returns {{ kind: string, display: string, pretty: boolean, label: string }}
+     */
+    function formatTextForDisplay(text) {
+      const raw = String(text ?? '');
+      const det = detectStructuredText(raw);
+      if (det.kind === 'json') {
+        try {
+          const pretty = JSON.stringify(JSON.parse(raw.trim()), null, 2);
+          return { kind: 'json', display: pretty, pretty: true, label: 'JSON · 已排版' };
+        } catch (_) {}
+      }
+      return { kind: 'plain', display: raw, pretty: false, label: '' };
+    }
+
     /** Heuristic: treat as code/SQL for keyword highlight (hljs). */
     function looksLikeCode(text) {
       const s = String(text || '');
       if (s.length < 8) return false;
+      if (detectStructuredText(s).kind === 'json') return true;
       if (/^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXPLAIN)\b/im.test(s)) return true;
       if (/^\s*(function|const|let|var|class|import|export|def |async |package |fn |pub )\b/m.test(s)) return true;
       if (/[{;]\s*$/m.test(s) && /[{}=<>]/.test(s) && s.split('\n').length >= 2) return true;
@@ -2647,15 +2720,24 @@ window.ClipViewMasonry = Masonry;
       return 'plaintext';
     }
 
-    /** Plain / code body with optional hljs language class. */
-    function renderPlainBody(plain, extraClass = '') {
-      const text = String(plain || '');
-      const mode = textLineModeClass(text);
-      const codey = looksLikeCode(text);
-      const lang = codey ? detectCodeLang(text) : '';
+    /** Plain / code body with optional hljs language class + structured pretty display. */
+    function renderPlainBody(plain, extraClass = '', opts = {}) {
+      const raw = String(plain || '');
+      // opts.pretty: default true for display; search path may pass false to keep raw for mark alignment
+      const doPretty = opts.pretty !== false;
+      const fmt = doPretty ? formatTextForDisplay(raw) : { kind: 'plain', display: raw, pretty: false, label: '' };
+      const text = fmt.display;
+      // Mode from *display* so pretty JSON is not forced into is-single horizontal pan hell
+      const mode = textLineModeClass(text) + (fmt.pretty ? ' is-pretty' : '');
+      const codey = looksLikeCode(raw) || fmt.kind === 'json';
+      let lang = codey ? detectCodeLang(raw) : '';
+      if (fmt.kind === 'json') lang = 'json';
       const langCls = lang && lang !== 'plaintext' ? ` language-${lang}` : '';
-      const codeAttr = codey ? '' : ' data-hljs="skip"';
-      return `<div class="text-scroll${mode}${extraClass}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
+      const codeAttr = codey || fmt.pretty ? '' : ' data-hljs="skip"';
+      const chip = fmt.pretty && fmt.label
+        ? `<span class="format-chip" title="仅展示排版，复制仍为原始文本"><span class="material-symbols-outlined">data_object</span>${esc(fmt.label)}</span>`
+        : '';
+      return `${chip}<div class="text-scroll${mode}${extraClass}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
     }
 
     function buildCard(item) {
@@ -2713,7 +2795,22 @@ window.ClipViewMasonry = Masonry;
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
         if (plain) {
-          body = searchQuery ? renderSearchableText(plain) : renderPlainBody(plain);
+          if (searchQuery) {
+            // Prefer pretty display string for hit visibility on single-line JSON.
+            const fmt = formatTextForDisplay(plain);
+            const forHit = fmt.pretty ? fmt.display : plain;
+            if (fieldMatchesQuery(forHit, searchQuery) || fieldMatchesQuery(plain, searchQuery)) {
+              const mode = textLineModeClass(forHit) + (fmt.pretty ? ' is-pretty' : '');
+              const chip = fmt.pretty
+                ? `<span class="format-chip" title="仅展示排版，复制仍为原始文本"><span class="material-symbols-outlined">data_object</span>${esc(fmt.label)}</span>`
+                : '';
+              body = chip + `<div class="text-scroll${mode}"><pre><code data-hljs="skip">${highlightEscaped(forHit, searchQuery)}</code></pre></div>`;
+            } else {
+              body = renderPlainBody(plain);
+            }
+          } else {
+            body = renderPlainBody(plain);
+          }
         } else {
           body = renderPlainBody('（无正文）');
         }
