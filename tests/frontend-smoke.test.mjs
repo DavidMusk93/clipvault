@@ -266,3 +266,12 @@ test('URL archive is manual + gated (save useful)', () => {
   assert.match(indexHtml, /\/api\/archive/, 'archive API');
   assert.match(indexHtml, /save useful|归档网页/, 'product copy');
 });
+
+test('archived URL uses View sheet — no inline HTML in cards', () => {
+  assert.match(indexHtml, /data-view-archive/, 'View button after archive');
+  assert.match(indexHtml, /id="archiveReader"/, 'Apple reader sheet');
+  assert.match(indexHtml, /water\.css/, 'open-source classless reader (water.css)');
+  assert.match(indexHtml, /archive-reader-frame/, 'isolated iframe');
+  assert.doesNotMatch(indexHtml, /archive-preview md-preview/, 'must not dump archive HTML into masonry');
+  assert.match(indexHtml, /function openArchiveReader/, 'reader opener');
+});

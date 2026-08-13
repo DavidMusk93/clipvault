@@ -625,7 +625,6 @@
       background: rgba(46, 125, 50, 0.12); border-radius: 999px;
       padding: 2px 8px;
     }
-    .archive-preview { margin-top: 8px; }
     .fmt-btn[data-archive-url].is-busy { opacity: 0.65; pointer-events: none; }
     .md-preview .url-inert, .md-preview .md-link {
       color: var(--accent) !important; text-decoration: underline dotted;
@@ -1014,6 +1013,93 @@
       letter-spacing: -0.01em;
     }
 
+
+    /* Archive reader — Apple sheet + isolated iframe (water.css inside).
+       Card never mounts archive HTML (masonry must not grow). */
+    .archive-reader {
+      position: fixed; inset: 0; z-index: 3800;
+      display: none; align-items: flex-end; justify-content: center;
+      pointer-events: none;
+    }
+    .archive-reader.open { display: flex; pointer-events: auto; }
+    .archive-reader-scrim {
+      position: absolute; inset: 0;
+      background: rgba(0, 0, 0, 0.32);
+      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+      opacity: 0; transition: opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .archive-reader.open .archive-reader-scrim { opacity: 1; }
+    .archive-reader-card {
+      position: relative; z-index: 1;
+      width: min(760px, calc(100vw - 16px));
+      height: min(88vh, 900px);
+      margin: 0 8px 10px;
+      display: flex; flex-direction: column;
+      border-radius: 22px 22px 18px 18px;
+      background: rgba(255, 255, 255, 0.88);
+      -webkit-backdrop-filter: blur(32px) saturate(180%);
+      backdrop-filter: blur(32px) saturate(180%);
+      border: 0.5px solid rgba(255,255,255,0.55);
+      box-shadow: 0 18px 56px rgba(0,0,0,0.22), 0 0 0 0.5px rgba(255,255,255,0.45) inset;
+      transform: translateY(28px);
+      opacity: 0;
+      transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease;
+      overflow: hidden;
+      will-change: transform, opacity;
+    }
+    .archive-reader.open .archive-reader-card {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    .archive-reader-grabber {
+      width: 36px; height: 5px; border-radius: 999px;
+      background: rgba(60, 60, 67, 0.22);
+      margin: 8px auto 0; flex-shrink: 0;
+    }
+    .archive-reader-head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 10px; padding: 10px 14px 10px 18px;
+      border-bottom: 0.5px solid var(--separator);
+      flex-shrink: 0;
+    }
+    .archive-reader-head-text { min-width: 0; flex: 1; }
+    .archive-reader-head h3 {
+      margin: 0; font-size: 17px; font-weight: 650;
+      letter-spacing: -0.022em; line-height: 1.25;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .archive-reader-url {
+      margin: 4px 0 0;
+      font-size: 12px; color: var(--muted);
+      font-family: var(--font-mono);
+      letter-spacing: -0.01em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .archive-reader-actions {
+      display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+    }
+    .archive-reader-frame {
+      flex: 1; min-height: 0; width: 100%; border: 0;
+      background: #fff;
+    }
+    @media (min-width: 640px) {
+      .archive-reader { align-items: center; }
+      .archive-reader-card {
+        border-radius: 18px; margin-bottom: 0;
+        transform: translateY(16px) scale(0.985);
+      }
+      .archive-reader.open .archive-reader-card { transform: translateY(0) scale(1); }
+      .archive-reader-grabber { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .archive-reader-card, .archive-reader-scrim {
+        transition: opacity 0.16s ease; transform: none !important;
+      }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .archive-reader-card { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
+      .archive-reader-scrim { backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
     /*
      * Evaluation sheet — Apple HIG-ish sheet (glass, spring, star rate).
      * Content lives ONLY in the modal; main card never mounts evaluation body
@@ -1766,6 +1852,30 @@
       <div class="event-toast-body">
         <ul class="event-toast-list" id="eventToastList"></ul>
       </div>
+    </div>
+  </div>
+
+
+  <!-- Archive reader: Apple sheet + sandboxed iframe (water.css). Not in masonry. -->
+  <div id="archiveReader" class="archive-reader" aria-hidden="true">
+    <div class="archive-reader-scrim" id="archiveReaderScrim"></div>
+    <div class="archive-reader-card" role="dialog" aria-modal="true" aria-labelledby="archiveReaderTitle">
+      <div class="archive-reader-grabber" aria-hidden="true"></div>
+      <div class="archive-reader-head">
+        <div class="archive-reader-head-text">
+          <h3 id="archiveReaderTitle">归档</h3>
+          <p class="archive-reader-url" id="archiveReaderUrl"></p>
+        </div>
+        <div class="archive-reader-actions">
+          <button type="button" class="btn-icon" id="archiveReaderOpen" title="打开原站" aria-label="打开原站">
+            <span class="material-symbols-outlined">open_in_new</span>
+          </button>
+          <button type="button" class="btn-icon" id="archiveReaderClose" title="关闭" aria-label="关闭">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+      </div>
+      <iframe id="archiveReaderFrame" class="archive-reader-frame" sandbox="" title="归档正文"></iframe>
     </div>
   </div>
 
@@ -3750,39 +3860,8 @@ window.ClipViewMasonry = Masonry;
     function renderUrlCardBody(item, href) {
       const raw = String(href || '').trim();
       const archived = !!(item.archived || (item.htmlContent && String(item.htmlContent).length > 40));
-      const pretty = renderPlainBody(raw, '', { itemId: item.id });
-      if (!archived) return pretty;
-      const title = (item.archive && item.archive.title) || '';
-      const when = (item.archive && item.archive.archivedAt) || '';
-      const badge = `<span class="archive-badge" title="${escAttr(when)}"><span class="material-symbols-outlined" style="font-size:14px">inventory_2</span>已归档${title ? ' · ' + esc(title) : ''}</span>`;
-      const html = sanitizeArchiveHtml(item.htmlContent || '');
-      return `${pretty}${badge}<div class="archive-preview md-preview is-pretty" data-format-kind="archive">${html}</div>`;
-    }
-
-    function sanitizeArchiveHtml(html) {
-      const raw = String(html || '');
-      try {
-        if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
-          let safe = DOMPurify.sanitize(raw, {
-            USE_PROFILES: { html: true },
-            FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
-            FORBID_ATTR: ['style'],
-            ALLOW_DATA_ATTR: false,
-          });
-          const doc = new DOMParser().parseFromString('<!doctype html><body>' + safe, 'text/html');
-          const root = doc.body || doc;
-          root.querySelectorAll('a').forEach((a) => {
-            const span = doc.createElement('span');
-            span.className = 'url-inert md-link';
-            const href = a.getAttribute('href') || '';
-            if (href) span.setAttribute('data-url', href);
-            span.textContent = a.textContent || href;
-            if (a.parentNode) a.parentNode.replaceChild(span, a);
-          });
-          return (root.innerHTML || '').trim();
-        }
-      } catch (_) {}
-      return renderNotesFragment(raw);
+      // Card stays compact: URL line + toolbar only. Archive HTML lives in the reader sheet.
+      return renderPlainBody(raw, '', { itemId: item.id, archived, archiveItem: item });
     }
 
     async function requestArchivePage(href, itemId, btn) {
@@ -3863,6 +3942,91 @@ window.ClipViewMasonry = Masonry;
       } catch (_) {}
     }
 
+
+    function sanitizeArchiveHtml(html) {
+      const raw = String(html || '');
+      try {
+        if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+          return DOMPurify.sanitize(raw, {
+            USE_PROFILES: { html: true },
+            FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+            FORBID_ATTR: ['onerror', 'onload'],
+            ALLOW_DATA_ATTR: false,
+          });
+        }
+      } catch (_) {}
+      return renderNotesFragment(raw);
+    }
+
+    function buildArchiveReaderDoc(title, html) {
+      const safe = sanitizeArchiveHtml(html);
+      // water.css: mature classless stylesheet for raw HTML articles (Readability output).
+      return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="color-scheme" content="light"/>
+<title>${esc(title || '归档')}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/light.min.css"/>
+<style>
+  html,body{background:#fff;}
+  body{
+    max-width:38rem; margin:0 auto; padding:1.75rem 1.35rem 3.5rem;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
+    font-size:17px; line-height:1.55; letter-spacing:-0.016em; color:#1d1d1f;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{letter-spacing:-0.022em; line-height:1.22; font-weight:650;}
+  img{max-width:100%;height:auto;border-radius:10px;}
+  figure{margin:1em 0;}
+  pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  a{pointer-events:none; color:#0071e3; text-decoration:none;}
+</style></head><body>${safe}</body></html>`;
+    }
+
+    let archiveReaderHref = '';
+    function openArchiveReader(item) {
+      const sheet = document.getElementById('archiveReader');
+      const frame = document.getElementById('archiveReaderFrame');
+      const titleEl = document.getElementById('archiveReaderTitle');
+      const urlEl = document.getElementById('archiveReaderUrl');
+      if (!sheet || !frame) return;
+      const title = (item.archive && item.archive.title) || '归档';
+      const href = item.textContent || (item.archive && item.archive.sourceUrl) || '';
+      archiveReaderHref = href;
+      titleEl.textContent = title;
+      urlEl.textContent = href;
+      urlEl.title = href;
+      frame.srcdoc = buildArchiveReaderDoc(title, item.htmlContent || '');
+      sheet.classList.add('open');
+      sheet.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeArchiveReader() {
+      const sheet = document.getElementById('archiveReader');
+      const frame = document.getElementById('archiveReaderFrame');
+      if (!sheet) return;
+      sheet.classList.remove('open');
+      sheet.setAttribute('aria-hidden', 'true');
+      if (frame) frame.srcdoc = '';
+      archiveReaderHref = '';
+      document.body.style.overflow = '';
+    }
+
+    function wireArchiveReaderOnce() {
+      if (wireArchiveReaderOnce._done) return;
+      wireArchiveReaderOnce._done = true;
+      document.getElementById('archiveReaderScrim')?.addEventListener('click', closeArchiveReader);
+      document.getElementById('archiveReaderClose')?.addEventListener('click', closeArchiveReader);
+      document.getElementById('archiveReaderOpen')?.addEventListener('click', () => {
+        if (archiveReaderHref) requestOpenExternalUrl(archiveReaderHref);
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('archiveReader')?.classList.contains('open')) {
+          closeArchiveReader();
+        }
+      });
+    }
+
     function replaceCardInPlace(item) {
       const old = cardCache.get(item.id);
       const next = buildCard(item);
@@ -3877,12 +4041,13 @@ window.ClipViewMasonry = Masonry;
     function renderPlainBody(plain, extraClass = '', opts = {}) {
       const raw = String(plain || '');
       const itemId = opts.itemId || '';
+      const archived = !!opts.archived;
       const det = detectStructuredText(raw);
       const modePref = opts.forceMode || getClipDisplayMode(itemId, det.kind);
       const wantPretty = modePref === 'pretty' && det.kind !== 'plain' && opts.pretty !== false;
 
       if (!wantPretty) {
-        return renderPlainBodyRaw(raw, extraClass, det, itemId);
+        return renderPlainBodyRaw(raw, extraClass, det, itemId, archived);
       }
 
       const fmt = formatTextForDisplay(raw, { beautifiers: browserBeautifiers(), enabled: true });
@@ -3898,6 +4063,7 @@ window.ClipViewMasonry = Masonry;
         itemId,
         showRawToggle: true,
         rawMode: false,
+        archived,
       });
       // URL dual surface (locked): single-line canonical + multi-line param parse
       if (fmt.kind === 'url' && fmt.openHref) {
@@ -3914,7 +4080,7 @@ window.ClipViewMasonry = Masonry;
       return `${toolbar}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}" data-engine="${escAttr(fmt.engine || '')}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
     }
 
-    function renderPlainBodyRaw(raw, extraClass, det, itemId) {
+    function renderPlainBodyRaw(raw, extraClass, det, itemId, archived = false) {
       const kind = (det && det.kind) || 'plain';
       const meta = kindMeta(kind);
       const mode = textLineModeClass(raw);
@@ -3941,6 +4107,7 @@ window.ClipViewMasonry = Masonry;
         itemId,
         showRawToggle: kind !== 'plain',
         rawMode: true,
+        archived,
       });
       const codeAttr = codey ? '' : ' data-hljs="skip"';
       if (kind === 'url' && openHref) {
@@ -3950,7 +4117,7 @@ window.ClipViewMasonry = Masonry;
       return `${toolbar}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(kind)}" data-raw="1"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(raw)}</code></pre></div>`;
     }
 
-    function renderFormatToolbar(raw, fmt, { itemId = '', showRawToggle = false, rawMode = false } = {}) {
+    function renderFormatToolbar(raw, fmt, { itemId = '', showRawToggle = false, rawMode = false, archived = false } = {}) {
       if (!fmt) return '';
       const bits = [];
       if (fmt.label || (fmt.kind && fmt.kind !== 'plain')) {
@@ -3974,7 +4141,14 @@ window.ClipViewMasonry = Masonry;
         bits.push(
           `<button type="button" class="fmt-btn" data-copy-text="${escAttr(href)}" title="复制完整 URL"><span class="material-symbols-outlined">link</span>复制链接</button>`
         );
-        if (itemId) {
+        if (itemId && archived) {
+          bits.push(
+            `<span class="archive-badge"><span class="material-symbols-outlined" style="font-size:14px">inventory_2</span>已归档</span>`
+          );
+          bits.push(
+            `<button type="button" class="fmt-btn is-primary" data-view-archive="${escAttr(itemId)}" title="查看归档正文"><span class="material-symbols-outlined">visibility</span>查看</button>`
+          );
+        } else if (itemId) {
           bits.push(
             `<button type="button" class="fmt-btn" data-archive-url="${escAttr(href)}" data-item-id="${escAttr(itemId)}" title="用本机浏览器引擎归档正文（手动 · save useful）"><span class="material-symbols-outlined">inventory_2</span>归档网页</button>`
           );
@@ -4070,7 +4244,8 @@ window.ClipViewMasonry = Masonry;
           const openBtn = e.target.closest && e.target.closest('[data-open-url]');
           const copyBtn = e.target.closest && e.target.closest('[data-copy-text]');
           const archBtn = e.target.closest && e.target.closest('[data-archive-url]');
-          if (!rawBtn && !prettyBtn && !openBtn && !copyBtn && !archBtn) return;
+          const viewBtn = e.target.closest && e.target.closest('[data-view-archive]');
+          if (!rawBtn && !prettyBtn && !openBtn && !copyBtn && !archBtn && !viewBtn) return;
           const card = e.target.closest('.m3-card');
           if (!card) return;
           const id = card.dataset.id;
@@ -4114,6 +4289,18 @@ window.ClipViewMasonry = Masonry;
             const href = archBtn.getAttribute('data-archive-url');
             const id = (card && card.dataset.id) || archBtn.getAttribute('data-item-id');
             requestArchivePage(href, id, archBtn);
+            return;
+          }
+          if (viewBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = viewBtn.getAttribute('data-view-archive') || (card && card.dataset.id);
+            const item = clips.find((c) => c.id === id);
+            if (item && item.htmlContent) openArchiveReader(item);
+            else if (id) refreshClipInPlace(id).then(() => {
+              const live = clips.find((c) => c.id === id);
+              if (live && live.htmlContent) openArchiveReader(live);
+            });
           }
         },
         true
