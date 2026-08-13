@@ -211,3 +211,13 @@ test('url dual surface locked in index.html (canonical + parse)', () => {
   assert.doesNotMatch(indexHtml, /class="url-canonical"/);
   assert.match(indexHtml, /function requestOpenExternalUrl/);
 });
+
+test('delete/restore use differential remove (no full rebuild scroll jump)', () => {
+  assert.match(indexHtml, /function removeCardFromMasonry/, 'differential remove required');
+  // deleteClip must call removeCardFromMasonry, not only rebuildFromData
+  const delIdx = indexHtml.indexOf('async function deleteClip');
+  const delChunk = indexHtml.slice(delIdx, delIdx + 900);
+  assert.match(delChunk, /removeCardFromMasonry/, 'deleteClip uses removeCardFromMasonry');
+  assert.doesNotMatch(delChunk, /rebuildFromData\(\s*\)/, 'deleteClip must not bare rebuildFromData()');
+  assert.match(indexHtml, /behavior:\s*['"]instant['"]/, 'scroll restore uses absolute scrollTo');
+});

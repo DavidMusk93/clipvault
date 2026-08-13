@@ -65,6 +65,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | 交互不抖：hover 不做几何位移；展开不重排整墙 | `translateY` hover + 全量 remount |
 | OCR 限高可滚动，不靠 `<details>` 撑布局 | 点一下 OCR 整页 masonry 重排 |
 | 备份/恢复有状态、可点、路径说人话 | 只有日志里才知道备份成败 |
+| **列表变更差分渲染 + 保持 scroll/cursor**（删/恢复卡片） | 删一条就 `innerHTML=''` 全量 rebuild 回顶 |
 
 ### 2.3 工程（always SOTA / 终局）
 

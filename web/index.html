@@ -4074,8 +4074,85 @@ window.ClipViewMasonry = Masonry;
     }
 
     /**
+     * Differential card remove — keep other cards mounted; preserve read position.
+     * Full rebalance clears #grid and collapses document height → scroll jumps to top.
+     * @param {string} id
+     * @param {{ animate?: boolean }} [opts]
+     * @returns {Promise<void>}
+     */
+    function removeCardFromMasonry(id, opts = {}) {
+      const animate = opts.animate !== false;
+      const card = cardCache.get(id);
+      eventsCache.delete(id);
+      if (!card) {
+        cardCache.delete(id);
+        return Promise.resolve();
+      }
+
+      const applyRemove = () => {
+        if (!cardCache.has(id) && !card.isConnected) return;
+        const host = document.getElementById('grid');
+        const col = card.closest && card.closest('.masonry-col');
+        const colEls = host ? [...host.querySelectorAll(':scope > .masonry-col')] : [];
+        const colIdx = col ? colEls.indexOf(col) : -1;
+        const rect = card.getBoundingClientRect();
+        const h = Masonry.measureHeight(card);
+        const kids = col ? [...col.children] : [];
+        const gapDrop = kids.length > 1 ? MASONRY_GAP : 0;
+        const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        const stickyCutoff = 88; // below frosted chrome
+
+        card.remove();
+        cardCache.delete(id);
+
+        if (colIdx >= 0 && Array.isArray(colHeights) && colHeights[colIdx] != null) {
+          colHeights[colIdx] = Math.max(0, colHeights[colIdx] - h - gapDrop);
+        }
+
+        // Content above the fold shrank → keep visual "cursor" (viewport) stable.
+        let nextY = scrollY;
+        if (rect.bottom <= stickyCutoff) {
+          nextY = scrollY - h - gapDrop;
+        } else if (rect.top < stickyCutoff) {
+          nextY = scrollY - (stickyCutoff - rect.top);
+        }
+        // In-viewport / below fold: keep scrollY — list slides up under the eye naturally.
+        if (nextY !== scrollY) {
+          try {
+            window.scrollTo({ top: Math.max(0, nextY), left: 0, behavior: 'instant' });
+          } catch (_) {
+            window.scrollTo(0, Math.max(0, nextY));
+          }
+        }
+      };
+
+      if (animate && card.isConnected) {
+        return new Promise((resolve) => {
+          let settled = false;
+          const settle = () => {
+            if (settled) return;
+            settled = true;
+            applyRemove();
+            resolve();
+          };
+          try {
+            card.style.transition = 'opacity 150ms ease, transform 150ms ease';
+            card.style.opacity = '0';
+            card.style.transform = 'scale(0.98) translateY(-4px)';
+            card.style.pointerEvents = 'none';
+            card.addEventListener('transitionend', settle, { once: true });
+          } catch (_) {}
+          setTimeout(settle, 180);
+        });
+      }
+      applyRemove();
+      return Promise.resolve();
+    }
+
+    /**
      * Full masonry rebuild. Used for reset / filter / resize only.
      * Load-more must use appendCardsIncremental to avoid scroll jump that looks like dups.
+     * Delete/restore must use removeCardFromMasonry (differential) — not this.
      */
     function rebuildFromData({ preserveScroll = true } = {}) {
       const host = document.getElementById('grid');
@@ -4090,9 +4167,10 @@ window.ClipViewMasonry = Masonry;
         return;
       }
 
-      // Scroll anchor: first card whose top is >= 0 (in viewport)
+      // Scroll anchor + raw Y (belt): rebalance can zero scrollY via height collapse.
       let anchorId = null;
       let anchorOffset = 0;
+      const savedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
       if (preserveScroll) {
         for (const item of view) {
           const el = cardCache.get(item.id);
@@ -4117,12 +4195,26 @@ window.ClipViewMasonry = Masonry;
       const cards = view.map(item => ensureCard(item));
       rebalance(cards);
 
-      if (preserveScroll && anchorId) {
-        const el = cardCache.get(anchorId);
-        if (el && el.isConnected) {
-          const delta = el.getBoundingClientRect().top - anchorOffset;
-          if (Math.abs(delta) > 1) window.scrollBy(0, delta);
-        }
+      // rebalance() clears #grid → document height collapses → browser may clamp scrollY to 0.
+      // Restore with absolute target, not scrollBy from a corrupted scrollY.
+      if (preserveScroll) {
+        requestAnimationFrame(() => {
+          const el = anchorId ? cardCache.get(anchorId) : null;
+          if (el && el.isConnected) {
+            const y = el.getBoundingClientRect().top + (window.scrollY || 0) - anchorOffset;
+            try {
+              window.scrollTo({ top: Math.max(0, y), left: 0, behavior: 'instant' });
+            } catch (_) {
+              window.scrollTo(0, Math.max(0, y));
+            }
+          } else if (typeof savedScrollY === 'number') {
+            try {
+              window.scrollTo({ top: savedScrollY, left: 0, behavior: 'instant' });
+            } catch (_) {
+              window.scrollTo(0, savedScrollY);
+            }
+          }
+        });
       }
     }
 
@@ -4341,12 +4433,14 @@ window.ClipViewMasonry = Masonry;
     async function deleteClip(id) {
       try {
         await fetch(`${API}/api/clips?id=${id}`, { method: 'DELETE' });
-        eventsCache.delete(id);
         clips = clips.filter(c => c.id !== id);
-        cardCache.get(id)?.remove();
-        cardCache.delete(id);
+        await removeCardFromMasonry(id, { animate: true });
         toast('已移入回收箱（30 天）');
-        rebuildFromData();
+        // Empty library → empty state (only full rebuild when necessary)
+        if (!clientFilter(clips).length) {
+          colHeights = null;
+          rebuildFromData({ preserveScroll: false });
+        }
       } catch (_) { toast('删除失败'); }
     }
 
@@ -4358,12 +4452,13 @@ window.ClipViewMasonry = Masonry;
           body: JSON.stringify({ id })
         });
         if (!res.ok) throw new Error('restore ' + res.status);
-        eventsCache.delete(id);
         clips = clips.filter(c => c.id !== id);
-        cardCache.get(id)?.remove();
-        cardCache.delete(id);
+        await removeCardFromMasonry(id, { animate: true });
         toast('已恢复到主库');
-        rebuildFromData();
+        if (!clientFilter(clips).length) {
+          colHeights = null;
+          rebuildFromData({ preserveScroll: false });
+        }
       } catch (_) { toast('恢复失败'); }
     }
 
