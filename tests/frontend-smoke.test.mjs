@@ -258,3 +258,11 @@ test('scroll smoothness: no full masonry rebuild on image load', () => {
   const chunk = indexHtml.slice(syncIdx, syncIdx + 280);
   assert.doesNotMatch(chunk, /rebuildFromData/, 'scheduleMasonrySync must not rebuildFromData');
 });
+
+test('URL archive is manual + gated (save useful)', () => {
+  assert.match(indexHtml, /data-archive-url/, 'archive button on URL cards');
+  assert.match(indexHtml, /function requestArchivePage/, 'archive request helper');
+  assert.match(indexHtml, /function renderUrlCardBody/, 'url card dedicated body');
+  assert.match(indexHtml, /\/api\/archive/, 'archive API');
+  assert.match(indexHtml, /save useful|归档网页/, 'product copy');
+});

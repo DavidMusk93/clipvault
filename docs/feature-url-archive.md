@@ -110,7 +110,7 @@ GET /api/archive/jobs/{jobId}
 
 | Phase | 交付 |
 | --- | --- |
-| **P0** | `ArchiveService` + WKWebView load + 标题/正文抽取；POST API；URL 卡按钮 + 进度；写入 htmlContent；卡片离线预览 |
+| **P0** | **已实现**：`WebArchiveService` + WKWebView + Mozilla Readability；`POST /api/archive`；URL 卡「归档网页」；`htmlContent` + `keepsake_meta`；离线预览（DOMPurify） |
 | **P1** | job 队列 + SSE 进度；成人门禁复用；SSRF/超时/体积限制 |
 | **P2** | snapshot 模式（PDF 或 single-file 内联）；资源 CAS |
 | **P3** | 与 Android 同步展示 archive；搜索归档正文 |

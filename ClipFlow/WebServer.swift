@@ -10,6 +10,7 @@ class WebServer {
     private let database: DatabaseManager
     private let backup: CloudDocsBackupService?
     private let sync: CloudDocsSyncService?
+    private let archive: WebArchiveService?
     private var sseConnections: [NWConnection] = []
     
     var isRunning: Bool {
@@ -20,12 +21,17 @@ class WebServer {
         port: UInt16 = 8080,
         database: DatabaseManager = DatabaseManager(),
         backup: CloudDocsBackupService? = nil,
-        sync: CloudDocsSyncService? = nil
+        sync: CloudDocsSyncService? = nil,
+        archive: WebArchiveService? = nil
     ) {
         self.port = port
         self.database = database
         self.backup = backup
         self.sync = sync
+        self.archive = archive
+        archive?.onFinished = { [weak self] itemId, _, err in
+            self?.broadcastSSE(event: err == nil ? "archive_ok" : "archive_error", id: itemId)
+        }
     }
     
     /// Resolve web/ by cwd first, then walk up from executable (LaunchAgent-safe).
@@ -160,6 +166,8 @@ class WebServer {
             handleClipContext(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/evaluate" {
             handleClipEvaluate(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/archive" {
+            handleArchivePost(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
             handleDeleteClip(path: path, connection: connection)
         } else {
@@ -203,6 +211,8 @@ class WebServer {
             sendItemFrequency(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/evaluations") {
             sendItemEvaluations(path: path, connection: connection)
+        } else if pathOnly == "/api/archive" || pathOnly.hasPrefix("/api/archive/") {
+            sendArchiveStatus(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/assets/") {
             sendStaticAsset(pathOnly: pathOnly, connection: connection)
         } else {
@@ -848,6 +858,16 @@ class WebServer {
         }
         if let html = item.htmlContent { dict["htmlContent"] = html }
         if let text = item.textContent { dict["textContent"] = text }
+        if let metaStr = database.webArchiveMetaJSON(id: item.id),
+           let metaData = metaStr.data(using: .utf8),
+           let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
+            dict["archived"] = true
+            dict["archive"] = meta
+        } else if item.type == .url, let html = item.htmlContent, html.count > 40 {
+            dict["archived"] = true
+        } else {
+            dict["archived"] = false
+        }
         if let ocr = item.ocrText { dict["ocrText"] = ocr }
         if let urls = item.fileURLs, !urls.isEmpty {
             dict["filePaths"] = urls.map { $0.path }
@@ -871,6 +891,56 @@ class WebServer {
             dict["fullUrl"] = "/api/image?id=\(item.id.uuidString)&size=full"
         }
         return dict
+    }
+
+    /// POST /api/archive  { url, itemId? }
+    /// Manual web archive — WKWebView + Readability. Never auto.
+    private func handleArchivePost(data: Data, connection: NWConnection) {
+        guard let archive else {
+            sendJSON(["ok": false, "message": "归档服务未启动"], connection: connection)
+            return
+        }
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        guard let brace = raw.range(of: "{"),
+              let jsonData = raw[brace.lowerBound...].data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let urlStr = obj["url"] as? String,
+              let url = URL(string: urlStr.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            sendJSON(["ok": false, "message": "expected {url, itemId?}"], connection: connection)
+            return
+        }
+        var itemId: UUID?
+        if let s = obj["itemId"] as? String { itemId = UUID(uuidString: s) }
+        let (job, reason) = archive.enqueue(url: url, itemId: itemId)
+        if let job {
+            sendJSON(["ok": true, "job": job.json()], connection: connection)
+        } else {
+            sendJSON(["ok": false, "message": reason ?? "无法归档"], connection: connection)
+        }
+    }
+
+    /// GET /api/archive?job=  or /api/archive/{jobId}
+    private func sendArchiveStatus(path: String, connection: NWConnection) {
+        guard let archive else {
+            sendJSON(["ok": false, "message": "归档服务未启动"], connection: connection)
+            return
+        }
+        var jobId: String?
+        if let comps = URLComponents(string: "http://localhost\(path)") {
+            jobId = comps.queryItems?.first(where: { $0.name == "job" || $0.name == "id" })?.value
+        }
+        if jobId == nil {
+            let parts = path.split(separator: "/").map(String.init)
+            if parts.count >= 3, parts[0].isEmpty || parts[0] == "api" {
+                // /api/archive/{uuid}
+                if let last = parts.last, last != "archive", last.count > 8 { jobId = last }
+            }
+        }
+        guard let jobId, let job = archive.job(id: jobId) else {
+            sendJSON(["ok": false, "message": "job not found"], connection: connection)
+            return
+        }
+        sendJSON(["ok": true, "job": job.json()], connection: connection)
     }
 
     /// POST /api/clips/evaluate  { id, rating?, note? }
@@ -947,6 +1017,14 @@ class WebServer {
         let q = items.first(where: { $0.name == "q" })?.value
         let view = items.first(where: { $0.name == "view" })?.value
         let trashOnly = (view == "trash")
+        if let idStr = items.first(where: { $0.name == "id" })?.value, let uuid = UUID(uuidString: idStr) {
+            database.fetchItem(id: uuid) { [weak self] item in
+                guard let self else { return }
+                let arr = item.map { [self.itemToJSON($0)] } ?? []
+                self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
+            }
+            return
+        }
 
         database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly) { [weak self] page in
             guard let self = self else { return }

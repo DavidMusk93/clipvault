@@ -18,7 +18,10 @@ let package = Package(
             name: "ClipFlowServer",
             dependencies: [],
             path: "ClipFlow",
-            exclude: ["ClipFlowApp.swift", "ContentView.swift", "ClipFlow.entitlements", "Assets.xcassets", "Preview Assets.xcassets"]
+            exclude: ["ClipFlowApp.swift", "ContentView.swift", "ClipFlow.entitlements", "Assets.xcassets", "Preview Assets.xcassets"],
+            resources: [
+                .copy("Resources/Readability.js")
+            ]
         )
     ]
 )

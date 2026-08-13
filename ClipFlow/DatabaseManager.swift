@@ -1868,6 +1868,89 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    // MARK: - Web archive (manual, useful-first)
+
+    /// Persist readable archive onto an existing clip. Capture URL/hash stays immutable.
+    func fetchItem(id: UUID, completion: @escaping (ClipboardItem?) -> Void) {
+        dbQueue.async { [weak self] in
+            let item = self?.fetchItemByIdLocked(id.uuidString)
+            DispatchQueue.main.async { completion(item) }
+        }
+    }
+
+    func applyWebArchive(
+        id: UUID,
+        html: String,
+        textSnippet: String,
+        title: String,
+        metaJSON: String,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            let idStr = id.uuidString
+            let sql = "UPDATE clipboard_items SET html_content = ? WHERE id = ?;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            self.bindText(stmt, 1, html)
+            self.bindText(stmt, 2, idStr)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            self.metaSet("archive.\(idStr)", metaJSON)
+            var t: String?
+            var o: String?
+            var s: String?
+            var q: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "SELECT text_content, ocr_text, source_app FROM clipboard_items WHERE id = ?;",
+                -1, &q, nil
+            ) == SQLITE_OK {
+                self.bindText(q, 1, idStr)
+                if sqlite3_step(q) == SQLITE_ROW {
+                    t = sqlite3_column_text(q, 0).map { String(cString: $0) }
+                    o = sqlite3_column_text(q, 1).map { String(cString: $0) }
+                    s = sqlite3_column_text(q, 2).map { String(cString: $0) }
+                }
+            }
+            sqlite3_finalize(q)
+            let searchText: String
+            if let t, !t.isEmpty {
+                searchText = title.isEmpty ? t : (title + "\n" + t)
+            } else {
+                searchText = title
+            }
+            self.upsertFTS(id: idStr, text: searchText, ocr: o, source: s, html: html)
+            self.appendOperationLogSync(
+                action: "web_archive",
+                itemId: idStr,
+                contentHash: nil,
+                detail: "mode=readable title=\(title.prefix(80)) bytes=\(html.utf8.count)",
+                source: "web"
+            )
+            _ = textSnippet
+            DispatchQueue.main.async { completion?(true) }
+        }
+    }
+
+    func webArchiveMetaJSON(id: UUID) -> String? {
+        var out: String?
+        dbQueue.sync {
+            out = self.metaGet("archive.\(id.uuidString)")
+        }
+        return out
+    }
+
     // MARK: - Soft delete / recycle bin (TTL 30d)
 
     func deleteItem(_ item: ClipboardItem, completion: ((Bool) -> Void)? = nil) {

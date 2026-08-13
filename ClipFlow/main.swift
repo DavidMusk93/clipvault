@@ -13,8 +13,10 @@ let db = DatabaseManager()
 let backup = CloudDocsBackupService.bootstrap(database: db)
 // Plane B: multi-device live sync (op-log + shared CAS) — never whole-db replace
 let sync = CloudDocsSyncService.bootstrap(database: db)
+let archive = WebArchiveService()
+archive.database = db
 let monitor = ClipboardMonitor(database: db)
-let webServer = WebServer(port: 8080, database: db, backup: backup, sync: sync)
+let webServer = WebServer(port: 8080, database: db, backup: backup, sync: sync, archive: archive)
 
 monitor.startMonitoring()
 webServer.start()
