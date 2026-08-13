@@ -471,14 +471,31 @@ final class CloudDocsSyncService {
     private func kickPeerOpsDownload(host: String, fromSeq: Int, toSeq: Int, root: URL) {
         let dir = opsDir(in: root, host: host)
         startDownloadIfNeeded(dir)
-        // Request a window of upcoming ops so File Provider hydrates ahead of cursor.
-        let end = min(toSeq, fromSeq + 40)
+        // Wider window: CloudDocs often leaves ops as dataless placeholders.
+        let end = min(toSeq, fromSeq + 120)
         var s = max(1, fromSeq + 1)
         while s <= end {
             let u = dir.appendingPathComponent(String(format: "%016d.json", s))
             startDownloadIfNeeded(u)
             s += 1
         }
+    }
+
+    /// Scan peer ops dir for highest seq present (head.json can lag when producer fails to rewrite head).
+    private func discoverMaxOpSeq(host: String, root: URL) -> Int {
+        let dir = opsDir(in: root, host: host)
+        startDownloadIfNeeded(dir)
+        let files = ((try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []).filter { $0.pathExtension == "json" }
+        var maxSeq = 0
+        for f in files {
+            let name = f.deletingPathExtension().lastPathComponent
+            if let n = Int(name), n > maxSeq { maxSeq = n }
+        }
+        return maxSeq
     }
 
     private func pushOutbox() -> StepResult {
@@ -581,7 +598,13 @@ final class CloudDocsSyncService {
             guard let data = readCloudData(headFile),
                   let head = try? decoder.decode(HostHead.self, from: data) else { continue }
             if head.host == hostId { continue }
-            peerRemoteSeq[head.host] = head.seq
+            // head.seq can lag behind real op files (producer push wrote ops but head rewrite failed / iCloud stale).
+            let diskMax = discoverMaxOpSeq(host: head.host, root: syncRoot)
+            let targetSeq = max(head.seq, diskMax)
+            peerRemoteSeq[head.host] = targetSeq
+            if diskMax > head.seq {
+                print("[Sync] peer \(head.host) head.seq=\(head.seq) but ops disk max=\(diskMax) — using disk max")
+            }
 
             var applied = 0
             database.performSyncWork {
@@ -592,8 +615,8 @@ final class CloudDocsSyncService {
             var cursor = appliedBefore
             let limit = config.pullBatchLimit
             var batch = 0
-            kickPeerOpsDownload(host: head.host, fromSeq: cursor, toSeq: head.seq, root: syncRoot)
-            while cursor < head.seq, batch < limit {
+            kickPeerOpsDownload(host: head.host, fromSeq: cursor, toSeq: targetSeq, root: syncRoot)
+            while cursor < targetSeq, batch < limit {
                 let next = cursor + 1
                 let opURL = opsDir(in: syncRoot, host: head.host)
                     .appendingPathComponent(String(format: "%016d.json", next))
@@ -912,9 +935,10 @@ final class CloudDocsSyncService {
                       let head = try? decoder.decode(HostHead.self, from: data),
                       head.host != hostId else { continue }
                 let applied = appliedSeq(for: head.host)
+                let diskMax = discoverMaxOpSeq(host: head.host, root: root)
                 peers.append(PeerStatus(
                     host: head.host,
-                    remoteSeq: head.seq,
+                    remoteSeq: max(head.seq, diskMax),
                     appliedSeq: applied,
                     lag: max(0, head.seq - applied)
                 ))
