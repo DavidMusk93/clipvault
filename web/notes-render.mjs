@@ -125,16 +125,11 @@ export function renderNotesFragment(html) {
         }
       });
 
-      root.querySelectorAll('ul, ol, li, p, span, div, h1, h2, h3, h4, h5, h6').forEach(el => {
-        el.removeAttribute('style');
-        // keep is-mono if we set it later; strip foreign classes
-        const keep = el.classList && el.classList.contains('is-mono');
-        el.removeAttribute('class');
-        if (keep) el.classList.add('is-mono');
-        el.removeAttribute('face');
-        el.removeAttribute('size');
-        el.removeAttribute('color');
-      });
+      // Presentation sanitize: Chrome dark-mode copy leaves black bg / white text
+      // on font/span/mark/etc. Strip ALL presentation attrs (not just a tag whitelist).
+      sanitizePresentation(root);
+      // Never render navigable links in the card (public-misclick risk).
+      neutralizeAnchors(root);
 
       root.querySelectorAll('p').forEach(p => {
         const t = p.textContent || '';
@@ -172,9 +167,48 @@ export function renderNotesFragment(html) {
     .replace(/<span class="Apple-tab-span"[^>]*>[\s\S]*?<\/span>/gi, '')
     .replace(/<span class="Apple-converted-space"[^>]*>([\s\S]*?)<\/span>/gi, '$1')
     .replace(/\sclass="(?!is-mono)[^"]*"/gi, '')
-    .replace(/\sstyle="[^"]*"/gi, '');
+    .replace(/\sstyle=("|')[^"']*\1/gi, '')
+    .replace(/\s(bgcolor|background|color|face|size)=("|')[^"']*\2/gi, '')
+    .replace(/<a\b[^>]*>/gi, '<span class="url-inert">')
+    .replace(/<\/a>/gi, '</span>');
   return collapseEmptyHtmlBlocks(s.trim());
 }
+
+/** Strip dark-mode / selection paint that turns cards black (Chrome HTML copy). */
+export function sanitizePresentation(root) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll('*').forEach(el => {
+    el.removeAttribute('style');
+    el.removeAttribute('bgcolor');
+    el.removeAttribute('background');
+    el.removeAttribute('color');
+    el.removeAttribute('face');
+    el.removeAttribute('size');
+    el.removeAttribute('width');
+    el.removeAttribute('height');
+    el.removeAttribute('align');
+    // Drop foreign classes; keep is-mono if present
+    const keepMono = el.classList && el.classList.contains('is-mono');
+    const keepInert = el.classList && el.classList.contains('url-inert');
+    el.removeAttribute('class');
+    if (keepMono) el.classList.add('is-mono');
+    if (keepInert) el.classList.add('url-inert');
+  });
+}
+
+/** Convert <a href> → inert span (no navigation in card). */
+export function neutralizeAnchors(root) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll('a').forEach(a => {
+    const span = a.ownerDocument.createElement('span');
+    span.className = 'url-inert';
+    const href = a.getAttribute('href') || '';
+    if (href) span.setAttribute('data-url', href);
+    span.textContent = a.textContent || href;
+    a.parentNode && a.parentNode.replaceChild(span, a);
+  });
+}
+
 
 export function notesFragmentUseful(fragment) {
   if (!fragment) return false;
@@ -195,4 +229,8 @@ export const NOTES_CSS_POLICY = {
   requireEmptyPHidden: true,
   /** inner content max-content for horizontal pan */
   requireNotesInnerMaxContent: true,
+  /** neutralize Chrome dark paint / black selection backgrounds */
+  requireNeutralPresentation: true,
+  /** no clickable <a href> in card HTML */
+  requireNoNavigableAnchors: true,
 };

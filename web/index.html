@@ -602,12 +602,39 @@
     .format-toolbar .fmt-btn.is-active {
       background: var(--ink); color: #fff; border-color: transparent;
     }
-    .url-canonical {
-      display: block; font-size: 12px; line-height: 1.4; margin: 0 0 8px;
-      word-break: break-all; color: var(--accent); text-decoration: none;
-      font-family: var(--font-mono); letter-spacing: 0;
+    /* URL display — never an <a href> (AGENTS §8 链接安全) */
+    .url-display {
+      display: block;
+      margin: 0 0 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(21, 101, 192, 0.08);
+      color: var(--type-url, #1565C0);
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.4;
+      word-break: break-all;
+      white-space: pre-wrap;
+      user-select: text;
+      cursor: text;
     }
-    .url-canonical:hover { text-decoration: underline; text-underline-offset: 2px; }
+    .url-display.is-adult-risk {
+      background: rgba(198, 40, 40, 0.08);
+      color: #b71c1c;
+      border: 0.5px solid rgba(198, 40, 40, 0.25);
+    }
+    .url-risk-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin: 0 0 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #b71c1c;
+      background: rgba(198, 40, 40, 0.12);
+    }
 
     /* Pretty code: hard newlines only — long tokens pan horizontally (never mid-token soft wrap) */
     .card-body .text-scroll.is-pretty {
@@ -743,11 +770,20 @@
     .notes-rich b, .notes-rich strong, .snippet-html b, .snippet-html strong { font-weight: 600; }
     .notes-rich i, .notes-rich em, .snippet-html i, .snippet-html em { font-style: italic; }
     .notes-rich u, .snippet-html u { text-decoration: underline; text-underline-offset: 2px; }
-    .notes-rich a, .snippet-html a {
-      color: var(--accent); text-decoration: none;
+    /* Safety: never paint host page with foreign dark-mode / selection colors */
+    .notes-rich *, .snippet-html * {
+      background: transparent !important;
+      background-color: transparent !important;
+      color: inherit !important;
+      -webkit-text-fill-color: inherit !important;
     }
-    .notes-rich a:hover, .snippet-html a:hover { text-decoration: underline; }
-
+    .notes-rich a, .snippet-html a,
+    .notes-rich .url-inert, .snippet-html .url-inert {
+      color: var(--ink) !important;
+      text-decoration: none !important;
+      pointer-events: none !important;
+      cursor: text !important;
+    }
     /* Mono runs (Notes monospaced paragraphs / code) */
     .notes-rich .is-mono, .snippet-html .is-mono,
     .notes-rich code, .snippet-html code {
@@ -2524,12 +2560,31 @@ window.ClipViewMasonry = Masonry;
           if (!removed) break;
         }
 
-        root.querySelectorAll('ul, ol, li, p, span, div, h1, h2, h3, h4, h5, h6').forEach(el => {
+        // AGENTS §8: strip ALL presentation (Chrome dark paint → black cards)
+        root.querySelectorAll('*').forEach(el => {
           el.removeAttribute('style');
-          el.removeAttribute('class');
+          el.removeAttribute('bgcolor');
+          el.removeAttribute('background');
+          el.removeAttribute('color');
           el.removeAttribute('face');
           el.removeAttribute('size');
-          el.removeAttribute('color');
+          el.removeAttribute('width');
+          el.removeAttribute('height');
+          el.removeAttribute('align');
+          const keepMono = el.classList && el.classList.contains('is-mono');
+          const keepInert = el.classList && el.classList.contains('url-inert');
+          el.removeAttribute('class');
+          if (keepMono) el.classList.add('is-mono');
+          if (keepInert) el.classList.add('url-inert');
+        });
+        // Neutralize anchors — no clickable URLs in card HTML
+        root.querySelectorAll('a').forEach(a => {
+          const span = doc.createElement('span');
+          span.className = 'url-inert';
+          const href = a.getAttribute('href') || '';
+          if (href) span.setAttribute('data-url', href);
+          span.textContent = a.textContent || href;
+          if (a.parentNode) a.parentNode.replaceChild(span, a);
         });
 
         root.querySelectorAll('p').forEach(p => {
@@ -2562,7 +2617,10 @@ window.ClipViewMasonry = Masonry;
           .replace(/<span class="Apple-tab-span"[^>]*>[\s\S]*?<\/span>/gi, '')
           .replace(/<span class="Apple-converted-space"[^>]*>([\s\S]*?)<\/span>/gi, '$1')
           .replace(/\sclass="[^"]*"/gi, '')
-          .replace(/\sstyle="[^"]*"/gi, '');
+          .replace(/\sstyle=("|')[^"']*\1/gi, '')
+          .replace(/\s(bgcolor|background|color|face|size)=("|')[^"']*\2/gi, '')
+          .replace(/<a\b[^>]*>/gi, '<span class="url-inert">')
+          .replace(/<\/a>/gi, '</span>');
         return collapseEmptyHtmlBlocks(s.trim());
       }
     }
@@ -2708,6 +2766,7 @@ window.ClipViewMasonry = Masonry;
     }
     wireEventToastOnce();
     wireFormatToolbarDelegateOnce();
+    wireUrlSafetyDelegateOnce();
 
 
     /** Clipboard type → label/icon/class. Shared palette: docs/design-taste.md + Android typeStyle(). */
@@ -3415,7 +3474,80 @@ window.ClipViewMasonry = Masonry;
       });
     }
 
-    /** Plain / code body + per-clip pretty (DSL formatters when loaded). */
+    /**
+     * AGENTS §8 链接安全门禁
+     * - 卡片内禁止可点击 <a href>
+     * - 打开外链须显式按钮
+     * - 成人/敏感域名强制确认（公开场合误触）
+     */
+    const ADULT_URL_NEEDLES = [
+      'porn', 'xxx', 'xvideos', 'pornhub', 'xhamster', 'xnxx', 'onlyfans', 'redtube',
+      'spankbang', 'xhamster', 'brazzers', 'youporn', 'chaturbate', 'stripchat',
+      'jav', 'javbus', 'javlibrary', 'missav', 'avmoo', 'avgle', 'javdb', 'javtrailers',
+      'nhentai', 'hanime', 'hentai', 'rule34', 'e-hentai', 'exhentai', 'pixiv.net/r18',
+      'dmm.co.jp', 'fanza', 'dlsite.com', 'ci-en.dlsite', 'fantia.jp',
+      'nsfw', 'r18', '18+', 'adult', 'erome', 'thothub', 'hqporner',
+      'sex.com', 'nude', 'camgirl', 'camwhore',
+    ];
+
+    function isAdultRiskUrl(href) {
+      try {
+        const u = new URL(String(href || '').trim());
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+        const s = (u.hostname + u.pathname + u.search + u.hash).toLowerCase();
+        return ADULT_URL_NEEDLES.some((n) => s.includes(n));
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function urlHostLabel(href) {
+      try {
+        return new URL(String(href || '').trim()).host;
+      } catch (_) {
+        return '';
+      }
+    }
+
+    /** Sole path to open external URLs from the UI. */
+    function requestOpenExternalUrl(href) {
+      const raw = String(href || '').trim();
+      if (!raw) return false;
+      let safe = '';
+      try {
+        const u = new URL(raw);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+          toast('仅支持 http(s) 链接');
+          return false;
+        }
+        safe = u.href;
+      } catch (_) {
+        toast('链接无效');
+        return false;
+      }
+      const host = urlHostLabel(safe) || safe;
+      const risky = isAdultRiskUrl(safe);
+      const msg = risky
+        ? `⚠️ 该链接可能含成人/敏感内容\n\n主机：${host}\n\n公开场合打开可能不当。确认仍要在新标签页打开？`
+        : `在新标签页打开链接？\n\n${host}`;
+      if (!window.confirm(msg)) return false;
+      window.open(safe, '_blank', 'noopener,noreferrer');
+      return true;
+    }
+
+    function renderUrlDisplayBlock(href, displayText) {
+      const h = String(href || '').trim();
+      const text = displayText != null ? String(displayText) : h;
+      const risky = isAdultRiskUrl(h);
+      const badge = risky
+        ? '<span class="url-risk-badge" title="成人/敏感内容风险"><span class="material-symbols-outlined" style="font-size:14px">warning</span>敏感 · 打开需确认</span>'
+        : '';
+      const cls = risky ? 'url-display is-adult-risk' : 'url-display';
+      // Never use <a href> — text only (AGENTS §8)
+      return `${badge}<div class="${cls}" role="text" title="不可点击；请用「打开」按钮">${esc(text)}</div>`;
+    }
+
+        /** Plain / code body + per-clip pretty (DSL formatters when loaded). */
     function renderPlainBody(plain, extraClass = '', opts = {}) {
       const raw = String(plain || '');
       const itemId = opts.itemId || '';
@@ -3441,11 +3573,11 @@ window.ClipViewMasonry = Masonry;
         showRawToggle: true,
         rawMode: false,
       });
-      const urlLink =
+      const urlBlock =
         fmt.kind === 'url' && fmt.openHref
-          ? `<a class="url-canonical" href="${escAttr(fmt.openHref)}" target="_blank" rel="noopener noreferrer" title="在新标签页打开">${esc(fmt.openHref)}</a>`
+          ? renderUrlDisplayBlock(fmt.openHref, fmt.openHref)
           : '';
-      return `${toolbar}${urlLink}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}" data-engine="${escAttr(fmt.engine || '')}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
+      return `${toolbar}${urlBlock}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}" data-engine="${escAttr(fmt.engine || '')}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
     }
 
     function renderPlainBodyRaw(raw, extraClass, det, itemId) {
@@ -3476,11 +3608,9 @@ window.ClipViewMasonry = Masonry;
         showRawToggle: kind !== 'plain',
         rawMode: true,
       });
-      const urlLink = openHref
-        ? `<a class="url-canonical" href="${escAttr(openHref)}" target="_blank" rel="noopener noreferrer">${esc(openHref)}</a>`
-        : '';
+      const urlBlock = openHref ? renderUrlDisplayBlock(openHref, openHref) : '';
       const codeAttr = codey ? '' : ' data-hljs="skip"';
-      return `${toolbar}${urlLink}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(kind)}" data-raw="1"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(raw)}</code></pre></div>`;
+      return `${toolbar}${urlBlock}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(kind)}" data-raw="1"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(raw)}</code></pre></div>`;
     }
 
     function renderFormatToolbar(raw, fmt, { itemId = '', showRawToggle = false, rawMode = false } = {}) {
@@ -3498,8 +3628,11 @@ window.ClipViewMasonry = Masonry;
       }
       if (fmt.openHref || fmt.kind === 'url') {
         const href = fmt.openHref || raw.trim();
+        const risk = isAdultRiskUrl(href);
+        const openTitle = risk ? '敏感链接 · 打开前需确认' : '新标签页打开（需确认）';
+        const openLabel = risk ? '打开…' : '打开';
         bits.push(
-          `<button type="button" class="fmt-btn is-primary" data-open-url="${escAttr(href)}" title="新标签页打开"><span class="material-symbols-outlined">open_in_new</span>打开</button>`
+          `<button type="button" class="fmt-btn is-primary" data-open-url="${escAttr(href)}" title="${escAttr(openTitle)}"><span class="material-symbols-outlined">open_in_new</span>${openLabel}</button>`
         );
         bits.push(
           `<button type="button" class="fmt-btn" data-copy-text="${escAttr(href)}" title="复制完整 URL"><span class="material-symbols-outlined">link</span>复制链接</button>`
@@ -3529,7 +3662,7 @@ window.ClipViewMasonry = Masonry;
           e.preventDefault();
           e.stopPropagation();
           const href = btn.getAttribute('data-open-url');
-          if (href) window.open(href, '_blank', 'noopener,noreferrer');
+          if (href) requestOpenExternalUrl(href);
         });
       });
       card.querySelectorAll('[data-copy-text]').forEach((btn) => {
@@ -3568,6 +3701,22 @@ window.ClipViewMasonry = Masonry;
     }
 
     /** One-time delegation so per-clip 原文/排版 always works after masonry rebuilds. */
+    function wireUrlSafetyDelegateOnce() {
+      if (wireUrlSafetyDelegateOnce._done) return;
+      wireUrlSafetyDelegateOnce._done = true;
+      document.addEventListener(
+        'click',
+        (e) => {
+          const a = e.target && e.target.closest && e.target.closest('.m3-card a[href], .notes-rich a[href], .snippet-html a[href]');
+          if (!a) return;
+          e.preventDefault();
+          e.stopPropagation();
+          toast('卡片内链接不可直接打开，请用「打开」按钮');
+        },
+        true
+      );
+    }
+
     function wireFormatToolbarDelegateOnce() {
       if (wireFormatToolbarDelegateOnce._done) return;
       wireFormatToolbarDelegateOnce._done = true;
@@ -3604,7 +3753,7 @@ window.ClipViewMasonry = Masonry;
             e.preventDefault();
             e.stopPropagation();
             const href = openBtn.getAttribute('data-open-url');
-            if (href) window.open(href, '_blank', 'noopener,noreferrer');
+            if (href) requestOpenExternalUrl(href);
             return;
           }
           if (copyBtn) {

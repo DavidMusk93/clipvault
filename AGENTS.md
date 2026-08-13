@@ -284,3 +284,57 @@ rg -n 'forceFullCopy:\s*true|forceFull\s*=\s*\(dest' ClipFlow/
 
 相关 nmem：`clipvault_research_gdrive_fileprovider_edeadlk_20260813` · `clipvault_fix_gdrive_edeadlk_cvbak_20260813`
 
+---
+
+## 8. 链接与 HTML 安全门禁（公开场合 · 成人内容）
+
+**卡片是预览，不是浏览器。禁止把剪贴板 HTML/URL 渲染成可误触的可点击链接。**
+
+### 问题（incident 2026-08-13）
+
+| 问题 | 原因 / 风险 |
+| --- | --- |
+| HTML 卡片黑底白字 | Chrome 暗色页 / 选区复制带 `style=background:#000;color:#fff` 或 `bgcolor`，旧 sanitize 只清部分标签 |
+| 成人 URL 误触 | 公开场合一点即 `window.open` 伤风败俗 |
+| 可点击 `<a href>` / `url-canonical` | 预览区像网页，误触即外跳 |
+
+### 禁止
+
+| 禁止 | 说明 |
+| --- | --- |
+| 卡片内可导航 `<a href>` | 富文本 / pretty URL / 任意 innerHTML 注入 |
+| 无确认 `window.open` 外链 | 尤其成人/敏感域名 |
+| 信任剪贴板 `style`/`bgcolor`/`color` | 一律剥离后再渲染 |
+| 用「方便」恢复一键裸开链接 | PR 直接打回 |
+
+### 必须
+
+| 必须 | 说明 |
+| --- | --- |
+| **presentation sanitize** | 对 DOM **全部元素**去 style/bgcolor/color/face…；CSS 再 `background:transparent !important` |
+| **neutralize anchors** | `<a>` → 不可点 `span.url-inert`（文案保留） |
+| **URL 展示** | `div.url-display` 纯文本，**不是** `<a>` |
+| **打开路径唯一** | `requestOpenExternalUrl(href)`；仅 http(s) |
+| **成人/敏感确认** | `isAdultRiskUrl` 命中 → 强确认文案后再 open；未命中也要 confirm（显式按钮意图） |
+| **事件兜底** | capture 阶段拦截 `.m3-card a[href]` 误点 |
+
+### 自检
+
+```bash
+rg -n 'url-canonical|window\.open\(' web/index.html
+# 期望：无 url-canonical；window.open 仅出现在 requestOpenExternalUrl 内
+rg -n 'requestOpenExternalUrl|isAdultRiskUrl|url-display|transparent !important' web/index.html
+node --test tests/notes-render.test.mjs tests/frontend-smoke.test.mjs
+```
+
+### 代码锚点
+
+```text
+web/notes-render.mjs     sanitizePresentation · neutralizeAnchors
+web/index.html           renderNotesFragment · requestOpenExternalUrl · url-display
+AGENTS.md §8             本门禁
+```
+
+相关 nmem：`clipvault_gate_url_html_safety_20260813`
+
+

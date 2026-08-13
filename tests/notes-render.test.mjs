@@ -110,3 +110,23 @@ test('plain text path stays unwrap for is-single (not notes)', () => {
   assert.match(indexHtml, /\.card-body \.text-scroll\.is-single pre code/);
   assert.match(indexHtml, /white-space:\s*pre;\s*\/\* no soft wrap/);
 });
+
+test('Chrome dark paint styles are stripped (no black cards)', () => {
+  const html = `<html><body>
+    <span style="background-color: rgb(0, 0, 0); color: rgb(255, 255, 255)">DSOD-062</span>
+    <font bgcolor="#000000" color="#ffffff">code</font>
+    <p style="background:black;color:white">x</p>
+  </body></html>`;
+  const frag = renderNotesFragment(html);
+  assert.ok(!/background/i.test(frag), frag);
+  assert.ok(!/style=/i.test(frag), frag);
+  assert.ok(!/bgcolor/i.test(frag), frag);
+  assert.match(frag, /DSOD-062/);
+});
+
+test('anchors are neutralized (no navigable href)', () => {
+  const html = '<p>see <a href="https://example.com/path">link</a> here</p>';
+  const frag = renderNotesFragment(html);
+  assert.ok(!/<a\b/i.test(frag), frag);
+  assert.match(frag, /url-inert|link|example/i);
+});

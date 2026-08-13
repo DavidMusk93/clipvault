@@ -187,3 +187,12 @@ test('per-clip pretty + url open + beautifier CDNs', () => {
   assert.doesNotMatch(indexHtml, /id="prettyToggle"/);
   assert.doesNotMatch(indexHtml, /cv\.displayPretty/);
 });
+
+test('URL safety: no clickable url-canonical; open goes through confirm gate', () => {
+  assert.doesNotMatch(indexHtml, /class="url-canonical"/, 'url-canonical <a> must not exist');
+  assert.match(indexHtml, /function requestOpenExternalUrl/, 'external open must use confirm gate');
+  assert.match(indexHtml, /function isAdultRiskUrl/, 'adult risk detector required');
+  assert.match(indexHtml, /url-display/, 'URL shown as non-link text block');
+  assert.match(indexHtml, /background:\s*transparent\s*!important/, 'notes-rich must neutralize foreign bg');
+  assert.match(indexHtml, /pointer-events:\s*none\s*!important/, 'rich anchors must not receive clicks');
+});
