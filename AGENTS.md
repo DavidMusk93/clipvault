@@ -217,7 +217,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 
 ## 7. 备份增量铁律（incident 2026-08-13 · GDrive EDEADLK）
 
-**增量是核心能力。对云盘目标每周期全量重拷 = 偷懒 / 无能，禁止。**
+**增量是核心能力。对任何目标（含 quark / 本地 staging）每周期全量重拷 = 偷懒 / 无能，禁止。零例外。**
 
 ### 背景（必须记住）
 
@@ -233,7 +233,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 
 | 禁止 | 说明 |
 | --- | --- |
-| **云目标每轮 forceFull** | `forceFullCopy = (dest == gdrive \|\| icloud \|\| …)` **一律非法** |
+| **任何目标每轮 forceFull** | `forceFullCopy=true` **一律非法**（**含 quark / 本地 staging**；无白名单） |
 | **CloudStorage 路径 `F_FULLFSYNC`** | 无磁盘 barrier 语义，只会加压 File Provider 协调路径 |
 | **为「保险」重写全部 CAS** | 完整度靠 **verify + 只修 missing/sizeMismatch**，不靠全量重拷 |
 | **把 bulk full 当默认** | 「简单粗暴全拷」在 PR/review 直接打回 |
@@ -244,7 +244,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | --- | --- |
 | **增量 CAS 镜像** | 目标已存在且 `size` 一致且 `size > 0` → **skip** |
 | **只修坏的** | missing / size 0 占位 / sizeMismatch → 单文件 rewrite + 退避 |
-| **forceFull 白名单** | **仅**本地 APFS 暂存（当前：`quark` staging；或显式 local staging 根） |
+| **forceFull 零例外** | 代码里若传入 true 必须拒绝/降级为增量；**quark 也不例外** |
 | **cloudSafe 写路径** | gdrive/icloud：禁 FULLFSYNC；流式写或等价；EDEADLK 退避；禁止紧循环 mass `copyItem` |
 | **最新快照面** | 灾备主面是 `latest/` + `blobs/` CAS；named snapshot 可 best-effort，**不得**为 snap 失败否定已成功的增量 latest |
 | **路径楔死** | 换干净子树（如 `cvbak`）或本地暂存 + 诚实 `ok:local_staging`；**禁止**对 wedged 树死磕全量 |
@@ -253,9 +253,9 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 
 ```text
 CloudDocsBackupService.syncBlobsToCAS
-  forceFullCopy: true  → 仅 quark / 本地 staging
-  cloudSafe: true      → gdrive + icloud
-  size-match continue  → 增量核心
+  forceFullCopy: false  → 全目标强制（含 quark）；true 会 log 拒绝并降级
+  cloudSafe: true       → gdrive + icloud
+  size-match continue   → 增量核心
 
 BackupDestinations.backupRoot(gdrive)
   优先 My Drive/ClipVault/cvbak   # 避开 wedged backup/
@@ -264,12 +264,13 @@ BackupDestinations.backupRoot(gdrive)
 ### 自检（改备份相关代码后）
 
 ```bash
-# 1) 源码不得再出现「云目标 forceFull」
-rg -n 'forceFull.*gdrive|gdrive.*forceFull|forceFullCopy: true' ClipFlow/
+# 1) 源码不得再出现 forceFullCopy: true（任何目标，含 quark）
+rg -n 'forceFullCopy:\s*true|forceFull\s*=\s*\(dest' ClipFlow/
+# 期望：无匹配；或仅有「REFUSED forceFullCopy」拒绝分支
 
-# 2) 跑一次备份：gdrive 日志应为 +0/repairK 或小增量，不是 +N 全量（N=全部 blob 数）
-# [Backup] dest=gdrive ok … blobs=N +0/repair0   ← 稳态
-# [Backup] dest=gdrive ok … blobs=N +N/repair0   ← 仅首次填空或修楔后允许一次
+# 2) 跑一次备份：各 dest 日志应为 +0/repairK 或小增量，不是 +N 全量
+# [Backup] dest=gdrive|quark|icloud ok … blobs=N +0/repair0   ← 稳态
+# +N 仅允许「目标几乎为空、首次灌库」的一次，禁止周期性全量
 ```
 
 ### 错误心态（写进复盘）
@@ -279,6 +280,7 @@ rg -n 'forceFull.*gdrive|gdrive.*forceFull|forceFullCopy: true' ClipFlow/
 | 「全量最稳」 | 全量最稳的是 **语义**（sqlite3_backup 快照 + CAS 校验），不是 **每轮字节重传** |
 | 「File Provider 不靠谱所以狂写」 | 越狂写越楔死；靠增量 + 校验 + 退避 |
 | 「clonefile 假成功 → 永远 full copy」 | clonefile 禁用于云目标即可；**增量 full-byte 只针对缺失文件** |
+| 「quark 是本地盘可以全量」 | **不行**。本地也增量；full 浪费 IO，且会把「全量习惯」带回云目标 |
 
 相关 nmem：`clipvault_research_gdrive_fileprovider_edeadlk_20260813` · `clipvault_fix_gdrive_edeadlk_cvbak_20260813`
 

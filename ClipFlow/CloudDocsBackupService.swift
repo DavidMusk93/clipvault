@@ -551,11 +551,9 @@ final class CloudDocsBackupService {
                                     try self.ensureCloudDir(blobs)
                                     self.scrubLatestTmpFiles(in: latest)
 
-                                    // AGENTS.md §7 备份增量铁律：增量是核心；云目标禁止每轮 forceFull。
-                                    // Quark staging = local APFS only → full re-copy allowed.
-                                    // GDrive/iCloud File Providers: size-match skip; repair missing/partial only.
-                                    // (Historical bug: forceFull on gdrive → EDEADLK / missing=N; never revive.)
-                                    let forceFull = (dest.type == "quark")
+                                    // AGENTS.md §7：增量是核心。forceFull 全目标禁止（含 quark）。
+                                    // size-match skip；只修 missing / sizeMismatch / 空占位。
+                                    let forceFull = false
                                     let cas = self.syncBlobsToCAS(
                                         destRoot: blobs,
                                         forceFullCopy: forceFull,
@@ -774,10 +772,10 @@ final class CloudDocsBackupService {
         var sizeMismatch: Int
     }
 
-    /// Mirror local CAS into destination `blobs/`.
-    /// - forceFullCopy: rewrite every blob (local staging only; never on GDrive).
+    /// Mirror local CAS into destination `blobs/` **incrementally**.
+    /// - forceFullCopy: **must stay false** (AGENTS §7). Parameter kept only for call-site clarity / tests.
     /// - cloudSafe: stream write + long backoff; never bulk delete+copyItem (EDEADLK).
-    private func syncBlobsToCAS(destRoot: URL, forceFullCopy: Bool, cloudSafe: Bool = false) -> CASSyncResult {
+    private func syncBlobsToCAS(destRoot: URL, forceFullCopy: Bool = false, cloudSafe: Bool = false) -> CASSyncResult {
         try? fm.createDirectory(at: destRoot, withIntermediateDirectories: true)
         scrubCloudTmpFiles(in: destRoot)
         let local = database.blobsDirectoryURL
@@ -787,6 +785,12 @@ final class CloudDocsBackupService {
             options: [.skipsHiddenFiles]
         ) else {
             return CASSyncResult(total: 0, bytes: 0, copied: 0, repaired: 0)
+        }
+        // Absolute ban: never rewrite the whole CAS tree in one pass (quark included).
+        var forceFullCopy = forceFullCopy
+        if forceFullCopy {
+            print("[Backup] REFUSED forceFullCopy=true (AGENTS §7); downgrading to incremental")
+            forceFullCopy = false
         }
         var total = 0
         var bytes = 0
@@ -1203,7 +1207,7 @@ final class CloudDocsBackupService {
         try fm.createDirectory(at: latest, withIntermediateDirectories: true)
         try fm.createDirectory(at: snaps, withIntermediateDirectories: true)
         try fm.createDirectory(at: blobs, withIntermediateDirectories: true)
-        let cas = syncBlobsToCAS(destRoot: blobs, forceFullCopy: true, cloudSafe: false)
+        let cas = syncBlobsToCAS(destRoot: blobs, forceFullCopy: false, cloudSafe: false)
         let verified = try verifyCASMirror(local: database.blobsDirectoryURL, dest: blobs)
         guard verified.ok else {
             throw NSError(domain: "ClipFlow.Backup", code: 2, userInfo: [
