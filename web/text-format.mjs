@@ -1,8 +1,10 @@
 /**
  * ClipVault — display-only structured text formatting.
- * Prefer real formatters (js-beautify / sql-formatter) when available;
+ * Prefer real formatters (js-beautify / sql-formatter / marked) when available;
  * fall back to conservative builtins. Copy path must use raw payload.
  */
+
+import { renderMarkdownToHtml } from './markdown-render.mjs';
 
 export const TEXT_PRETTY_MAX = 200000;
 
@@ -28,10 +30,13 @@ export function kindMeta(kind) {
   return KIND_META[kind] || KIND_META.plain;
 }
 
-/** Optional engines: { jsBeautify, htmlBeautify, sqlFormat } */
+/** Optional engines: { jsBeautify, htmlBeautify, sqlFormat, marked } */
 export function resolveBeautifiers(custom) {
   if (custom && typeof custom === 'object') return custom;
   const g = typeof globalThis !== 'undefined' ? globalThis : {};
+  let marked = null;
+  if (typeof g.marked === 'function') marked = g.marked;
+  else if (g.marked && typeof g.marked.parse === 'function') marked = g.marked;
   return {
     jsBeautify: typeof g.js_beautify === 'function' ? g.js_beautify : null,
     htmlBeautify: typeof g.html_beautify === 'function' ? g.html_beautify : null,
@@ -39,6 +44,7 @@ export function resolveBeautifiers(custom) {
       g.sqlFormatter && typeof g.sqlFormatter.format === 'function'
         ? (s, opts) => g.sqlFormatter.format(s, opts || { language: 'sql', tabWidth: 2, keywordCase: 'upper' })
         : null,
+    marked,
   };
 }
 
@@ -491,6 +497,7 @@ export function formatTextForDisplay(text, options = {}) {
   const out = (fields) => ({
     kind: det.kind,
     display: raw,
+    html: '',
     pretty: false,
     label: '',
     icon: meta.icon,
@@ -579,13 +586,27 @@ export function formatTextForDisplay(text, options = {}) {
           label: chip(b.sqlFormat ? 'sql-formatter' : '已断行'),
           engine: b.sqlFormat ? 'sql-formatter' : 'sql',
         });
-      case 'markdown':
+      case 'markdown': {
+        const src = raw.replace(/\r\n/g, '\n');
+        const md = renderMarkdownToHtml(src, { marked: b.marked, purify: b.purify });
+        if (md.ok && md.html) {
+          return out({
+            display: src,
+            html: md.html,
+            pretty: true,
+            label: chip('预览'),
+            engine: md.engine,
+          });
+        }
+        // Library missing → plain source (no DIY markdown grammar)
         return out({
-          display: raw.replace(/\r\n/g, '\n'),
+          display: src,
+          html: '',
           pretty: true,
-          label: chip('文档'),
-          engine: 'md',
+          label: chip('原文'),
+          engine: md.engine || 'md',
         });
+      }
       case 'yaml':
         return out({
           display: raw.replace(/\r\n/g, '\n'),

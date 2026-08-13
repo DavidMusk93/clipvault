@@ -14,6 +14,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify-html.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sql-formatter@2.3.4/dist/sql-formatter.min.js"></script>
+  <!-- Markdown preview: mature libs only (no DIY grammar) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -560,6 +563,67 @@
     .format-chip--csv, .format-chip--env, .format-chip--yaml { color: #455A64; background: rgba(69, 90, 100, 0.12); }
     .format-chip--stack { color: #C62828; background: rgba(198, 40, 40, 0.10); }
     .format-chip--markdown { color: #37474F; background: rgba(55, 71, 79, 0.10); }
+
+    /* Markdown preview via marked + DOMPurify */
+    .md-preview {
+      font-family: var(--font-ui);
+      font-size: 14px;
+      line-height: 1.55;
+      letter-spacing: -0.014em;
+      color: var(--ink);
+      background: rgba(245, 245, 247, 0.92);
+      border: 0.5px solid var(--separator);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px 14px;
+      max-height: min(48vh, 420px);
+      overflow: auto;
+      min-width: 0;
+      max-width: 100%;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      -webkit-font-smoothing: antialiased;
+      scrollbar-width: thin;
+    }
+    .md-preview > :first-child { margin-top: 0; }
+    .md-preview > :last-child { margin-bottom: 0; }
+    .md-preview h1, .md-preview h2, .md-preview h3,
+    .md-preview h4, .md-preview h5, .md-preview h6 {
+      font-weight: 650; letter-spacing: -0.022em; line-height: 1.25;
+      margin: 0.85em 0 0.35em; color: var(--ink);
+    }
+    .md-preview h1 { font-size: 1.35em; }
+    .md-preview h2 { font-size: 1.2em; }
+    .md-preview h3 { font-size: 1.08em; }
+    .md-preview h4, .md-preview h5, .md-preview h6 { font-size: 1em; opacity: 0.92; }
+    .md-preview p { margin: 0 0 0.65em; }
+    .md-preview ul, .md-preview ol { margin: 0.2em 0 0.7em; padding-left: 1.35em; }
+    .md-preview li { margin: 0.16em 0; }
+    .md-preview blockquote {
+      margin: 0.45em 0 0.7em; padding: 0.3em 0 0.3em 0.85em;
+      border-left: 3px solid rgba(0, 113, 227, 0.35); color: var(--muted);
+    }
+    .md-preview blockquote p { margin: 0.15em 0; }
+    .md-preview hr { border: 0; border-top: 0.5px solid var(--separator-strong); margin: 0.85em 0; }
+    .md-preview code {
+      font-family: var(--font-mono); font-size: 0.88em;
+      background: rgba(120, 120, 128, 0.12); padding: 0.1em 0.35em; border-radius: 5px;
+      font-variant-ligatures: none;
+    }
+    .md-preview pre {
+      margin: 0.4em 0 0.75em; padding: 10px 12px;
+      background: rgba(28, 28, 30, 0.04); border: 0.5px solid var(--separator);
+      border-radius: 10px; overflow-x: auto; white-space: pre;
+    }
+    .md-preview pre code { background: transparent; padding: 0; font-size: 12.5px; line-height: 1.45; }
+    .md-preview table { border-collapse: collapse; width: max-content; max-width: 100%; margin: 0.45em 0 0.8em; font-size: 13px; display: block; overflow-x: auto; }
+    .md-preview th, .md-preview td { border: 0.5px solid var(--separator-strong); padding: 6px 10px; text-align: left; }
+    .md-preview th { background: rgba(120, 120, 128, 0.10); font-weight: 600; }
+    .md-preview img { max-width: 100%; height: auto; border-radius: 8px; margin: 0.35em 0; }
+    .md-preview .url-inert, .md-preview .md-link {
+      color: var(--accent) !important; text-decoration: underline dotted;
+      text-underline-offset: 2px; pointer-events: none !important; cursor: text !important;
+    }
+
     /* Format toolbar: one control row — equal height chips/buttons (Apple spatial consistency) */
     .format-toolbar {
       display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
@@ -3173,6 +3237,52 @@ window.ClipViewMasonry = Masonry;
       return fixed.join('\n').replace(/\n{3,}/g, '\n\n').trim();
     }
 
+
+    /**
+     * Markdown preview — marked + DOMPurify only (no DIY grammar).
+     * Returns '' if libs missing; caller falls back to mono source.
+     */
+    function renderMarkdownPreviewHtml(src) {
+      const text = String(src ?? '').replace(/\r\n/g, '\n');
+      const g = window;
+      const markedLib = g.marked;
+      const purify = g.DOMPurify;
+      if (!markedLib || (typeof markedLib.parse !== 'function' && typeof markedLib !== 'function')) return '';
+      if (!purify || typeof purify.sanitize !== 'function') return '';
+      let rawHtml = '';
+      try {
+        if (typeof markedLib.setOptions === 'function') {
+          markedLib.setOptions({ gfm: true, breaks: true });
+        }
+        rawHtml = typeof markedLib.parse === 'function'
+          ? markedLib.parse(text, { async: false, gfm: true, breaks: true })
+          : markedLib(text);
+      } catch (_) {
+        return '';
+      }
+      let safe = purify.sanitize(String(rawHtml || ''), {
+        USE_PROFILES: { html: true },
+        FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+        FORBID_ATTR: ['style'],
+        ALLOW_DATA_ATTR: false,
+      });
+      // AGENTS §8: no clickable links in card
+      try {
+        const doc = new DOMParser().parseFromString('<!doctype html><body>' + safe, 'text/html');
+        const root = doc.body || doc;
+        root.querySelectorAll('a').forEach((a) => {
+          const span = doc.createElement('span');
+          span.className = 'url-inert md-link';
+          const href = a.getAttribute('href') || '';
+          if (href) span.setAttribute('data-url', href);
+          span.textContent = a.textContent || href;
+          if (a.parentNode) a.parentNode.replaceChild(span, a);
+        });
+        safe = (root.innerHTML || '').trim();
+      } catch (_) {}
+      return safe;
+    }
+
     function looksLikeMarkdown(t) {
       if (t.length < 8 || t.length > TEXT_PRETTY_MAX) return false;
       const lines = t.split(/\n/);
@@ -3257,7 +3367,7 @@ window.ClipViewMasonry = Masonry;
     function formatTextForDisplay(text, options = {}) {
       const raw = String(text ?? '');
       if (options.enabled === false) {
-        return { kind: 'plain', display: raw, pretty: false, label: '', icon: '', lang: 'plaintext', openHref: '', engine: '' };
+        return { kind: 'plain', display: raw, html: '', pretty: false, label: '', icon: '', lang: 'plaintext', openHref: '', engine: '' };
       }
 
       const b = resolveBeautifiers(options.beautifiers);
@@ -3317,6 +3427,7 @@ window.ClipViewMasonry = Masonry;
       const out = (fields) => ({
         kind: det.kind,
         display: raw,
+        html: '',
         pretty: false,
         label: '',
         icon: meta.icon,
@@ -3405,13 +3516,17 @@ window.ClipViewMasonry = Masonry;
               label: chip(b.sqlFormat ? 'sql-formatter' : '已断行'),
               engine: b.sqlFormat ? 'sql-formatter' : 'sql',
             });
-          case 'markdown':
+          case 'markdown': {
+            const src = raw.replace(/\r\n/g, '\n');
+            const html = renderMarkdownPreviewHtml(src);
             return out({
-              display: raw.replace(/\r\n/g, '\n'),
+              display: src,
+              html: html || '',
               pretty: true,
-              label: chip('文档'),
-              engine: 'md',
+              label: chip(html ? '预览' : '原文'),
+              engine: html ? 'marked+dompurify' : 'md',
             });
+          }
           case 'yaml':
             return out({
               display: raw.replace(/\r\n/g, '\n'),
@@ -3624,6 +3739,10 @@ window.ClipViewMasonry = Masonry;
           `${toolbar}${renderUrlDisplayBlock(fmt.openHref, fmt.openHref)}` +
           `<div class="text-scroll is-pretty url-parsed${extraClass}" data-format-kind="url" data-engine="url"><pre><code data-hljs="skip">${esc(parsed)}</code></pre></div>`
         );
+      }
+      // Markdown: professional HTML preview (marked + DOMPurify). Copy stays raw.
+      if (fmt.kind === 'markdown' && fmt.html) {
+        return `${toolbar}<div class="md-preview is-pretty${extraClass}" data-format-kind="markdown" data-engine="${escAttr(fmt.engine || 'marked')}">${fmt.html}</div>`;
       }
       return `${toolbar}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}" data-engine="${escAttr(fmt.engine || '')}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
     }
@@ -4048,7 +4167,7 @@ window.ClipViewMasonry = Masonry;
 
     function highlightCard(card) {
       if (typeof hljs === 'undefined') return;
-      card.querySelectorAll('pre code:not([data-hljs])').forEach(block => {
+      card.querySelectorAll('pre code:not([data-hljs]), .md-preview pre code:not([data-hljs])').forEach(block => {
         if (block.getAttribute('data-hljs') === 'skip') return;
         // Skip tiny non-code one-liners
         const raw = block.textContent || '';

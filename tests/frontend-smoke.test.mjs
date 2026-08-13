@@ -231,3 +231,11 @@ test('SSE clip_deleted must not fetchPage reset (scroll thrash root cause)', () 
     'SSE must not full-reset on clip_deleted',
   );
 });
+
+test('markdown preview uses marked + DOMPurify CDN', () => {
+  assert.match(indexHtml, /marked(\.min)?\.js|marked@/, 'marked CDN');
+  assert.match(indexHtml, /dompurify|purify\.min\.js/i, 'DOMPurify CDN');
+  assert.match(indexHtml, /md-preview/, 'preview surface');
+  assert.match(indexHtml, /renderMarkdownPreviewHtml|marked\+dompurify/, 'engine path');
+  assert.doesNotMatch(indexHtml, /function fallbackMarkdownToHtml/, 'no DIY markdown parser');
+});
