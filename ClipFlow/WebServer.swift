@@ -833,7 +833,7 @@ class WebServer {
         """
     }
     
-    private func itemToJSON(_ item: ClipboardItem) -> [String: Any] {
+    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false) -> [String: Any] {
         let ts = item.timestamp.timeIntervalSince1970
         let first = (item.firstSeenAt ?? item.timestamp).timeIntervalSince1970
         var dict: [String: Any] = [
@@ -858,15 +858,25 @@ class WebServer {
         } else {
             dict["inTrash"] = false
         }
-        if let html = item.htmlContent { dict["htmlContent"] = html }
         if let text = item.textContent { dict["textContent"] = text }
-        if let metaStr = database.webArchiveMetaJSON(id: item.id),
-           let metaData = metaStr.data(using: .utf8),
-           let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
-            dict["archived"] = true
-            dict["archive"] = meta
-        } else if item.type == .url, let html = item.htmlContent, html.count > 40 {
-            dict["archived"] = true
+        // URL archive is an overlay — never dump article HTML into the feed JSON
+        // (that produced extra/ugly cards). Full HTML only on id fetch for View.
+        if item.type == .url {
+            let hasHTML = (item.htmlContent?.count ?? 0) > 40
+            var archived = hasHTML
+            if let metaStr = database.webArchiveMetaJSON(id: item.id),
+               let metaData = metaStr.data(using: .utf8),
+               let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
+                archived = true
+                dict["archive"] = meta
+            }
+            dict["archived"] = archived
+            if includeArchiveHTML, let html = item.htmlContent {
+                dict["htmlContent"] = html
+            }
+        } else if let html = item.htmlContent {
+            dict["htmlContent"] = html
+            dict["archived"] = false
         } else {
             dict["archived"] = false
         }
@@ -1039,7 +1049,7 @@ class WebServer {
         if let idStr = items.first(where: { $0.name == "id" })?.value, let uuid = UUID(uuidString: idStr) {
             database.fetchItem(id: uuid) { [weak self] item in
                 guard let self else { return }
-                let arr = item.map { [self.itemToJSON($0)] } ?? []
+                let arr = item.map { [self.itemToJSON($0, includeArchiveHTML: true)] } ?? []
                 self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
             }
             return

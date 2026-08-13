@@ -2580,6 +2580,7 @@ window.ClipViewMasonry = Masonry;
         const prevLen = clips.length;
         const prevIds = new Set(clips.map(c => c.id));
         clips = Pagination.mergePage(clips, items, { reset });
+        clips = dedupeClipsById(clips);
         nextCursor = cursor;
         if (!cursor || items.length === 0) exhausted = true;
 
@@ -2617,6 +2618,17 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
+    function dedupeClipsById(list) {
+      const seen = new Set();
+      const out = [];
+      for (const c of list || []) {
+        if (!c || !c.id || seen.has(c.id)) continue;
+        seen.add(c.id);
+        out.push(c);
+      }
+      return out;
+    }
+
     /** SSE: only pull the newest page and merge by id — no full history reload */
     async function mergeHead() {
       try {
@@ -2630,8 +2642,18 @@ window.ClipViewMasonry = Masonry;
         if (!items.length) return;
         const seen = new Set(clips.map(c => c.id));
         const fresh = items.filter(i => !seen.has(i.id));
-        if (!fresh.length) return;
-        clips = [...fresh, ...clips];
+        // Refresh archived flags on existing rows (list JSON has no article HTML).
+        const byId = new Map(items.map((i) => [i.id, i]));
+        clips = clips.map((c) => {
+          const n = byId.get(c.id);
+          if (!n) return c;
+          return { ...c, archived: n.archived, archive: n.archive, textContent: n.textContent || c.textContent };
+        });
+        if (!fresh.length) {
+          clips = dedupeClipsById(clips);
+          return;
+        }
+        clips = dedupeClipsById([...fresh, ...clips]);
         if (clips.length > CLIENT_CAP) {
           const removed = clips.splice(CLIENT_CAP);
           removed.forEach(r => { cardCache.get(r.id)?.remove(); cardCache.delete(r.id); });
@@ -3861,6 +3883,7 @@ window.ClipViewMasonry = Masonry;
     function renderUrlCardBody(item, href) {
       const raw = String(href || '').trim();
       const archived = !!(item.archived || (item.htmlContent && String(item.htmlContent).length > 40));
+      // htmlContent is omitted from feed JSON — archived flag is the source of truth.
       // Card stays compact: URL line + toolbar only. Archive HTML lives in the reader sheet.
       return renderPlainBody(raw, '', { itemId: item.id, archived, archiveItem: item });
     }
@@ -4001,19 +4024,31 @@ window.ClipViewMasonry = Masonry;
     }
 
     let archiveReaderHref = '';
-    function openArchiveReader(item) {
+    async function openArchiveReader(item) {
       const sheet = document.getElementById('archiveReader');
       const frame = document.getElementById('archiveReaderFrame');
       const titleEl = document.getElementById('archiveReaderTitle');
       const urlEl = document.getElementById('archiveReaderUrl');
       if (!sheet || !frame) return;
-      const title = (item.archive && item.archive.title) || '归档';
-      const href = item.textContent || (item.archive && item.archive.sourceUrl) || '';
+      let live = item || {};
+      if (!live.htmlContent && live.id) {
+        try {
+          const res = await fetch(API + '/api/clips?id=' + encodeURIComponent(live.id) + '&limit=1');
+          const data = await res.json();
+          if (data.items && data.items[0]) live = data.items[0];
+        } catch (_) {}
+      }
+      if (!live.htmlContent) {
+        toast('没有归档正文');
+        return;
+      }
+      const title = (live.archive && live.archive.title) || '归档';
+      const href = live.textContent || (live.archive && live.archive.sourceUrl) || '';
       archiveReaderHref = href;
       titleEl.textContent = title;
       urlEl.textContent = href;
       urlEl.title = href;
-      frame.srcdoc = buildArchiveReaderDoc(title, item.htmlContent || '');
+      frame.srcdoc = buildArchiveReaderDoc(title, live.htmlContent || '');
       sheet.classList.add('open');
       sheet.setAttribute('aria-hidden', 'false');
       document.body.style.overflow = 'hidden';
@@ -4317,12 +4352,8 @@ window.ClipViewMasonry = Masonry;
             e.preventDefault();
             e.stopPropagation();
             const id = viewBtn.getAttribute('data-view-archive') || (card && card.dataset.id);
-            const item = clips.find((c) => c.id === id);
-            if (item && item.htmlContent) openArchiveReader(item);
-            else if (id) refreshClipInPlace(id).then(() => {
-              const live = clips.find((c) => c.id === id);
-              if (live && live.htmlContent) openArchiveReader(live);
-            });
+            const item = clips.find((c) => c.id === id) || { id };
+            openArchiveReader(item);
             return;
           }
           if (clearBtn) {

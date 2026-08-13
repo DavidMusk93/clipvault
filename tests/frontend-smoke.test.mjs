@@ -281,3 +281,8 @@ test('archived URL uses View sheet — no inline HTML in cards', () => {
   assert.doesNotMatch(indexHtml, /archive-preview md-preview/, 'must not dump archive HTML into masonry');
   assert.match(indexHtml, /function openArchiveReader/, 'reader opener');
 });
+
+test('feed JSON must not embed archive HTML into masonry items', () => {
+  assert.match(indexHtml, /function dedupeClipsById/, 'dedupe clips');
+  assert.match(indexHtml, /includeArchiveHTML|archived flag is the source/, 'list vs full html split');
+});

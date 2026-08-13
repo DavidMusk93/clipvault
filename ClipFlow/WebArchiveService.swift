@@ -202,6 +202,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         }
 
         func start() {
+            ClipboardMonitor.shared?.suppressCapture(for: WebArchiveService.navigationTimeout + 4)
             let cfg = WKWebViewConfiguration()
             cfg.websiteDataStore = .nonPersistent()
             cfg.suppressesIncrementalRendering = false
@@ -243,6 +244,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             window?.contentView = nil
             window?.close()
             window = nil
+            ClipboardMonitor.shared?.absorbPasteboardNow()
         }
 
         private func fail(_ message: String) {

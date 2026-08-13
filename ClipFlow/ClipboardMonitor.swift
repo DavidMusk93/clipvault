@@ -11,13 +11,33 @@ class ClipboardMonitor: ObservableObject {
     
     private var timer: Timer?
     private var lastChangeCount: Int = 0
+    /// While WKWebView archives, sites/WebKit may dirty NSPasteboard — absorb, don't spawn cards.
+    private var suppressCaptureUntil: Date?
     private let pasteboard = NSPasteboard.general
     private let database: DatabaseManager?
+
+    static weak var shared: ClipboardMonitor?
     
     private let monitorQueue = DispatchQueue(label: "com.clipflow.monitor", qos: .userInitiated)
     
     init(database: DatabaseManager? = nil) {
         self.database = database
+        lastChangeCount = pasteboard.changeCount
+        ClipboardMonitor.shared = self
+    }
+
+    /// Swallow pasteboard mutations (archive WebView, programmatic writes).
+    func suppressCapture(for seconds: TimeInterval) {
+        let until = Date().addingTimeInterval(seconds)
+        if let cur = suppressCaptureUntil, cur > until {
+            lastChangeCount = pasteboard.changeCount
+            return
+        }
+        suppressCaptureUntil = until
+        lastChangeCount = pasteboard.changeCount
+    }
+
+    func absorbPasteboardNow() {
         lastChangeCount = pasteboard.changeCount
     }
     
@@ -38,7 +58,14 @@ class ClipboardMonitor: ObservableObject {
     
     private func checkPasteboard() {
         let currentChangeCount = pasteboard.changeCount
-        
+        if let until = suppressCaptureUntil {
+            if Date() < until {
+                lastChangeCount = currentChangeCount
+                return
+            }
+            suppressCaptureUntil = nil
+        }
+
         guard currentChangeCount != lastChangeCount else { return }
         
         lastChangeCount = currentChangeCount
