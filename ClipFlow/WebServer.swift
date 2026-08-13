@@ -223,10 +223,14 @@ class WebServer {
         sseConnections.append(connection)
     }
 
-    func broadcastSSE(event: String) {
-        let payload = "data: {\"type\":\"\(event)\"}\n\n"
+    func broadcastSSE(event: String, id: String? = nil) {
+        var obj: [String: Any] = ["type": event]
+        if let id = id, !id.isEmpty { obj["id"] = id }
+        guard let json = try? JSONSerialization.data(withJSONObject: obj),
+              let jsonStr = String(data: json, encoding: .utf8) else { return }
+        let payload = "data: \(jsonStr)\n\n"
         guard let data = payload.data(using: .utf8) else { return }
-        
+
         sseConnections.removeAll { conn in
             if conn.state == .cancelled || conn.state == .failed(NWError.posix(.ECANCELED)) {
                 return true
@@ -285,7 +289,7 @@ class WebServer {
             guard let self = self else { return }
             if success {
                 // Soft-delete only — do not tombstone peers (row still exists for TTL).
-                self.broadcastSSE(event: "clip_deleted")
+                self.broadcastSSE(event: "clip_deleted", id: uuid.uuidString)
                 let resp = """
                 HTTP/1.1 200 OK
                 Access-Control-Allow-Origin: *
@@ -318,7 +322,7 @@ class WebServer {
         database.restoreItem(id: uuid) { [weak self] ok in
             guard let self = self else { return }
             if ok {
-                self.broadcastSSE(event: "clip_restored")
+                self.broadcastSSE(event: "clip_restored", id: uuid.uuidString)
                 let resp = """
                 HTTP/1.1 200 OK
                 Access-Control-Allow-Origin: *

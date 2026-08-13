@@ -214,10 +214,20 @@ test('url dual surface locked in index.html (canonical + parse)', () => {
 
 test('delete/restore use differential remove (no full rebuild scroll jump)', () => {
   assert.match(indexHtml, /function removeCardFromMasonry/, 'differential remove required');
-  // deleteClip must call removeCardFromMasonry, not only rebuildFromData
   const delIdx = indexHtml.indexOf('async function deleteClip');
   const delChunk = indexHtml.slice(delIdx, delIdx + 900);
   assert.match(delChunk, /removeCardFromMasonry/, 'deleteClip uses removeCardFromMasonry');
   assert.doesNotMatch(delChunk, /rebuildFromData\(\s*\)/, 'deleteClip must not bare rebuildFromData()');
   assert.match(indexHtml, /behavior:\s*['"]instant['"]/, 'scroll restore uses absolute scrollTo');
+});
+
+test('SSE clip_deleted must not fetchPage reset (scroll thrash root cause)', () => {
+  assert.match(indexHtml, /function applyRemoteClipRemoval/, 'SSE delete path required');
+  assert.match(indexHtml, /noteLocalListMutation/, 'local mutation suppress required');
+  // Hard ban: clip_deleted → fetchPage reset was the bug
+  assert.doesNotMatch(
+    indexHtml,
+    /clip_deleted[\s\S]{0,200}?fetchPage\(\{\s*reset:\s*true/,
+    'SSE must not full-reset on clip_deleted',
+  );
 });

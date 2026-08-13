@@ -1940,6 +1940,28 @@ window.ClipViewMasonry = Masonry;
     let searchQuery = '';
     let searchTimer = null;
     const cardCache = new Map();
+    /** Ids already applied by this tab (delete/restore). Suppress SSE full-reset thrash. */
+    const localListMutations = new Map(); // id -> expiry ts
+    function noteLocalListMutation(id) {
+      if (!id) return;
+      localListMutations.set(id, Date.now() + 4000);
+    }
+    function consumeLocalListMutation(id) {
+      if (!id) return false;
+      const exp = localListMutations.get(id);
+      if (exp == null) return false;
+      if (Date.now() > exp) { localListMutations.delete(id); return false; }
+      localListMutations.delete(id);
+      return true;
+    }
+    function hasRecentLocalListMutation() {
+      const now = Date.now();
+      for (const [id, exp] of [...localListMutations]) {
+        if (now > exp) localListMutations.delete(id);
+        else return true;
+      }
+      return false;
+    }
     let lastColCount = 0;
     let rebalanceTimer = null;
     let rebalanceBusy = false;
@@ -4432,6 +4454,7 @@ window.ClipViewMasonry = Masonry;
 
     async function deleteClip(id) {
       try {
+        noteLocalListMutation(id);
         await fetch(`${API}/api/clips?id=${id}`, { method: 'DELETE' });
         clips = clips.filter(c => c.id !== id);
         await removeCardFromMasonry(id, { animate: true });
@@ -4446,6 +4469,7 @@ window.ClipViewMasonry = Masonry;
 
     async function restoreClip(id) {
       try {
+        noteLocalListMutation(id);
         const res = await fetch(API + '/api/clips/restore', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4511,19 +4535,49 @@ window.ClipViewMasonry = Masonry;
 
     window.addEventListener('resize', () => scheduleRebalance());
 
-    // SSE incremental
+    // SSE incremental — never full-list reset on delete (that zeros scroll).
     function setupSSE() {
       const es = new EventSource(API + '/api/events');
       es.onmessage = e => {
         try {
           const d = JSON.parse(e.data);
-          if (d.type === 'update') mergeHead();
+          if (d.type === 'update') {
+            mergeHead();
+            return;
+          }
           if (d.type === 'clip_deleted' || d.type === 'clip_restored') {
-            nextCursor = null; exhausted = false; fetchPage({ reset: true });
+            applyRemoteClipRemoval(d);
+            return;
           }
         } catch (_) {}
       };
       es.onerror = () => { es.close(); setTimeout(setupSSE, 3000); };
+    }
+
+    /**
+     * Remote/local-echo delete·restore via SSE.
+     * Prefer differential remove; NEVER fetchPage({reset:true}) (scroll → top).
+     */
+    function applyRemoteClipRemoval(d) {
+      const id = d && d.id ? String(d.id) : '';
+      if (id && consumeLocalListMutation(id)) {
+        // This tab already removed the card — keep scroll, do nothing.
+        return;
+      }
+      if (id) {
+        if (!clips.some(c => c.id === id) && !cardCache.has(id)) return;
+        clips = clips.filter(c => c.id !== id);
+        removeCardFromMasonry(id, { animate: false });
+        if (!clientFilter(clips).length) {
+          colHeights = null;
+          rebuildFromData({ preserveScroll: true });
+        }
+        return;
+      }
+      // Legacy SSE without id: do NOT full reset. If this tab just mutated, ignore echo.
+      if (hasRecentLocalListMutation()) return;
+      // Unknown remote mutation without id — soft head merge only (preserve scroll).
+      mergeHead();
     }
 
 
