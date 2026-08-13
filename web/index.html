@@ -79,7 +79,7 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html { -webkit-text-size-adjust: 100%; }
+    html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
     body {
       font-family: var(--font-ui);
       font-size: 15px;
@@ -902,14 +902,27 @@
     }
     .card-body .text-scroll.is-rtf.is-tiny pre.plain { padding: 0 12px 8px 4px; font-size: 14px; }
 
+    /* Locked geometry: image decode must NOT change layout (scroll smoothness). */
     .thumb-wrap {
       position: relative; border-radius: 14px; overflow: hidden;
       border: 0.5px solid var(--separator); background: var(--fill);
-      cursor: zoom-in; aspect-ratio: 4 / 3; max-height: 200px;
+      cursor: zoom-in;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      max-height: 200px;
+      min-height: 96px;
+      flex-shrink: 0;
+      contain: layout paint style;
+      content-visibility: visible;
     }
     .thumb-wrap img {
       display: block; width: 100%; height: 100%;
       object-fit: cover; object-position: top center;
+      /* never contribute intrinsic size to layout */
+      position: absolute; inset: 0;
+    }
+    .thumb-wrap.is-broken {
+      display: none !important;
     }
     .thumb-wrap .zoom-hint {
       position: absolute; right: 8px; bottom: 8px;
@@ -1974,10 +1987,29 @@
         const prevCIS = card.style.containIntrinsicSize;
         card.style.contentVisibility = 'visible';
         card.style.containIntrinsicSize = 'auto none';
-        // force layout
         const h = Math.ceil(card.getBoundingClientRect().height);
         card.style.contentVisibility = prevCV;
         card.style.containIntrinsicSize = prevCIS;
+        return h > 0 ? h : 120;
+      },
+      /**
+       * Measure card at a column width WITHOUT attaching to live masonry columns
+       * (appending to col[0] during scroll causes layout thrash / jitter).
+       */
+      measureHeightAtWidth(card, widthPx) {
+        if (!card) return 120;
+        const w = Math.max(120, Math.floor(widthPx || 280));
+        const probe = document.createElement('div');
+        probe.setAttribute('aria-hidden', 'true');
+        probe.style.cssText =
+          'position:absolute;left:-100000px;top:0;width:' + w + 'px;' +
+          'visibility:hidden;pointer-events:none;contain:layout;';
+        // Keep card out of document flow of the feed
+        document.body.appendChild(probe);
+        probe.appendChild(card);
+        const h = Masonry.measureHeight(card);
+        probe.removeChild(card);
+        probe.remove();
         return h > 0 ? h : 120;
       },
       isCompact(item) {
@@ -4152,12 +4184,10 @@ window.ClipViewMasonry = Masonry;
       if (wrap) {
         wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview')));
         const img = wrap.querySelector('img');
-        if (img && !img.complete) {
-          img.addEventListener('load', () => scheduleMasonrySync(), { once: true });
-        }
+        // Thumb box has locked aspect-ratio — successful decode must not reflow masonry.
+        // Only broken images collapse the box; patch that column's height, never full rebuild.
         img?.addEventListener('error', () => {
-          wrap.style.display = 'none';
-          scheduleMasonrySync();
+          onThumbBroken(card, wrap);
         }, { once: true });
       }
       wireFormatToolbar(card, item);
@@ -4379,19 +4409,18 @@ window.ClipViewMasonry = Masonry;
       const toAdd = newItems.filter(it => viewIds.has(it.id) && !cardCache.has(it.id));
       if (!toAdd.length) return;
 
+      const colWidth = colEls[0].clientWidth || Math.floor((host.clientWidth || 800) / cols);
       for (const item of toAdd) {
         const card = ensureCard(item);
-        // Probe height at column width
-        colEls[0].appendChild(card);
-        const h = Masonry.measureHeight(card);
-        card.remove();
+        // Off-DOM measure — never attach to a live column just to probe (scroll thrash).
+        const h = Masonry.measureHeightAtWidth(card, colWidth);
 
         let best = 0;
         for (let c = 1; c < cols; c++) {
           if (colHeights[c] < colHeights[best]) best = c;
         }
         colEls[best].appendChild(card);
-        // Prefer post-attach height (images/fonts settle)
+        // Thumb geometry is locked; post-attach height should match probe.
         const realH = Masonry.measureHeight(card) || h;
         colHeights[best] += realH + (colHeights[best] > 0 ? MASONRY_GAP : 0);
       }
@@ -4428,13 +4457,9 @@ window.ClipViewMasonry = Masonry;
           colEls.push(col);
         }
 
-        // Measure in-column at final width so wrapping matches painted result.
-        const heights = orderedCards.map(card => {
-          colEls[0].appendChild(card);
-          const h = Masonry.measureHeight(card);
-          card.remove();
-          return h;
-        });
+        // Off-DOM measure at column width (avoid thrashing live col during pack).
+        const colW = Math.floor((host.clientWidth || window.innerWidth) / cols) || 280;
+        const heights = orderedCards.map(card => Masonry.measureHeightAtWidth(card, colW));
         const packed = Masonry.pack(heights, cols, MASONRY_GAP);
         for (let i = 0; i < orderedCards.length; i++) {
           colEls[packed.colOf[i]].appendChild(orderedCards[i]);
@@ -4465,13 +4490,53 @@ window.ClipViewMasonry = Masonry;
       }), 48);
     }
 
-    /** After image/font height settles, re-pack with scroll anchor (debounced). */
-    let masonrySyncTimer = 0;
+    /**
+     * Scroll smoothness iron rule:
+     * NEVER full-rebuild masonry because media decoded / settled while the user is reading.
+     * Social feeds lock media geometry; we lock .thumb-wrap aspect-ratio and only patch
+     * colHeights when height truly changes (e.g. broken image).
+     */
+    function patchColHeightForCard(card, heightDelta) {
+      if (!card || !heightDelta || !Array.isArray(colHeights)) return;
+      const host = document.getElementById('grid');
+      if (!host) return;
+      const col = card.closest('.masonry-col');
+      if (!col) return;
+      const colEls = [...host.querySelectorAll(':scope > .masonry-col')];
+      const i = colEls.indexOf(col);
+      if (i < 0 || colHeights[i] == null) return;
+      colHeights[i] = Math.max(0, colHeights[i] + heightDelta);
+    }
+
+    function compensateScrollForHeightDelta(card, heightDelta) {
+      if (!heightDelta) return;
+      const rect = card.getBoundingClientRect();
+      const stickyCutoff = 88;
+      // Content above the fold shrank/grew → keep viewport stable
+      if (rect.bottom <= stickyCutoff) {
+        const y = (window.scrollY || 0) + heightDelta;
+        try {
+          window.scrollTo({ top: Math.max(0, y), left: 0, behavior: 'instant' });
+        } catch (_) {
+          window.scrollTo(0, Math.max(0, y));
+        }
+      }
+    }
+
+    function onThumbBroken(card, wrap) {
+      if (!card || !wrap || wrap.classList.contains('is-broken')) return;
+      const before = Masonry.measureHeight(card);
+      wrap.classList.add('is-broken');
+      const after = Masonry.measureHeight(card);
+      const delta = after - before;
+      if (Math.abs(delta) < 1) return;
+      patchColHeightForCard(card, delta);
+      compensateScrollForHeightDelta(card, delta);
+    }
+
+    /** @deprecated name kept so any stale call is a no-op (do not revive full rebuild). */
     function scheduleMasonrySync() {
-      clearTimeout(masonrySyncTimer);
-      masonrySyncTimer = setTimeout(() => requestAnimationFrame(() => {
-        rebuildFromData({ preserveScroll: true });
-      }), 120);
+      /* intentionally empty — full rebuild on media settle was the scroll-jitter root cause */
     }
 
 

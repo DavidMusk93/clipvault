@@ -239,3 +239,22 @@ test('markdown preview uses marked + DOMPurify CDN', () => {
   assert.match(indexHtml, /renderMarkdownPreviewHtml|marked\+dompurify/, 'engine path');
   assert.doesNotMatch(indexHtml, /function fallbackMarkdownToHtml/, 'no DIY markdown parser');
 });
+
+test('scroll smoothness: no full masonry rebuild on image load', () => {
+  // Thumb box must reserve geometry
+  assert.match(indexHtml, /\.thumb-wrap[\s\S]{0,400}?aspect-ratio:\s*4\s*\/\s*3/, 'thumb aspect-ratio lock');
+  assert.match(indexHtml, /thumb-wrap img[\s\S]{0,200}?position:\s*absolute/, 'img absolute so intrinsic size cannot reflow');
+  // Image load must not call rebuildFromData
+  assert.match(indexHtml, /function onThumbBroken|intentionally empty/, 'local patch / no-op sync');
+  assert.match(indexHtml, /measureHeightAtWidth/, 'off-DOM measure for append');
+  // Hard ban: load listener → scheduleMasonrySync full rebuild path
+  assert.doesNotMatch(
+    indexHtml,
+    /addEventListener\(\s*['"]load['"][\s\S]{0,80}?scheduleMasonrySync/,
+    'img load must not schedule full masonry rebuild',
+  );
+  const syncIdx = indexHtml.indexOf('function scheduleMasonrySync');
+  assert.ok(syncIdx > 0);
+  const chunk = indexHtml.slice(syncIdx, syncIdx + 280);
+  assert.doesNotMatch(chunk, /rebuildFromData/, 'scheduleMasonrySync must not rebuildFromData');
+});
