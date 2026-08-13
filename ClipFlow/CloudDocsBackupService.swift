@@ -551,10 +551,10 @@ final class CloudDocsBackupService {
                                     try self.ensureCloudDir(blobs)
                                     self.scrubLatestTmpFiles(in: latest)
 
-                                    // Quark staging is local APFS — full re-copy OK.
-                                    // GDrive/iCloud File Providers: never bulk re-copy every cycle (EDEADLK /
-                                    // "Resource deadlock avoided" under F_FULLFSYNC + mass copyItem).
-                                    // Size-match skip + repair missing/empty placeholders only.
+                                    // AGENTS.md §7 备份增量铁律：增量是核心；云目标禁止每轮 forceFull。
+                                    // Quark staging = local APFS only → full re-copy allowed.
+                                    // GDrive/iCloud File Providers: size-match skip; repair missing/partial only.
+                                    // (Historical bug: forceFull on gdrive → EDEADLK / missing=N; never revive.)
                                     let forceFull = (dest.type == "quark")
                                     let cas = self.syncBlobsToCAS(
                                         destRoot: blobs,

@@ -75,6 +75,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |
 | SQLite 备份用 `sqlite3_backup`；CloudDocs 固定目录 | 热 copy 开着的 db；依赖未签名的 App ubiquity 容器当 daemon 方案 |
+| **备份增量是核心**：CAS size-match skip；只补 missing/partial | **每轮 forceFull 重拷全部 blob**（偷懒/无能；GDrive File Provider 会 EDEADLK） |
 | SQLite 运行时按 `sqlite-runtime-tricks` skill：WAL / busy_timeout / ANALYZE / FTS5 / 分批清理 | 裸 `sqlite3_open` + 全表 `LIKE '%q%'` + 一次 `DELETE` 清库 |
 | CI = 能绿的真构建（`swift build` + 单测） | 为旧 xcodeproj+DuckDB 殉葬 |
 
@@ -174,7 +175,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | --- | --- |
 | 路径 | `android/` |
 | 定位 | 备份阅读器 + 前台粘贴/分享；**不做**后台剪贴板监听 |
-| 数据 | SAF 读 `ClipVault/backup`（兼容旧目录 `Keepsake/backup`；与 Mac GDrive fan-out 一致） |
+| 数据 | SAF 读优先 `ClipVault/cvbak`，兼容 `ClipVault/backup` / `Keepsake/backup`（与 Mac GDrive fan-out 一致） |
 | 发布 | `.github/workflows/android-apk.yml` → artifact / tag Release |
 
 ---
@@ -211,3 +212,73 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 ```
 
 完整复盘：`docs/incident-20260811-wrong-data-home.md`
+
+---
+
+## 7. 备份增量铁律（incident 2026-08-13 · GDrive EDEADLK）
+
+**增量是核心能力。对云盘目标每周期全量重拷 = 偷懒 / 无能，禁止。**
+
+### 背景（必须记住）
+
+| 项 | 事实 |
+| --- | --- |
+| 表象 | `blobs 校验失败 missing=N` + `Resource deadlock avoided`（EDEADLK） |
+| 真因 | File Provider（`~/Library/CloudStorage/GoogleDrive-*`）不是块设备；高频 create/unlink + `F_FULLFSYNC` 把域楔死 |
+| 直接触发 | 旧逻辑对 **gdrive/icloud 每轮 `forceFullCopy=true`**（为修 clonefile 假成功而矫枉过正） |
+| 对照 | iCloud 增量正常；夸克本地 APFS 暂存可 full；GDrive 旧路径 `ClipVault/backup` 楔死后连 mkdir 也 EDEADLK |
+| 修复 | commit `3cb4d9a`：size-match 增量 + cloudSafe + 新根 `ClipVault/cvbak` |
+
+### 禁止（agent / 代码 / 运维）
+
+| 禁止 | 说明 |
+| --- | --- |
+| **云目标每轮 forceFull** | `forceFullCopy = (dest == gdrive \|\| icloud \|\| …)` **一律非法** |
+| **CloudStorage 路径 `F_FULLFSYNC`** | 无磁盘 barrier 语义，只会加压 File Provider 协调路径 |
+| **为「保险」重写全部 CAS** | 完整度靠 **verify + 只修 missing/sizeMismatch**，不靠全量重拷 |
+| **把 bulk full 当默认** | 「简单粗暴全拷」在 PR/review 直接打回 |
+
+### 必须
+
+| 必须 | 说明 |
+| --- | --- |
+| **增量 CAS 镜像** | 目标已存在且 `size` 一致且 `size > 0` → **skip** |
+| **只修坏的** | missing / size 0 占位 / sizeMismatch → 单文件 rewrite + 退避 |
+| **forceFull 白名单** | **仅**本地 APFS 暂存（当前：`quark` staging；或显式 local staging 根） |
+| **cloudSafe 写路径** | gdrive/icloud：禁 FULLFSYNC；流式写或等价；EDEADLK 退避；禁止紧循环 mass `copyItem` |
+| **最新快照面** | 灾备主面是 `latest/` + `blobs/` CAS；named snapshot 可 best-effort，**不得**为 snap 失败否定已成功的增量 latest |
+| **路径楔死** | 换干净子树（如 `cvbak`）或本地暂存 + 诚实 `ok:local_staging`；**禁止**对 wedged 树死磕全量 |
+
+### 代码锚点
+
+```text
+CloudDocsBackupService.syncBlobsToCAS
+  forceFullCopy: true  → 仅 quark / 本地 staging
+  cloudSafe: true      → gdrive + icloud
+  size-match continue  → 增量核心
+
+BackupDestinations.backupRoot(gdrive)
+  优先 My Drive/ClipVault/cvbak   # 避开 wedged backup/
+```
+
+### 自检（改备份相关代码后）
+
+```bash
+# 1) 源码不得再出现「云目标 forceFull」
+rg -n 'forceFull.*gdrive|gdrive.*forceFull|forceFullCopy: true' ClipFlow/
+
+# 2) 跑一次备份：gdrive 日志应为 +0/repairK 或小增量，不是 +N 全量（N=全部 blob 数）
+# [Backup] dest=gdrive ok … blobs=N +0/repair0   ← 稳态
+# [Backup] dest=gdrive ok … blobs=N +N/repair0   ← 仅首次填空或修楔后允许一次
+```
+
+### 错误心态（写进复盘）
+
+| 错误 | 正确 |
+| --- | --- |
+| 「全量最稳」 | 全量最稳的是 **语义**（sqlite3_backup 快照 + CAS 校验），不是 **每轮字节重传** |
+| 「File Provider 不靠谱所以狂写」 | 越狂写越楔死；靠增量 + 校验 + 退避 |
+| 「clonefile 假成功 → 永远 full copy」 | clonefile 禁用于云目标即可；**增量 full-byte 只针对缺失文件** |
+
+相关 nmem：`clipvault_research_gdrive_fileprovider_edeadlk_20260813` · `clipvault_fix_gdrive_edeadlk_cvbak_20260813`
+
