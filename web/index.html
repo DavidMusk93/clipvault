@@ -3930,6 +3930,23 @@ window.ClipViewMasonry = Masonry;
       toast('归档仍在进行，完成后会自动出现在卡片上');
     }
 
+    async function clearArchiveKeepUrl(itemId) {
+      if (!itemId) return;
+      if (!window.confirm('只删除归档正文，保留这条网址？')) return;
+      try {
+        const res = await fetch(API + '/api/archive?id=' + encodeURIComponent(itemId), { method: 'DELETE' });
+        const data = await res.json();
+        if (!data.ok) {
+          toast('清除归档失败');
+          return;
+        }
+        toast('已清除归档 · 网址还在');
+        await refreshClipInPlace(itemId);
+      } catch (_) {
+        toast('清除归档失败');
+      }
+    }
+
     async function refreshClipInPlace(itemId) {
       try {
         const res = await fetch(API + '/api/clips?id=' + encodeURIComponent(itemId) + '&limit=1');
@@ -4149,6 +4166,9 @@ window.ClipViewMasonry = Masonry;
           bits.push(
             `<button type="button" class="fmt-btn is-primary" data-view-archive="${escAttr(itemId)}" title="查看归档正文"><span class="material-symbols-outlined">visibility</span>查看</button>`
           );
+          bits.push(
+            `<button type="button" class="fmt-btn" data-clear-archive="${escAttr(itemId)}" title="只去掉归档，保留这条网址"><span class="material-symbols-outlined">scan_delete</span>清除归档</button>`
+          );
         } else if (itemId) {
           bits.push(
             `<button type="button" class="fmt-btn" data-archive-url="${escAttr(href)}" data-item-id="${escAttr(itemId)}" title="用本机浏览器引擎归档正文（手动 · save useful）"><span class="material-symbols-outlined">inventory_2</span>归档网页</button>`
@@ -4246,7 +4266,8 @@ window.ClipViewMasonry = Masonry;
           const copyBtn = e.target.closest && e.target.closest('[data-copy-text]');
           const archBtn = e.target.closest && e.target.closest('[data-archive-url]');
           const viewBtn = e.target.closest && e.target.closest('[data-view-archive]');
-          if (!rawBtn && !prettyBtn && !openBtn && !copyBtn && !archBtn && !viewBtn) return;
+          const clearBtn = e.target.closest && e.target.closest('[data-clear-archive]');
+          if (!rawBtn && !prettyBtn && !openBtn && !copyBtn && !archBtn && !viewBtn && !clearBtn) return;
           const card = e.target.closest('.m3-card');
           if (!card) return;
           const id = card.dataset.id;
@@ -4302,6 +4323,13 @@ window.ClipViewMasonry = Masonry;
               const live = clips.find((c) => c.id === id);
               if (live && live.htmlContent) openArchiveReader(live);
             });
+            return;
+          }
+          if (clearBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = clearBtn.getAttribute('data-clear-archive') || (card && card.dataset.id);
+            if (id) clearArchiveKeepUrl(id);
           }
         },
         true
@@ -5078,6 +5106,10 @@ window.ClipViewMasonry = Masonry;
             return;
           }
           if (d.type === 'archive_error' && d.id) {
+            return;
+          }
+          if (d.type === 'archive_cleared' && d.id) {
+            refreshClipInPlace(d.id);
             return;
           }
         } catch (_) {}

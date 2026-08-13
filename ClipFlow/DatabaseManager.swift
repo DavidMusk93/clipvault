@@ -549,6 +549,16 @@ final class DatabaseManager: ObservableObject {
         return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
     }
 
+    private func metaDelete(_ key: String) {
+        guard let db = db else { return }
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM keepsake_meta WHERE key = ?;", -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, key)
+            _ = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+    }
+
     private func metaSet(_ key: String, _ value: String) {
         guard let db = db else { return }
         var stmt: OpaquePointer?
@@ -1148,17 +1158,42 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Same content re-copied: keep one row, refresh timestamp / source / count; keep stable id.
-    /// If row was soft-deleted, re-copy restores it to the main library.
+    /// If row was soft-deleted, re-copy restores the **URL capture** only — user-made
+    /// web archive is derivative and must not auto-revive (save useful, not ghost archive).
     private func bumpLatestAlive(id: String, item: ClipboardItem) -> Bool {
         guard let db = db else { return false }
-        let sql = """
-        UPDATE clipboard_items SET
-            timestamp = ?,
-            source_app = COALESCE(?, source_app),
-            copy_count = COALESCE(copy_count, 1) + 1,
-            deleted_at = NULL
-        WHERE id = ?;
-        """
+        var wasDeleted = false
+        var q: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT deleted_at FROM clipboard_items WHERE id = ?;", -1, &q, nil) == SQLITE_OK {
+            bindText(q, 1, id)
+            if sqlite3_step(q) == SQLITE_ROW {
+                wasDeleted = sqlite3_column_type(q, 0) != SQLITE_NULL
+            }
+        }
+        sqlite3_finalize(q)
+
+        // Capture bump never carries html. Reviving from trash: strip archive overlay.
+        let sql: String
+        if wasDeleted {
+            sql = """
+            UPDATE clipboard_items SET
+                timestamp = ?,
+                source_app = COALESCE(?, source_app),
+                copy_count = COALESCE(copy_count, 1) + 1,
+                deleted_at = NULL,
+                html_content = NULL
+            WHERE id = ?;
+            """
+        } else {
+            sql = """
+            UPDATE clipboard_items SET
+                timestamp = ?,
+                source_app = COALESCE(?, source_app),
+                copy_count = COALESCE(copy_count, 1) + 1,
+                deleted_at = NULL
+            WHERE id = ?;
+            """
+        }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         sqlite3_bind_double(stmt, 1, item.timestamp.timeIntervalSince1970)
@@ -1167,13 +1202,29 @@ final class DatabaseManager: ObservableObject {
         let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
         guard rc == SQLITE_DONE else { return false }
-        // Re-index FTS if restored from trash (FTS may have been removed on soft-delete).
+        if wasDeleted {
+            metaDelete("archive.\(id)")
+        }
+        // Alive bump: keep existing archive HTML in row; FTS must re-read it.
+        var htmlForFts = item.htmlContent
+        if !wasDeleted {
+            var hStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, "SELECT html_content FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
+                bindText(hStmt, 1, id)
+                if sqlite3_step(hStmt) == SQLITE_ROW {
+                    htmlForFts = sqlite3_column_text(hStmt, 0).map { String(cString: $0) }
+                }
+            }
+            sqlite3_finalize(hStmt)
+        } else {
+            htmlForFts = nil
+        }
         upsertFTS(
             id: id,
             text: item.textContent,
             ocr: item.ocrText,
             source: item.sourceApp,
-            html: item.htmlContent
+            html: htmlForFts
         )
         recordClipboardEvent(
             itemId: id,
@@ -1939,6 +1990,60 @@ final class DatabaseManager: ObservableObject {
                 source: "web"
             )
             _ = textSnippet
+            DispatchQueue.main.async { completion?(true) }
+        }
+    }
+
+    /// Remove archive overlay only. URL capture row stays.
+    func clearWebArchive(id: UUID, completion: ((Bool) -> Void)? = nil) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            let idStr = id.uuidString
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "UPDATE clipboard_items SET html_content = NULL WHERE id = ?;",
+                -1, &stmt, nil
+            ) == SQLITE_OK else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            self.bindText(stmt, 1, idStr)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            self.metaDelete("archive.\(idStr)")
+            var t: String?
+            var o: String?
+            var s: String?
+            var q: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "SELECT text_content, ocr_text, source_app FROM clipboard_items WHERE id = ?;",
+                -1, &q, nil
+            ) == SQLITE_OK {
+                self.bindText(q, 1, idStr)
+                if sqlite3_step(q) == SQLITE_ROW {
+                    t = sqlite3_column_text(q, 0).map { String(cString: $0) }
+                    o = sqlite3_column_text(q, 1).map { String(cString: $0) }
+                    s = sqlite3_column_text(q, 2).map { String(cString: $0) }
+                }
+            }
+            sqlite3_finalize(q)
+            self.upsertFTS(id: idStr, text: t, ocr: o, source: s, html: nil)
+            self.appendOperationLogSync(
+                action: "web_archive_clear",
+                itemId: idStr,
+                contentHash: nil,
+                detail: "clear overlay, keep url",
+                source: "web"
+            )
             DispatchQueue.main.async { completion?(true) }
         }
     }

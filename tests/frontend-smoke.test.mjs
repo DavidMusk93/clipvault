@@ -267,6 +267,12 @@ test('URL archive is manual + gated (save useful)', () => {
   assert.match(indexHtml, /save useful|归档网页/, 'product copy');
 });
 
+test('clear archive is independent of URL clip', () => {
+  assert.match(indexHtml, /data-clear-archive/, 'clear-archive control');
+  assert.match(indexHtml, /function clearArchiveKeepUrl/, 'clear helper');
+  assert.match(indexHtml, /DELETE/, 'uses DELETE /api/archive');
+});
+
 test('archived URL uses View sheet — no inline HTML in cards', () => {
   assert.match(indexHtml, /data-view-archive/, 'View button after archive');
   assert.match(indexHtml, /id="archiveReader"/, 'Apple reader sheet');

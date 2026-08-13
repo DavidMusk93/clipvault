@@ -168,6 +168,8 @@ class WebServer {
             handleClipEvaluate(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/archive" {
             handleArchivePost(data: data, connection: connection)
+        } else if method == "DELETE" && pathOnly.hasPrefix("/api/archive") {
+            handleArchiveClear(path: path, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
             handleDeleteClip(path: path, connection: connection)
         } else {
@@ -916,6 +918,23 @@ class WebServer {
             sendJSON(["ok": true, "job": job.json()], connection: connection)
         } else {
             sendJSON(["ok": false, "message": reason ?? "无法归档"], connection: connection)
+        }
+    }
+
+    /// DELETE /api/archive?id=  — drop archive overlay, keep URL clip.
+    private func handleArchiveClear(path: String, connection: NWConnection) {
+        guard let comps = URLComponents(string: "http://localhost\(path)"),
+              let idStr = comps.queryItems?.first(where: { $0.name == "id" })?.value,
+              let uuid = UUID(uuidString: idStr) else {
+            sendJSON(["ok": false, "message": "expected ?id="], connection: connection)
+            return
+        }
+        database.clearWebArchive(id: uuid) { [weak self] ok in
+            guard let self else { return }
+            if ok {
+                self.broadcastSSE(event: "archive_cleared", id: uuid.uuidString)
+            }
+            self.sendJSON(["ok": ok], connection: connection)
         }
     }
 
