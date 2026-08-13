@@ -196,3 +196,8 @@ test('URL safety: no clickable url-canonical; open goes through confirm gate', (
   assert.match(indexHtml, /background:\s*transparent\s*!important/, 'notes-rich must neutralize foreign bg');
   assert.match(indexHtml, /pointer-events:\s*none\s*!important/, 'rich anchors must not receive clicks');
 });
+
+test('url-display is single-line (nowrap pan)', () => {
+  assert.match(indexHtml, /\.url-display[\s\S]{0,400}?white-space:\s*nowrap/, 'url-display must be single-line nowrap');
+  assert.match(indexHtml, /URL: single-line block only|single-line only/, 'url path must not multi-line expand body');
+});

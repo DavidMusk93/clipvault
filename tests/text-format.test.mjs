@@ -27,13 +27,17 @@ test('ndjson', () => {
   assert.ok(f.pretty);
 });
 
-test('url expands query and exposes openHref', () => {
-  const f = formatTextForDisplay('https://example.com/path?foo=1&bar=two%20x');
+test('url is single-line display and exposes openHref', () => {
+  const raw = 'https://example.com/path?foo=1&bar=two%20x';
+  const f = formatTextForDisplay(raw);
   assert.equal(f.kind, 'url');
-  assert.ok(f.display.includes('foo'));
-  assert.equal(f.openHref, 'https://example.com/path?foo=1&bar=two%20x');
+  assert.equal(f.display, f.openHref);
+  assert.ok(!f.display.includes('\n'), 'URL display must be one line');
+  assert.equal(f.openHref, raw);
   const parts = formatUrlParts('https://example.com/a?x=1');
   assert.equal(parts.openHref, 'https://example.com/a?x=1');
+  assert.equal(parts.display, parts.openHref);
+  assert.ok(!parts.display.includes('\n'));
 });
 
 test('form body', () => {

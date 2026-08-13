@@ -116,25 +116,12 @@ function looksLikeUrl(t) {
   }
 }
 
-/** Structured URL for display + openHref for new tab. */
+/** Structured URL — single-line display (product: pan/ellipsis, no multi-line expand). */
 export function formatUrlParts(t) {
   const u = new URL(t);
   const openHref = u.href;
-  const lines = [];
-  lines.push(`${u.protocol}//${u.host}${u.pathname}`);
-  if (u.search && u.search.length > 1) {
-    lines.push('');
-    lines.push('# query');
-    for (const [k, v] of u.searchParams.entries()) {
-      lines.push(`${k} = ${v}`);
-    }
-  }
-  if (u.hash && u.hash.length > 1) {
-    lines.push('');
-    lines.push('# hash');
-    lines.push(u.hash.slice(1));
-  }
-  return { openHref, display: lines.join('\n'), host: u.host, path: u.pathname };
+  // One physical line only; long URLs pan horizontally like other is-single text.
+  return { openHref, display: openHref, host: u.host, path: u.pathname };
 }
 
 function looksLikeFormBody(t) {
