@@ -551,12 +551,16 @@ final class CloudDocsBackupService {
                                     try self.ensureCloudDir(blobs)
                                     self.scrubLatestTmpFiles(in: latest)
 
-                                    // GDrive File Provider: APFS clonefile often "succeeds" locally but
-                                    // does not upload real bytes → Android SAF sees incomplete blobs/.
-                                    // Always full-copy to cloud / remote-sync destinations
-                                    // (APFS clonefile often does not upload through File Providers).
-                                    let forceFull = (dest.type == "gdrive" || dest.type == "icloud" || dest.type == "quark")
-                                    let cas = self.syncBlobsToCAS(destRoot: blobs, forceFullCopy: forceFull)
+                                    // Quark staging is local APFS — full re-copy OK.
+                                    // GDrive/iCloud File Providers: never bulk re-copy every cycle (EDEADLK /
+                                    // "Resource deadlock avoided" under F_FULLFSYNC + mass copyItem).
+                                    // Size-match skip + repair missing/empty placeholders only.
+                                    let forceFull = (dest.type == "quark")
+                                    let cas = self.syncBlobsToCAS(
+                                        destRoot: blobs,
+                                        forceFullCopy: forceFull,
+                                        cloudSafe: (dest.type == "gdrive" || dest.type == "icloud")
+                                    )
                                     lastBlobCount = cas.total
                                     lastBlobBytes = cas.bytes
                                     totalBlobNew += cas.copied + cas.repaired
@@ -619,15 +623,21 @@ final class CloudDocsBackupService {
                                     self.fullFsync(latestManifest)
 
                                     if let snapId = snapId {
-                                        let snapDir = snaps.appendingPathComponent(snapId, isDirectory: true)
-                                        try self.fm.createDirectory(at: snapDir, withIntermediateDirectories: true)
-                                        let snapDB = snapDir.appendingPathComponent("clipflow.db")
-                                        try self.publishFileFullCopy(from: latestDB, to: snapDB)
-                                        try self.writeJSONAtomic(
-                                            manifest,
-                                            to: snapDir.appendingPathComponent("MANIFEST.json")
-                                        )
-                                        snapIdGlobal = snapId
+                                        // Named snapshots are best-effort on File Providers (EDEADLK on mkdir).
+                                        // latest/ + blobs/ are the disaster-recovery surface; snap failure must not fail the dest.
+                                        do {
+                                            let snapDir = snaps.appendingPathComponent(snapId, isDirectory: true)
+                                            try self.ensureCloudDir(snapDir)
+                                            let snapDB = snapDir.appendingPathComponent("clipflow.db")
+                                            try self.publishFileFullCopy(from: latestDB, to: snapDB, cloudSafe: (dest.type == "gdrive" || dest.type == "icloud"))
+                                            try self.writeJSONAtomic(
+                                                manifest,
+                                                to: snapDir.appendingPathComponent("MANIFEST.json")
+                                            )
+                                            snapIdGlobal = snapId
+                                        } catch {
+                                            print("[Backup] snapshot skipped dest=\(dest.id) id=\(snapId): \(error)")
+                                        }
                                     }
 
                                     self.pruneSnapshots(in: snaps, keep: self.config.keepSnapshots)
@@ -653,6 +663,33 @@ final class CloudDocsBackupService {
                                     )
                                 } catch {
                                     allSkip = false
+                                    // GDrive File Provider often returns EDEADLK for the whole tree.
+                                    // Fall back to local APFS staging (same honesty model as 夸克).
+                                    if dest.type == "gdrive" {
+                                        do {
+                                            let stage = self.gdriveLocalStagingRoot()
+                                            try self.publishFullBackupToLocalRoot(
+                                                root: stage,
+                                                artifact: artifact,
+                                                sha: sha,
+                                                size: size,
+                                                count: count,
+                                                host: host,
+                                                iso: iso,
+                                                created: created,
+                                                snapId: snapId
+                                            )
+                                            self.destLastError[dest.id] = nil
+                                            self.destLastPhase[dest.id] = "ok:local_staging"
+                                            self.destLastSuccessUnix[dest.id] = created.timeIntervalSince1970
+                                            messages.append("Google Drive: 本机暂存（云端 File Provider 死锁/不可写）")
+                                            anyOk = true
+                                            print("[Backup] dest=gdrive cloud fail → local staging ok: \(stage.path) (cloud err: \(error.localizedDescription))")
+                                            continue
+                                        } catch {
+                                            print("[Backup] dest=gdrive staging also failed: \(error)")
+                                        }
+                                    }
                                     self.destLastError[dest.id] = error.localizedDescription
                                     self.destLastPhase[dest.id] = "error"
                                     messages.append("\(BackupDestinationResolver.displayLabel(dest)): 失败")
@@ -738,10 +775,11 @@ final class CloudDocsBackupService {
     }
 
     /// Mirror local CAS into destination `blobs/`.
-    /// - Parameter forceFullCopy: **required for Google Drive / iCloud File Providers**.
-    ///   `clonefile` creates APFS clones that often never upload real payload bytes.
-    private func syncBlobsToCAS(destRoot: URL, forceFullCopy: Bool) -> CASSyncResult {
+    /// - forceFullCopy: rewrite every blob (local staging only; never on GDrive).
+    /// - cloudSafe: stream write + long backoff; never bulk delete+copyItem (EDEADLK).
+    private func syncBlobsToCAS(destRoot: URL, forceFullCopy: Bool, cloudSafe: Bool = false) -> CASSyncResult {
         try? fm.createDirectory(at: destRoot, withIntermediateDirectories: true)
+        scrubCloudTmpFiles(in: destRoot)
         let local = database.blobsDirectoryURL
         guard let files = try? fm.contentsOfDirectory(
             at: local,
@@ -754,6 +792,8 @@ final class CloudDocsBackupService {
         var bytes = 0
         var copied = 0
         var repaired = 0
+        var failures = 0
+        var consecutiveFailures = 0
         for src in files where src.pathExtension == "bin" {
             total += 1
             let size = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -762,20 +802,39 @@ final class CloudDocsBackupService {
             let existed = fm.fileExists(atPath: dest.path)
             if existed && !forceFullCopy {
                 let destSize = (try? dest.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+                // Empty / partial File Provider placeholders often report size 0.
                 if destSize == size, size > 0 {
+                    consecutiveFailures = 0
                     continue
                 }
             }
-            // Cloud File Providers: always full rewrite (clonefile stubs upload as empty/partial).
-            // Local disk: skip when size matches (above).
             do {
-                if existed { try? fm.removeItem(at: dest) }
-                try publishFileFullCopy(from: src, to: dest, allowClone: !forceFullCopy)
-                fullFsync(dest)
+                // Do NOT pre-delete dest: GDrive File Provider thrashing → EDEADLK on mass remove+copy.
+                try publishFileFullCopy(
+                    from: src,
+                    to: dest,
+                    allowClone: !forceFullCopy && !cloudSafe,
+                    cloudSafe: cloudSafe
+                )
                 if existed { repaired += 1 } else { copied += 1 }
+                consecutiveFailures = 0
             } catch {
+                failures += 1
+                consecutiveFailures += 1
                 print("[Backup] blob copy failed \(src.lastPathComponent): \(error)")
+                if cloudSafe {
+                    // Cooling period after a streak of deadlocks.
+                    let cool = min(2_000_000, 200_000 * UInt32(consecutiveFailures))
+                    usleep(cool)
+                }
             }
+            // Give Google Drive File Provider time between files.
+            if cloudSafe {
+                usleep(80_000)
+            }
+        }
+        if failures > 0 {
+            print("[Backup] CAS mirror incomplete failures=\(failures)/\(total) cloudSafe=\(cloudSafe)")
         }
         return CASSyncResult(total: total, bytes: bytes, copied: copied, repaired: repaired)
     }
@@ -822,45 +881,218 @@ final class CloudDocsBackupService {
     }
 
     /// Full byte copy into cloud mounts. Prefer copyItem; optional clone only for local disks.
-    private func publishFileFullCopy(from src: URL, to dst: URL, allowClone: Bool = false) throws {
+    /// - cloudSafe: stream write + /bin/cp fallback; no F_FULLFSYNC; long EDEADLK backoff.
+    private func publishFileFullCopy(
+        from src: URL,
+        to dst: URL,
+        allowClone: Bool = false,
+        cloudSafe: Bool = false
+    ) throws {
+        let cloud = cloudSafe || isCloudFileProviderURL(dst)
+        if !cloud {
+            // Local APFS path: clone optional, fullFsync for durability.
+            if fm.fileExists(atPath: dst.path) { try? fm.removeItem(at: dst) }
+            if allowClone {
+                let rc = clonefile(src.path, dst.path, 0)
+                if rc == 0 { return }
+            }
+            let tmp = dst.deletingLastPathComponent()
+                .appendingPathComponent(".tmp_\(UUID().uuidString)_\(dst.lastPathComponent)")
+            try fm.copyItem(at: src, to: tmp)
+            fullFsync(tmp)
+            if fm.fileExists(atPath: dst.path) { try? fm.removeItem(at: dst) }
+            try fm.moveItem(at: tmp, to: dst)
+            fullFsync(dst)
+            return
+        }
+
+        // --- Cloud File Provider (GDrive / iCloud) ---
+        // Never F_FULLFSYNC. Prefer stream write; FileManager.copyItem often hits EDEADLK.
+        let expected = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+        if expected > 0, fm.fileExists(atPath: dst.path) {
+            let got = (try? dst.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+            if got == expected { return }
+        }
+
+        var lastError: Error?
+        for attempt in 0..<8 {
+            let tmp = dst.deletingLastPathComponent()
+                .appendingPathComponent(".tmp_\(UUID().uuidString)_\(dst.lastPathComponent)")
+            do {
+                if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
+                // Strategy A: stream bytes (avoids copyfile/clonefile path that deadlocks).
+                try streamCopyNoFsync(from: src, to: tmp)
+                try promoteCloudTmp(tmp: tmp, dst: dst, expected: expected)
+                return
+            } catch {
+                lastError = error
+                try? fm.removeItem(at: tmp)
+            }
+            // Strategy B: /bin/cp subprocess (sometimes succeeds when Foundation fails).
+            do {
+                if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
+                try shellCp(from: src, to: tmp)
+                try promoteCloudTmp(tmp: tmp, dst: dst, expected: expected)
+                return
+            } catch {
+                lastError = error
+                try? fm.removeItem(at: tmp)
+                if isTransientCloudCopyError(error) || isTransientCloudCopyError(lastError!) {
+                    // Exponential-ish backoff: 0.15s → ~3.5s
+                    let usec = UInt32(min(3_500_000, 150_000 * (1 << min(attempt, 4))))
+                    usleep(usec)
+                    continue
+                }
+                throw error
+            }
+        }
+        if let lastError { throw lastError }
+    }
+
+    /// Byte-stream copy without fsync/fullfsync (File Provider safe).
+    private func streamCopyNoFsync(from src: URL, to dst: URL) throws {
+        let inFd = open(src.path, O_RDONLY)
+        guard inFd >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [
+                NSLocalizedDescriptionKey: "open src failed \(src.lastPathComponent)"
+            ])
+        }
+        defer { close(inFd) }
+        let outFd = open(dst.path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        guard outFd >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [
+                NSLocalizedDescriptionKey: "open dst failed \(dst.lastPathComponent)"
+            ])
+        }
+        defer { close(outFd) }
+        var buf = [UInt8](repeating: 0, count: 256 * 1024)
+        while true {
+            let n = read(inFd, &buf, buf.count)
+            if n == 0 { break }
+            if n < 0 {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [
+                    NSLocalizedDescriptionKey: "read failed"
+                ])
+            }
+            var off = 0
+            while off < n {
+                let w = write(outFd, &buf[off], n - off)
+                if w <= 0 {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [
+                        NSLocalizedDescriptionKey: "write failed"
+                    ])
+                }
+                off += w
+            }
+        }
+        // flush kernel buffers only — no F_FULLFSYNC
+        _ = fsync(outFd)
+    }
+
+    private func shellCp(from src: URL, to dst: URL) throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/cp")
+        p.arguments = ["-f", src.path, dst.path]
+        let err = Pipe()
+        p.standardError = err
+        p.standardOutput = Pipe()
+        try p.run()
+        p.waitUntilExit()
+        if p.terminationStatus != 0 {
+            let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "cp failed"
+            throw NSError(domain: "ClipFlow.Backup", code: 11, userInfo: [
+                NSLocalizedDescriptionKey: msg,
+                NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(EDEADLK), userInfo: nil)
+            ])
+        }
+    }
+
+    private func promoteCloudTmp(tmp: URL, dst: URL, expected: Int) throws {
+        let tmpSize = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+        if expected > 0, tmpSize != expected {
+            try? fm.removeItem(at: tmp)
+            throw NSError(domain: "ClipFlow.Backup", code: 12, userInfo: [
+                NSLocalizedDescriptionKey: "tmp size \(tmpSize) != expected \(expected)"
+            ])
+        }
+        // Replace final name: prefer replaceItemAt; fall back to remove+move.
         if fm.fileExists(atPath: dst.path) {
-            try fm.removeItem(at: dst)
+            do {
+                _ = try fm.replaceItemAt(dst, withItemAt: tmp)
+            } catch {
+                try? fm.removeItem(at: dst)
+                try fm.moveItem(at: tmp, to: dst)
+            }
+        } else {
+            try fm.moveItem(at: tmp, to: dst)
         }
-        if allowClone {
-            let rc = clonefile(src.path, dst.path, 0)
-            if rc == 0 { return }
+        let got = (try? dst.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? -1
+        if expected > 0, got != expected {
+            throw NSError(domain: "ClipFlow.Backup", code: 13, userInfo: [
+                NSLocalizedDescriptionKey: "dest size \(got) != expected \(expected)"
+            ])
         }
-        // Stage to sibling temp then rename — File Provider sees a closed file.
-        let tmp = dst.deletingLastPathComponent()
-            .appendingPathComponent(".tmp_\(UUID().uuidString)_\(dst.lastPathComponent)")
-        try fm.copyItem(at: src, to: tmp)
-        fullFsync(tmp)
-        if fm.fileExists(atPath: dst.path) {
-            try fm.removeItem(at: dst)
+    }
+
+    private func scrubCloudTmpFiles(in dir: URL) {
+        let all = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil, options: [])) ?? []
+        for f in all {
+            let name = f.lastPathComponent
+            if name.hasPrefix(".tmp_") || name.hasPrefix(".probe") {
+                try? fm.removeItem(at: f)
+            }
         }
-        try fm.moveItem(at: tmp, to: dst)
-        fullFsync(dst)
     }
 
     private func writeJSONAtomic<T: Encodable>(_ value: T, to url: URL) throws {
         let data = try JSONEncoder.pretty.encode(value)
+        let cloud = isCloudFileProviderURL(url)
         let tmp = url.deletingLastPathComponent()
             .appendingPathComponent(".tmp_\(UUID().uuidString)_\(url.lastPathComponent)")
         try data.write(to: tmp, options: .atomic)
-        fullFsync(tmp)
+        if !cloud { fullFsync(tmp) }
         if fm.fileExists(atPath: url.path) {
             try fm.removeItem(at: url)
         }
         try fm.moveItem(at: tmp, to: url)
-        fullFsync(url)
+        if !cloud { fullFsync(url) }
     }
 
-    /// Request durable write (helps File Providers observe closed, complete files).
+    /// F_FULLFSYNC on Google Drive / iCloud File Provider paths frequently returns
+    /// EDEADLK ("Resource deadlock avoided") and aborts whole CAS mirrors.
+    private func isCloudFileProviderURL(_ url: URL) -> Bool {
+        let p = url.path
+        return p.contains("/Library/CloudStorage/")
+            || p.contains("/Mobile Documents/")
+            || p.contains("GoogleDrive-")
+    }
+
+    private func isTransientCloudCopyError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSPOSIXErrorDomain, ns.code == Int(EDEADLK) || ns.code == Int(EAGAIN) {
+            return true
+        }
+        if let und = ns.userInfo[NSUnderlyingErrorKey] as? NSError,
+           und.domain == NSPOSIXErrorDomain,
+           und.code == Int(EDEADLK) || und.code == Int(EAGAIN) {
+            return true
+        }
+        // NSCocoaErrorDomain 512 "couldn't be copied" often wraps EDEADLK for File Providers.
+        if ns.domain == NSCocoaErrorDomain, ns.code == NSFileWriteUnknownError || ns.code == 512 {
+            if let und = ns.userInfo[NSUnderlyingErrorKey] as? NSError,
+               und.domain == NSPOSIXErrorDomain {
+                return und.code == Int(EDEADLK) || und.code == Int(EAGAIN) || und.code == Int(EBUSY)
+            }
+        }
+        return false
+    }
+
+    /// Request durable write on **local** APFS only. No-op for cloud File Providers.
     private func fullFsync(_ url: URL) {
+        if isCloudFileProviderURL(url) { return }
         let path = url.path
         let fd = open(path, O_RDONLY)
         guard fd >= 0 else { return }
-        // F_FULLFSYNC is the durable form on APFS; fall back to fsync.
         if fcntl(fd, F_FULLFSYNC) == -1 {
             _ = fsync(fd)
         }
@@ -945,6 +1177,68 @@ final class CloudDocsBackupService {
     }
 
     /// File Provider (Google Drive) often fails multi-level createDirectory in one call.
+
+    /// Local APFS staging for Google Drive when File Provider is wedged (EDEADLK).
+    /// User can still upload `~/ClipVault-Backups/GDrive/backup` via Drive web or mirror mode.
+    private func gdriveLocalStagingRoot() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("ClipVault-Backups/GDrive/backup", isDirectory: true)
+    }
+
+    /// Write a complete backup package to a **local** root (APFS). Always full-copy CAS.
+    private func publishFullBackupToLocalRoot(
+        root: URL,
+        artifact: URL,
+        sha: String,
+        size: Int,
+        count: Int,
+        host: String,
+        iso: String,
+        created: Date,
+        snapId: String?
+    ) throws {
+        let latest = latestDir(in: root)
+        let snaps = snapshotsDir(in: root)
+        let blobs = blobsDir(in: root)
+        try fm.createDirectory(at: latest, withIntermediateDirectories: true)
+        try fm.createDirectory(at: snaps, withIntermediateDirectories: true)
+        try fm.createDirectory(at: blobs, withIntermediateDirectories: true)
+        let cas = syncBlobsToCAS(destRoot: blobs, forceFullCopy: true, cloudSafe: false)
+        let verified = try verifyCASMirror(local: database.blobsDirectoryURL, dest: blobs)
+        guard verified.ok else {
+            throw NSError(domain: "ClipFlow.Backup", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "staging blobs missing=\(verified.missing) sizeMismatch=\(verified.sizeMismatch)"
+            ])
+        }
+        let latestDB = latest.appendingPathComponent("clipflow.db")
+        let latestManifest = latest.appendingPathComponent("MANIFEST.json")
+        try publishFileFullCopy(from: artifact, to: latestDB, allowClone: true, cloudSafe: false)
+        let blobNames = listBinNames(in: blobs)
+        let manifest = Manifest(
+            createdAt: iso,
+            createdAtUnix: created.timeIntervalSince1970,
+            sourcePath: database.dbFileURL.path,
+            byteSize: size,
+            sha256: sha,
+            itemCount: count,
+            host: host,
+            note: "dest:gdrive-staging" + (snapId.map { " snap:\($0)" } ?? ""),
+            blobCount: blobNames.count,
+            blobBytes: cas.bytes,
+            blobFiles: blobNames,
+            blobsVerified: true
+        )
+        try writeJSONAtomic(manifest, to: latestManifest)
+        if let snapId = snapId {
+            let snapDir = snaps.appendingPathComponent(snapId, isDirectory: true)
+            try fm.createDirectory(at: snapDir, withIntermediateDirectories: true)
+            try publishFileFullCopy(from: latestDB, to: snapDir.appendingPathComponent("clipflow.db"), allowClone: true)
+            try writeJSONAtomic(manifest, to: snapDir.appendingPathComponent("MANIFEST.json"))
+        }
+        pruneSnapshots(in: snaps, keep: config.keepSnapshots)
+        _ = cas
+    }
+
     private func ensureCloudDir(_ url: URL) throws {
         var isDir: ObjCBool = false
         if fm.fileExists(atPath: url.path, isDirectory: &isDir) {
@@ -1050,7 +1344,7 @@ final class CloudDocsBackupService {
             ClipTimeFormat.isoLocal(unix: $0)
         }
         let destStatuses: [BackupDestinationStatus] = config.destinations.map { d in
-            let rootURL = BackupDestinationResolver.backupRoot(for: d)
+            var rootURL = BackupDestinationResolver.backupRoot(for: d)
             // Path alone is not enough for quark (staging is always creatable).
             let avail = BackupDestinationResolver.isDestinationReady(d)
             let lastU = destLastSuccessUnix[d.id]
@@ -1064,7 +1358,14 @@ final class CloudDocsBackupService {
                     phase = "ok:staging_cloud_listed"
                 }
             }
-            let hint = BackupDestinationResolver.availabilityHint(for: d)
+            var hint = BackupDestinationResolver.availabilityHint(for: d)
+            // GDrive: when File Provider is wedged we stage locally — surface path + honesty.
+            if d.type == "gdrive", phase == "ok:local_staging" {
+                let stage = gdriveLocalStagingRoot()
+                rootURL = stage
+                hint = "ClipVault→本机暂存（Google Drive File Provider 不可写/EDEADLK） · 路径: \(stage.path) · 请重启 Google Drive 后点备份，或手动上传该文件夹到网盘"
+            }
+            let showHint = (d.type == "quark") || (d.type == "gdrive" && phase == "ok:local_staging") || !avail
             return BackupDestinationStatus(
                 id: d.id,
                 type: d.type,
@@ -1076,8 +1377,7 @@ final class CloudDocsBackupService {
                 lastSuccessUnix: lastU,
                 lastError: destLastError[d.id],
                 lastPhase: phase,
-                // Always surface quark hint (local ≠ cloud); others only when not ready.
-                hint: (d.type == "quark") ? hint : (avail ? nil : hint)
+                hint: showHint ? hint : nil
             )
         }
         let onLabels = destStatuses.filter { $0.enabled && $0.available }.map(\.label)

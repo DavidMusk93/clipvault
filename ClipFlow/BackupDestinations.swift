@@ -117,13 +117,14 @@ enum BackupDestinationResolver {
         case "icloud":
             return cloudDocsURL()?.appendingPathComponent("ClipFlow/backup", isDirectory: true)
         case "gdrive":
-            // Brand folder ClipVault; keep reading legacy Keepsake/backup.
+            // Brand folder ClipVault. Prefer `cvbak` (fresh) because legacy
+            // `ClipVault/backup` can wedge Google Drive File Provider (EDEADLK on every write).
+            // Still accept existing backup / Keepsake paths if cvbak is not yet created
+            // *and* the old tree is writable — resolver always returns cvbak first so new
+            // writes land on a clean path; readers that only look at `backup/` keep legacy.
             guard let my = googleDriveMyDriveURL() else { return nil }
-            let preferred = my.appendingPathComponent("ClipVault/backup", isDirectory: true)
-            if FileManager.default.fileExists(atPath: preferred.path) { return preferred }
-            let legacy = my.appendingPathComponent("Keepsake/backup", isDirectory: true)
-            if FileManager.default.fileExists(atPath: legacy.path) { return legacy }
-            return preferred
+            let fresh = my.appendingPathComponent("ClipVault/cvbak", isDirectory: true)
+            return fresh
         case "quark":
             return quarkStagingURL(configuredPath: dest.path)
         case "folder":
