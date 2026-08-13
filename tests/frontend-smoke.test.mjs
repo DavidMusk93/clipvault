@@ -197,7 +197,17 @@ test('URL safety: no clickable url-canonical; open goes through confirm gate', (
   assert.match(indexHtml, /pointer-events:\s*none\s*!important/, 'rich anchors must not receive clicks');
 });
 
-test('url-display is single-line (nowrap pan)', () => {
-  assert.match(indexHtml, /\.url-display[\s\S]{0,400}?white-space:\s*nowrap/, 'url-display must be single-line nowrap');
-  assert.match(indexHtml, /URL: single-line block only|single-line only/, 'url path must not multi-line expand body');
+test('url dual surface locked in index.html (canonical + parse)', () => {
+  // Header strip: single-line pan
+  assert.match(indexHtml, /\.url-display[\s\S]{0,500}?white-space:\s*nowrap/, 'canonical url-display is nowrap single-line');
+  // Parse must exist (query expand)
+  assert.match(indexHtml, /# query/, 'formatUrlParts must build # query section');
+  assert.match(indexHtml, /searchParams\.entries/, 'must iterate query params');
+  // UI must render BOTH surfaces for pretty url
+  assert.match(indexHtml, /url dual surface|URL dual surface/, 'renderPlainBody comment/path for dual surface');
+  assert.match(indexHtml, /url-parsed/, 'parsed body class url-parsed required');
+  assert.match(indexHtml, /renderUrlDisplayBlock/, 'canonical strip required');
+  // safety still on
+  assert.doesNotMatch(indexHtml, /class="url-canonical"/);
+  assert.match(indexHtml, /function requestOpenExternalUrl/);
 });

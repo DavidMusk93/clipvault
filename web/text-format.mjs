@@ -116,12 +116,32 @@ function looksLikeUrl(t) {
   }
 }
 
-/** Structured URL — single-line display (product: pan/ellipsis, no multi-line expand). */
+/**
+ * Structured URL parse for pretty display.
+ * Product contract (do not regress either side):
+ *  - openHref / canonical: full single-line href (card header strip)
+ *  - display: multi-line parse — origin+path, then # query / # hash key=value
+ *  - Never make display clickable; open only via explicit button + confirm
+ */
 export function formatUrlParts(t) {
   const u = new URL(t);
   const openHref = u.href;
-  // One physical line only; long URLs pan horizontally like other is-single text.
-  return { openHref, display: openHref, host: u.host, path: u.pathname };
+  const lines = [];
+  // first line is one logical URL line (host+path); query/hash expand below
+  lines.push(`${u.protocol}//${u.host}${u.pathname}`);
+  if (u.search && u.search.length > 1) {
+    lines.push('');
+    lines.push('# query');
+    for (const [k, v] of u.searchParams.entries()) {
+      lines.push(`${k} = ${v}`);
+    }
+  }
+  if (u.hash && u.hash.length > 1) {
+    lines.push('');
+    lines.push('# hash');
+    lines.push(u.hash.slice(1));
+  }
+  return { openHref, display: lines.join('\n'), host: u.host, path: u.pathname };
 }
 
 function looksLikeFormBody(t) {

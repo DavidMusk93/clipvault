@@ -624,6 +624,18 @@
       user-select: text;
       cursor: text;
     }
+    /* Parsed query/hash body under single-line canonical */
+    .text-scroll.url-parsed {
+      margin-top: 0;
+    }
+    .text-scroll.url-parsed pre {
+      margin: 0;
+      padding: 8px 10px 10px;
+      font-size: 12.5px;
+      line-height: 1.4;
+      white-space: pre; /* hard newlines from parse only — no soft wrap */
+      overflow-x: auto;
+    }
     .url-display.is-adult-risk {
       background: rgba(198, 40, 40, 0.08);
       color: #b71c1c;
@@ -2911,11 +2923,29 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
-    /** Structured URL — single-line only (no query multi-line expand). */
+    /**
+     * URL parse — dual surface (AGENTS / product, no more thrash):
+     *  - openHref: full single-line canonical for header strip + open/copy
+     *  - display: multi-line # query / # hash breakdown for pretty body
+     */
     function formatUrlParts(t) {
       const u = new URL(t);
       const openHref = u.href;
-      return { openHref, display: openHref, host: u.host, path: u.pathname };
+      const lines = [];
+      lines.push(`${u.protocol}//${u.host}${u.pathname}`);
+      if (u.search && u.search.length > 1) {
+        lines.push('');
+        lines.push('# query');
+        for (const [k, v] of u.searchParams.entries()) {
+          lines.push(`${k} = ${v}`);
+        }
+      }
+      if (u.hash && u.hash.length > 1) {
+        lines.push('');
+        lines.push('# hash');
+        lines.push(u.hash.slice(1));
+      }
+      return { openHref, display: lines.join('\n'), host: u.host, path: u.pathname };
     }
 
     function looksLikeFormBody(t) {
@@ -3302,9 +3332,9 @@ window.ClipViewMasonry = Masonry;
           case 'url': {
             const parts = formatUrlParts(raw.trim());
             return out({
-              display: parts.display, // single-line href
+              display: parts.display,
               pretty: true,
-              label: chip('URL'),
+              label: chip('参数'),
               openHref: parts.openHref,
               engine: 'url',
             });
@@ -3565,9 +3595,13 @@ window.ClipViewMasonry = Masonry;
         showRawToggle: true,
         rawMode: false,
       });
-      // URL: single-line block only (no multi-line pretty pre + duplicate url-display)
+      // URL dual surface (locked): single-line canonical + multi-line param parse
       if (fmt.kind === 'url' && fmt.openHref) {
-        return `${toolbar}${renderUrlDisplayBlock(fmt.openHref, fmt.openHref || text)}`;
+        const parsed = text || fmt.display || fmt.openHref;
+        return (
+          `${toolbar}${renderUrlDisplayBlock(fmt.openHref, fmt.openHref)}` +
+          `<div class="text-scroll is-pretty url-parsed${extraClass}" data-format-kind="url" data-engine="url"><pre><code data-hljs="skip">${esc(parsed)}</code></pre></div>`
+        );
       }
       return `${toolbar}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(fmt.kind || 'plain')}" data-engine="${escAttr(fmt.engine || '')}"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(text)}</code></pre></div>`;
     }
@@ -3602,6 +3636,7 @@ window.ClipViewMasonry = Masonry;
       });
       const codeAttr = codey ? '' : ' data-hljs="skip"';
       if (kind === 'url' && openHref) {
+        // raw mode: single-line canonical only (full string as captured)
         return `${toolbar}${renderUrlDisplayBlock(openHref, openHref)}`;
       }
       return `${toolbar}<div class="text-scroll${mode}${extraClass}" data-format-kind="${escAttr(kind)}" data-raw="1"><pre><code class="${langCls.trim()}"${codeAttr}>${esc(raw)}</code></pre></div>`;

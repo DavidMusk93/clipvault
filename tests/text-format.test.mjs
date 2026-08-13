@@ -27,17 +27,23 @@ test('ndjson', () => {
   assert.ok(f.pretty);
 });
 
-test('url is single-line display and exposes openHref', () => {
-  const raw = 'https://example.com/path?foo=1&bar=two%20x';
+test('url dual surface: openHref single-line + display parses query', () => {
+  // LOCK: never drop either side (2026-08 thrash).
+  // openHref = full canonical one line; display = multi-line # query parse.
+  const raw = 'https://example.com/path?foo=1&bar=two%20x#frag';
   const f = formatTextForDisplay(raw);
   assert.equal(f.kind, 'url');
-  assert.equal(f.display, f.openHref);
-  assert.ok(!f.display.includes('\n'), 'URL display must be one line');
-  assert.equal(f.openHref, raw);
+  assert.equal(f.openHref, 'https://example.com/path?foo=1&bar=two%20x#frag');
+  assert.ok(!f.openHref.includes('\n'), 'openHref must be single-line');
+  assert.ok(f.display.includes('# query'), 'pretty must expand query section');
+  assert.ok(f.display.includes('foo = 1'), 'pretty must list query keys');
+  assert.ok(f.display.includes('bar = two x'), 'pretty must decode query values');
+  assert.ok(f.display.includes('# hash'), 'pretty must expand hash section');
+  assert.ok(f.display.includes('\n'), 'parsed display is multi-line');
   const parts = formatUrlParts('https://example.com/a?x=1');
   assert.equal(parts.openHref, 'https://example.com/a?x=1');
-  assert.equal(parts.display, parts.openHref);
-  assert.ok(!parts.display.includes('\n'));
+  assert.match(parts.display, /# query/);
+  assert.match(parts.display, /x = 1/);
 });
 
 test('form body', () => {

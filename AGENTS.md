@@ -191,6 +191,16 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 - `launchctl` 重启后不跑校验  
 - 未确认路径就对 db 做删除、覆盖、migration「修复」  
 
+### URL 双面展示（禁止再拆丢）
+
+| 面 | 行为 |
+| --- | --- |
+| **canonical** | `openHref` 整链 **单行**（`.url-display` nowrap 横滑） |
+| **parse** | pretty 正文多行：`host/path` + `# query` 键值 + `# hash` |
+| **打开** | 仅按钮 → `requestOpenExternalUrl`（确认 / 成人门禁） |
+
+**禁止**只留单行不要解析，或只展开参数却做成可点 `<a>`。改 URL 展示必须同时跑 `tests/text-format.test.mjs` 的 dual surface 用例。
+
 ### 必须
 
 ```bash
@@ -237,6 +247,16 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **CloudStorage 路径 `F_FULLFSYNC`** | 无磁盘 barrier 语义，只会加压 File Provider 协调路径 |
 | **为「保险」重写全部 CAS** | 完整度靠 **verify + 只修 missing/sizeMismatch**，不靠全量重拷 |
 | **把 bulk full 当默认** | 「简单粗暴全拷」在 PR/review 直接打回 |
+
+### URL 双面展示（禁止再拆丢）
+
+| 面 | 行为 |
+| --- | --- |
+| **canonical** | `openHref` 整链 **单行**（`.url-display` nowrap 横滑） |
+| **parse** | pretty 正文多行：`host/path` + `# query` 键值 + `# hash` |
+| **打开** | 仅按钮 → `requestOpenExternalUrl`（确认 / 成人门禁） |
+
+**禁止**只留单行不要解析，或只展开参数却做成可点 `<a>`。改 URL 展示必须同时跑 `tests/text-format.test.mjs` 的 dual surface 用例。
 
 ### 必须
 
@@ -306,6 +326,16 @@ rg -n 'forceFullCopy:\s*true|forceFull\s*=\s*\(dest' ClipFlow/
 | 无确认 `window.open` 外链 | 尤其成人/敏感域名 |
 | 信任剪贴板 `style`/`bgcolor`/`color` | 一律剥离后再渲染 |
 | 用「方便」恢复一键裸开链接 | PR 直接打回 |
+
+### URL 双面展示（禁止再拆丢）
+
+| 面 | 行为 |
+| --- | --- |
+| **canonical** | `openHref` 整链 **单行**（`.url-display` nowrap 横滑） |
+| **parse** | pretty 正文多行：`host/path` + `# query` 键值 + `# hash` |
+| **打开** | 仅按钮 → `requestOpenExternalUrl`（确认 / 成人门禁） |
+
+**禁止**只留单行不要解析，或只展开参数却做成可点 `<a>`。改 URL 展示必须同时跑 `tests/text-format.test.mjs` 的 dual surface 用例。
 
 ### 必须
 
