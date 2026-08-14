@@ -157,51 +157,51 @@
       ".cv-selbar.has-hl .cv-hl-btn,.cv-selbar.has-hl .cv-hl-btn + .cv-div{display:none;}",
       ".cv-selbar .cv-del{color:#d70015;}",
       "@media (hover:hover) and (pointer:fine){.cv-selbar button:hover{background:rgba(0,0,0,.04);}.cv-selbar .cv-del:hover{background:rgba(215,0,21,.08);}}",
-      ".cv-note{position:fixed;z-index:51;left:0;top:0;display:flex;flex-direction:column;gap:8px;",
-      "width:min(320px,calc(100vw - 20px));padding:12px 14px 14px;",
+      ".cv-note{position:fixed;z-index:51;left:0;top:0;display:flex;flex-direction:column;gap:6px;",
+      "width:min(300px,calc(100vw - 20px));padding:10px 12px 10px;",
       "opacity:0;pointer-events:none;transform:translate3d(0,8px,0) scale(.97);transform-origin:20% 0;",
       "transition:opacity .2s cubic-bezier(.22,1,.36,1),transform .24s cubic-bezier(.22,1,.36,1);",
       "background:rgba(255,255,255,.92);color:#1d1d1f;",
       "-webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);",
-      "border-radius:18px;border:.5px solid rgba(60,60,67,.12);",
-      "box-shadow:0 12px 40px rgba(0,0,0,.18),0 0 0 .5px rgba(255,255,255,.4) inset;}",
+      "border-radius:14px;border:.5px solid rgba(60,60,67,.12);",
+      "box-shadow:0 10px 28px rgba(0,0,0,.16),0 0 0 .5px rgba(255,255,255,.4) inset;}",
       ".cv-note.open{opacity:1;pointer-events:auto;transform:translate3d(0,0,0) scale(1);}",
-      ".cv-note .cv-grabber{width:36px;height:5px;border-radius:999px;background:rgba(60,60,67,.22);",
+      ".cv-note .cv-grabber{width:28px;height:4px;border-radius:999px;background:rgba(60,60,67,.22);",
       "margin:0 auto 2px;display:none;flex-shrink:0;}",
-      ".cv-note .cv-note-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}",
-      ".cv-note .cv-note-head strong{font-size:17px;font-weight:600;letter-spacing:-.02em;}",
-      ".cv-note .cv-quote{font-size:12px;line-height:1.4;color:#6e6e73;letter-spacing:-.01em;",
-      "padding-left:8px;border-left:2px solid #ffd60a;max-height:3.2em;overflow:hidden;}",
-      ".cv-note textarea{width:100%;min-height:96px;box-sizing:border-box;border:.5px solid rgba(60,60,67,.18);",
-      "border-radius:14px;padding:12px 14px;font:inherit;font-size:15px;letter-spacing:-.01em;line-height:1.4;",
+      ".cv-note .cv-note-head{display:flex;align-items:baseline;gap:8px;min-width:0;}",
+      ".cv-note .cv-note-head strong{font-size:13px;font-weight:600;letter-spacing:-.02em;flex-shrink:0;}",
+      ".cv-note .cv-quote{font-size:11px;line-height:1.3;color:#6e6e73;letter-spacing:-.01em;margin:0;",
+      "padding-left:6px;border-left:2px solid #ffd60a;max-height:1.3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;}",
+      ".cv-note textarea{width:100%;min-height:52px;box-sizing:border-box;border:0;",
+      "border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;letter-spacing:-.01em;line-height:1.35;",
       "resize:vertical;outline:none;background:rgba(120,120,128,.08);color:#1d1d1f;}",
-      ".cv-note textarea:focus{background:#fff;border-color:rgba(0,113,227,.45);box-shadow:0 0 0 4px rgba(0,113,227,.18);}",
-      ".cv-note .cv-note-actions{display:flex;gap:10px;padding-top:2px;}",
-      ".cv-note .cv-note-actions button{flex:1;height:44px;border:0;border-radius:12px;",
-      "font:inherit;font-size:16px;font-weight:600;letter-spacing:-.02em;cursor:pointer;}",
+      ".cv-note textarea:focus{background:rgba(120,120,128,.12);box-shadow:inset 0 0 0 .5px rgba(0,113,227,.45);}",
+      ".cv-note .cv-note-actions{display:flex;gap:8px;}",
+      ".cv-note .cv-note-actions button{flex:1;height:32px;border:0;border-radius:8px;",
+      "font:inherit;font-size:13px;font-weight:590;letter-spacing:-.016em;cursor:pointer;}",
       ".cv-note .cv-note-actions button:active{transform:scale(.98);}",
       ".cv-note .cv-ok{background:#0071e3;color:#fff;}",
       ".cv-note .cv-ok:disabled{opacity:.4;cursor:not-allowed;}",
-      ".cv-note .cv-ghost{background:rgba(120,120,128,.14);color:#1d1d1f;font-weight:500;}",
-      ".cv-note-body{display:flex;flex-direction:column;gap:10px;}",
-      ".cv-hist-title{font-size:13px;font-weight:600;color:#6e6e73;letter-spacing:-.01em;margin:2px 0 0;}",
-      ".cv-hist{list-style:none;margin:0;padding:0 0 2px 12px;border-left:2px solid rgba(60,60,67,.10);",
-      "max-height:160px;overflow:auto;-webkit-overflow-scrolling:touch;}",
-      ".cv-hist-item{position:relative;padding:0 0 12px 14px;}",
-      ".cv-hist-item:last-child{padding-bottom:2px;}",
-      ".cv-hist-item::before{content:'';position:absolute;left:-17px;top:6px;width:8px;height:8px;",
-      "border-radius:50%;background:#0071e3;box-shadow:0 0 0 3px rgba(0,113,227,.12);}",
-      ".cv-hist-item.is-mark::before{background:rgba(60,60,67,.35);box-shadow:0 0 0 3px rgba(60,60,67,.08);}",
-      ".cv-hist-time{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}",
-      ".cv-hist-rel{font-size:13px;font-weight:600;letter-spacing:-.02em;}",
-      ".cv-hist-abs{font-size:11px;color:#6e6e73;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}",
-      ".cv-hist-badge{display:inline-block;margin-top:4px;font-size:11px;font-weight:600;color:#6e6e73;",
-      "background:rgba(120,120,128,.12);border-radius:999px;padding:2px 8px;}",
-      ".cv-hist-note{margin:6px 0 0;font-size:14px;line-height:1.45;letter-spacing:-.01em;",
+      ".cv-note .cv-ghost{background:rgba(120,120,128,.12);color:#1d1d1f;font-weight:510;}",
+      ".cv-note-body{display:flex;flex-direction:column;gap:8px;}",
+      ".cv-hist-title{font-size:11px;font-weight:600;color:#6e6e73;letter-spacing:-.01em;margin:2px 0 0;}",
+      ".cv-hist{list-style:none;margin:0;padding:0 0 0 10px;border-left:1.5px solid rgba(60,60,67,.12);",
+      "max-height:140px;overflow:auto;-webkit-overflow-scrolling:touch;}",
+      ".cv-hist-item{position:relative;padding:0 0 8px 12px;}",
+      ".cv-hist-item:last-child{padding-bottom:0;}",
+      ".cv-hist-item::before{content:'';position:absolute;left:-13.5px;top:5px;width:6px;height:6px;",
+      "border-radius:50%;background:#0071e3;box-shadow:0 0 0 2px rgba(0,113,227,.12);}",
+      ".cv-hist-item.is-mark::before{background:rgba(60,60,67,.35);box-shadow:0 0 0 2px rgba(60,60,67,.08);}",
+      ".cv-hist-time{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;}",
+      ".cv-hist-rel{font-size:12px;font-weight:600;letter-spacing:-.02em;}",
+      ".cv-hist-abs{font-size:10px;color:#6e6e73;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}",
+      ".cv-hist-badge{font-size:10px;font-weight:600;color:#6e6e73;",
+      "background:rgba(120,120,128,.12);border-radius:999px;padding:1px 6px;}",
+      ".cv-hist-note{margin:3px 0 0;font-size:13px;line-height:1.35;letter-spacing:-.01em;",
       "white-space:pre-wrap;word-break:break-word;}",
-      ".cv-hist-empty{font-size:13px;color:#6e6e73;padding:10px 0 4px;text-align:center;}",
-      ".cv-note.is-sheet{left:8px!important;right:8px;width:auto;top:auto!important;bottom:12px;",
-      "transform-origin:50% 100%;max-width:none;border-radius:20px 20px 18px 18px;}",
+      ".cv-hist-empty{font-size:12px;color:#6e6e73;padding:6px 0 2px;text-align:center;}",
+      ".cv-note.is-sheet{left:8px!important;right:8px;width:auto;top:auto!important;bottom:10px;",
+      "transform-origin:50% 100%;max-width:none;border-radius:16px;}",
       ".cv-note.is-sheet .cv-grabber{display:block;}",
       "main.cv-article h1,main.cv-article h2,main.cv-article h3,main.cv-article h4{scroll-margin-top:16px;}",
       "@media (prefers-reduced-motion:reduce){.cv-selbar,.cv-note{transition:opacity .15s ease;transform:none!important;}}",
@@ -556,9 +556,10 @@
     var head = el("div", "cv-note-head");
     head.appendChild(el("strong", "", "评论"));
     var quote = el("p", "cv-quote");
+    head.appendChild(quote);
     var ta = document.createElement("textarea");
     ta.placeholder = "写下一句想法（可选）…";
-    ta.rows = 3;
+    ta.rows = 2;
     ta.maxLength = 4000;
     var actions = el("div", "cv-note-actions");
     var cancelBtn = el("button", "cv-ghost", "取消");
@@ -569,7 +570,6 @@
     var histTitle = el("div", "cv-hist-title", "记录");
     var hist = el("ul", "cv-hist");
     var body = el("div", "cv-note-body");
-    body.appendChild(quote);
     body.appendChild(ta);
     body.appendChild(actions);
     body.appendChild(histTitle);
@@ -807,8 +807,8 @@
         var time = el("div", "cv-hist-time");
         time.appendChild(el("span", "cv-hist-rel", t.rel));
         if (t.abs && t.abs !== t.rel) time.appendChild(el("span", "cv-hist-abs", t.abs));
+        time.appendChild(el("span", "cv-hist-badge", badge));
         li.appendChild(time);
-        li.appendChild(el("span", "cv-hist-badge", badge));
         if (comment) li.appendChild(el("div", "cv-hist-note", comment));
         hist.appendChild(li);
       });
@@ -952,18 +952,17 @@
     var note = el("div", "cv-note open");
     note.innerHTML =
       '<div class="cv-grabber"></div>' +
-      '<div class="cv-note-head"><strong>评论</strong></div>' +
+      '<div class="cv-note-head"><strong>评论</strong><p class="cv-quote">dependencies between distant positions</p></div>' +
       '<div class="cv-note-body">' +
-      '<p class="cv-quote">dependencies between distant positions</p>' +
-      '<textarea rows="3" maxlength="4000" placeholder="写下一句想法（可选）…"></textarea>' +
+      '<textarea rows="2" maxlength="4000" placeholder="写下一句想法（可选）…"></textarea>' +
       '<div class="cv-note-actions"><button class="cv-ghost" type="button">取消</button>' +
       '<button class="cv-ok" type="button">提交</button></div>' +
       '<div class="cv-hist-title">记录</div>' +
       '<ul class="cv-hist">' +
-      '<li class="cv-hist-item"><div class="cv-hist-time"><span class="cv-hist-rel">刚刚</span><span class="cv-hist-abs">13:41</span></div>' +
-      '<span class="cv-hist-badge">评论</span><div class="cv-hist-note">这里记下为什么这段值得留。</div></li>' +
-      '<li class="cv-hist-item is-mark"><div class="cv-hist-time"><span class="cv-hist-rel">3 分钟前</span></div>' +
-      '<span class="cv-hist-badge">划线</span></li></ul></div>';
+      '<li class="cv-hist-item"><div class="cv-hist-time"><span class="cv-hist-rel">刚刚</span><span class="cv-hist-abs">13:41</span>' +
+      '<span class="cv-hist-badge">评论</span></div><div class="cv-hist-note">这里记下为什么这段值得留。</div></li>' +
+      '<li class="cv-hist-item is-mark"><div class="cv-hist-time"><span class="cv-hist-rel">3 分钟前</span>' +
+      '<span class="cv-hist-badge">划线</span></div></li></ul></div>';
     if (scene !== "note") ui.appendChild(selbar);
     if (scene !== "sel" && scene !== "hl" && noteMark) ui.appendChild(note);
     document.body.appendChild(ui);
