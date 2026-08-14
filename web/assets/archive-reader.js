@@ -158,7 +158,7 @@
       ".cv-selbar .cv-del{color:#d70015;}",
       "@media (hover:hover) and (pointer:fine){.cv-selbar button:hover{background:rgba(0,0,0,.04);}.cv-selbar .cv-del:hover{background:rgba(215,0,21,.08);}}",
       ".cv-note{position:fixed;z-index:51;left:0;top:0;display:flex;flex-direction:column;gap:6px;",
-      "width:min(300px,calc(100vw - 20px));padding:10px 12px 10px;",
+      "width:min(340px,calc(100vw - 20px));padding:10px 12px 10px;",
       "opacity:0;pointer-events:none;transform:translate3d(0,8px,0) scale(.97);transform-origin:20% 0;",
       "transition:opacity .2s cubic-bezier(.22,1,.36,1),transform .24s cubic-bezier(.22,1,.36,1);",
       "background:rgba(255,255,255,.92);color:#1d1d1f;",
@@ -168,41 +168,38 @@
       ".cv-note.open{opacity:1;pointer-events:auto;transform:translate3d(0,0,0) scale(1);}",
       ".cv-note .cv-grabber{width:28px;height:4px;border-radius:999px;background:rgba(60,60,67,.22);",
       "margin:0 auto 2px;display:none;flex-shrink:0;}",
-      ".cv-note .cv-note-head{display:flex;align-items:baseline;gap:8px;min-width:0;}",
+      ".cv-note .cv-note-head{display:flex;align-items:center;gap:6px;min-width:0;}",
       ".cv-note .cv-note-head strong{font-size:13px;font-weight:600;letter-spacing:-.02em;flex-shrink:0;}",
       ".cv-note .cv-quote{font-size:11px;line-height:1.3;color:#6e6e73;letter-spacing:-.01em;margin:0;",
-      "padding-left:6px;border-left:2px solid #ffd60a;max-height:1.3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;}",
+      "padding-left:6px;border-left:2px solid #ffd60a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0;}",
+      ".cv-note-tools{display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:auto;}",
+      ".cv-note .cv-mini{appearance:none;border:0;height:24px;padding:0 9px;border-radius:6px;cursor:pointer;",
+      "font:inherit;font-size:12px;font-weight:590;letter-spacing:-.016em;}",
+      ".cv-note .cv-mini:active{transform:scale(.97);}",
+      ".cv-note .cv-ghost{background:rgba(120,120,128,.12);color:#1d1d1f;}",
+      ".cv-note .cv-ok{background:#0071e3;color:#fff;}",
+      ".cv-note .cv-ok:disabled{opacity:.4;cursor:not-allowed;}",
       ".cv-note textarea{width:100%;min-height:52px;box-sizing:border-box;border:0;",
       "border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;letter-spacing:-.01em;line-height:1.35;",
       "resize:vertical;outline:none;background:rgba(120,120,128,.08);color:#1d1d1f;}",
       ".cv-note textarea:focus{background:rgba(120,120,128,.12);box-shadow:inset 0 0 0 .5px rgba(0,113,227,.45);}",
-      ".cv-note .cv-note-actions{display:flex;gap:8px;}",
-      ".cv-note .cv-note-actions button{flex:1;height:32px;border:0;border-radius:8px;",
-      "font:inherit;font-size:13px;font-weight:590;letter-spacing:-.016em;cursor:pointer;}",
-      ".cv-note .cv-note-actions button:active{transform:scale(.98);}",
-      ".cv-note .cv-ok{background:#0071e3;color:#fff;}",
-      ".cv-note .cv-ok:disabled{opacity:.4;cursor:not-allowed;}",
-      ".cv-note .cv-ghost{background:rgba(120,120,128,.12);color:#1d1d1f;font-weight:510;}",
       ".cv-note-body{display:flex;flex-direction:column;gap:8px;}",
       ".cv-hist-title{font-size:11px;font-weight:600;color:#6e6e73;letter-spacing:-.01em;margin:2px 0 0;}",
-      ".cv-hist{list-style:none;margin:0;padding:0 0 0 10px;border-left:1.5px solid rgba(60,60,67,.12);",
-      "max-height:140px;overflow:auto;-webkit-overflow-scrolling:touch;}",
-      ".cv-hist-item{position:relative;padding:0 0 8px 12px;}",
-      ".cv-hist-item:last-child{padding-bottom:0;}",
-      ".cv-hist-item::before{content:'';position:absolute;left:-13.5px;top:5px;width:6px;height:6px;",
-      "border-radius:50%;background:#0071e3;box-shadow:0 0 0 2px rgba(0,113,227,.12);}",
-      ".cv-hist-item.is-mark::before{background:rgba(60,60,67,.35);box-shadow:0 0 0 2px rgba(60,60,67,.08);}",
-      ".cv-hist-time{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;}",
-      ".cv-hist-rel{font-size:12px;font-weight:600;letter-spacing:-.02em;}",
-      ".cv-hist-abs{font-size:10px;color:#6e6e73;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}",
-      ".cv-hist-badge{font-size:10px;font-weight:600;color:#6e6e73;",
-      "background:rgba(120,120,128,.12);border-radius:999px;padding:1px 6px;}",
-      ".cv-hist-note{margin:3px 0 0;font-size:13px;line-height:1.35;letter-spacing:-.01em;",
+      ".cv-hist{list-style:none;margin:0;padding:0;max-height:160px;overflow:auto;-webkit-overflow-scrolling:touch;}",
+      ".cv-hist-item{display:grid;grid-template-columns:8px 1fr;gap:8px;padding:3px 0 8px;align-items:stretch;}",
+      ".cv-hist-item:last-child{padding-bottom:2px;}",
+      ".cv-hist-rail{width:2px;border-radius:1px;background:rgba(60,60,67,.18);justify-self:center;}",
+      ".cv-hist-item:hover .cv-hist-rail{background:rgba(0,113,227,.45);}",
+      ".cv-hist-main{min-width:0;}",
+      ".cv-hist-time{display:flex;align-items:baseline;gap:5px;flex-wrap:wrap;color:#6e6e73;}",
+      ".cv-hist-badge{font-size:12px;font-weight:600;color:#1d1d1f;letter-spacing:-.016em;}",
+      ".cv-hist-rel,.cv-hist-abs{font-size:11px;font-weight:400;letter-spacing:-.01em;}",
+      ".cv-hist-rel::before{content:'·';margin-right:5px;opacity:.45;}",
+      ".cv-hist-note{margin:2px 0 0;font-size:13px;line-height:1.4;letter-spacing:-.01em;color:#1d1d1f;",
       "white-space:pre-wrap;word-break:break-word;}",
       ".cv-hist-empty{font-size:12px;color:#6e6e73;padding:6px 0 2px;text-align:center;}",
       ".cv-note.is-sheet{left:8px!important;right:8px;width:auto;top:auto!important;bottom:10px;",
       "transform-origin:50% 100%;max-width:none;border-radius:16px;}",
-      ".cv-note.is-sheet .cv-grabber{display:block;}",
       "main.cv-article h1,main.cv-article h2,main.cv-article h3,main.cv-article h4{scroll-margin-top:16px;}",
       "@media (prefers-reduced-motion:reduce){.cv-selbar,.cv-note{transition:opacity .15s ease;transform:none!important;}}",
       "@media (prefers-reduced-transparency:reduce){.cv-selbar,.cv-note,.cv-selbar .cv-caret{background:#fff;backdrop-filter:none;-webkit-backdrop-filter:none;}}",
@@ -561,17 +558,17 @@
     ta.placeholder = "写下一句想法（可选）…";
     ta.rows = 2;
     ta.maxLength = 4000;
-    var actions = el("div", "cv-note-actions");
-    var cancelBtn = el("button", "cv-ghost", "取消");
-    var saveBtn = el("button", "cv-ok", "提交");
+    var tools = el("div", "cv-note-tools");
+    var cancelBtn = el("button", "cv-mini cv-ghost", "取消");
+    var saveBtn = el("button", "cv-mini cv-ok", "提交");
     cancelBtn.type = saveBtn.type = "button";
-    actions.appendChild(cancelBtn);
-    actions.appendChild(saveBtn);
+    tools.appendChild(cancelBtn);
+    tools.appendChild(saveBtn);
+    head.appendChild(tools);
     var histTitle = el("div", "cv-hist-title", "记录");
     var hist = el("ul", "cv-hist");
     var body = el("div", "cv-note-body");
     body.appendChild(ta);
-    body.appendChild(actions);
     body.appendChild(histTitle);
     body.appendChild(hist);
     note.appendChild(grabber);
@@ -803,13 +800,15 @@
         var isMark = op.kind === "highlight_add" && !comment;
         var badge = isMark ? "划线" : "评论";
         var t = formatOpTime(op);
-        var li = el("li", "cv-hist-item" + (isMark ? " is-mark" : ""));
+        var li = el("li", "cv-hist-item");
+        li.appendChild(el("i", "cv-hist-rail"));
+        var main = el("div", "cv-hist-main");
         var time = el("div", "cv-hist-time");
-        time.appendChild(el("span", "cv-hist-rel", t.rel));
-        if (t.abs && t.abs !== t.rel) time.appendChild(el("span", "cv-hist-abs", t.abs));
         time.appendChild(el("span", "cv-hist-badge", badge));
-        li.appendChild(time);
-        if (comment) li.appendChild(el("div", "cv-hist-note", comment));
+        time.appendChild(el("span", "cv-hist-rel", t.rel));
+        main.appendChild(time);
+        if (comment) main.appendChild(el("div", "cv-hist-note", comment));
+        li.appendChild(main);
         hist.appendChild(li);
       });
     }
@@ -952,17 +951,19 @@
     var note = el("div", "cv-note open");
     note.innerHTML =
       '<div class="cv-grabber"></div>' +
-      '<div class="cv-note-head"><strong>评论</strong><p class="cv-quote">dependencies between distant positions</p></div>' +
+      '<div class="cv-note-head"><strong>评论</strong><p class="cv-quote">语义边界</p>' +
+      '<div class="cv-note-tools"><button class="cv-mini cv-ghost" type="button">取消</button>' +
+      '<button class="cv-mini cv-ok" type="button">提交</button></div></div>' +
       '<div class="cv-note-body">' +
       '<textarea rows="2" maxlength="4000" placeholder="写下一句想法（可选）…"></textarea>' +
-      '<div class="cv-note-actions"><button class="cv-ghost" type="button">取消</button>' +
-      '<button class="cv-ok" type="button">提交</button></div>' +
       '<div class="cv-hist-title">记录</div>' +
       '<ul class="cv-hist">' +
-      '<li class="cv-hist-item"><div class="cv-hist-time"><span class="cv-hist-rel">刚刚</span><span class="cv-hist-abs">13:41</span>' +
-      '<span class="cv-hist-badge">评论</span></div><div class="cv-hist-note">这里记下为什么这段值得留。</div></li>' +
-      '<li class="cv-hist-item is-mark"><div class="cv-hist-time"><span class="cv-hist-rel">3 分钟前</span>' +
-      '<span class="cv-hist-badge">划线</span></div></li></ul></div>';
+      '<li class="cv-hist-item"><i class="cv-hist-rail"></i><div class="cv-hist-main">' +
+      '<div class="cv-hist-time"><span class="cv-hist-badge">评论</span><span class="cv-hist-rel">刚刚</span></div>' +
+      '<div class="cv-hist-note">这里记下为什么这段值得留。</div></div></li>' +
+      '<li class="cv-hist-item"><i class="cv-hist-rail"></i><div class="cv-hist-main">' +
+      '<div class="cv-hist-time"><span class="cv-hist-badge">划线</span><span class="cv-hist-rel">3 分钟前</span></div>' +
+      '</div></li></ul></div>';
     if (scene !== "note") ui.appendChild(selbar);
     if (scene !== "sel" && scene !== "hl" && noteMark) ui.appendChild(note);
     document.body.appendChild(ui);
@@ -977,7 +978,7 @@
       try {
         noteMark.scrollIntoView({ block: "center", behavior: "instant" });
       } catch (_) {}
-      if (window.innerWidth <= 640) {
+      if (scene === "note" || window.innerWidth <= 640) {
         note.classList.add("is-sheet");
       } else {
         requestAnimationFrame(function () {
