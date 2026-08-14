@@ -401,6 +401,6 @@ Hook 事件进 **单独 DuckDB**，禁止写入 `clipboard_items`。
 
 安装：`bash trae_hooks/install.sh`。改配置后 **硬重启 Trae** 才加载 hook。采集脚本必须永远 exit 0。
 
-会话时间线是长期前端：JSON / Markdown 走 `web/session-render.mjs` + 既有 `markdown-render.mjs` / `text-format.mjs`（marked + DOMPurify + highlight.js）。禁止再 DIY 一套 markdown 语法。
+会话时间线是长期前端，按 **IM 俯瞰**：用户右 / 助手左 / 工具与系统分色。JSON / Markdown 走 `web/session-render.mjs` + `markdown-render.mjs` / `text-format.mjs`。角色色真源：`docs/design-taste.md`。禁止 DIY markdown 语法。气泡内等宽必须换行，禁止撑破卡片。
 
 

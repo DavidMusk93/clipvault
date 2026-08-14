@@ -10,6 +10,8 @@ import {
   toolCommand,
   blocksFromEvent,
   renderValue,
+  roleFromEvent,
+  imMessagesFromEvents,
 } from '../web/session-render.mjs';
 
 test('toolCommand prefers cmd then command', () => {
@@ -68,4 +70,26 @@ test('renderValue markdown without libs falls back to escaped pre', () => {
   assert.equal(r.kind, 'plain');
   assert.match(r.html, /<pre>/);
   assert.doesNotMatch(r.html, /<h1>/);
+});
+
+test('IM roles: user / assistant / tool / system', () => {
+  assert.equal(roleFromEvent({ hook_event: 'UserPromptSubmit' }), 'user');
+  assert.equal(roleFromEvent({ hook_event: 'Stop' }), 'assistant');
+  assert.equal(roleFromEvent({ hook_event: 'PostToolUse' }), 'tool');
+  assert.equal(roleFromEvent({ hook_event: 'SessionStart' }), 'system');
+});
+
+test('IM overview drops PreToolUse when Post exists', () => {
+  const rows = imMessagesFromEvents([
+    { hook_event: 'PostToolUse', tool_use_id: 'c1', ts: '2', event_id: 'b' },
+    { hook_event: 'UserPromptSubmit', ts: '1', event_id: 'a' },
+    { hook_event: 'PreToolUse', tool_use_id: 'c1', ts: '1.5', event_id: 'p' },
+    { hook_event: 'PreToolUse', tool_use_id: 'orphan', ts: '1.6', event_id: 'o' },
+  ]);
+  assert.deepEqual(
+    rows.map((r) => r.event.hook_event),
+    ['UserPromptSubmit', 'PreToolUse', 'PostToolUse'],
+  );
+  assert.equal(rows[0].role, 'user');
+  assert.equal(rows[2].align, 'start');
 });

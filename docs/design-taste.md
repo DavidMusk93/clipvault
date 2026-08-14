@@ -59,6 +59,21 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 布局：左侧 3px 色轨 + 来源 pill + 字段区 **不 soft-wrap、可 XY pan**。
 
+## Trae 会话 IM 角色色
+
+时间线按即时通讯俯瞰：用户右、助手左、工具/系统居中偏左。语义色与类型标签同源，禁止灰底灰字一锅炖。
+
+| role | 中文 | 对齐 | Ink / 软底 | 轨 |
+| --- | --- | --- | --- | --- |
+| `user` | 你 | 右 | Honey `#C47A2C` / 12% | Honey |
+| `assistant` | 助手 | 左 | Ink + 白气泡 | Accent `#0071E3` |
+| `tool` | 工具 | 左 | `#1565C0` / 12% | `#1565C0` |
+| `system` | 系统 | 中 | `#8E8E93` / 12% | 灰 |
+
+映射：`UserPromptSubmit`→user；`Stop`（及 assistant 正文）→assistant；`PreToolUse`/`PostToolUse`→tool；`SessionStart`/`Notification`→system。同一 `tool_use_id` 有 Post 则俯瞰里不重复画 Pre。
+
+**溢出**：气泡 `min-width:0`；等宽 `pre/code` 必须 `pre-wrap` + `overflow-wrap:anywhere`，禁止撑破卡片。
+
 ## 源码绑定
 
 | 端 | 文件 |

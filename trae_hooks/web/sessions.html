@@ -19,6 +19,12 @@
       --card: #ffffff;
       --accent: #0071e3;
       --honey: #c47a2c;
+      --honey-soft: rgba(196, 122, 44, 0.12);
+      --user-ink: #8a5414;
+      --tool: #1565c0;
+      --tool-soft: rgba(21, 101, 192, 0.12);
+      --system: #8e8e93;
+      --system-soft: rgba(142, 142, 147, 0.14);
       --radius: 16px;
       --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
       --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -55,9 +61,13 @@
     a.back {
       color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 500;
     }
-    main { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 58px); }
-    .list, .detail { padding: 16px 18px; }
-    .list { border-right: 0.5px solid var(--separator); }
+    main {
+      display: grid; grid-template-columns: 280px minmax(0, 1fr);
+      min-height: calc(100vh - 58px); min-width: 0;
+    }
+    .list, .detail { padding: 16px 18px; min-width: 0; }
+    .list { border-right: 0.5px solid var(--separator); overflow: auto; }
+    .detail { display: flex; flex-direction: column; overflow: hidden; }
     .card {
       background: var(--card);
       border-radius: 12px;
@@ -69,29 +79,71 @@
     .card.active { outline: 2px solid rgba(0,113,227,0.35); }
     .card .id { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
     .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
-    .ev {
-      background: var(--card);
-      border-radius: 12px;
-      padding: 12px 14px;
-      margin-bottom: 8px;
-      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    .thread { flex: 1; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
+    .row {
+      display: flex; width: 100%; margin: 0 0 10px;
+      min-width: 0;
     }
+    .row.user { justify-content: flex-end; }
+    .row.assistant, .row.tool { justify-content: flex-start; }
+    .row.system { justify-content: center; }
+    .bubble {
+      max-width: min(720px, 86%);
+      min-width: 0;
+      border-radius: 16px;
+      padding: 10px 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+      overflow: hidden;
+    }
+    .bubble.user {
+      background: var(--honey-soft);
+      color: var(--user-ink);
+      border-bottom-right-radius: 6px;
+    }
+    .bubble.assistant {
+      background: var(--card);
+      border-left: 3px solid var(--accent);
+      border-bottom-left-radius: 6px;
+    }
+    .bubble.tool {
+      background: var(--tool-soft);
+      border-left: 3px solid var(--tool);
+      max-width: min(820px, 94%);
+    }
+    .bubble.system {
+      background: var(--system-soft);
+      color: var(--system);
+      border-radius: 980px;
+      padding: 6px 12px;
+      font-size: 12px;
+      max-width: min(520px, 80%);
+    }
+    .who {
+      font-size: 11px; font-weight: 650; letter-spacing: 0.02em;
+      margin-bottom: 4px; opacity: 0.85;
+    }
+    .bubble.user .who { color: var(--honey); text-align: right; }
+    .bubble.assistant .who { color: var(--accent); }
+    .bubble.tool .who { color: var(--tool); }
+    .meta { color: var(--muted); font-size: 11px; margin-top: 6px; }
     .badge {
       display: inline-block;
       font-size: 11px; font-weight: 600;
       padding: 2px 8px; border-radius: 980px;
-      background: rgba(196,122,44,0.12); color: var(--honey);
+      background: var(--honey-soft); color: var(--honey);
     }
-    .badge.tool { background: rgba(21,101,192,0.12); color: #1565c0; }
-    .badge.stop { background: rgba(46,125,50,0.12); color: #2e7d32; }
-    .badge.warn { background: rgba(178,80,0,0.12); color: #b25000; }
-    pre {
+    pre, code, .hljs, .md-preview, .kv {
+      max-width: 100%; min-width: 0;
+    }
+    pre, pre.hljs, .hljs {
       font-family: var(--font-mono);
       font-size: 12px;
       white-space: pre-wrap;
+      overflow-wrap: anywhere;
       word-break: break-word;
-      margin-top: 8px;
+      margin-top: 6px;
       color: #333;
+      overflow-x: auto;
     }
     .kv { margin-top: 8px; }
     .kv .k {
@@ -156,22 +208,17 @@
     <section class="detail" id="events"><div class="empty">选择左侧会话</div></section>
   </main>
   <script type="module">
-    import { prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
+    import { imMessagesFromEvents, prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
 
     const $ = (id) => document.getElementById(id);
     let current = "";
+    let painted = "";
     const engines = () => ({
       marked: globalThis.marked,
       purify: globalThis.DOMPurify,
       hljs: globalThis.hljs,
       jsBeautify: globalThis.js_beautify,
     });
-    const badgeClass = (name) => {
-      if (name === "PreToolUse" || name === "PostToolUse") return "tool";
-      if (name === "Stop") return "stop";
-      if (name === "UserPromptSubmit") return "warn";
-      return "";
-    };
     const esc = (s) => String(s ?? "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -216,28 +263,37 @@
         box.innerHTML = '<div class="empty">没有匹配事件</div>';
         return;
       }
-      box.innerHTML = data.events.map((e) => {
+      const rows = imMessagesFromEvents(data.events);
+      box.innerHTML = `<div class="thread">${rows.map((row) => {
+        const e = row.event;
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
-        const meta = [e.ts, tools, e.instance_id, e.cwd].filter(Boolean).join(" · ");
+        const meta = [e.ts, e.hook_event, tools].filter(Boolean).join(" · ");
         const body = renderEventBlocks(e, engines()).map((b) =>
-          `<div class="kv"><div class="k">${esc(b.key)} · ${esc(b.kind)}</div>${b.html}</div>`
+          `<div class="kv">${b.html}</div>`
         ).join("");
-        return `<article class="ev" data-id="${esc(e.event_id)}">
-          <span class="badge ${badgeClass(e.hook_event)}">${esc(e.hook_event)}</span>
-          <span class="meta">${esc(meta)}</span>
-          ${body}
-          <details class="raw">
-            <summary>原始 JSON</summary>
-            <div class="raw-body">加载中…</div>
-          </details>
-        </article>`;
-      }).join("");
+        return `<div class="row ${esc(row.role)}">
+          <article class="bubble ${esc(row.role)}" data-id="${esc(e.event_id)}">
+            <div class="who">${esc(row.label)}</div>
+            ${body}
+            <div class="meta">${esc(meta)}</div>
+            <details class="raw">
+              <summary>原始 JSON</summary>
+              <div class="raw-body">加载中…</div>
+            </details>
+          </article>
+        </div>`;
+      }).join("")}</div>`;
+      const thread = box.querySelector(".thread");
+      if (painted !== current && thread) {
+        thread.scrollTop = thread.scrollHeight;
+        painted = current;
+      }
       box.querySelectorAll("details.raw").forEach((el) => {
         el.addEventListener("toggle", async () => {
           if (!el.open) return;
           const host = el.querySelector(".raw-body");
           if (host.dataset.loaded) return;
-          const id = el.closest(".ev").getAttribute("data-id");
+          const id = el.closest(".bubble").getAttribute("data-id");
           try {
             const d = await (await fetch("/api/event?id=" + encodeURIComponent(id))).json();
             const raw = d.event && d.event.raw_json ? d.event.raw_json : prettyJson(d.event);

@@ -25,6 +25,47 @@ export function prettyJson(value) {
   return JSON.stringify(value, null, 2);
 }
 
+/** IM role for a hook event. Taste: docs/design-taste.md 「Trae 会话 IM 角色色」 */
+export const IM_ROLES = {
+  user: { label: '你', align: 'end' },
+  assistant: { label: '助手', align: 'start' },
+  tool: { label: '工具', align: 'start' },
+  system: { label: '系统', align: 'center' },
+};
+
+export function roleFromEvent(event) {
+  const name = String(event?.hook_event || '');
+  if (name === 'UserPromptSubmit') return 'user';
+  if (name === 'Stop') return 'assistant';
+  if (name === 'PreToolUse' || name === 'PostToolUse') return 'tool';
+  return 'system';
+}
+
+/**
+ * Chronological IM rows. Drop PreToolUse when PostToolUse shares tool_use_id.
+ * @param {object[]} events
+ */
+export function imMessagesFromEvents(events) {
+  const list = [...(events || [])].sort((a, b) => {
+    const ta = String(a.ts || '');
+    const tb = String(b.ts || '');
+    if (ta < tb) return -1;
+    if (ta > tb) return 1;
+    return String(a.event_id || '').localeCompare(String(b.event_id || ''));
+  });
+  const posted = new Set(
+    list
+      .filter((e) => e.hook_event === 'PostToolUse' && e.tool_use_id)
+      .map((e) => e.tool_use_id),
+  );
+  return list
+    .filter((e) => !(e.hook_event === 'PreToolUse' && e.tool_use_id && posted.has(e.tool_use_id)))
+    .map((event) => {
+      const role = roleFromEvent(event);
+      return { role, ...IM_ROLES[role], event };
+    });
+}
+
 export function toolCommand(input) {
   const obj = asObj(input) || {};
   return obj.cmd || obj.command || obj.command_line || '';
