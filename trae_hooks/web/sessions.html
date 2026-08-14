@@ -67,7 +67,22 @@
     }
     .list, .detail { padding: 16px 18px; min-width: 0; }
     .list { border-right: 0.5px solid var(--separator); overflow: auto; }
-    .detail { display: flex; flex-direction: column; overflow: hidden; }
+    .detail { display: flex; flex-direction: column; overflow: hidden; position: relative; }
+    #events { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .jump {
+      position: absolute; right: 22px; bottom: 18px; z-index: 5;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .jump button {
+      width: 36px; height: 36px; border-radius: 980px;
+      border: 0.5px solid var(--separator);
+      background: rgba(255,255,255,0.88);
+      backdrop-filter: blur(12px);
+      color: var(--ink); font: inherit; font-size: 13px; font-weight: 650;
+      cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.06);
+    }
+    .jump button:hover { background: #fff; }
+    .jump button.on { background: var(--accent); color: #fff; border-color: transparent; }
     .card {
       background: var(--card);
       border-radius: 12px;
@@ -214,7 +229,13 @@
   </header>
   <main>
     <section class="list" id="sessions"><div class="empty">暂无会话</div></section>
-    <section class="detail" id="events"><div class="empty">选择左侧会话</div></section>
+    <section class="detail">
+      <div id="events"><div class="empty">选择左侧会话</div></div>
+      <div class="jump">
+        <button type="button" id="jumpTop" title="滑到顶部">顶</button>
+        <button type="button" id="jumpBot" title="滑到底部并跟踪">底</button>
+      </div>
+    </section>
   </main>
   <script type="module">
     import { imMessagesFromEvents, prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
@@ -222,6 +243,29 @@
     const $ = (id) => document.getElementById(id);
     let current = "";
     let painted = "";
+    let followTail = true;
+    let lastSig = "";
+    const NEAR = 48;
+    const threadEl = () => $("events").querySelector(".thread");
+    const nearBottom = (el) =>
+      !el || el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR;
+    const scrollThread = (where) => {
+      const el = threadEl();
+      if (!el) return;
+      el.scrollTop = where === "top" ? 0 : el.scrollHeight;
+    };
+    const markFollow = (on) => {
+      followTail = on;
+      $("jumpBot").classList.toggle("on", on);
+    };
+    const bindThreadScroll = () => {
+      const el = threadEl();
+      if (!el || el.dataset.bound) return;
+      el.dataset.bound = "1";
+      el.addEventListener("scroll", () => {
+        markFollow(nearBottom(el));
+      }, { passive: true });
+    };
     const engines = () => ({
       marked: globalThis.marked,
       purify: globalThis.DOMPurify,
@@ -256,6 +300,8 @@
       box.querySelectorAll(".card").forEach((el) => {
         el.addEventListener("click", () => {
           current = el.getAttribute("data-id") || "";
+          lastSig = "";
+          markFollow(true);
           loadEvents();
           loadSessions();
         });
@@ -273,6 +319,13 @@
         return;
       }
       const rows = imMessagesFromEvents(data.events);
+      const sig = rows.map((r) => r.event.event_id).join(",");
+      const unchanged = sig === lastSig && threadEl();
+      lastSig = sig;
+      if (unchanged) {
+        if (followTail) scrollThread("bottom");
+        return;
+      }
       box.innerHTML = `<div class="thread">${rows.map((row) => {
         const e = row.event;
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
@@ -292,11 +345,9 @@
           </article>
         </div>`;
       }).join("")}</div>`;
-      const thread = box.querySelector(".thread");
-      if (painted !== current && thread) {
-        thread.scrollTop = thread.scrollHeight;
-        painted = current;
-      }
+      bindThreadScroll();
+      if (followTail || painted !== current) scrollThread("bottom");
+      painted = current;
       box.querySelectorAll("details.raw").forEach((el) => {
         el.addEventListener("toggle", async () => {
           if (!el.open) return;
@@ -317,6 +368,15 @@
     $("q").addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") loadEvents();
     });
+    $("jumpTop").addEventListener("click", () => {
+      markFollow(false);
+      scrollThread("top");
+    });
+    $("jumpBot").addEventListener("click", () => {
+      markFollow(true);
+      scrollThread("bottom");
+    });
+    markFollow(true);
     loadHealth();
     loadSessions();
     setInterval(() => { loadHealth(); if (current) loadEvents(); else loadSessions(); }, 8000);
