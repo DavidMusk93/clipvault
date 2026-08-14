@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import WebKit
+import CryptoKit
 
 /// Long-term URL archive plane: **manual**, **browser-engine** (WKWebView / WebKit),
 /// **useful-first** (Mozilla Readability). Not CORS fetch. Not auto-crawl.
@@ -179,7 +180,15 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             textSnippet: text,
             title: title,
             metaJSON: metaStr
-        ) { _ in
+        ) { ok in
+            if ok {
+                let sha = SHA256.hash(data: Data(html.utf8)).map { String(format: "%02x", $0) }.joined()
+                CloudDocsSyncService.shared?.recordLocalArchive(
+                    itemId: itemId,
+                    htmlSHA: sha,
+                    metaJSON: metaStr
+                )
+            }
             done()
         }
     }

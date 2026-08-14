@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import CryptoKit
 
 enum DatabaseError: Error {
     case connectionFailed
@@ -2048,14 +2049,18 @@ final class DatabaseManager: ObservableObject {
                 return
             }
             let idStr = id.uuidString
-            let sql = "UPDATE clipboard_items SET html_content = ? WHERE id = ?;"
+            let htmlData = Data(html.utf8)
+            let sha = SHA256.hash(data: htmlData).map { String(format: "%02x", $0) }.joined()
+            _ = self.writeBlobFile(hash: sha, data: htmlData)
+            let sql = "UPDATE clipboard_items SET html_content = ?, archive_html_sha = ? WHERE id = ?;"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
                 DispatchQueue.main.async { completion?(false) }
                 return
             }
             self.bindText(stmt, 1, html)
-            self.bindText(stmt, 2, idStr)
+            self.bindText(stmt, 2, sha)
+            self.bindText(stmt, 3, idStr)
             let rc = sqlite3_step(stmt)
             sqlite3_finalize(stmt)
             guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else {
@@ -2268,15 +2273,15 @@ final class DatabaseManager: ObservableObject {
         kind: String,
         payload: [String: Any],
         source: String,
-        completion: @escaping ([String: Any]?) -> Void
+        completion: @escaping (_ state: [String: Any]?, _ opId: String?, _ storedPayload: [String: Any]?) -> Void
     ) {
         dbQueue.async { [weak self] in
             guard let self = self else {
-                DispatchQueue.main.async { completion(nil) }
+                DispatchQueue.main.async { completion(nil, nil, nil) }
                 return
             }
             let result = self.appendReaderOpLocked(itemId: itemId, kind: kind, payload: payload, source: source)
-            DispatchQueue.main.async { completion(result) }
+            DispatchQueue.main.async { completion(result?.state, result?.opId, result?.payload) }
         }
     }
 
@@ -2285,8 +2290,10 @@ final class DatabaseManager: ObservableObject {
         itemId: UUID,
         kind: String,
         payload: [String: Any],
-        source: String
-    ) -> [String: Any]? {
+        source: String,
+        forcedOpId: String? = nil,
+        forcedTs: Double? = nil
+    ) -> (state: [String: Any], opId: String, payload: [String: Any])? {
         guard let db = db else { return nil }
         guard Self.readerKinds.contains(kind) else { return nil }
         let idStr = itemId.uuidString
@@ -2301,16 +2308,18 @@ final class DatabaseManager: ObservableObject {
         guard exists else { return nil }
 
         var payloadObj = payload
-        let opId = (payloadObj["id"] as? String).flatMap { UUID(uuidString: $0) != nil ? $0 : nil } ?? UUID().uuidString
+        let opId = forcedOpId
+            ?? (payloadObj["id"] as? String).flatMap { UUID(uuidString: $0) != nil ? $0 : nil }
+            ?? UUID().uuidString
         if kind == "highlight_add" { payloadObj["id"] = opId }
-        let ts = Date().timeIntervalSince1970
+        let ts = forcedTs ?? Date().timeIntervalSince1970
         let payloadData = (try? JSONSerialization.data(withJSONObject: payloadObj, options: [])) ?? Data("{}".utf8)
         let payloadStr = String(data: payloadData, encoding: .utf8) ?? "{}"
 
-        let sql = "INSERT INTO reader_ops (id, item_id, ts, kind, payload, source) VALUES (?, ?, ?, ?, ?, ?);"
+        let sql = "INSERT OR IGNORE INTO reader_ops (id, item_id, ts, kind, payload, source) VALUES (?, ?, ?, ?, ?, ?);"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        bindText(stmt, 1, kind == "highlight_add" ? opId : UUID().uuidString)
+        bindText(stmt, 1, opId)
         bindText(stmt, 2, idStr)
         sqlite3_bind_double(stmt, 3, ts)
         bindText(stmt, 4, kind)
@@ -2319,6 +2328,13 @@ final class DatabaseManager: ObservableObject {
         let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
         guard rc == SQLITE_DONE else { return nil }
+        if sqlite3_changes(db) == 0 {
+            // Idempotent re-delivery.
+            if let existing = fetchReaderStateLocked(idStr) {
+                return (existing, opId, payloadObj)
+            }
+            return ([:], opId, payloadObj)
+        }
 
         var state: [String: Any] = [:]
         var sStmt: OpaquePointer?
@@ -2342,7 +2358,7 @@ final class DatabaseManager: ObservableObject {
             _ = sqlite3_step(uStmt)
         }
         sqlite3_finalize(uStmt)
-        if kind != "scroll_checkpoint" {
+        if kind != "scroll_checkpoint" && !source.hasPrefix("sync:") {
             _ = appendOperationLogSync(
                 action: "reader.\(kind)",
                 itemId: idStr,
@@ -2351,7 +2367,93 @@ final class DatabaseManager: ObservableObject {
                 source: source
             )
         }
+        return (state, opId, payloadObj)
+    }
+
+    private func fetchReaderStateLocked(_ idStr: String) -> [String: Any]? {
+        guard let db = db else { return nil }
+        var sStmt: OpaquePointer?
+        var state: [String: Any]?
+        if sqlite3_prepare_v2(db, "SELECT reader_state FROM clipboard_items WHERE id = ?;", -1, &sStmt, nil) == SQLITE_OK {
+            bindText(sStmt, 1, idStr)
+            if sqlite3_step(sStmt) == SQLITE_ROW,
+               let raw = sqlite3_column_text(sStmt, 0).map({ String(cString: $0) }),
+               let data = raw.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                state = obj
+            }
+        }
+        sqlite3_finalize(sStmt)
         return state
+    }
+
+    @discardableResult
+    func applySyncPinLocked(id: UUID, pinned: Bool, pinnedAt: Date) -> Bool {
+        guard let db = db else { return false }
+        let idStr = id.uuidString
+        let sql = "UPDATE clipboard_items SET pinned_at = ? WHERE id = ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        if pinned {
+            sqlite3_bind_double(stmt, 1, pinnedAt.timeIntervalSince1970)
+        } else {
+            sqlite3_bind_null(stmt, 1)
+        }
+        bindText(stmt, 2, idStr)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        return rc == SQLITE_DONE && sqlite3_changes(db) > 0
+    }
+
+    @discardableResult
+    func applySyncArchiveLocked(id: UUID, htmlSHA: String?, metaJSON: String?, htmlFallback: String?) -> Bool {
+        guard let db = db else { return false }
+        let idStr = id.uuidString
+        var html = htmlFallback
+        if (html == nil || (html?.count ?? 0) < 40), let sha = htmlSHA, let data = readBlobFile(hash: sha) {
+            html = String(data: data, encoding: .utf8)
+        }
+        guard let html, html.count > 40 else { return false }
+        let htmlData = Data(html.utf8)
+        let sha = htmlSHA ?? SHA256.hash(data: htmlData).map { String(format: "%02x", $0) }.joined()
+        _ = writeBlobFile(hash: sha, data: htmlData)
+        let sql = "UPDATE clipboard_items SET html_content = ?, archive_html_sha = ? WHERE id = ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        bindText(stmt, 1, html)
+        bindText(stmt, 2, sha)
+        bindText(stmt, 3, idStr)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else { return false }
+        if let metaJSON, !metaJSON.isEmpty {
+            metaSet("archive.\(idStr)", metaJSON)
+        }
+        return true
+    }
+
+    @discardableResult
+    func applySyncReaderOpLocked(
+        itemId: UUID,
+        opId: String,
+        noteJSON: String?,
+        wallTs: Double,
+        source: String
+    ) -> Bool {
+        guard let raw = noteJSON, let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let kind = obj["kind"] as? String else { return false }
+        let payload = obj["payload"] as? [String: Any] ?? [:]
+        let ts = (obj["ts"] as? Double) ?? wallTs
+        let src = (obj["source"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? source
+        return appendReaderOpLocked(
+            itemId: itemId,
+            kind: kind,
+            payload: payload,
+            source: src,
+            forcedOpId: opId,
+            forcedTs: ts
+        ) != nil
     }
 
     private func applyReaderOp(_ state: inout [String: Any], kind: String, payload: [String: Any], ts: Double) {

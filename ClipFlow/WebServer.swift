@@ -882,6 +882,9 @@ class WebServer {
         if item.type == .url, (item.htmlContent?.count ?? 0) > 40 {
             archived = true
         }
+        if !archived, (item.htmlContent?.count ?? 0) > 40, database.webArchiveMetaJSON(id: item.id) != nil {
+            archived = true
+        }
         dict["archived"] = archived
         if item.type != .url, let html = item.htmlContent, !archived {
             dict["htmlContent"] = html
@@ -1108,6 +1111,11 @@ class WebServer {
             database.setPinned(id: uuid, pinned: pinned) { [weak self] item in
                 guard let self else { return }
                 if let item {
+                    CloudDocsSyncService.shared?.recordLocalPin(
+                        itemId: uuid,
+                        pinned: pinned,
+                        pinnedAt: item.pinnedAt
+                    )
                     self.sendJSON(["ok": true, "item": self.itemToJSON(item)], connection: connection)
                 } else {
                     self.sendJSON(["ok": false, "message": "置顶失败"], connection: connection)
@@ -1138,9 +1146,17 @@ class WebServer {
         }
         let payload = obj["payload"] as? [String: Any] ?? [:]
         let source = (obj["source"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "web"
-        database.appendReaderOp(itemId: uuid, kind: kind, payload: payload, source: source) { [weak self] state in
+        database.appendReaderOp(itemId: uuid, kind: kind, payload: payload, source: source) { [weak self] state, opId, storedPayload in
             guard let self else { return }
-            if state != nil {
+            if state != nil, let opId {
+                CloudDocsSyncService.shared?.recordLocalReaderOp(
+                    itemId: uuid,
+                    opId: opId,
+                    kind: kind,
+                    payload: storedPayload ?? payload,
+                    ts: Date().timeIntervalSince1970,
+                    source: source
+                )
                 let bundle = self.database.fetchReaderBundle(id: uuid)
                 self.sendJSON(["ok": true, "state": bundle.state, "ops": bundle.ops], connection: connection)
             } else {

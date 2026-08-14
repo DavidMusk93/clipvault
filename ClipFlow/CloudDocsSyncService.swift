@@ -44,7 +44,7 @@ final class CloudDocsSyncService {
         var opId: String
         var host: String
         var seq: Int
-        /// `upsert` | `tombstone` | `touch`
+        /// `upsert` | `tombstone` | `touch` | `user_evaluation` | `pin` | `unpin` | `web_archive` | `reader_op`
         var kind: String
         var itemId: String
         var contentHash: String?
@@ -246,6 +246,69 @@ final class CloudDocsSyncService {
             op.note = "user_evaluation"
             self.enqueue(op)
             self.scheduleDrain(reason: "user_evaluation")
+        }
+    }
+
+    func recordLocalPin(itemId: UUID, pinned: Bool, pinnedAt: Date?) {
+        guard config.enabled else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            var op = self.makeOp(
+                kind: pinned ? "pin" : "unpin",
+                itemId: itemId.uuidString,
+                item: nil,
+                blobKeys: nil
+            )
+            op.wallTs = (pinnedAt ?? Date()).timeIntervalSince1970
+            op.note = pinned ? "pin" : "unpin"
+            self.enqueue(op)
+            self.scheduleDrain(reason: pinned ? "pin" : "unpin")
+        }
+    }
+
+    func recordLocalArchive(itemId: UUID, htmlSHA: String, metaJSON: String) {
+        guard config.enabled else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            var op = self.makeOp(
+                kind: "web_archive",
+                itemId: itemId.uuidString,
+                item: nil,
+                blobKeys: [htmlSHA]
+            )
+            op.contentHash = htmlSHA
+            op.note = metaJSON
+            self.enqueue(op)
+            self.scheduleDrain(reason: "web_archive")
+        }
+    }
+
+    func recordLocalReaderOp(itemId: UUID, opId: String, kind: String, payload: [String: Any], ts: Double, source: String) {
+        guard config.enabled else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            var op = self.makeOp(
+                kind: "reader_op",
+                itemId: itemId.uuidString,
+                item: nil,
+                blobKeys: nil
+            )
+            if let eid = UUID(uuidString: opId) {
+                op.opId = eid.uuidString
+            }
+            op.wallTs = ts
+            let body: [String: Any] = [
+                "kind": kind,
+                "payload": payload,
+                "ts": ts,
+                "source": source,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: body),
+               let raw = String(data: data, encoding: .utf8) {
+                op.note = raw
+            }
+            self.enqueue(op)
+            self.scheduleDrain(reason: "reader_op")
         }
     }
 
@@ -670,6 +733,7 @@ final class CloudDocsSyncService {
     }
 
     private func needsBlob(op: SyncOp, key: String) -> Bool {
+        if op.kind == "web_archive" { return true }
         // Text-only upserts may list empty blobKeys; if key listed, require it for image/rtf/pdf types.
         guard let t = op.type else { return true }
         switch t {
@@ -701,6 +765,27 @@ final class CloudDocsSyncService {
                 print("[Sync] user_evaluation apply failed \(op.itemId): \(error)")
                 return false
             }
+        case "pin", "unpin":
+            return database.applySyncPinLocked(
+                id: uuid,
+                pinned: op.kind == "pin",
+                pinnedAt: Date(timeIntervalSince1970: op.wallTs)
+            )
+        case "web_archive":
+            return database.applySyncArchiveLocked(
+                id: uuid,
+                htmlSHA: op.contentHash ?? op.blobKeys?.first,
+                metaJSON: op.note,
+                htmlFallback: op.htmlContent
+            )
+        case "reader_op":
+            return database.applySyncReaderOpLocked(
+                itemId: uuid,
+                opId: op.opId,
+                noteJSON: op.note,
+                wallTs: op.wallTs,
+                source: "sync:\(op.host)"
+            )
         case "upsert", "touch":
             guard let hash = op.contentHash, let type = op.type else { return false }
             return database.applySyncUpsertLocked(
