@@ -93,3 +93,12 @@ test('IM overview drops PreToolUse when Post exists', () => {
   assert.equal(rows[0].role, 'user');
   assert.equal(rows[2].align, 'start');
 });
+
+test('IM overview hides SessionStart cwd pills', () => {
+  const rows = imMessagesFromEvents([
+    { hook_event: 'SessionStart', ts: '1', cwd: '/root/Documents/flowkit', event_id: 's' },
+    { hook_event: 'UserPromptSubmit', ts: '1', prompt: 'hi', event_id: 'u' },
+    { hook_event: 'Notification', ts: '2', event_id: 'n' },
+  ]);
+  assert.deepEqual(rows.map((r) => r.event.hook_event), ['UserPromptSubmit']);
+});

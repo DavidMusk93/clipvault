@@ -59,7 +59,9 @@ export function imMessagesFromEvents(events) {
       .map((e) => e.tool_use_id),
   );
   return list
+    .filter((e) => e.hook_event !== 'SessionStart')
     .filter((e) => !(e.hook_event === 'PreToolUse' && e.tool_use_id && posted.has(e.tool_use_id)))
+    .filter((e) => e.hook_event !== 'Notification' || Boolean(e.notification_message))
     .map((event) => {
       const role = roleFromEvent(event);
       return { role, ...IM_ROLES[role], event };

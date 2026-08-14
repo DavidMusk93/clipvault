@@ -77,8 +77,10 @@
       cursor: pointer;
     }
     .card.active { outline: 2px solid rgba(0,113,227,0.35); }
-    .card .id { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
-    .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .card .id, .card .meta {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .card .id { font-family: var(--font-mono); font-size: 12px; }
     .thread { flex: 1; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
     .row {
       display: flex; width: 100%; margin: 0 0 10px;
@@ -88,12 +90,18 @@
     .row.assistant, .row.tool { justify-content: flex-start; }
     .row.system { justify-content: center; }
     .bubble {
-      max-width: min(720px, 86%);
+      max-width: min(640px, 78%);
       min-width: 0;
+      width: fit-content;
       border-radius: 16px;
       padding: 10px 12px;
       box-shadow: 0 1px 2px rgba(0,0,0,.04);
       overflow: hidden;
+    }
+    .bubble-body {
+      max-height: min(280px, 38vh);
+      overflow: auto;
+      min-width: 0;
     }
     .bubble.user {
       background: var(--honey-soft);
@@ -132,18 +140,18 @@
       padding: 2px 8px; border-radius: 980px;
       background: var(--honey-soft); color: var(--honey);
     }
-    pre, code, .hljs, .md-preview, .kv {
+    .bubble pre, .bubble code, .bubble .hljs, .bubble .md-preview, .bubble .kv {
       max-width: 100%; min-width: 0;
     }
-    pre, pre.hljs, .hljs {
-      font-family: var(--font-mono);
+    .bubble pre, .bubble pre.hljs, .bubble .hljs, .bubble .hljs code, .bubble code {
+      font-family: var(--font-mono) !important;
       font-size: 12px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      word-break: break-word;
+      white-space: pre-wrap !important;
+      overflow-wrap: anywhere !important;
+      word-break: break-word !important;
       margin-top: 6px;
       color: #333;
-      overflow-x: auto;
+      overflow-x: hidden !important;
     }
     .kv { margin-top: 8px; }
     .kv .k {
@@ -176,6 +184,7 @@
     .md-preview code {
       font-family: var(--font-mono); font-size: 12.5px;
       background: rgba(120,120,128,0.12); padding: 0.08em 0.35em; border-radius: 5px;
+      white-space: pre-wrap !important; overflow-wrap: anywhere !important;
     }
     .md-preview pre {
       background: #f6f8fa; border-radius: 10px; padding: 10px 12px;
@@ -274,7 +283,7 @@
         return `<div class="row ${esc(row.role)}">
           <article class="bubble ${esc(row.role)}" data-id="${esc(e.event_id)}">
             <div class="who">${esc(row.label)}</div>
-            ${body}
+            <div class="bubble-body">${body}</div>
             <div class="meta">${esc(meta)}</div>
             <details class="raw">
               <summary>原始 JSON</summary>

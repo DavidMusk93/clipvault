@@ -70,9 +70,9 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | `tool` | 工具 | 左 | `#1565C0` / 12% | `#1565C0` |
 | `system` | 系统 | 中 | `#8E8E93` / 12% | 灰 |
 
-映射：`UserPromptSubmit`→user；`Stop`（及 assistant 正文）→assistant；`PreToolUse`/`PostToolUse`→tool；`SessionStart`/`Notification`→system。同一 `tool_use_id` 有 Post 则俯瞰里不重复画 Pre。
+映射：`UserPromptSubmit`→user；`Stop`（及 assistant 正文）→assistant；`PreToolUse`/`PostToolUse`→tool。`SessionStart` **不进气泡**（cwd 不是一句对话）。无正文的 `Notification` 也不进。同一 `tool_use_id` 有 Post 则不画 Pre。
 
-**溢出**：气泡 `min-width:0`；等宽 `pre/code` 必须 `pre-wrap` + `overflow-wrap:anywhere`，禁止撑破卡片。
+**溢出**：气泡 `min-width:0`；等宽覆盖 highlight.js 的 `white-space:pre`，必须 `pre-wrap !important` + `overflow-wrap:anywhere`。聊天正文限高，内部滚动。
 
 ## 源码绑定
 
