@@ -23,7 +23,8 @@ fi
 echo "pids: $PIDS"
 
 if launchctl print "gui/$(id -u)/$LABEL" >/tmp/cv_launch_print.txt 2>/dev/null; then
-  ENV_HOME=$(awk -F'=> ' '/KEEPSAKE_HOME|CLIPVAULT_HOME/{print $2}' /tmp/cv_launch_print.txt | head -1 | tr -d ' ')
+  # Do not strip spaces: mac-home home is ".../Application Support/Keepsake".
+  ENV_HOME=$(awk -F'=> ' '/KEEPSAKE_HOME|CLIPVAULT_HOME/{print $2}' /tmp/cv_launch_print.txt | head -1 | sed 's/[[:space:]]*$//')
   echo "launchd env home: ${ENV_HOME:-<missing>}"
   if [ -z "${ENV_HOME:-}" ]; then
     red "FAIL: LaunchAgent missing KEEPSAKE_HOME/CLIPVAULT_HOME"
