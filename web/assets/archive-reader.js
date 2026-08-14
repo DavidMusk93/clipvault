@@ -65,6 +65,129 @@
     return hit;
   }
 
+  /** Viewport Y of the reading line — not the chapter title, the line the eyes are on. */
+  function readingLineY() {
+    return Math.max(64, Math.min(140, Math.round(window.innerHeight * 0.18)));
+  }
+
+  function caretAtPoint(x, y) {
+    var range = null;
+    if (document.caretRangeFromPoint) {
+      range = document.caretRangeFromPoint(x, y);
+    } else if (document.caretPositionFromPoint) {
+      var cp = document.caretPositionFromPoint(x, y);
+      if (cp && cp.offsetNode) {
+        range = document.createRange();
+        range.setStart(cp.offsetNode, cp.offset);
+        range.collapse(true);
+      }
+    }
+    return range;
+  }
+
+  function caretAbs(index, range) {
+    if (!range || !index) return -1;
+    var node = range.startContainer;
+    var offset = range.startOffset;
+    if (node.nodeType !== 3) {
+      if (node.childNodes && node.childNodes[offset] && node.childNodes[offset].nodeType === 3) {
+        node = node.childNodes[offset];
+        offset = 0;
+      } else {
+        return -1;
+      }
+    }
+    for (var i = 0; i < index.parts.length; i++) {
+      if (index.parts[i].node === node) return index.parts[i].start + offset;
+    }
+    return -1;
+  }
+
+  function rangeFromAbs(index, start, end) {
+    var range = document.createRange();
+    var setS = false;
+    var setE = false;
+    for (var i = 0; i < index.parts.length; i++) {
+      var p = index.parts[i];
+      if (!setS && start >= p.start && start <= p.end) {
+        range.setStart(p.node, Math.min(p.node.nodeValue.length, start - p.start));
+        setS = true;
+      }
+      if (!setE && end >= p.start && end <= p.end) {
+        range.setEnd(p.node, Math.min(p.node.nodeValue.length, end - p.start));
+        setE = true;
+      }
+    }
+    return setS ? range : null;
+  }
+
+  function quoteAroundAbs(index, abs) {
+    if (abs < 0 || !index.text) return null;
+    var take = 40;
+    var start = abs;
+    var end = Math.min(index.text.length, abs + take);
+    if (end - start < 16) start = Math.max(0, abs - take);
+    var raw = index.text.slice(start, end);
+    var quote = raw.replace(/\s+/g, " ").trim();
+    if (quote.length < 8) return null;
+    var prefix = index.text.slice(Math.max(0, start - 24), start);
+    var suffix = index.text.slice(end, end + 24);
+    return { quote: quote, prefix: prefix, suffix: suffix };
+  }
+
+  function captureAnchor(headings) {
+    var y = Math.round(currentY());
+    var line = readingLineY();
+    var docLine = y + line;
+    var hit = nearestHeading(headings, docLine);
+    var headingOffset = 0;
+    if (hit) {
+      var hTop = hit.el.getBoundingClientRect().top + y;
+      headingOffset = Math.round(docLine - hTop);
+    }
+    var q = null;
+    var root = articleRoot();
+    var range = caretAtPoint(Math.round(window.innerWidth * 0.42), line);
+    if (range && root.contains(range.startContainer)) {
+      var idx = buildIndex(root);
+      q = quoteAroundAbs(idx, caretAbs(idx, range));
+    }
+    return {
+      y: y,
+      ratio: Number(currentRatio().toFixed(5)),
+      line: line,
+      headingId: hit ? hit.id : "",
+      headingText: hit ? hit.text : "",
+      headingOffset: headingOffset,
+      quote: q ? q.quote : "",
+      prefix: q ? q.prefix : "",
+      suffix: q ? q.suffix : "",
+    };
+  }
+
+  function resolvePosY(pos, headings) {
+    if (!pos) return null;
+    var line = typeof pos.line === "number" ? pos.line : readingLineY();
+    if (pos.quote) {
+      var idx = buildIndex(articleRoot());
+      var loc = locateQuote(idx, pos.quote, pos.prefix || "", pos.suffix || "");
+      if (loc) {
+        var r = rangeFromAbs(idx, loc.start, Math.min(loc.end, loc.start + 1));
+        if (r) return r.getBoundingClientRect().top + currentY() - line;
+      }
+    }
+    if (pos.headingId && typeof pos.headingOffset === "number") {
+      var el = document.getElementById(pos.headingId);
+      if (el) return el.getBoundingClientRect().top + currentY() + pos.headingOffset - line;
+    }
+    if (typeof pos.ratio === "number") return pos.ratio * scrollMax();
+    if (typeof pos.y === "number") return pos.y;
+    if (pos.headingId && document.getElementById(pos.headingId)) {
+      return document.getElementById(pos.headingId).getBoundingClientRect().top + currentY() - 12;
+    }
+    return null;
+  }
+
   function apiGet(id) {
     return fetch("/api/archive/reader?id=" + encodeURIComponent(id), { credentials: "same-origin" }).then(function (r) {
       return r.json();
@@ -680,13 +803,7 @@
       var y = Math.round(currentY());
       if (!force && Math.abs(y - lastSentY) < 80) return;
       lastSentY = y;
-      var hit = nearestHeading(headings, y + 8);
-      apiPost(id, "scroll_checkpoint", {
-        y: y,
-        ratio: Number(currentRatio().toFixed(4)),
-        headingId: hit ? hit.id : "",
-        headingText: hit ? hit.text : "",
-      }).catch(function () {});
+      apiPost(id, "scroll_checkpoint", captureAnchor(headings)).catch(function () {});
     }
     function onScroll() {
       markActive();
@@ -706,20 +823,21 @@
 
     function applyPos(pos) {
       if (!pos) return;
-      var y = 0;
-      if (pos.headingId && document.getElementById(pos.headingId)) {
-        y = document.getElementById(pos.headingId).getBoundingClientRect().top + currentY() - 12;
-      } else if (typeof pos.y === "number") {
-        y = pos.y;
-      } else if (typeof pos.ratio === "number") {
-        y = pos.ratio * scrollMax();
-      }
-      if (y < 80) return;
-      window.scrollTo(0, y);
+      var y = resolvePosY(pos, headings);
+      if (y == null || y < 24) return;
+      window.scrollTo(0, Math.max(0, y));
       lastSentY = Math.round(y);
       markActive();
-      if (pos.headingText) {
-        resume.textContent = "已回到 · " + pos.headingText;
+      var label = "";
+      if (pos.quote) {
+        var bit = String(pos.quote).replace(/\s+/g, " ").trim();
+        if (bit.length > 22) bit = bit.slice(0, 22) + "…";
+        label = bit;
+      } else if (pos.headingText) {
+        label = pos.headingText;
+      }
+      if (label) {
+        resume.textContent = "已回到 · " + label;
         resume.classList.add("show");
         setTimeout(function () {
           resume.classList.remove("show");

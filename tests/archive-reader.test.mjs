@@ -17,6 +17,10 @@ test('reader chrome talks to SQLite via same-origin API', () => {
   assert.match(js, /\/api\/archive\/reader/, 'reader API');
   assert.match(js, /highlight_add/, 'highlight op');
   assert.match(js, /scroll_checkpoint/, 'resume op');
+  assert.match(js, /headingOffset/, 'resume stores offset inside the chapter');
+  assert.match(js, /caretRangeFromPoint|caretPositionFromPoint/, 'reading-line caret');
+  assert.match(js, /function resolvePosY/, 'restore prefers quote then chapter offset');
+  assert.match(js, /function captureAnchor/, 'checkpoint captures a text anchor');
   assert.match(js, /comment/, 'comment op');
   assert.match(js, /collectHeadings/, 'TOC still derived');
 });
@@ -32,7 +36,7 @@ test('selection chrome is a glass bar that never covers the rect', () => {
   assert.match(js, /评论/, 'comment action');
   assert.match(js, /is-sheet/, 'narrow viewport uses a sheet');
   assert.match(js, /allowSide/, 'wide viewport parks the note in the margin');
-  assert.match(swiftWeb, /archive-reader\.js\?v=20260814s/, 'cache bust');
+  assert.match(swiftWeb, /archive-reader\.js\?v=20260814u/, 'cache bust');
   assert.match(js, /dblclick/, 'double-click mark opens comment');
   assert.match(js, /cv-note-kicker/, 'header title is a span, not a nested lead');
   assert.match(js, /line-height:28px/, 'header text and buttons share one strut');
