@@ -48,8 +48,8 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 
 **目标**：随着批评与取舍累积，ClipVault 形成 **Owner 个性化的设计语言**，而不是通用 Material/工具腔皮肤。
 
-**产品哲学（演进新能力前必读）**：nmem `clipvault_design_philosophy_layered_memory_20260814`  
-一句话：正确性交给浏览器引擎，陪伴感留在产品里，运行时体验不污染 capture。五层：Capture / Judgment / Archive / View / Runtime。
+**产品哲学（演进新能力前必读）**：nmem `clipvault_design_philosophy_layered_memory_20260814`（身份/五层）+ `clipvault_reader_learning_layer_sqlite_20260814`（阅读态进 SQLite）  
+一句话：私人游乐场 + 学习工具。正确性交给引擎，陪伴感留在产品里；划线/评论/续读是个人知识，进 SQLite，不进浏览器一次性库。
 
 ### 2.1 品牌与叙事
 
@@ -73,7 +73,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **URL 归档（save useful）**：手动「归档网页」→ WKWebView+Readability；预览消毒不可点 | 前端 CORS fetch 当归档；自动爬每一个链接 |
 | **View**：弹层 iframe `src=/api/archive/view?embed=1`（真文档，浏览器引擎排版）；可再开新标签 | srcdoc / Turndown 自绘；毛玻璃+transform 包 iframe；只弹出孤立 tab |
 | **归档后同一按钮变「查看」**（同槽同尺寸）；已归档禁止再点「归档网页」 | 另塞一颗小「查看」；归档按钮归档后仍可点 |
-| **View 阅读壳**：同域文档内注入 TOC + 进度；阅读位置只进 IndexedDB | 把滚动位置写入 SQLite；srcdoc 里自绘目录；父页面跨 iframe 记进度 |
+| **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |
 | 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
 
 ### 2.3 工程（always SOTA / 终局）
