@@ -168,16 +168,17 @@
       ".cv-note.open{opacity:1;pointer-events:auto;transform:translate3d(0,0,0) scale(1);}",
       ".cv-note .cv-grabber{width:28px;height:4px;border-radius:999px;background:rgba(60,60,67,.22);",
       "margin:0 auto 2px;display:none;flex-shrink:0;}",
-      ".cv-note .cv-note-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:10px;min-height:28px;}",
-      ".cv-note-lead{display:flex;align-items:center;gap:7px;min-width:0;height:28px;}",
-      ".cv-note .cv-note-head strong{display:inline-flex;align-items:center;height:28px;font-size:13px;font-weight:600;letter-spacing:-.02em;line-height:1;flex-shrink:0;}",
-      ".cv-note .cv-quote-bar{width:2px;height:12px;border-radius:1px;background:#ffd60a;flex-shrink:0;}",
-      ".cv-note .cv-quote{display:inline-flex;align-items:center;height:28px;font-size:13px;line-height:1;color:#6e6e73;letter-spacing:-.01em;margin:0;",
-      "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0;}",
-      ".cv-note-tools{display:flex;align-items:center;gap:6px;height:28px;}",
-      ".cv-note .cv-mini{appearance:none;border:0;height:28px;padding:0 11px;border-radius:7px;cursor:pointer;",
-      "display:inline-flex;align-items:center;justify-content:center;",
-      "font:inherit;font-size:13px;font-weight:590;letter-spacing:-.016em;line-height:1;}",
+      ".cv-note .cv-note-head{display:flex;align-items:center;height:28px;min-height:28px;max-height:28px;gap:7px;}",
+      ".cv-note .cv-note-kicker,.cv-note .cv-quote,.cv-note .cv-mini{box-sizing:border-box;height:28px;line-height:28px;",
+      "font-size:13px;margin:0;padding:0;border:0;display:block;}",
+      ".cv-note .cv-note-kicker{flex-shrink:0;font-weight:600;letter-spacing:-.02em;color:#1d1d1f;}",
+      ".cv-note .cv-quote-bar{width:2px;height:12px;border-radius:1px;background:#ffd60a;flex:0 0 auto;align-self:center;",
+      "font-style:normal;line-height:0;margin:0;padding:0;}",
+      ".cv-note .cv-quote{min-width:0;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
+      "color:#6e6e73;font-weight:400;letter-spacing:-.01em;}",
+      ".cv-note-tools{display:flex;align-items:center;gap:6px;height:28px;margin-left:auto;flex-shrink:0;}",
+      ".cv-note .cv-mini{-webkit-appearance:none;appearance:none;padding:0 11px;border-radius:7px;cursor:pointer;",
+      "font:inherit;font-size:13px;font-weight:590;letter-spacing:-.016em;line-height:28px;}",
       ".cv-note .cv-mini:active{transform:scale(.97);}",
       ".cv-note .cv-ghost{background:rgba(120,120,128,.12);color:#1d1d1f;}",
       ".cv-note .cv-ok{background:#0071e3;color:#fff;}",
@@ -554,12 +555,11 @@
     var note = el("div", "cv-note");
     var grabber = el("div", "cv-grabber");
     var head = el("div", "cv-note-head");
-    var lead = el("div", "cv-note-lead");
-    lead.appendChild(el("strong", "", "评论"));
-    lead.appendChild(el("i", "cv-quote-bar"));
-    var quote = el("p", "cv-quote");
-    lead.appendChild(quote);
-    head.appendChild(lead);
+    head.appendChild(el("span", "cv-note-kicker", "评论"));
+    var quoteBar = el("i", "cv-quote-bar");
+    head.appendChild(quoteBar);
+    var quote = el("span", "cv-quote");
+    head.appendChild(quote);
     var ta = document.createElement("textarea");
     ta.placeholder = "写下一句想法（可选）…";
     ta.rows = 4;
@@ -885,6 +885,7 @@
       hideSel();
       quote.textContent = String(h.quote || "").replace(/\s+/g, " ").trim();
       quote.hidden = !quote.textContent;
+      quoteBar.hidden = !quote.textContent;
       ta.value = "";
       renderHist(h.id);
       if (anchor && anchor.scrollIntoView) {
@@ -983,7 +984,7 @@
     var note = el("div", "cv-note open");
     note.innerHTML =
       '<div class="cv-grabber"></div>' +
-      '<div class="cv-note-head"><div class="cv-note-lead"><strong>评论</strong><i class="cv-quote-bar"></i><p class="cv-quote">语义边界</p></div>' +
+      '<div class="cv-note-head"><span class="cv-note-kicker">评论</span><i class="cv-quote-bar"></i><span class="cv-quote">语义边界</span>' +
       '<div class="cv-note-tools"><button class="cv-mini cv-ghost" type="button">取消</button>' +
       '<button class="cv-mini cv-ok" type="button">提交</button></div></div>' +
       '<div class="cv-note-body">' +

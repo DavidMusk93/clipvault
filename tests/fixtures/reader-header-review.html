@@ -4,38 +4,69 @@
   <meta charset="utf-8">
   <title>header align review</title>
   <style>
-    html, body { margin: 0; background: #ddd; }
+    html, body { margin: 0; background: #d8d8dc; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; }
+    .page { min-height: 100vh; position: relative; }
     .cv-note {
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
-      width: 420px; margin: 40px auto; padding: 10px 12px;
-      background: #fff; border-radius: 14px; color: #1d1d1f;
+      position: fixed; left: 8px; right: 8px; bottom: 10px;
+      padding: 10px 12px 10px;
+      background: rgba(255,255,255,.92);
+      border-radius: 16px;
+      color: #1d1d1f;
+      box-shadow: 0 10px 28px rgba(0,0,0,.16);
     }
-    .cv-note-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; column-gap: 10px; min-height: 28px; position: relative; }
-    .cv-note-lead { display: flex; align-items: center; gap: 7px; min-width: 0; height: 28px; }
-    .cv-note-head strong { display: inline-flex; align-items: center; height: 28px; font-size: 13px; font-weight: 600; letter-spacing: -.02em; line-height: 1; }
-    .cv-quote-bar { width: 2px; height: 12px; border-radius: 1px; background: #ffd60a; flex-shrink: 0; }
-    .cv-quote { display: inline-flex; align-items: center; height: 28px; font-size: 13px; line-height: 1; color: #6e6e73; margin: 0; }
-    .cv-note-tools { display: flex; align-items: center; gap: 6px; height: 28px; }
-    .cv-mini { appearance: none; border: 0; height: 28px; padding: 0 11px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font: inherit; font-size: 13px; font-weight: 590; line-height: 1; }
+    .cv-note-head { display: flex; align-items: center; height: 28px; min-height: 28px; max-height: 28px; gap: 7px; position: relative; }
+    .cv-note-kicker, .cv-quote, .cv-mini {
+      box-sizing: border-box; height: 28px; line-height: 28px;
+      font-size: 13px; margin: 0; padding: 0; border: 0; display: block;
+    }
+    .cv-note-kicker { flex-shrink: 0; font-weight: 600; letter-spacing: -.02em; color: #1d1d1f; }
+    .cv-quote-bar { width: 2px; height: 12px; border-radius: 1px; background: #ffd60a; flex: 0 0 auto; align-self: center; font-style: normal; line-height: 0; margin: 0; padding: 0; }
+    .cv-quote { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6e6e73; font-weight: 400; letter-spacing: -.01em; }
+    .cv-note-tools { display: flex; align-items: center; gap: 6px; height: 28px; margin-left: auto; flex-shrink: 0; }
+    .cv-mini { -webkit-appearance: none; appearance: none; padding: 0 11px; border-radius: 7px; font: inherit; font-size: 13px; font-weight: 590; letter-spacing: -.016em; line-height: 28px; }
     .cv-ghost { background: rgba(120,120,128,.12); }
     .cv-ok { background: #0071e3; color: #fff; }
     .guide { position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: #f00; pointer-events: none; }
+    textarea { width: 100%; min-height: 96px; box-sizing: border-box; border: 0; border-radius: 10px; padding: 10px 12px; margin-top: 8px; font: inherit; font-size: 15px; background: rgba(120,120,128,.08); }
+    #report { position: absolute; top: 16px; left: 16px; font: 12px/1.4 ui-monospace, monospace; background: #fff; padding: 8px 10px; border-radius: 8px; }
+    #report.ok { color: #0a7; }
+    #report.bad { color: #c00; }
   </style>
 </head>
 <body>
-  <div class="cv-note">
-    <div class="cv-note-head">
-      <div class="cv-note-lead">
-        <strong>评论</strong>
-        <i class="cv-quote-bar"></i>
-        <p class="cv-quote">语义边界</p>
+  <div class="page">
+    <pre id="report">measuring…</pre>
+    <div class="cv-note">
+      <div class="cv-note-head" id="head">
+        <span class="cv-note-kicker" id="kicker">评论</span>
+        <i class="cv-quote-bar" id="bar"></i>
+        <span class="cv-quote" id="quote">语义边界</span>
+        <div class="cv-note-tools">
+          <button class="cv-mini cv-ghost" type="button" id="cancel">取消</button>
+          <button class="cv-mini cv-ok" type="button" id="ok">提交</button>
+        </div>
+        <i class="guide"></i>
       </div>
-      <div class="cv-note-tools">
-        <button class="cv-mini cv-ghost" type="button">取消</button>
-        <button class="cv-mini cv-ok" type="button">提交</button>
-      </div>
-      <i class="guide"></i>
+      <textarea placeholder="写下一句想法（可选）…"></textarea>
     </div>
   </div>
+  <script>
+    function mid(id) {
+      var r = document.getElementById(id).getBoundingClientRect();
+      return { top: r.top, h: r.height, mid: r.top + r.height / 2 };
+    }
+    var ids = ["kicker", "bar", "quote", "cancel", "ok"];
+    var m = {};
+    ids.forEach(function (id) { m[id] = mid(id); });
+    var ref = m.ok.mid;
+    var lines = ids.map(function (id) {
+      return id + " mid=" + m[id].mid.toFixed(2) + " h=" + m[id].h.toFixed(2) + " d=" + (m[id].mid - ref).toFixed(2);
+    });
+    var worst = Math.max.apply(null, ids.map(function (id) { return Math.abs(m[id].mid - ref); }));
+    var report = document.getElementById("report");
+    report.textContent = (worst <= 0.6 ? "OK " : "BAD ") + "worstΔ=" + worst.toFixed(2) + "\n" + lines.join("\n");
+    report.className = worst <= 0.6 ? "ok" : "bad";
+    document.title = report.textContent.split("\n")[0];
+  </script>
 </body>
 </html>
