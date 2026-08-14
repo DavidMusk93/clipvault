@@ -282,7 +282,7 @@ test('archived URL uses View sheet — no inline HTML in cards', () => {
   assert.match(indexHtml, /function morphArchiveButtonToView/, 'archive button becomes view');
   assert.match(indexHtml, /archiveReaderFrame/, 'isolated iframe');
   assert.match(indexHtml, /archiveReaderNewTab/, 'escape hatch: real browser tab');
-  assert.doesNotMatch(indexHtml, /archive-badge/, 'no tiny 已归档 chip replacing the control');
+  assert.doesNotMatch(indexHtml, /class="archive-badge"|已归档/, 'no tiny 已归档 chip replacing the control');
   assert.doesNotMatch(indexHtml, /frame\.srcdoc|buildArchiveReaderDoc/, 'never srcdoc / JS rebuild');
   assert.doesNotMatch(indexHtml, /archive-preview md-preview/, 'must not dump archive HTML into masonry');
   assert.match(indexHtml, /function openArchiveReader/, 'reader opener');
