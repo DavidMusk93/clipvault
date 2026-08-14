@@ -2629,13 +2629,17 @@ window.ClipViewMasonry = Masonry;
         const fresh = items.filter(i => !seen.has(i.id));
         // Refresh archived flags on existing rows (list JSON has no article HTML).
         const byId = new Map(items.map((i) => [i.id, i]));
+        const flagDirty = [];
         clips = clips.map((c) => {
           const n = byId.get(c.id);
           if (!n) return c;
-          return { ...c, archived: n.archived, archive: n.archive, textContent: n.textContent || c.textContent };
+          const next = { ...c, archived: n.archived, archive: n.archive, textContent: n.textContent || c.textContent };
+          if (!!c.archived !== !!n.archived) flagDirty.push(next);
+          return next;
         });
         if (!fresh.length) {
           clips = dedupeClipsById(clips);
+          flagDirty.forEach((c) => replaceCardInPlace(c));
           return;
         }
         clips = dedupeClipsById([...fresh, ...clips]);
@@ -3874,6 +3878,11 @@ window.ClipViewMasonry = Masonry;
     }
 
     async function requestArchivePage(href, itemId, btn) {
+      const existing = itemId && clips.find((c) => c.id === itemId);
+      if (existing && existing.archived) {
+        openArchiveReader(existing);
+        return;
+      }
       const raw = String(href || '').trim();
       let safe = '';
       try {
@@ -3926,16 +3935,46 @@ window.ClipViewMasonry = Masonry;
           const job = data.job || {};
           if (job.status === 'ok') {
             toast(job.title ? ('已归档 · ' + job.title) : '归档完成');
+            if (itemId) {
+              const idx = clips.findIndex((c) => c.id === itemId);
+              if (idx >= 0) {
+                clips[idx] = {
+                  ...clips[idx],
+                  archived: true,
+                  archive: job.title ? { ...(clips[idx].archive || {}), title: job.title } : clips[idx].archive,
+                };
+              }
+            }
+            morphArchiveButtonToView(btn, itemId);
             if (itemId) await refreshClipInPlace(itemId);
             return;
           }
           if (job.status === 'error') {
             toast(job.error || '归档失败');
+            restoreArchiveButton(btn);
             return;
           }
         } catch (_) {}
       }
       toast('归档仍在进行，完成后会自动出现在卡片上');
+      restoreArchiveButton(btn);
+    }
+
+    function morphArchiveButtonToView(btn, itemId) {
+      if (!btn || !itemId) return;
+      btn.classList.remove('is-busy');
+      btn.removeAttribute('data-archive-url');
+      btn.removeAttribute('data-item-id');
+      btn.setAttribute('data-view-archive', itemId);
+      btn.title = '查看归档正文';
+      btn.innerHTML = '<span class="material-symbols-outlined">visibility</span>查看';
+    }
+
+    function restoreArchiveButton(btn) {
+      if (!btn) return;
+      btn.classList.remove('is-busy');
+      if (btn.getAttribute('data-view-archive')) return;
+      btn.innerHTML = '<span class="material-symbols-outlined">inventory_2</span>归档网页';
     }
 
     async function clearArchiveKeepUrl(itemId) {
@@ -4155,14 +4194,12 @@ window.ClipViewMasonry = Masonry;
           `<button type="button" class="fmt-btn" data-copy-text="${escAttr(href)}" title="复制完整 URL"><span class="material-symbols-outlined">link</span>复制链接</button>`
         );
         if (itemId && archived) {
+          // Same slot / same fmt-btn size as「归档网页」. Do not keep a clickable archive control.
           bits.push(
-            `<span class="archive-badge"><span class="material-symbols-outlined" style="font-size:14px">inventory_2</span>已归档</span>`
+            `<button type="button" class="fmt-btn" data-view-archive="${escAttr(itemId)}" title="查看归档正文"><span class="material-symbols-outlined">visibility</span>查看</button>`
           );
           bits.push(
-            `<button type="button" class="fmt-btn is-primary" data-view-archive="${escAttr(itemId)}" title="查看归档正文"><span class="material-symbols-outlined">visibility</span>查看</button>`
-          );
-          bits.push(
-            `<button type="button" class="fmt-btn" data-clear-archive="${escAttr(itemId)}" title="只去掉归档，保留这条网址"><span class="material-symbols-outlined">scan_delete</span>清除归档</button>`
+            `<button type="button" class="fmt-btn" data-clear-archive="${escAttr(itemId)}" title="只去掉归档，保留这条网址"><span class="material-symbols-outlined">scan_delete</span>清除</button>`
           );
         } else if (itemId) {
           bits.push(
@@ -4305,6 +4342,11 @@ window.ClipViewMasonry = Masonry;
             e.stopPropagation();
             const href = archBtn.getAttribute('data-archive-url');
             const id = (card && card.dataset.id) || archBtn.getAttribute('data-item-id');
+            const live = clips.find((c) => c.id === id);
+            if (live && live.archived) {
+              openArchiveReader(live);
+              return;
+            }
             requestArchivePage(href, id, archBtn);
             return;
           }
