@@ -51,6 +51,8 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 **产品哲学（演进新能力前必读）**：nmem `clipvault_design_philosophy_layered_memory_20260814`（身份/五层）+ `clipvault_reader_learning_layer_sqlite_20260814`（阅读态进 SQLite）  
 一句话：私人游乐场 + 学习工具。正确性交给引擎，陪伴感留在产品里；划线/评论/续读是个人知识，进 SQLite，不进浏览器一次性库。
 
+**评论 header 对齐（修前必搜 nmem，不靠会话记忆）**：`clipvault_reader_comment_header_strut_20260814`（怎么修）+ `clipvault_reader_header_align_fail_loop_20260814`（为何翻车）+ `owner_nmem_only_not_grok_session_memory_20260814`（Owner：依据只认 nmem）。
+
 ### 2.1 品牌与叙事
 
 | Do | Don't |
