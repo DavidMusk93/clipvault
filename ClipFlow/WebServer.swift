@@ -1057,7 +1057,7 @@ class WebServer {
             img,video{max-width:100%;height:auto;}
             a{pointer-events:none;color:inherit;text-decoration:none;}
           </style>
-          <script src="/assets/archive-reader.js?v=20260814g" defer></script>
+          <script src="/assets/archive-reader.js?v=20260814h" defer></script>
         </head>
         <body>
         \(bar)

@@ -32,8 +32,14 @@ test('selection chrome is a glass bar that never covers the rect', () => {
   assert.match(js, /评论/, 'comment action');
   assert.match(js, /is-sheet/, 'narrow viewport uses a sheet');
   assert.match(js, /allowSide/, 'wide viewport parks the note in the margin');
-  assert.match(swiftWeb, /archive-reader\.js\?v=20260814g/, 'cache bust');
+  assert.match(swiftWeb, /archive-reader\.js\?v=20260814h/, 'cache bust');
   assert.match(js, /写下一句想法/, 'same copy as card evaluation');
+});
+
+test('delete highlight lives on the selection bar, not the comment sheet', () => {
+  assert.match(js, /className = "cv-del"/, 'delete is a selbar action');
+  assert.match(js, /has-hl/, 'existing highlight switches the bar');
+  assert.doesNotMatch(js, /删除划线/, 'no 删除划线 inside the comment sheet');
 });
 
 test('reader comment sheet lists append-only ops as a timeline', () => {

@@ -152,7 +152,11 @@
       "transform:translateX(-50%) rotate(45deg);pointer-events:none;border-radius:1px;}",
       ".cv-selbar.is-below .cv-caret{top:-3px;bottom:auto;border:0;",
       "border-left:.5px solid rgba(0,0,0,.06);border-top:.5px solid rgba(0,0,0,.06);}",
-      "@media (hover:hover) and (pointer:fine){.cv-selbar button:hover{background:rgba(0,0,0,.04);}}",
+      ".cv-selbar .cv-del-slot{display:none;align-items:stretch;}",
+      ".cv-selbar.has-hl .cv-del-slot{display:flex;}",
+      ".cv-selbar.has-hl .cv-hl-btn,.cv-selbar.has-hl .cv-hl-btn + .cv-div{display:none;}",
+      ".cv-selbar .cv-del{color:#d70015;}",
+      "@media (hover:hover) and (pointer:fine){.cv-selbar button:hover{background:rgba(0,0,0,.04);}.cv-selbar .cv-del:hover{background:rgba(215,0,21,.08);}}",
       ".cv-note{position:fixed;z-index:51;left:0;top:0;display:flex;flex-direction:column;gap:8px;",
       "width:min(320px,calc(100vw - 20px));padding:12px 14px 14px;",
       "opacity:0;pointer-events:none;transform:translate3d(0,8px,0) scale(.97);transform-origin:20% 0;",
@@ -179,8 +183,6 @@
       ".cv-note .cv-ok{background:#0071e3;color:#fff;}",
       ".cv-note .cv-ok:disabled{opacity:.4;cursor:not-allowed;}",
       ".cv-note .cv-ghost{background:rgba(120,120,128,.14);color:#1d1d1f;font-weight:500;}",
-      ".cv-note .cv-danger{align-self:flex-start;border:0;background:transparent;color:#d70015;",
-      "font:inherit;font-size:13px;font-weight:510;letter-spacing:-.01em;padding:0;min-height:0;cursor:pointer;}",
       ".cv-note-body{display:flex;flex-direction:column;gap:10px;}",
       ".cv-hist-title{font-size:13px;font-weight:600;color:#6e6e73;letter-spacing:-.01em;margin:2px 0 0;}",
       ".cv-hist{list-style:none;margin:0;padding:0 0 2px 12px;border-left:2px solid rgba(60,60,67,.10);",
@@ -536,10 +538,19 @@
     var cmtBtn = document.createElement("button");
     cmtBtn.type = "button";
     cmtBtn.innerHTML = ico(ICO_NOTE) + "<span>评论</span>";
+    var delSlot = el("span", "cv-del-slot");
+    var divDel = el("i", "cv-div");
+    var delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "cv-del";
+    delBtn.textContent = "删除";
+    delSlot.appendChild(divDel);
+    delSlot.appendChild(delBtn);
     selbar.appendChild(caret);
     selbar.appendChild(hlBtn);
     selbar.appendChild(div);
     selbar.appendChild(cmtBtn);
+    selbar.appendChild(delSlot);
     var note = el("div", "cv-note");
     var grabber = el("div", "cv-grabber");
     var head = el("div", "cv-note-head");
@@ -549,11 +560,10 @@
     ta.placeholder = "写下一句想法（可选）…";
     ta.rows = 3;
     ta.maxLength = 4000;
-    var delBtn = el("button", "cv-danger", "删除划线");
     var actions = el("div", "cv-note-actions");
     var cancelBtn = el("button", "cv-ghost", "取消");
     var saveBtn = el("button", "cv-ok", "提交");
-    delBtn.type = cancelBtn.type = saveBtn.type = "button";
+    cancelBtn.type = saveBtn.type = "button";
     actions.appendChild(cancelBtn);
     actions.appendChild(saveBtn);
     var histTitle = el("div", "cv-hist-title", "记录");
@@ -561,7 +571,6 @@
     var body = el("div", "cv-note-body");
     body.appendChild(quote);
     body.appendChild(ta);
-    body.appendChild(delBtn);
     body.appendChild(actions);
     body.appendChild(histTitle);
     body.appendChild(hist);
@@ -718,26 +727,47 @@
 
     var pendingSel = null;
     var editing = null;
+    var activeHl = null;
     function hideSel() {
       selbar.classList.remove("open");
+      selbar.classList.remove("has-hl");
       pendingSel = null;
+      activeHl = null;
     }
-    function showSel(rangeOrRect) {
+    function highlightFromNode(node) {
+      var eln = node && node.nodeType === 1 ? node : node && node.parentElement;
+      var mark = eln && eln.closest && eln.closest("mark.cv-hl");
+      if (!mark) return null;
+      var hid = mark.dataset.hlId;
+      return (
+        highlights.filter(function (x) {
+          return x.id === hid;
+        })[0] || null
+      );
+    }
+    function setSelMode(hl) {
+      activeHl = hl || null;
+      selbar.classList.toggle("has-hl", !!activeHl);
+    }
+    function showSel(rangeOrRect, hl) {
       var first = rangeOrRect && rangeOrRect.getClientRects ? lineRect(rangeOrRect, "first") : rangeOrRect;
       var bounds = rangeOrRect && rangeOrRect.getBoundingClientRect ? rangeOrRect.getBoundingClientRect() : first;
       if (!first || first.width < 2 || first.height < 2) return;
+      setSelMode(hl);
       placeNearRect(selbar, first, {
         prefer: "above",
         gap: 12,
         bounds: bounds,
-        fallbackW: 148,
+        fallbackW: 168,
         fallbackH: 28,
       });
       selbar.classList.add("open");
     }
     document.addEventListener("pointerup", function (e) {
       if (ui.contains(e.target)) return;
+      var mark = e.target.closest && e.target.closest("mark.cv-hl");
       setTimeout(function () {
+        if (mark) return;
         pendingSel = serializeSelection(root);
         if (!pendingSel) {
           hideSel();
@@ -745,7 +775,8 @@
         }
         var sel = window.getSelection();
         if (!sel || !sel.rangeCount) return;
-        showSel(sel.getRangeAt(0));
+        var range = sel.getRangeAt(0);
+        showSel(range, highlightFromNode(range.commonAncestorContainer));
       }, 0);
     });
 
@@ -823,7 +854,25 @@
     });
     cmtBtn.addEventListener("click", function (e) {
       e.stopPropagation();
+      if (activeHl) {
+        var h = activeHl;
+        var mark = root.querySelector('mark.cv-hl[data-hl-id="' + h.id + '"]');
+        hideSel();
+        openNote(h, mark);
+        return;
+      }
       addHighlight(true);
+    });
+    delBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (!activeHl) return;
+      var hid = activeHl.id;
+      apiPost(id, "highlight_delete", { id: hid }).then(function (res) {
+        if (res && res.ok) refreshFromState(res.state, res.ops);
+        hideSel();
+        note.classList.remove("open");
+        editing = null;
+      });
     });
 
     function openNote(h, anchor) {
@@ -856,7 +905,7 @@
       var h = highlights.filter(function (x) {
         return x.id === hid;
       })[0];
-      if (h) openNote(h, m);
+      if (h) showSel(m, h);
     });
     saveBtn.addEventListener("click", function () {
       if (!editing) return;
@@ -878,14 +927,6 @@
         });
       });
     });
-    delBtn.addEventListener("click", function () {
-      if (!editing) return;
-      apiPost(id, "highlight_delete", { id: editing.id }).then(function (res) {
-        if (res && res.ok) refreshFromState(res.state, res.ops);
-        note.classList.remove("open");
-        editing = null;
-      });
-    });
     cancelBtn.addEventListener("click", function () {
       note.classList.remove("open");
       editing = null;
@@ -901,12 +942,13 @@
     var mark = document.getElementById("cv-preview-sel");
     var noteMark = document.getElementById("cv-preview-note");
     var ui = el("div", "cv-reader-ui");
-    var selbar = el("div", "cv-selbar open");
+    var selbar = el("div", "cv-selbar open" + (scene === "hl" ? " has-hl" : ""));
     selbar.innerHTML =
       '<i class="cv-caret"></i><button type="button" class="cv-hl-btn">' +
       '<i class="cv-swatch" aria-hidden="true"></i><span>划线</span></button><i class="cv-div"></i><button type="button">' +
       ico(ICO_NOTE) +
-      "<span>评论</span></button>";
+      "<span>评论</span></button>" +
+      '<span class="cv-del-slot"><i class="cv-div"></i><button type="button" class="cv-del">删除</button></span>';
     var note = el("div", "cv-note open");
     note.innerHTML =
       '<div class="cv-grabber"></div>' +
@@ -914,7 +956,6 @@
       '<div class="cv-note-body">' +
       '<p class="cv-quote">dependencies between distant positions</p>' +
       '<textarea rows="3" maxlength="4000" placeholder="写下一句想法（可选）…"></textarea>' +
-      '<button class="cv-danger" type="button">删除划线</button>' +
       '<div class="cv-note-actions"><button class="cv-ghost" type="button">取消</button>' +
       '<button class="cv-ok" type="button">提交</button></div>' +
       '<div class="cv-hist-title">记录</div>' +
@@ -924,7 +965,7 @@
       '<li class="cv-hist-item is-mark"><div class="cv-hist-time"><span class="cv-hist-rel">3 分钟前</span></div>' +
       '<span class="cv-hist-badge">划线</span></li></ul></div>';
     if (scene !== "note") ui.appendChild(selbar);
-    if (scene !== "sel" && noteMark) ui.appendChild(note);
+    if (scene !== "sel" && scene !== "hl" && noteMark) ui.appendChild(note);
     document.body.appendChild(ui);
     if (scene !== "note" && mark) {
       placeNearRect(selbar, lineRect(mark, "first"), {
