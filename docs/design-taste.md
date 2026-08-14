@@ -82,7 +82,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | Token | 值 | 用途 |
 | --- | --- | --- |
 | 选区菜单 | macOS 浅玻璃 `rgba(246,246,248,.92)` blur 40 · 高 28 · 圆角 8 · 黄点=划线 | 备忘录/Safari Reader，不是 iOS 黑胶囊+粗三角 |
-| 评论卡片 | 与卡片「评价」sheet 同构：18 圆角玻璃、15px 输入、44px 取消/提交 | 不要另做一套胶囊按钮 |
+| 评论卡片 | 与卡片「评价」sheet 同构：18 圆角玻璃、15px 输入、44px 取消/提交、底部「记录」时间线 | 不要另做一套胶囊按钮；不要只显示最新一句 |
 | 高亮 | Apple Notes 黄 `#FFD60A` 叠层 | `mark.cv-hl` / `::selection` |
 | 有评论 | 底部 inset 1.5px `#0071E3` | 划线带想法 |
 | 动效 | 从选区长出 `scale(.96→1)` + 16–200ms ease-out | 空间来源是文字，不是屏幕中心 |

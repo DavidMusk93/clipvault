@@ -2241,10 +2241,17 @@ final class DatabaseManager: ObservableObject {
                 while sqlite3_step(oStmt) == SQLITE_ROW {
                     var row: [String: Any] = [:]
                     row["id"] = sqlite3_column_text(oStmt, 0).map { String(cString: $0) } ?? ""
-                    row["ts"] = sqlite3_column_double(oStmt, 1)
+                    let ots = sqlite3_column_double(oStmt, 1)
+                    row["ts"] = ots
+                    row["timeLocal"] = ClipTimeFormat.displayWall(unix: ots)
                     row["kind"] = sqlite3_column_text(oStmt, 2).map { String(cString: $0) } ?? ""
                     if let payload = sqlite3_column_text(oStmt, 3).map({ String(cString: $0) }) {
-                        row["payload"] = payload
+                        if let data = payload.data(using: .utf8),
+                           let obj = try? JSONSerialization.jsonObject(with: data) {
+                            row["payload"] = obj
+                        } else {
+                            row["payload"] = payload
+                        }
                     }
                     row["source"] = sqlite3_column_text(oStmt, 4).map { String(cString: $0) } ?? "web"
                     ops.append(row)

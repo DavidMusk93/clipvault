@@ -75,7 +75,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **归档后同一按钮变「查看」**（同槽同尺寸）；已归档禁止再点「归档网页」 | 另塞一颗小「查看」；归档按钮归档后仍可点 |
 | **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶 | 改 timestamp 冒充置顶；钉子混进下一页重复出现 |
 | **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |
-| **阅读选区菜单**：macOS 浅玻璃小条（28px），黄点=划线；**绝不盖住选中内容**；评论宽屏栏外 / 窄屏底栏 | iOS 黑胶囊 + 粗三角 caret；菜单压在高亮上 |
+| **阅读选区菜单**：macOS 浅玻璃小条（28px），黄点=划线；**绝不盖住选中内容**；评论宽屏栏外 / 窄屏底栏；评论卡底部「记录」= `reader_ops` 时间线 | iOS 黑胶囊 + 粗三角 caret；菜单压在高亮上；评论只显示最新一句 |
 | 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
 
 ### 2.3 工程（always SOTA / 终局）

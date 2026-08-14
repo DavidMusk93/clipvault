@@ -1057,7 +1057,7 @@ class WebServer {
             img,video{max-width:100%;height:auto;}
             a{pointer-events:none;color:inherit;text-decoration:none;}
           </style>
-          <script src="/assets/archive-reader.js?v=20260814f" defer></script>
+          <script src="/assets/archive-reader.js?v=20260814g" defer></script>
         </head>
         <body>
         \(bar)
@@ -1140,8 +1140,9 @@ class WebServer {
         let source = (obj["source"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "web"
         database.appendReaderOp(itemId: uuid, kind: kind, payload: payload, source: source) { [weak self] state in
             guard let self else { return }
-            if let state {
-                self.sendJSON(["ok": true, "state": state], connection: connection)
+            if state != nil {
+                let bundle = self.database.fetchReaderBundle(id: uuid)
+                self.sendJSON(["ok": true, "state": bundle.state, "ops": bundle.ops], connection: connection)
             } else {
                 self.sendJSON(["ok": false, "message": "无法写入阅读记录"], connection: connection)
             }

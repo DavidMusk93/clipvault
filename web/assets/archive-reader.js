@@ -153,7 +153,7 @@
       ".cv-selbar.is-below .cv-caret{top:-3px;bottom:auto;border:0;",
       "border-left:.5px solid rgba(0,0,0,.06);border-top:.5px solid rgba(0,0,0,.06);}",
       "@media (hover:hover) and (pointer:fine){.cv-selbar button:hover{background:rgba(0,0,0,.04);}}",
-      ".cv-note{position:fixed;z-index:51;left:0;top:0;display:flex;flex-direction:column;gap:10px;",
+      ".cv-note{position:fixed;z-index:51;left:0;top:0;display:flex;flex-direction:column;gap:8px;",
       "width:min(320px,calc(100vw - 20px));padding:12px 14px 14px;",
       "opacity:0;pointer-events:none;transform:translate3d(0,8px,0) scale(.97);transform-origin:20% 0;",
       "transition:opacity .2s cubic-bezier(.22,1,.36,1),transform .24s cubic-bezier(.22,1,.36,1);",
@@ -181,6 +181,23 @@
       ".cv-note .cv-ghost{background:rgba(120,120,128,.14);color:#1d1d1f;font-weight:500;}",
       ".cv-note .cv-danger{align-self:flex-start;border:0;background:transparent;color:#d70015;",
       "font:inherit;font-size:13px;font-weight:510;letter-spacing:-.01em;padding:0;min-height:0;cursor:pointer;}",
+      ".cv-note-body{display:flex;flex-direction:column;gap:10px;}",
+      ".cv-hist-title{font-size:13px;font-weight:600;color:#6e6e73;letter-spacing:-.01em;margin:2px 0 0;}",
+      ".cv-hist{list-style:none;margin:0;padding:0 0 2px 12px;border-left:2px solid rgba(60,60,67,.10);",
+      "max-height:160px;overflow:auto;-webkit-overflow-scrolling:touch;}",
+      ".cv-hist-item{position:relative;padding:0 0 12px 14px;}",
+      ".cv-hist-item:last-child{padding-bottom:2px;}",
+      ".cv-hist-item::before{content:'';position:absolute;left:-17px;top:6px;width:8px;height:8px;",
+      "border-radius:50%;background:#0071e3;box-shadow:0 0 0 3px rgba(0,113,227,.12);}",
+      ".cv-hist-item.is-mark::before{background:rgba(60,60,67,.35);box-shadow:0 0 0 3px rgba(60,60,67,.08);}",
+      ".cv-hist-time{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}",
+      ".cv-hist-rel{font-size:13px;font-weight:600;letter-spacing:-.02em;}",
+      ".cv-hist-abs{font-size:11px;color:#6e6e73;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}",
+      ".cv-hist-badge{display:inline-block;margin-top:4px;font-size:11px;font-weight:600;color:#6e6e73;",
+      "background:rgba(120,120,128,.12);border-radius:999px;padding:2px 8px;}",
+      ".cv-hist-note{margin:6px 0 0;font-size:14px;line-height:1.45;letter-spacing:-.01em;",
+      "white-space:pre-wrap;word-break:break-word;}",
+      ".cv-hist-empty{font-size:13px;color:#6e6e73;padding:10px 0 4px;text-align:center;}",
       ".cv-note.is-sheet{left:8px!important;right:8px;width:auto;top:auto!important;bottom:12px;",
       "transform-origin:50% 100%;max-width:none;border-radius:20px 20px 18px 18px;}",
       ".cv-note.is-sheet .cv-grabber{display:block;}",
@@ -218,7 +235,7 @@
     var pad = 10;
     var bounds = opts.bounds || rect;
     var w = node.offsetWidth || opts.fallbackW || 168;
-    var h = node.offsetHeight || opts.fallbackH || 38;
+    var h = Math.max(node.offsetHeight || 0, node.scrollHeight || 0, opts.fallbackH || 0) || 38;
     var vw = window.innerWidth;
     var vh = window.innerHeight;
     var cx = rect.left + rect.width / 2;
@@ -234,6 +251,14 @@
         node.classList.remove("is-below");
         node.style.left = Math.round(left) + "px";
         node.style.top = Math.round(top) + "px";
+        var sideBox = node.getBoundingClientRect();
+        var sideDy = 0;
+        if (sideBox.bottom > vh - pad) sideDy = vh - pad - sideBox.bottom;
+        if (sideBox.top + sideDy < pad) sideDy = pad - sideBox.top;
+        if (sideDy) {
+          top += sideDy;
+          node.style.top = Math.round(top) + "px";
+        }
         return { left: left, top: top, below: false, side: true, w: w, h: h };
       }
     }
@@ -258,6 +283,14 @@
     node.classList.toggle("is-below", below);
     node.style.left = Math.round(left) + "px";
     node.style.top = Math.round(top) + "px";
+    var box = node.getBoundingClientRect();
+    var dy = 0;
+    if (box.bottom > vh - pad) dy = vh - pad - box.bottom;
+    if (box.top + dy < pad) dy = pad - box.top;
+    if (dy) {
+      top += dy;
+      node.style.top = Math.round(top) + "px";
+    }
     var caret = node.querySelector(".cv-caret");
     if (caret) {
       caret.style.left = Math.min(w - 14, Math.max(14, cx - left)) + "px";
@@ -394,6 +427,49 @@
     };
   }
 
+  function parsePayload(raw) {
+    if (!raw) return {};
+    if (typeof raw === "object") return raw;
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function opHighlightId(op) {
+    return String(parsePayload(op && op.payload).id || "");
+  }
+
+  function opsForHighlight(ops, hid) {
+    if (!hid) return [];
+    return (ops || [])
+      .filter(function (op) {
+        if (opHighlightId(op) !== hid) return false;
+        return op.kind === "highlight_add" || op.kind === "comment" || op.kind === "highlight_update";
+      })
+      .slice()
+      .reverse();
+  }
+
+  function formatOpTime(op) {
+    var ts = Number(op && op.ts);
+    var abs = String((op && op.timeLocal) || "").trim();
+    if (abs && /^\d{4}\/\d{2}\/\d{2} /.test(abs)) {
+      abs = abs.slice(0, 16);
+    }
+    if (!isFinite(ts) || ts <= 0) return { rel: abs || "—", abs: abs || "—" };
+    var sec = Math.round(Date.now() / 1000 - ts);
+    var rel;
+    if (sec < 45) rel = "刚刚";
+    else if (sec < 3600) rel = Math.max(1, Math.round(sec / 60)) + " 分钟前";
+    else if (sec < 86400) rel = Math.max(1, Math.round(sec / 3600)) + " 小时前";
+    else if (sec < 86400 * 2) rel = "昨天";
+    else if (sec < 86400 * 7) rel = Math.max(1, Math.round(sec / 86400)) + " 天前";
+    else rel = abs || "更早";
+    return { rel: rel, abs: abs || rel };
+  }
+
   function nearestHeadingId(node) {
     var el = node && node.nodeType === 1 ? node : node && node.parentElement;
     while (el && el !== document.body) {
@@ -403,10 +479,11 @@
     return "";
   }
 
-  function mount(headings, id, initial) {
+  function mount(headings, id, initial, initialOps) {
     injectCSS();
     var state = initial || {};
     var highlights = state.highlights || [];
+    var ops = initialOps || [];
     var root = articleRoot();
     applyHighlights(root, highlights);
 
@@ -479,12 +556,18 @@
     delBtn.type = cancelBtn.type = saveBtn.type = "button";
     actions.appendChild(cancelBtn);
     actions.appendChild(saveBtn);
+    var histTitle = el("div", "cv-hist-title", "记录");
+    var hist = el("ul", "cv-hist");
+    var body = el("div", "cv-note-body");
+    body.appendChild(quote);
+    body.appendChild(ta);
+    body.appendChild(delBtn);
+    body.appendChild(actions);
+    body.appendChild(histTitle);
+    body.appendChild(hist);
     note.appendChild(grabber);
     note.appendChild(head);
-    note.appendChild(quote);
-    note.appendChild(ta);
-    note.appendChild(delBtn);
-    note.appendChild(actions);
+    note.appendChild(body);
     ui.appendChild(bar);
     ui.appendChild(panel);
     ui.appendChild(noteFab);
@@ -666,12 +749,57 @@
       }, 0);
     });
 
-    function refreshFromState(next) {
-      if (!next) return;
-      state = next;
-      highlights = next.highlights || [];
-      applyHighlights(root, highlights);
-      setNoteCount();
+    function refreshFromState(next, nextOps) {
+      if (next) {
+        state = next;
+        highlights = next.highlights || [];
+        applyHighlights(root, highlights);
+        setNoteCount();
+      }
+      if (nextOps) ops = nextOps;
+    }
+
+    function renderHist(hid) {
+      var rows = opsForHighlight(ops, hid);
+      hist.innerHTML = "";
+      if (!rows.length) {
+        hist.appendChild(el("li", "cv-hist-empty", "暂无记录"));
+        return;
+      }
+      rows.forEach(function (op) {
+        var p = parsePayload(op.payload);
+        var comment = String(p.comment || "").trim();
+        var isMark = op.kind === "highlight_add" && !comment;
+        var badge = isMark ? "划线" : "评论";
+        var t = formatOpTime(op);
+        var li = el("li", "cv-hist-item" + (isMark ? " is-mark" : ""));
+        var time = el("div", "cv-hist-time");
+        time.appendChild(el("span", "cv-hist-rel", t.rel));
+        if (t.abs && t.abs !== t.rel) time.appendChild(el("span", "cv-hist-abs", t.abs));
+        li.appendChild(time);
+        li.appendChild(el("span", "cv-hist-badge", badge));
+        if (comment) li.appendChild(el("div", "cv-hist-note", comment));
+        hist.appendChild(li);
+      });
+    }
+
+    function placeNote(anchor) {
+      var host = anchor || noteFab;
+      if (window.innerWidth <= 640) {
+        note.classList.add("is-sheet");
+        note.style.left = "";
+        note.style.top = "";
+        return;
+      }
+      note.classList.remove("is-sheet");
+      placeNearRect(note, lineRect(host, "last"), {
+        prefer: "below",
+        gap: 14,
+        bounds: host.getBoundingClientRect(),
+        allowSide: true,
+        fallbackW: 320,
+        fallbackH: 360,
+      });
     }
 
     function addHighlight(withComment) {
@@ -681,7 +809,7 @@
       window.getSelection().removeAllRanges();
       apiPost(id, "highlight_add", payload).then(function (res) {
         if (!res || !res.ok) return;
-        refreshFromState(res.state);
+        refreshFromState(res.state, res.ops);
         if (withComment) {
           var listNow = (res.state && res.state.highlights) || [];
           var last = listNow[listNow.length - 1];
@@ -703,7 +831,8 @@
       hideSel();
       quote.textContent = String(h.quote || "").replace(/\s+/g, " ").trim();
       quote.hidden = !quote.textContent;
-      ta.value = h.comment || "";
+      ta.value = "";
+      renderHist(h.id);
       if (anchor && anchor.scrollIntoView) {
         try {
           anchor.scrollIntoView({ block: "center", behavior: "instant" });
@@ -711,23 +840,11 @@
           anchor.scrollIntoView(true);
         }
       }
-      var host = anchor || noteFab;
-      if (window.innerWidth <= 640) {
-        note.classList.add("is-sheet");
-        note.style.left = "";
-        note.style.top = "";
-      } else {
-        note.classList.remove("is-sheet");
-        placeNearRect(note, lineRect(host, "last"), {
-          prefer: "below",
-          gap: 14,
-          bounds: host.getBoundingClientRect(),
-          allowSide: true,
-          fallbackW: 320,
-          fallbackH: 260,
-        });
-      }
       note.classList.add("open");
+      placeNote(anchor);
+      requestAnimationFrame(function () {
+        placeNote(anchor);
+      });
       ta.focus();
     }
     root.addEventListener("click", function (e) {
@@ -743,16 +860,28 @@
     });
     saveBtn.addEventListener("click", function () {
       if (!editing) return;
-      apiPost(id, "comment", { id: editing.id, comment: ta.value }).then(function (res) {
-        if (res && res.ok) refreshFromState(res.state);
-        note.classList.remove("open");
-        editing = null;
+      var text = ta.value;
+      if (!String(text || "").trim() && !(editing.comment || "").trim()) return;
+      apiPost(id, "comment", { id: editing.id, comment: text }).then(function (res) {
+        if (!res || !res.ok) return;
+        refreshFromState(res.state, res.ops);
+        var hid = editing.id;
+        var next = (highlights || []).filter(function (x) {
+          return x.id === hid;
+        })[0];
+        if (next) editing = next;
+        ta.value = "";
+        renderHist(hid);
+        requestAnimationFrame(function () {
+          var mark = root.querySelector('mark.cv-hl[data-hl-id="' + hid + '"]');
+          placeNote(mark);
+        });
       });
     });
     delBtn.addEventListener("click", function () {
       if (!editing) return;
       apiPost(id, "highlight_delete", { id: editing.id }).then(function (res) {
-        if (res && res.ok) refreshFromState(res.state);
+        if (res && res.ok) refreshFromState(res.state, res.ops);
         note.classList.remove("open");
         editing = null;
       });
@@ -782,11 +911,18 @@
     note.innerHTML =
       '<div class="cv-grabber"></div>' +
       '<div class="cv-note-head"><strong>评论</strong></div>' +
+      '<div class="cv-note-body">' +
       '<p class="cv-quote">dependencies between distant positions</p>' +
-      '<textarea rows="3" maxlength="4000">这里记下为什么这段值得留。</textarea>' +
+      '<textarea rows="3" maxlength="4000" placeholder="写下一句想法（可选）…"></textarea>' +
       '<button class="cv-danger" type="button">删除划线</button>' +
       '<div class="cv-note-actions"><button class="cv-ghost" type="button">取消</button>' +
-      '<button class="cv-ok" type="button">提交</button></div>';
+      '<button class="cv-ok" type="button">提交</button></div>' +
+      '<div class="cv-hist-title">记录</div>' +
+      '<ul class="cv-hist">' +
+      '<li class="cv-hist-item"><div class="cv-hist-time"><span class="cv-hist-rel">刚刚</span><span class="cv-hist-abs">13:41</span></div>' +
+      '<span class="cv-hist-badge">评论</span><div class="cv-hist-note">这里记下为什么这段值得留。</div></li>' +
+      '<li class="cv-hist-item is-mark"><div class="cv-hist-time"><span class="cv-hist-rel">3 分钟前</span></div>' +
+      '<span class="cv-hist-badge">划线</span></li></ul></div>';
     if (scene !== "note") ui.appendChild(selbar);
     if (scene !== "sel" && noteMark) ui.appendChild(note);
     document.body.appendChild(ui);
@@ -804,11 +940,13 @@
       if (window.innerWidth <= 640) {
         note.classList.add("is-sheet");
       } else {
-        placeNearRect(note, lineRect(noteMark, "last"), {
-          prefer: "below",
-          gap: 14,
-          bounds: noteMark.getBoundingClientRect(),
-          allowSide: true,
+        requestAnimationFrame(function () {
+          placeNearRect(note, lineRect(noteMark, "last"), {
+            prefer: "below",
+            gap: 14,
+            bounds: noteMark.getBoundingClientRect(),
+            allowSide: true,
+          });
         });
       }
     }
@@ -825,10 +963,10 @@
     var headings = collectHeadings(root);
     apiGet(id)
       .then(function (res) {
-        mount(headings, id, (res && res.ok && res.state) || {});
+        mount(headings, id, (res && res.ok && res.state) || {}, (res && res.ok && res.ops) || []);
       })
       .catch(function () {
-        mount(headings, id, {});
+        mount(headings, id, {}, []);
       });
   }
 

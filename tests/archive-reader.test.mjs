@@ -32,8 +32,16 @@ test('selection chrome is a glass bar that never covers the rect', () => {
   assert.match(js, /评论/, 'comment action');
   assert.match(js, /is-sheet/, 'narrow viewport uses a sheet');
   assert.match(js, /allowSide/, 'wide viewport parks the note in the margin');
-  assert.match(swiftWeb, /archive-reader\.js\?v=20260814f/, 'cache bust');
+  assert.match(swiftWeb, /archive-reader\.js\?v=20260814g/, 'cache bust');
   assert.match(js, /写下一句想法/, 'same copy as card evaluation');
+});
+
+test('reader comment sheet lists append-only ops as a timeline', () => {
+  assert.match(js, /function opsForHighlight/, 'filter ops per highlight');
+  assert.match(js, /cv-hist/, 'history list');
+  assert.match(js, />记录</, '记录 title');
+  assert.match(swiftWeb, /"ops": bundle\.ops/, 'POST returns ops');
+  assert.match(swiftDb, /timeLocal/, 'ops carry wall time');
 });
 
 test('server persists reader_state + reader_ops, not archive HTML', () => {
