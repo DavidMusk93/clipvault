@@ -154,28 +154,36 @@
       "border-left:.5px solid rgba(0,0,0,.06);border-top:.5px solid rgba(0,0,0,.06);}",
       "@media (hover:hover) and (pointer:fine){.cv-selbar button:hover{background:rgba(0,0,0,.04);}}",
       ".cv-note{position:fixed;z-index:51;left:0;top:0;display:flex;flex-direction:column;gap:10px;",
-      "width:min(300px,calc(100vw - 24px));padding:12px 12px 10px;",
+      "width:min(320px,calc(100vw - 20px));padding:12px 14px 14px;",
       "opacity:0;pointer-events:none;transform:translate3d(0,8px,0) scale(.97);transform-origin:20% 0;",
       "transition:opacity .2s cubic-bezier(.22,1,.36,1),transform .24s cubic-bezier(.22,1,.36,1);",
-      "background:rgba(250,250,252,.96);color:#1d1d1f;",
+      "background:rgba(255,255,255,.92);color:#1d1d1f;",
       "-webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);",
-      "border-radius:16px;border:.5px solid rgba(255,255,255,.86);",
-      "box-shadow:0 18px 40px rgba(0,0,0,.18),0 0 0 .5px rgba(0,0,0,.08);}",
+      "border-radius:18px;border:.5px solid rgba(60,60,67,.12);",
+      "box-shadow:0 12px 40px rgba(0,0,0,.18),0 0 0 .5px rgba(255,255,255,.4) inset;}",
       ".cv-note.open{opacity:1;pointer-events:auto;transform:translate3d(0,0,0) scale(1);}",
+      ".cv-note .cv-grabber{width:36px;height:5px;border-radius:999px;background:rgba(60,60,67,.22);",
+      "margin:0 auto 2px;display:none;flex-shrink:0;}",
+      ".cv-note .cv-note-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}",
+      ".cv-note .cv-note-head strong{font-size:17px;font-weight:600;letter-spacing:-.02em;}",
       ".cv-note .cv-quote{font-size:12px;line-height:1.4;color:#6e6e73;letter-spacing:-.01em;",
       "padding-left:8px;border-left:2px solid #ffd60a;max-height:3.2em;overflow:hidden;}",
-      ".cv-note textarea{min-height:68px;border:0;border-radius:10px;padding:8px 10px;",
-      "font:inherit;font-size:15px;letter-spacing:-.016em;line-height:1.35;resize:none;outline:none;",
-      "background:rgba(120,120,128,.1);}",
-      ".cv-note .cv-note-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;}",
-      ".cv-note button{border:0;border-radius:980px;padding:6px 12px;min-height:30px;",
-      "font:inherit;font-size:13px;font-weight:590;letter-spacing:-.016em;cursor:pointer;}",
-      ".cv-note button:active{transform:scale(.97);}",
+      ".cv-note textarea{width:100%;min-height:96px;box-sizing:border-box;border:.5px solid rgba(60,60,67,.18);",
+      "border-radius:14px;padding:12px 14px;font:inherit;font-size:15px;letter-spacing:-.01em;line-height:1.4;",
+      "resize:vertical;outline:none;background:rgba(120,120,128,.08);color:#1d1d1f;}",
+      ".cv-note textarea:focus{background:#fff;border-color:rgba(0,113,227,.45);box-shadow:0 0 0 4px rgba(0,113,227,.18);}",
+      ".cv-note .cv-note-actions{display:flex;gap:10px;padding-top:2px;}",
+      ".cv-note .cv-note-actions button{flex:1;height:44px;border:0;border-radius:12px;",
+      "font:inherit;font-size:16px;font-weight:600;letter-spacing:-.02em;cursor:pointer;}",
+      ".cv-note .cv-note-actions button:active{transform:scale(.98);}",
       ".cv-note .cv-ok{background:#0071e3;color:#fff;}",
-      ".cv-note .cv-ghost{background:rgba(120,120,128,.12);color:#1d1d1f;}",
-      ".cv-note .cv-danger{background:transparent;color:#d70015;margin-right:auto;padding-left:4px;}",
-      ".cv-note.is-sheet{left:10px!important;right:10px;width:auto;top:auto!important;bottom:10px;",
-      "transform-origin:50% 100%;max-width:none;}",
+      ".cv-note .cv-ok:disabled{opacity:.4;cursor:not-allowed;}",
+      ".cv-note .cv-ghost{background:rgba(120,120,128,.14);color:#1d1d1f;font-weight:500;}",
+      ".cv-note .cv-danger{align-self:flex-start;border:0;background:transparent;color:#d70015;",
+      "font:inherit;font-size:13px;font-weight:510;letter-spacing:-.01em;padding:0;min-height:0;cursor:pointer;}",
+      ".cv-note.is-sheet{left:8px!important;right:8px;width:auto;top:auto!important;bottom:12px;",
+      "transform-origin:50% 100%;max-width:none;border-radius:20px 20px 18px 18px;}",
+      ".cv-note.is-sheet .cv-grabber{display:block;}",
       "main.cv-article h1,main.cv-article h2,main.cv-article h3,main.cv-article h4{scroll-margin-top:16px;}",
       "@media (prefers-reduced-motion:reduce){.cv-selbar,.cv-note{transition:opacity .15s ease;transform:none!important;}}",
       "@media (prefers-reduced-transparency:reduce){.cv-selbar,.cv-note,.cv-selbar .cv-caret{background:#fff;backdrop-filter:none;-webkit-backdrop-filter:none;}}",
@@ -456,20 +464,26 @@
     selbar.appendChild(div);
     selbar.appendChild(cmtBtn);
     var note = el("div", "cv-note");
+    var grabber = el("div", "cv-grabber");
+    var head = el("div", "cv-note-head");
+    head.appendChild(el("strong", "", "评论"));
     var quote = el("p", "cv-quote");
     var ta = document.createElement("textarea");
-    ta.placeholder = "写下你的想法…";
+    ta.placeholder = "写下一句想法（可选）…";
     ta.rows = 3;
-    var actions = el("div", "cv-note-actions");
+    ta.maxLength = 4000;
     var delBtn = el("button", "cv-danger", "删除划线");
+    var actions = el("div", "cv-note-actions");
     var cancelBtn = el("button", "cv-ghost", "取消");
-    var saveBtn = el("button", "cv-ok", "保存");
+    var saveBtn = el("button", "cv-ok", "提交");
     delBtn.type = cancelBtn.type = saveBtn.type = "button";
-    actions.appendChild(delBtn);
     actions.appendChild(cancelBtn);
     actions.appendChild(saveBtn);
+    note.appendChild(grabber);
+    note.appendChild(head);
     note.appendChild(quote);
     note.appendChild(ta);
+    note.appendChild(delBtn);
     note.appendChild(actions);
     ui.appendChild(bar);
     ui.appendChild(panel);
@@ -709,8 +723,8 @@
           gap: 14,
           bounds: host.getBoundingClientRect(),
           allowSide: true,
-          fallbackW: 300,
-          fallbackH: 180,
+          fallbackW: 320,
+          fallbackH: 260,
         });
       }
       note.classList.add("open");
@@ -766,11 +780,13 @@
       "<span>评论</span></button>";
     var note = el("div", "cv-note open");
     note.innerHTML =
+      '<div class="cv-grabber"></div>' +
+      '<div class="cv-note-head"><strong>评论</strong></div>' +
       '<p class="cv-quote">dependencies between distant positions</p>' +
-      '<textarea rows="3">这里记下为什么这段值得留。</textarea>' +
-      '<div class="cv-note-actions"><button class="cv-danger" type="button">删除划线</button>' +
-      '<button class="cv-ghost" type="button">取消</button>' +
-      '<button class="cv-ok" type="button">保存</button></div>';
+      '<textarea rows="3" maxlength="4000">这里记下为什么这段值得留。</textarea>' +
+      '<button class="cv-danger" type="button">删除划线</button>' +
+      '<div class="cv-note-actions"><button class="cv-ghost" type="button">取消</button>' +
+      '<button class="cv-ok" type="button">提交</button></div>';
     if (scene !== "note") ui.appendChild(selbar);
     if (scene !== "sel" && noteMark) ui.appendChild(note);
     document.body.appendChild(ui);
