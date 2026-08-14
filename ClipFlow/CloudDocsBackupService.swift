@@ -3,23 +3,21 @@ import CryptoKit
 import Darwin
 import SQLite3
 
-/// Personal-machine SOTA backup to **iCloud Drive (CloudDocs)** — no App iCloud entitlements.
+/// Per-machine disaster backup. **Not** the multi-device sync bus.
 ///
-/// ## Strategy (sqlite-runtime-tricks aligned)
-/// - **latest/clipflow.db** — slim SQLite (metadata; blobs externalized) via `sqlite3_backup`.
-/// - **blobs/{hash}.bin** — content-addressed CAS at backup root (sync only missing files).
-/// - **snapshots/** — sparse **db-only** history (small); blobs shared via CAS.
-/// - SHA256 of db → skip promote when unchanged; prune keep=3; scrub `.tmp_*`.
-/// - One-shot cleanup of legacy DuckDB under CloudDocs/ClipFlow/db.
+/// Writes only under `hosts/{hostId}/` so two Macs cannot last-writer-wins
+/// each other's snapshot. Legacy shared `latest/` is still readable.
 ///
 /// ```
-/// …/CloudDocs/ClipFlow/backup/
-///   latest/{clipflow.db, MANIFEST.json}
-///   blobs/{sha256}.bin
-///   snapshots/YYYYMMDD-HHmmss/{clipflow.db, MANIFEST.json}
+/// …/ClipFlow/backup/
 ///   STATUS.json
+///   hosts/{hostId}/
+///     latest/{clipflow.db, MANIFEST.json}
+///     blobs/{sha}.bin          # this machine's media, incremental
+///     snapshots/YYYYMMDD-HHmmss/
+///   latest/                    # legacy shared (read-only)
 /// ```
-/// Local config: `~/Documents/ClipFlow/config/backup.json`
+/// Local config: `KEEPSAKE_HOME/config/backup.json`
 final class CloudDocsBackupService {
     /// Set once from `main` via `bootstrap(database:)`.
     private(set) static var shared: CloudDocsBackupService?
@@ -81,6 +79,9 @@ final class CloudDocsBackupService {
         var sha256: String?
         var itemCount: Int?
         var isLatest: Bool
+        var host: String? = nil
+        /// `self` | `peer` | `legacy`
+        var origin: String? = nil
     }
 
     struct Status: Codable {
@@ -110,6 +111,7 @@ final class CloudDocsBackupService {
         var quarkDiscovery: QuarkDiscoveryReport? = nil
         var googleDriveAvailable: Bool = false
         var googleDrivePath: String? = nil
+        var hostId: String? = nil
     }
 
     private let database: DatabaseManager
@@ -162,9 +164,10 @@ final class CloudDocsBackupService {
             }
         }
         // Path string only — do not touch CloudDocs listing here.
-        let rootHint = BackupDestinationResolver.cloudDocsURL()?.appendingPathComponent("ClipFlow/backup").path
+        let rootHint = BackupDestinationResolver.cloudDocsURL()?
+            .appendingPathComponent("ClipFlow/backup/hosts/\(ClipHostIdentity.id)").path
             ?? "(CloudDocs pending)"
-        print("[Backup] CloudDocs ready · enabled=\(config.enabled) · keep=\(config.keepSnapshots) · latest≥\(Int(config.minIntervalSeconds))s · snap≥\(Int(config.snapshotEverySeconds))s · root=\(rootHint)")
+        print("[Backup] CloudDocs ready · host=\(ClipHostIdentity.id) · enabled=\(config.enabled) · keep=\(config.keepSnapshots) · latest≥\(Int(config.minIntervalSeconds))s · snap≥\(Int(config.snapshotEverySeconds))s · root=\(rootHint)")
     }
 
     /// Tighten chatty early defaults (keep=20, throttle=3s) to minute-level policy.
@@ -247,16 +250,73 @@ final class CloudDocsBackupService {
         return dir
     }
 
-    private func latestDir(in root: URL) -> URL { root.appendingPathComponent("latest", isDirectory: true) }
-    private func snapshotsDir(in root: URL) -> URL { root.appendingPathComponent("snapshots", isDirectory: true) }
-    private func blobsDir(in root: URL) -> URL { root.appendingPathComponent("blobs", isDirectory: true) }
-    private func statusFile(in root: URL) -> URL { root.appendingPathComponent("STATUS.json") }
+    private func hostSlice(in destRoot: URL, host: String = ClipHostIdentity.id) -> URL {
+        destRoot.appendingPathComponent("hosts/\(host)", isDirectory: true)
+    }
 
-    /// Legacy single-root helpers (primary available dest).
+    private func latestDir(in destRoot: URL, host: String = ClipHostIdentity.id) -> URL {
+        hostSlice(in: destRoot, host: host).appendingPathComponent("latest", isDirectory: true)
+    }
+
+    private func snapshotsDir(in destRoot: URL, host: String = ClipHostIdentity.id) -> URL {
+        hostSlice(in: destRoot, host: host).appendingPathComponent("snapshots", isDirectory: true)
+    }
+
+    private func blobsDir(in destRoot: URL, host: String = ClipHostIdentity.id) -> URL {
+        hostSlice(in: destRoot, host: host).appendingPathComponent("blobs", isDirectory: true)
+    }
+
+    private func statusFile(in destRoot: URL) -> URL { destRoot.appendingPathComponent("STATUS.json") }
+
+    private func listPeerHostIds(in destRoot: URL) -> [String] {
+        let hosts = destRoot.appendingPathComponent("hosts", isDirectory: true)
+        let dirs = (try? fm.contentsOfDirectory(
+            at: hosts,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        return dirs.map(\.lastPathComponent).sorted()
+    }
+
+    /// This machine's slice on the primary dest.
     private var latestDir: URL? { backupRootURL.map { latestDir(in: $0) } }
     private var snapshotsDir: URL? { backupRootURL.map { snapshotsDir(in: $0) } }
     private var backupBlobsDir: URL? { backupRootURL.map { blobsDir(in: $0) } }
     private var statusFile: URL? { backupRootURL.map { statusFile(in: $0) } }
+
+    /// Restore keys: `latest`, `{snapId}`, `hosts/{id}/latest`, `hosts/{id}/{snap}`, `legacy/latest`.
+    private func resolveRestoreDB(snapshotId: String) -> URL? {
+        let id = snapshotId
+        if id == "latest" {
+            if let p = latestDir?.appendingPathComponent("clipflow.db"), fm.fileExists(atPath: p.path) {
+                return p
+            }
+        }
+        if id == "legacy/latest", let root = backupRootURL {
+            let p = root.appendingPathComponent("latest/clipflow.db")
+            if fm.fileExists(atPath: p.path) { return p }
+        }
+        if id.hasPrefix("hosts/") {
+            let parts = id.split(separator: "/").map(String.init)
+            guard parts.count >= 3, let root = backupRootURL else { return nil }
+            let host = parts[1]
+            let rest = parts.dropFirst(2).joined(separator: "/")
+            if rest == "latest" {
+                let p = latestDir(in: root, host: host).appendingPathComponent("clipflow.db")
+                return fm.fileExists(atPath: p.path) ? p : nil
+            }
+            let p = snapshotsDir(in: root, host: host).appendingPathComponent("\(rest)/clipflow.db")
+            return fm.fileExists(atPath: p.path) ? p : nil
+        }
+        if let p = snapshotsDir?.appendingPathComponent("\(id)/clipflow.db"), fm.fileExists(atPath: p.path) {
+            return p
+        }
+        if let root = backupRootURL {
+            let legacy = root.appendingPathComponent("snapshots/\(id)/clipflow.db")
+            if fm.fileExists(atPath: legacy.path) { return legacy }
+        }
+        return nil
+    }
 
     private var enabledDestinations: [BackupDestinationConfig] {
         config.destinations.filter(\.enabled)
@@ -353,14 +413,7 @@ final class CloudDocsBackupService {
                 DispatchQueue.main.async { completion(false, "备份进行中，请稍后恢复") }
                 return
             }
-            guard let root = self.backupRootURL else {
-                DispatchQueue.main.async { completion(false, "iCloud Drive (CloudDocs) 不可用") }
-                return
-            }
-            let srcDB: URL = snapshotId == "latest"
-                ? root.appendingPathComponent("latest/clipflow.db")
-                : root.appendingPathComponent("snapshots/\(snapshotId)/clipflow.db")
-            guard self.fm.fileExists(atPath: srcDB.path) else {
+            guard let srcDB = self.resolveRestoreDB(snapshotId: snapshotId) else {
                 DispatchQueue.main.async { completion(false, "快照不存在: \(snapshotId)") }
                 return
             }
@@ -514,7 +567,7 @@ final class CloudDocsBackupService {
 
                     let sha = (try? Self.sha256File(artifact)) ?? ""
                     let size = (try? self.fm.attributesOfItem(atPath: artifact.path)[.size] as? NSNumber)?.intValue ?? 0
-                    let host = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+                    let host = ClipHostIdentity.id
                     let created = Date()
                     let iso = ClipTimeFormat.isoLocal(created)
 
@@ -544,8 +597,9 @@ final class CloudDocsBackupService {
                                     let snaps = self.snapshotsDir(in: root)
                                     let blobs = self.blobsDir(in: root)
                                     // Create parents step-by-step (Google Drive File Provider is picky).
-                                    try self.ensureCloudDir(root.deletingLastPathComponent()) // ClipVault (or legacy Keepsake)/
-                                    try self.ensureCloudDir(root) // backup/
+                                    try self.ensureCloudDir(root.deletingLastPathComponent())
+                                    try self.ensureCloudDir(root)
+                                    try self.ensureCloudDir(self.hostSlice(in: root))
                                     try self.ensureCloudDir(latest)
                                     try self.ensureCloudDir(snaps)
                                     try self.ensureCloudDir(blobs)
@@ -1138,17 +1192,24 @@ final class CloudDocsBackupService {
     }
 
     private func restoreBlobsFromBackupCAS() {
-        // Merge CAS from all available destinations (union of hashes).
         let local = database.blobsDirectoryURL
         try? fm.createDirectory(at: local, withIntermediateDirectories: true)
         for d in config.destinations {
             guard let root = BackupDestinationResolver.backupRoot(for: d) else { continue }
-            let cas = blobsDir(in: root)
-            guard fm.fileExists(atPath: cas.path) else { continue }
-            let files = (try? fm.contentsOfDirectory(at: cas, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-            for src in files where src.pathExtension == "bin" {
-                let hash = src.deletingPathExtension().lastPathComponent
-                database.importBlobIfNeeded(hash: hash, from: src)
+            var casDirs: [URL] = [
+                blobsDir(in: root),
+                root.appendingPathComponent("blobs", isDirectory: true),
+            ]
+            for peer in listPeerHostIds(in: root) {
+                casDirs.append(blobsDir(in: root, host: peer))
+            }
+            for cas in casDirs {
+                guard fm.fileExists(atPath: cas.path) else { continue }
+                let files = (try? fm.contentsOfDirectory(at: cas, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+                for src in files where src.pathExtension == "bin" {
+                    let hash = src.deletingPathExtension().lastPathComponent
+                    database.importBlobIfNeeded(hash: hash, from: src)
+                }
             }
         }
     }
@@ -1321,7 +1382,9 @@ final class CloudDocsBackupService {
                 byteSize: man?.byteSize ?? fileSize(latestDB),
                 sha256: man?.sha256,
                 itemCount: man?.itemCount,
-                isLatest: true
+                isLatest: true,
+                host: ClipHostIdentity.id,
+                origin: "self"
             )
         }
         var snaps: [SnapshotInfo] = []
@@ -1339,7 +1402,42 @@ final class CloudDocsBackupService {
                     byteSize: man?.byteSize ?? fileSize(db),
                     sha256: man?.sha256,
                     itemCount: man?.itemCount,
-                    isLatest: false
+                    isLatest: false,
+                    host: ClipHostIdentity.id,
+                    origin: "self"
+                ))
+            }
+        }
+        if let destRoot = root {
+            for peer in listPeerHostIds(in: destRoot) where peer != ClipHostIdentity.id {
+                let pdb = latestDir(in: destRoot, host: peer).appendingPathComponent("clipflow.db")
+                guard fm.fileExists(atPath: pdb.path) else { continue }
+                let man = readManifest(latestDir(in: destRoot, host: peer).appendingPathComponent("MANIFEST.json"))
+                snaps.append(SnapshotInfo(
+                    id: "hosts/\(peer)/latest",
+                    path: pdb.path,
+                    createdAt: man?.createdAt,
+                    byteSize: man?.byteSize ?? fileSize(pdb),
+                    sha256: man?.sha256,
+                    itemCount: man?.itemCount,
+                    isLatest: false,
+                    host: peer,
+                    origin: "peer"
+                ))
+            }
+            let legacyDB = destRoot.appendingPathComponent("latest/clipflow.db")
+            if fm.fileExists(atPath: legacyDB.path) {
+                let man = readManifest(destRoot.appendingPathComponent("latest/MANIFEST.json"))
+                snaps.append(SnapshotInfo(
+                    id: "legacy/latest",
+                    path: legacyDB.path,
+                    createdAt: man?.createdAt,
+                    byteSize: man?.byteSize ?? fileSize(legacyDB),
+                    sha256: man?.sha256,
+                    itemCount: man?.itemCount,
+                    isLatest: false,
+                    host: man?.host,
+                    origin: "legacy"
                 ))
             }
         }
@@ -1385,12 +1483,12 @@ final class CloudDocsBackupService {
             )
         }
         let onLabels = destStatuses.filter { $0.enabled && $0.available }.map(\.label)
-        let policy = "多源 fan-out [\(onLabels.joined(separator: ", "))] · db+CAS · latest ≥\(Int(config.minIntervalSeconds))s · 快照 ≥\(Int(config.snapshotEverySeconds))s ×\(config.keepSnapshots)"
+        let policy = "按机器备份 \(ClipHostIdentity.id) · 多源 [\(onLabels.joined(separator: ", "))] · 不互盖 · latest ≥\(Int(config.minIntervalSeconds))s · 快照 ≥\(Int(config.snapshotEverySeconds))s ×\(config.keepSnapshots)"
         return Status(
             enabled: config.enabled,
             cloudDocsAvailable: cloud != nil,
             cloudDocsPath: cloud?.path,
-            backupRootPath: root?.path,
+            backupRootPath: root.map { hostSlice(in: $0).path },
             lastSuccessAt: lastISO,
             lastSuccessUnix: lastSuccessUnix,
             lastError: lastError,
@@ -1407,7 +1505,8 @@ final class CloudDocsBackupService {
             destinations: destStatuses,
             quarkDiscovery: BackupDestinationResolver.discoverQuark(),
             googleDriveAvailable: gdrive != nil,
-            googleDrivePath: gdrive?.path
+            googleDrivePath: gdrive?.path,
+            hostId: ClipHostIdentity.id
         )
     }
 

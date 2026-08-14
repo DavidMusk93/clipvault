@@ -1775,14 +1775,14 @@
       <h3 style="font-size:14px;font-weight:600;margin-top:8px">命名快照（稀疏历史）</h3><p class="backup-label" style="margin:4px 0 8px">日常恢复优先用 latest；命名快照用于回滚到更早时间点。</p>
       <ul class="snap-list" id="bkSnaps"></ul>
 
-      <h3 style="font-size:14px;font-weight:600;margin-top:20px">多机同步（终局）</h3>
+      <h3 style="font-size:14px;font-weight:600;margin-top:20px">多机同步（最终一致）</h3>
       <p class="backup-label" style="margin:4px 0 8px">
-        op-log + 共享 CAS，不是整库覆盖。home/work 各自 push/pull merge；灾备平面与同步平面分离。
+        每机一条事务日志，云盘负责运输。备份按机器分目录，互不覆盖。禁止用整库当同步。
       </p>
       <div class="backup-row">
         <div>
           <div style="font-weight:600">启用多机同步</div>
-          <div class="backup-label">捕获后写 ops · 轮询 pull peer · 按 content_hash 去重</div>
+          <div class="backup-label">本机事务 · 云盘同步 · 对端幂等 apply</div>
         </div>
         <label class="switch"><input type="checkbox" id="syncEnabled"/><span></span></label>
       </div>
@@ -5475,7 +5475,7 @@ window.ClipViewMasonry = Masonry;
 
         document.getElementById('backupEnabled').checked = !!s.enabled;
         const bkRootEl = document.getElementById('bkRoot');
-        if (bkRootEl) bkRootEl.textContent = s.backupRootPath || '—';
+        if (bkRootEl) bkRootEl.textContent = (s.hostId ? (s.hostId + ' · ') : '') + (s.backupRootPath || '—');
         document.getElementById('bkLast').textContent = s.lastSuccessUnix != null
           ? formatLocalTime(s.lastSuccessUnix)
           : (s.lastSuccessAt ? formatLocalTime(s.lastSuccessAt) : '尚未成功');
@@ -5551,12 +5551,14 @@ window.ClipViewMasonry = Masonry;
         } else {
           list.forEach(snap => {
             const li = document.createElement('li');
+            const origin = snap.origin === 'peer' ? '其他机器' : (snap.origin === 'legacy' ? '旧共享 latest' : (snap.isLatest ? '本机 latest' : '本机快照'));
+            const title = snap.origin === 'peer' ? (snap.host || snap.id) : (snap.isLatest ? 'latest' : snap.id);
             li.innerHTML = `
               <div class="snap-row">
-                <strong>${snap.isLatest ? 'latest' : snap.id}</strong>
-                <button type="button" class="secondary" data-restore="${snap.id}" style="height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--md-outline-v);background:var(--md-surface-c);cursor:pointer;font-size:12px">恢复</button>
+                <strong>${esc(title)}</strong>
+                <button type="button" class="secondary" data-restore="${escAttr(snap.id)}" style="height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--md-outline-v);background:var(--md-surface-c);cursor:pointer;font-size:12px">恢复</button>
               </div>
-              <div class="snap-meta">${snap.createdAtUnix != null ? formatLocalTime(snap.createdAtUnix) : (snap.createdAt ? formatLocalTime(snap.createdAt) : '')} · ${fmtBytes(snap.byteSize)} · items ${snap.itemCount ?? '—'}</div>
+              <div class="snap-meta">${esc(origin)}${snap.host && snap.origin !== 'self' ? ' · ' + esc(snap.host) : ''} · ${snap.createdAtUnix != null ? formatLocalTime(snap.createdAtUnix) : (snap.createdAt ? formatLocalTime(snap.createdAt) : '')} · ${fmtBytes(snap.byteSize)} · items ${snap.itemCount ?? '—'}</div>
               <div class="snap-meta" style="word-break:break-all">${(snap.sha256||'').slice(0,16)}…</div>`;
             li.querySelector('[data-restore]')?.addEventListener('click', async (e) => {
               const id = e.currentTarget.getAttribute('data-restore');

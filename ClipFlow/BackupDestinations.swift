@@ -254,8 +254,14 @@ enum BackupDestinationResolver {
         let staging = quarkStagingURL(configuredPath: nil)
         var hasArtifact = false
         if let s = staging {
-            let db = s.appendingPathComponent("latest/clipflow.db")
-            hasArtifact = fm.fileExists(atPath: db.path)
+            let legacy = s.appendingPathComponent("latest/clipflow.db")
+            if fm.fileExists(atPath: legacy.path) {
+                hasArtifact = true
+            } else if let hosts = try? fm.contentsOfDirectory(at: s.appendingPathComponent("hosts", isDirectory: true), includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
+                hasArtifact = hosts.contains {
+                    fm.fileExists(atPath: $0.appendingPathComponent("latest/clipflow.db").path)
+                }
+            }
         }
         // Best-effort: IndexedDB cloud listing mentions ClipVault-Backups (user uploaded/synced name).
         var cloudListed = false

@@ -1,17 +1,17 @@
 import Foundation
 import CryptoKit
 
-/// Multi-device **live sync** over iCloud Drive CloudDocs (op-log + shared CAS).
+/// Multi-device **eventual consistency** over iCloud Drive (cloud transport + per-host txs).
 ///
 /// ## Two planes (do not conflate)
-/// - **Backup** (`CloudDocsBackupService`): disaster recovery — full slim DB + CAS snapshot.
-/// - **Sync** (this type): multi-active Mac merge — append-only ops per host + content-addressed blobs.
+/// - **Backup** (`CloudDocsBackupService`): per-host disaster snapshot. Never a sync bus.
+/// - **Live** (this type): append-only transactions per host; attachments next to the log.
 ///
 /// ```
-/// …/CloudDocs/ClipFlow/sync/v1/
+/// …/CloudDocs/ClipFlow/sync/v1/          # tx log (existing op files)
 ///   ops/{host_id}/{seq:016d}.json
 ///   heads/{host_id}.json
-/// …/CloudDocs/ClipFlow/backup/blobs/{hash}.bin   # shared CAS with backup plane
+/// …/CloudDocs/ClipFlow/live/attach/{key}.bin
 /// ```
 ///
 /// Local: outbox under `KEEPSAKE_HOME/sync/outbox/`, cursors in `keepsake_meta`.
@@ -110,7 +110,7 @@ final class CloudDocsSyncService {
         var inProgress: Bool
         var peers: [PeerStatus]
         var pollIntervalSeconds: Double
-        var scheme: String = "op-log+cas"
+        var scheme: String = "tx+cloud"
         var policy: String
     }
 
@@ -140,7 +140,7 @@ final class CloudDocsSyncService {
     private init(database: DatabaseManager) {
         self.database = database
         self.config = Self.loadConfig()
-        self.hostId = Self.loadOrCreateHostId()
+        self.hostId = ClipHostIdentity.id
         // Hydrate seq + start loops off the critical path (CloudDocs may stall).
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -642,9 +642,10 @@ final class CloudDocsSyncService {
     // MARK: Pull / merge
 
     private func pullRemote() -> StepResult {
-        guard let syncRoot = syncRootURL(), let casRoot = casBlobsURL() else {
+        guard let syncRoot = syncRootURL() else {
             return StepResult(ok: false, message: "pull:no CloudDocs")
         }
+        if let attach = casBlobsURL() { ensureDir(attach) }
         let heads = headsDir(in: syncRoot)
         ensureDir(heads)
         let headFiles = ((try? fm.contentsOfDirectory(
@@ -693,19 +694,22 @@ final class CloudDocsSyncService {
                 // Import blobs
                 if let keys = op.blobKeys {
                     for key in keys {
-                        let remote = casRoot.appendingPathComponent(key + ".bin")
-                        startDownloadIfNeeded(remote)
-                        // Ensure bytes present (not only placeholder) before import.
-                        if readCloudData(remote, attempts: 4, delayMs: 80) != nil || fm.fileExists(atPath: remote.path) {
-                            database.importBlobIfNeeded(hash: key, from: remote)
-                        } else {
+                        var imported = false
+                        for root in blobSearchRoots() {
+                            let remote = root.appendingPathComponent(key + ".bin")
+                            startDownloadIfNeeded(remote)
+                            if readCloudData(remote, attempts: 4, delayMs: 80) != nil || fm.fileExists(atPath: remote.path) {
+                                database.importBlobIfNeeded(hash: key, from: remote)
+                                imported = database.readBlobFile(hash: key) != nil
+                                if imported { break }
+                            }
+                        }
+                        if !imported && needsBlob(op: op, key: key) {
                             lastPhase = "pull:blob_wait \(key)"
-                            // Do not advance cursor — retry later.
                             break
                         }
                     }
-                    // If any blob still missing locally after import attempt, wait.
-                    if let keys = op.blobKeys, keys.contains(where: { database.readBlobFile(hash: $0) == nil && needsBlob(op: op, key: $0) }) {
+                    if keys.contains(where: { database.readBlobFile(hash: $0) == nil && needsBlob(op: op, key: $0) }) {
                         break
                     }
                 }
@@ -880,9 +884,28 @@ final class CloudDocsSyncService {
             .appendingPathComponent("ClipFlow/sync/v1", isDirectory: true)
     }
 
+    /// Live attachments. Not the backup CAS tree.
     private func casBlobsURL() -> URL? {
         BackupDestinationResolver.cloudDocsURL()?
-            .appendingPathComponent("ClipFlow/backup/blobs", isDirectory: true)
+            .appendingPathComponent("ClipFlow/live/attach", isDirectory: true)
+    }
+
+    /// Pull may still find bytes published under the old shared backup CAS.
+    private func blobSearchRoots() -> [URL] {
+        var roots: [URL] = []
+        if let live = casBlobsURL() { roots.append(live) }
+        guard let cloud = BackupDestinationResolver.cloudDocsURL() else { return roots }
+        roots.append(cloud.appendingPathComponent("ClipFlow/backup/blobs", isDirectory: true))
+        let hosts = cloud.appendingPathComponent("ClipFlow/backup/hosts", isDirectory: true)
+        let hostDirs = (try? fm.contentsOfDirectory(
+            at: hosts,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        for dir in hostDirs {
+            roots.append(dir.appendingPathComponent("blobs", isDirectory: true))
+        }
+        return roots
     }
 
     private func opsDir(in root: URL, host: String) -> URL {
@@ -941,28 +964,6 @@ final class CloudDocsSyncService {
     }
 
     // MARK: Host / config
-
-    private static func loadOrCreateHostId() -> String {
-        let root = DatabaseManager.resolveDataRoot()
-        let url = root.appendingPathComponent("config/host.json")
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        struct HostFile: Codable { var hostId: String; var label: String? }
-        if let data = try? Data(contentsOf: url),
-           let hf = try? JSONDecoder().decode(HostFile.self, from: data),
-           !hf.hostId.isEmpty {
-            return hf.hostId
-        }
-        let hostName = ProcessInfo.processInfo.hostName
-            .replacingOccurrences(of: ".local", with: "")
-            .replacingOccurrences(of: " ", with: "-")
-        let short = String(UUID().uuidString.prefix(8)).lowercased()
-        let id = "\(hostName)-\(short)"
-        let hf = HostFile(hostId: id, label: ProcessInfo.processInfo.hostName)
-        if let data = try? JSONEncoder().encode(hf) {
-            try? data.write(to: url, options: .atomic)
-        }
-        return id
-    }
 
     private static var configURL: URL {
         DatabaseManager.resolveDataRoot().appendingPathComponent("config/sync.json")
@@ -1045,7 +1046,7 @@ final class CloudDocsSyncService {
             inProgress: inProgress,
             peers: peers.sorted { $0.host < $1.host },
             pollIntervalSeconds: config.pollIntervalSeconds,
-            policy: "op-log + shared CAS · poll \(Int(config.pollIntervalSeconds))s · never whole-db replace"
+            policy: "per-host tx · cloud transport · eventual consistency · poll \(Int(config.pollIntervalSeconds))s · never whole-db replace"
         )
     }
 

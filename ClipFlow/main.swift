@@ -9,9 +9,9 @@ setlinebuf(stderr)
 print("🚀 启动 ClipFlow 后台守护进程与 Web 服务 (Port: 8080)...")
 
 let db = DatabaseManager()
-// Plane A: disaster backup (sqlite3_backup + CAS snapshots)
+// Plane A: per-host disaster backup (never a sync bus)
 let backup = CloudDocsBackupService.bootstrap(database: db)
-// Plane B: multi-device live sync (op-log + shared CAS) — never whole-db replace
+// Plane B: per-host transactions + cloud transport — eventual consistency
 let sync = CloudDocsSyncService.bootstrap(database: db)
 let archive = WebArchiveService()
 archive.database = db

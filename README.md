@@ -29,8 +29,8 @@ ClipVault 是面向个人 Mac 的剪贴板历史产品：本机守护进程静�
 - **OCR**：中英识别，限高可滚动展示，写入可检索字段  
 - **实时**：SSE 推送新条目，增量合并而非整表重刷  
 - **规模**：游标分页 + 列表不拉 BLOB + `content-visibility`  
-- **备份（灾备平面）**：CloudDocs · `sqlite3_backup` · latest + 滚动快照 · Web 侧栏控制 / 恢复  
-- **多机同步（同步平面）**：CloudDocs **op-log + 共享 CAS** · 每机 push/pull merge · **禁止整库覆盖当同步**  
+- **备份（灾备平面）**：CloudDocs · **按机器** `hosts/{hostId}/` · `sqlite3_backup` · 互不覆盖  
+- **多机同步**：每机事务 + 云盘运输 · 最终一致 · 附件 `live/attach/` · **禁止整库覆盖当同步**  
 - **隐私**：本机数据优先 Application Support / 可配置；备份与同步在你的 iCloud 云盘目录下  
 
 ---
@@ -43,8 +43,8 @@ ClipVault (product)
 │   ├── ClipboardMonitor    # pasteboard + OCR
 │   ├── DatabaseManager     # SQLite3 · cursor pages · online backup API
 │   ├── WebServer           # :8080 · REST + SSE + static UI
-│   ├── CloudDocsBackupService   # 灾备：整库 snapshot
-│   └── CloudDocsSyncService     # 同步：ops/{host}/{seq}.json + CAS
+│   ├── CloudDocsBackupService   # 灾备：hosts/{hostId}/ snapshot
+│   └── CloudDocsSyncService     # 同步：per-host tx + live/attach
 ├── web/index.html          # 浏览器控制面
 └── LaunchAgent             # 登录自启（可选）
 ```
