@@ -46,7 +46,16 @@ ON CONFLICT (event_id) DO NOTHING
 """
 
 UI_PATH = _HERE / "web" / "sessions.html"
+UI_DIR = _HERE / "web"
+CLIP_WEB = _HERE.parent / "web"
 SCHEMA_PATH = _HERE / "schema.sql"
+STATIC_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+}
 DEFAULT_QUACK_EXT = Path.home() / ".duckdb/extensions/v1.5.5/osx_arm64/quack.duckdb_extension"
 
 
@@ -240,6 +249,11 @@ def make_handler(store: Store, http_origin_note: str) -> type[BaseHTTPRequestHan
                 html = UI_PATH.read_bytes() if UI_PATH.is_file() else b"<h1>missing UI</h1>"
                 self._send(200, html, "text/html; charset=utf-8")
                 return
+            static = _static_file(path)
+            if static is not None:
+                body, ctype = static
+                self._send(200, body, ctype)
+                return
             if path == "/api/sessions":
                 limit = _int(qs.get("limit", ["50"])[0], 50, 1, 200)
                 rows = store.query(
@@ -314,6 +328,31 @@ def make_handler(store: Store, http_origin_note: str) -> type[BaseHTTPRequestHan
             self._json(404, {"error": "not found"})
 
     return Handler
+
+
+def _static_file(url_path: str) -> tuple[bytes, str] | None:
+    name = url_path.lstrip("/")
+    if not name or ".." in name or name.startswith("/"):
+        return None
+    candidates = [UI_DIR / name, CLIP_WEB / name]
+    for cand in candidates:
+        try:
+            resolved = cand.resolve()
+        except OSError:
+            continue
+        roots = []
+        for root in (UI_DIR, CLIP_WEB):
+            try:
+                roots.append(root.resolve())
+            except OSError:
+                continue
+        if not any(resolved == root or root in resolved.parents for root in roots):
+            continue
+        if not resolved.is_file():
+            continue
+        ctype = STATIC_TYPES.get(resolved.suffix.lower(), "application/octet-stream")
+        return resolved.read_bytes(), ctype
+    return None
 
 
 def _int(raw: str, default: int, lo: int, hi: int) -> int:

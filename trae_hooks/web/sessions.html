@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ClipVault · Trae 会话</title>
   <meta name="color-scheme" content="light" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
   <style>
     :root {
       --bg: #f5f5f7;
@@ -99,6 +104,37 @@
     }
     details.raw summary { cursor: pointer; user-select: none; }
     .empty { color: var(--muted); padding: 24px 8px; }
+    .md-preview { font-size: 14px; line-height: 1.5; color: var(--ink); }
+    .md-preview > :first-child { margin-top: 0; }
+    .md-preview > :last-child { margin-bottom: 0; }
+    .md-preview h1, .md-preview h2, .md-preview h3,
+    .md-preview h4, .md-preview h5, .md-preview h6 {
+      font-weight: 650; letter-spacing: -0.02em; margin: 0.85em 0 0.35em;
+    }
+    .md-preview h1 { font-size: 1.28em; }
+    .md-preview h2 { font-size: 1.14em; }
+    .md-preview h3 { font-size: 1.05em; }
+    .md-preview p { margin: 0 0 0.6em; }
+    .md-preview ul, .md-preview ol { margin: 0.15em 0 0.65em; padding-left: 1.3em; }
+    .md-preview li { margin: 0.12em 0; }
+    .md-preview blockquote {
+      margin: 0.4em 0 0.7em; padding: 0 0 0 10px;
+      border-left: 3px solid rgba(196,122,44,0.35); color: var(--muted);
+    }
+    .md-preview code {
+      font-family: var(--font-mono); font-size: 12.5px;
+      background: rgba(120,120,128,0.12); padding: 0.08em 0.35em; border-radius: 5px;
+    }
+    .md-preview pre {
+      background: #f6f8fa; border-radius: 10px; padding: 10px 12px;
+      overflow: auto; max-height: 28em;
+    }
+    .md-preview pre code { background: transparent; padding: 0; }
+    .kv .hljs, .kv pre.hljs {
+      margin-top: 4px; border-radius: 10px; padding: 10px 12px;
+      overflow: auto; max-height: 28em;
+    }
+    .url-inert.md-link { color: var(--accent); }
     @media (max-width: 800px) {
       main { grid-template-columns: 1fr; }
       .list { border-right: 0; border-bottom: 0.5px solid var(--separator); }
@@ -119,9 +155,17 @@
     <section class="list" id="sessions"><div class="empty">暂无会话</div></section>
     <section class="detail" id="events"><div class="empty">选择左侧会话</div></section>
   </main>
-  <script>
+  <script type="module">
+    import { prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
+
     const $ = (id) => document.getElementById(id);
     let current = "";
+    const engines = () => ({
+      marked: globalThis.marked,
+      purify: globalThis.DOMPurify,
+      hljs: globalThis.hljs,
+      jsBeautify: globalThis.js_beautify,
+    });
     const badgeClass = (name) => {
       if (name === "PreToolUse" || name === "PostToolUse") return "tool";
       if (name === "Stop") return "stop";
@@ -131,52 +175,7 @@
     const esc = (s) => String(s ?? "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    const asObj = (v) => {
-      if (v == null || v === "") return null;
-      if (typeof v === "object") return v;
-      try { return JSON.parse(v); } catch { return null; }
-    };
-    const pretty = (v) => {
-      if (v == null || v === "") return "";
-      if (typeof v === "string") {
-        const o = asObj(v);
-        return o ? JSON.stringify(o, null, 2) : v;
-      }
-      return JSON.stringify(v, null, 2);
-    };
-    const toolCmd = (input) => {
-      const o = asObj(input) || {};
-      return o.cmd || o.command || o.command_line || "";
-    };
-    const eventBody = (e) => {
-      const blocks = [];
-      const input = asObj(e.tool_input);
-      const resp = asObj(e.tool_response);
-      const cmd = toolCmd(e.tool_input);
-      if (e.prompt) blocks.push(["prompt", e.prompt]);
-      if (e.last_assistant_message) blocks.push(["assistant", e.last_assistant_message]);
-      if (e.notification_message) blocks.push(["message", e.notification_message]);
-      if (cmd) blocks.push(["command", cmd]);
-      else if (e.tool_input) blocks.push(["tool_input", pretty(e.tool_input)]);
-      if (resp) {
-        const bits = [];
-        if (resp.exit_code != null) bits.push("exit " + resp.exit_code);
-        if (resp.status) bits.push(resp.status);
-        if (resp.wall_time_seconds != null) bits.push(resp.wall_time_seconds + "s");
-        const out = resp.output || resp.stdout || resp.stderr || "";
-        const head = bits.join(" · ");
-        if (head) blocks.push(["result", head]);
-        if (out) blocks.push(["output", out]);
-        const rest = { ...resp };
-        delete rest.output; delete rest.stdout; delete rest.stderr;
-        delete rest.exit_code; delete rest.status; delete rest.wall_time_seconds;
-        if (Object.keys(rest).length) blocks.push(["tool_response", pretty(rest)]);
-      } else if (e.tool_response) {
-        blocks.push(["tool_response", pretty(e.tool_response)]);
-      }
-      if (!blocks.length && e.cwd) blocks.push(["cwd", e.cwd]);
-      return blocks;
-    };
+
     async function loadHealth() {
       try {
         const h = await (await fetch("/api/health")).json();
@@ -220,8 +219,8 @@
       box.innerHTML = data.events.map((e) => {
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
         const meta = [e.ts, tools, e.instance_id, e.cwd].filter(Boolean).join(" · ");
-        const body = eventBody(e).map(([k, v]) =>
-          `<div class="kv"><div class="k">${esc(k)}</div><pre>${esc(v)}</pre></div>`
+        const body = renderEventBlocks(e, engines()).map((b) =>
+          `<div class="kv"><div class="k">${esc(b.key)} · ${esc(b.kind)}</div>${b.html}</div>`
         ).join("");
         return `<article class="ev" data-id="${esc(e.event_id)}">
           <span class="badge ${badgeClass(e.hook_event)}">${esc(e.hook_event)}</span>
@@ -229,22 +228,23 @@
           ${body}
           <details class="raw">
             <summary>原始 JSON</summary>
-            <pre class="raw-body">加载中…</pre>
+            <div class="raw-body">加载中…</div>
           </details>
         </article>`;
       }).join("");
       box.querySelectorAll("details.raw").forEach((el) => {
         el.addEventListener("toggle", async () => {
           if (!el.open) return;
-          const pre = el.querySelector(".raw-body");
-          if (pre.dataset.loaded) return;
+          const host = el.querySelector(".raw-body");
+          if (host.dataset.loaded) return;
           const id = el.closest(".ev").getAttribute("data-id");
           try {
             const d = await (await fetch("/api/event?id=" + encodeURIComponent(id))).json();
-            pre.textContent = pretty(d.event && d.event.raw_json ? d.event.raw_json : d.event);
-            pre.dataset.loaded = "1";
+            const raw = d.event && d.event.raw_json ? d.event.raw_json : prettyJson(d.event);
+            host.innerHTML = renderValue(raw, "json", engines()).html;
+            host.dataset.loaded = "1";
           } catch (err) {
-            pre.textContent = String(err);
+            host.textContent = String(err);
           }
         });
       });
@@ -254,7 +254,7 @@
     });
     loadHealth();
     loadSessions();
-    setInterval(() => { loadHealth(); if (current) loadEvents(); else loadSessions(); }, 4000);
+    setInterval(() => { loadHealth(); if (current) loadEvents(); else loadSessions(); }, 8000);
   </script>
 </body>
 </html>
