@@ -416,6 +416,7 @@ class WebServer {
                 "outboxPending": st.outboxPending,
                 "cloudDocsAvailable": st.cloudDocsAvailable,
                 "syncRootPath": st.syncRootPath as Any,
+                "trxPath": st.trxPath as Any,
                 "lastPushAt": st.lastPushAt as Any,
                 "lastPullAt": st.lastPullAt as Any,
                 "lastPhase": st.lastPhase as Any,

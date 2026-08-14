@@ -8,8 +8,9 @@ import CryptoKit
 /// - **Live** (this type): append-only transactions per host; attachments next to the log.
 ///
 /// ```
-/// …/CloudDocs/ClipFlow/sync/v1/          # tx log (existing op files)
-///   ops/{host_id}/{seq:016d}.json
+/// …/CloudDocs/ClipFlow/sync/v1/
+///   trx/{host_id}/{seq:016d}.json     # transactions (write here)
+///   ops/{host_id}/{seq:016d}.json     # legacy, read-only fallback
 ///   heads/{host_id}.json
 /// …/CloudDocs/ClipFlow/live/attach/{key}.bin
 /// ```
@@ -101,6 +102,8 @@ final class CloudDocsSyncService {
         var outboxPending: Int
         var cloudDocsAvailable: Bool
         var syncRootPath: String?
+        /// Canonical transaction directory: `…/sync/v1/trx/{hostId}`
+        var trxPath: String? = nil
         var lastPushAt: String?
         var lastPullAt: String?
         var lastPushUnix: Double? = nil
@@ -532,21 +535,23 @@ final class CloudDocsSyncService {
     }
 
     private func kickPeerOpsDownload(host: String, fromSeq: Int, toSeq: Int, root: URL) {
-        let dir = opsDir(in: root, host: host)
-        startDownloadIfNeeded(dir)
-        // Wider window: CloudDocs often leaves ops as dataless placeholders.
-        let end = min(toSeq, fromSeq + 120)
-        var s = max(1, fromSeq + 1)
-        while s <= end {
-            let u = dir.appendingPathComponent(String(format: "%016d.json", s))
-            startDownloadIfNeeded(u)
-            s += 1
+        for dir in [trxDir(in: root, host: host), legacyOpsDir(in: root, host: host)] {
+            startDownloadIfNeeded(dir)
+            let end = min(toSeq, fromSeq + 120)
+            var s = max(1, fromSeq + 1)
+            while s <= end {
+                startDownloadIfNeeded(dir.appendingPathComponent(String(format: "%016d.json", s)))
+                s += 1
+            }
         }
     }
 
-    /// Scan peer ops dir for highest seq present (head.json can lag when producer fails to rewrite head).
+    /// Highest seq on disk. `trx/` is canonical; leftover `ops/` still counts.
     private func discoverMaxOpSeq(host: String, root: URL) -> Int {
-        let dir = opsDir(in: root, host: host)
+        max(maxSeqInDir(trxDir(in: root, host: host)), maxSeqInDir(legacyOpsDir(in: root, host: host)))
+    }
+
+    private func maxSeqInDir(_ dir: URL) -> Int {
         startDownloadIfNeeded(dir)
         let files = ((try? fm.contentsOfDirectory(
             at: dir,
@@ -561,13 +566,24 @@ final class CloudDocsSyncService {
         return maxSeq
     }
 
+    /// Prefer `trx/{host}/{seq}.json`; fall back to leftover `ops/`.
+    private func readTxData(host: String, seq: Int, root: URL) -> Data? {
+        let name = String(format: "%016d.json", seq)
+        let trx = trxDir(in: root, host: host).appendingPathComponent(name)
+        let legacy = legacyOpsDir(in: root, host: host).appendingPathComponent(name)
+        startDownloadIfNeeded(trx)
+        startDownloadIfNeeded(legacy)
+        if let data = readCloudData(trx) { return data }
+        return readCloudData(legacy)
+    }
+
     private func pushOutbox() -> StepResult {
         guard let syncRoot = syncRootURL(), let casRoot = casBlobsURL() else {
             lastError = "CloudDocs unavailable"
             return StepResult(ok: false, message: "no CloudDocs")
         }
         ensureDir(syncRoot)
-        ensureDir(opsDir(in: syncRoot, host: hostId))
+        ensureDir(trxDir(in: syncRoot, host: hostId))
         ensureDir(headsDir(in: syncRoot))
         ensureDir(casRoot)
 
@@ -600,7 +616,7 @@ final class CloudDocsSyncService {
                     }
                 }
             }
-            let dest = opsDir(in: syncRoot, host: hostId)
+            let dest = trxDir(in: syncRoot, host: hostId)
                 .appendingPathComponent(String(format: "%016d.json", op.seq))
             do {
                 try publishJSONAtomic(data, to: dest)
@@ -667,7 +683,7 @@ final class CloudDocsSyncService {
             let targetSeq = max(head.seq, diskMax)
             peerRemoteSeq[head.host] = targetSeq
             if diskMax > head.seq {
-                print("[Sync] peer \(head.host) head.seq=\(head.seq) but ops disk max=\(diskMax) — using disk max")
+                print("[Sync] peer \(head.host) head.seq=\(head.seq) but trx disk max=\(diskMax) — using disk max")
             }
 
             var applied = 0
@@ -682,13 +698,9 @@ final class CloudDocsSyncService {
             kickPeerOpsDownload(host: head.host, fromSeq: cursor, toSeq: targetSeq, root: syncRoot)
             while cursor < targetSeq, batch < limit {
                 let next = cursor + 1
-                let opURL = opsDir(in: syncRoot, host: head.host)
-                    .appendingPathComponent(String(format: "%016d.json", next))
-                guard let opData = readCloudData(opURL),
+                guard let opData = readTxData(host: head.host, seq: next, root: syncRoot),
                       let op = try? decoder.decode(SyncOp.self, from: opData) else {
-                    // File Provider lag: requested download; stop this host, retry next poll.
                     lastPhase = "pull:wait \(head.host)#\(next)"
-                    startDownloadIfNeeded(opURL)
                     break
                 }
                 // Import blobs
@@ -908,7 +920,11 @@ final class CloudDocsSyncService {
         return roots
     }
 
-    private func opsDir(in root: URL, host: String) -> URL {
+    private func trxDir(in root: URL, host: String) -> URL {
+        root.appendingPathComponent("trx/\(host)", isDirectory: true)
+    }
+
+    private func legacyOpsDir(in root: URL, host: String) -> URL {
         root.appendingPathComponent("ops/\(host)", isDirectory: true)
     }
 
@@ -1037,6 +1053,7 @@ final class CloudDocsSyncService {
             outboxPending: outboxPendingCount(),
             cloudDocsAvailable: root != nil,
             syncRootPath: root?.path,
+            trxPath: root.map { trxDir(in: $0, host: hostId).path },
             lastPushAt: lastPushUnix.map { ClipTimeFormat.isoLocal(unix: $0) },
             lastPullAt: lastPullUnix.map { ClipTimeFormat.isoLocal(unix: $0) },
             lastPushUnix: lastPushUnix,
@@ -1046,7 +1063,7 @@ final class CloudDocsSyncService {
             inProgress: inProgress,
             peers: peers.sorted { $0.host < $1.host },
             pollIntervalSeconds: config.pollIntervalSeconds,
-            policy: "per-host tx · cloud transport · eventual consistency · poll \(Int(config.pollIntervalSeconds))s · never whole-db replace"
+            policy: "per-host trx/ · cloud transport · eventual consistency · poll \(Int(config.pollIntervalSeconds))s · never whole-db replace"
         )
     }
 

@@ -90,7 +90,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |
 | SQLite 备份用 `sqlite3_backup`；**按机器**写 `backup/hosts/{hostId}/` | 热 copy 开着的 db；双机写同一 `latest/` 互盖 |
-| **同步 = 每机事务 + 云盘运输**；附件走 `live/attach/` | 用共享 CAS / 整库覆盖当同步 |
+| **同步 = 每机 `trx/` 事务 + 云盘运输**；附件走 `live/attach/` | 用 `ops/` 当事务目录；共享 CAS / 整库覆盖当同步 |
 | **备份增量是核心**：本机切片里 size-match skip；只补 missing/partial | **每轮 forceFull 重拷全部 blob**（GDrive File Provider 会 EDEADLK） |
 | SQLite 运行时按 `sqlite-runtime-tricks` skill：WAL / busy_timeout / ANALYZE / FTS5 / 分批清理 | 裸 `sqlite3_open` + 全表 `LIKE '%q%'` + 一次 `DELETE` 清库 |
 | CI = 能绿的真构建（`swift build` + 单测） | 为旧 xcodeproj+DuckDB 殉葬 |

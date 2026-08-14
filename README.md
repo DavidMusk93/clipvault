@@ -103,19 +103,20 @@ node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.
 ├── clipflow.db
 ├── blobs/{sha}.bin
 ├── config/{backup,sync,host}.json
-└── sync/outbox/                  # 待推送 ops
+└── sync/outbox/                  # 待推送 trx
 
-# 灾备平面
-…/CloudDocs/ClipFlow/backup/
+# 灾备平面（按机器，互不覆盖）
+…/CloudDocs/ClipFlow/backup/hosts/{hostId}/
 ├── latest/{clipflow.db, MANIFEST.json}
-├── blobs/{sha}.bin               # 与同步共用 CAS
-├── snapshots/…
-└── STATUS.json
+├── blobs/
+└── snapshots/…
 
-# 同步平面（多机 live merge）
+# 同步平面（每机事务 · 最终一致）
 …/CloudDocs/ClipFlow/sync/v1/
-├── ops/{host_id}/{seq:016d}.json
+├── trx/{host_id}/{seq:016d}.json   # 事务（新写入）
+├── ops/{host_id}/                  # 旧目录，只读回退
 └── heads/{host_id}.json
+…/CloudDocs/ClipFlow/live/attach/   # 同步附件
 ```
 
 Web：右上角 **备份** 侧栏 → 灾备开关 / 立即备份 / 恢复；同侧栏 **多机同步** → 开关 / 立即同步 / peer lag。

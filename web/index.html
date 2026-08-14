@@ -1777,7 +1777,7 @@
 
       <h3 style="font-size:14px;font-weight:600;margin-top:20px">多机同步（最终一致）</h3>
       <p class="backup-label" style="margin:4px 0 8px">
-        每机一条事务日志，云盘负责运输。备份按机器分目录，互不覆盖。禁止用整库当同步。
+        事务写在 <code>trx/</code> 目录（不是 ops）。云盘负责运输。备份按机器分目录，互不覆盖。
       </p>
       <div class="backup-row">
         <div>
@@ -1787,6 +1787,7 @@
         <label class="switch"><input type="checkbox" id="syncEnabled"/><span></span></label>
       </div>
       <div class="backup-row"><span class="backup-label">本机 host</span><span class="backup-value" id="syHost">—</span></div>
+      <div class="backup-row"><span class="backup-label">trx</span><span class="backup-value" id="syTrx">—</span></div>
       <div class="backup-row"><span class="backup-label">local seq</span><span class="backup-value" id="sySeq">—</span></div>
       <div class="backup-row"><span class="backup-label">outbox</span><span class="backup-value" id="syOutbox">—</span></div>
       <div class="backup-row"><span class="backup-label">上次 push / pull</span><span class="backup-value" id="syTimes">—</span></div>
@@ -5599,6 +5600,7 @@ window.ClipViewMasonry = Masonry;
         if (en) en.checked = !!s.enabled;
         const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
         set('syHost', s.hostId || '—');
+        set('syTrx', s.trxPath || ((s.syncRootPath || '') + '/trx/' + (s.hostId || '')) || '—');
         set('sySeq', s.localSeq != null ? String(s.localSeq) : '—');
         set('syOutbox', s.outboxPending != null ? String(s.outboxPending) : '—');
         set('syTimes',
