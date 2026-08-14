@@ -1419,6 +1419,22 @@
     .icon-btn.is-copied .icon-off { display: none; }
     .icon-btn.is-copied .icon-on { display: block; }
     /* Delete: same chrome, danger only on hover/active */
+    .icon-btn.is-pinned {
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .icon-btn.is-pinned:hover { color: var(--accent-ink); }
+    .m3-card.is-pinned {
+      box-shadow: var(--elev-2);
+      outline: 1px solid rgba(0, 113, 227, 0.22);
+    }
+    .pin-chip {
+      display: inline-flex; align-items: center; gap: 3px;
+      height: 20px; padding: 0 7px; border-radius: 999px;
+      background: var(--accent-soft); color: var(--accent);
+      font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
+    }
+    .pin-chip .material-symbols-outlined { font-size: 13px; }
     .icon-btn.is-danger:hover {
       color: var(--danger);
       background: var(--danger-soft);
@@ -2559,7 +2575,7 @@ window.ClipViewMasonry = Masonry;
         const prevLen = clips.length;
         const prevIds = new Set(clips.map(c => c.id));
         clips = Pagination.mergePage(clips, items, { reset });
-        clips = dedupeClipsById(clips);
+        clips = sortClipsForFeed(dedupeClipsById(clips));
         nextCursor = cursor;
         if (!cursor || items.length === 0) exhausted = true;
 
@@ -2597,6 +2613,20 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
+    function itemIsPinned(item) {
+      return !!(item && (item.pinned || item.pinnedAt));
+    }
+
+    function sortClipsForFeed(list) {
+      return (list || []).slice().sort((a, b) => {
+        const ap = itemIsPinned(a) ? 1 : 0;
+        const bp = itemIsPinned(b) ? 1 : 0;
+        if (ap !== bp) return bp - ap;
+        if (ap && (a.pinnedAt || 0) !== (b.pinnedAt || 0)) return (b.pinnedAt || 0) - (a.pinnedAt || 0);
+        return (b.timestamp || 0) - (a.timestamp || 0);
+      });
+    }
+
     function dedupeClipsById(list) {
       const seen = new Set();
       const out = [];
@@ -2624,19 +2654,33 @@ window.ClipViewMasonry = Masonry;
         // Refresh archived flags on existing rows (list JSON has no article HTML).
         const byId = new Map(items.map((i) => [i.id, i]));
         const flagDirty = [];
+        let pinChanged = false;
         clips = clips.map((c) => {
           const n = byId.get(c.id);
           if (!n) return c;
-          const next = { ...c, archived: n.archived, archive: n.archive, textContent: n.textContent || c.textContent };
-          if (!!c.archived !== !!n.archived) flagDirty.push(next);
+          const next = {
+            ...c,
+            archived: n.archived,
+            archive: n.archive,
+            textContent: n.textContent || c.textContent,
+            pinned: n.pinned,
+            pinnedAt: n.pinnedAt,
+          };
+          if (!!c.pinned !== !!n.pinned) pinChanged = true;
+          if (!!c.archived !== !!n.archived || !!c.pinned !== !!n.pinned) flagDirty.push(next);
           return next;
         });
         if (!fresh.length) {
-          clips = dedupeClipsById(clips);
-          flagDirty.forEach((c) => replaceCardInPlace(c));
+          clips = sortClipsForFeed(dedupeClipsById(clips));
+          if (pinChanged) {
+            colHeights = null;
+            rebuildFromData({ preserveScroll: true });
+          } else {
+            flagDirty.forEach((c) => replaceCardInPlace(c));
+          }
           return;
         }
-        clips = dedupeClipsById([...fresh, ...clips]);
+        clips = sortClipsForFeed(dedupeClipsById([...fresh, ...clips]));
         if (clips.length > CLIENT_CAP) {
           const removed = clips.splice(CLIENT_CAP);
           removed.forEach(r => { cardCache.get(r.id)?.remove(); cardCache.delete(r.id); });
@@ -4503,6 +4547,8 @@ window.ClipViewMasonry = Masonry;
       // Copy payload is plain text (type:text); built at click from rendered card / stripHtml — not data-attr.
       const inTrash = !!(item.inTrash || item.deletedAt);
       if (inTrash) card.classList.add('in-trash');
+      const pinned = itemIsPinned(item);
+      if (pinned) card.classList.add('is-pinned');
       const count = Math.max(1, Number(item.copyCount) || 1);
       const delTs = item.deletedAtLocal
         ? formatLocalTime(item.deletedAtLocal)
@@ -4516,6 +4562,7 @@ window.ClipViewMasonry = Masonry;
             <button type="button" class="icon-btn" data-restore="${item.id}" title="恢复" aria-label="恢复"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 12a5 5 0 1 1 1.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 8v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           </div>`
         : `<div class="action-pair">
+            <button type="button" class="icon-btn${pinned ? ' is-pinned' : ''}" data-pin="${item.id}" title="${pinned ? '取消置顶' : '置顶'}" aria-label="${pinned ? '取消置顶' : '置顶'}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5v10.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.2 8.2h7.6L14.4 13H9.6L8.2 8.2z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 13.7V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
             <button type="button" class="icon-btn${hasEval ? ' has-ctx' : ''}" data-eval="${item.id}" title="${hasEval ? '评价（有记录）' : '评价'}" aria-label="评价"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 20h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
             <button type="button" class="icon-btn" data-copy-plain="1" title="复制为纯文本" aria-label="复制"><svg class="icon-off" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button type="button" class="icon-btn is-danger" data-del="${item.id}" title="移入回收箱" aria-label="删除"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9.5 7.5V6.2A1.7 1.7 0 0 1 11.2 4.5h1.6a1.7 1.7 0 0 1 1.7 1.7v1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.2 7.5l.6 11.2a1.7 1.7 0 0 0 1.7 1.6h3a1.7 1.7 0 0 0 1.7-1.6l.6-11.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10.2 11v5.5M13.8 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
@@ -4534,6 +4581,7 @@ window.ClipViewMasonry = Masonry;
         <div class="card-header">
           <div class="card-header-lead">
             <span class="badge ${tm.cls}"><span class="material-symbols-outlined">${tm.icon}</span>${esc(tm.label)}</span>
+            ${pinned ? '<span class="pin-chip"><span class="material-symbols-outlined">keep</span>置顶</span>' : ''}
             ${countBadge}
           </div>
           ${trashMeta}
@@ -4558,6 +4606,11 @@ window.ClipViewMasonry = Masonry;
           btn.classList.remove('is-copied');
           btn.setAttribute('aria-label', '复制');
         }, 1400);
+      });
+      card.querySelector('[data-pin]')?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        togglePin(item);
       });
       card.querySelector('[data-eval]')?.addEventListener('click', e => {
         e.preventDefault();
@@ -5052,6 +5105,32 @@ window.ClipViewMasonry = Masonry;
       }, true);
     }
     wireForcePlainCopyOnce();
+
+    async function togglePin(item) {
+      if (!item || !item.id) return;
+      const next = !itemIsPinned(item);
+      try {
+        const res = await fetch(API + '/api/clips/pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: item.id, pinned: next }),
+        });
+        const data = await res.json();
+        if (!data.ok || !data.item) {
+          toast('置顶失败');
+          return;
+        }
+        const idx = clips.findIndex((c) => c.id === item.id);
+        if (idx >= 0) clips[idx] = { ...clips[idx], ...data.item };
+        else clips.unshift(data.item);
+        clips = sortClipsForFeed(dedupeClipsById(clips));
+        colHeights = null;
+        rebuildFromData({ preserveScroll: true });
+        toast(next ? '已置顶' : '已取消置顶');
+      } catch (_) {
+        toast('置顶失败');
+      }
+    }
 
     async function deleteClip(id) {
       try {

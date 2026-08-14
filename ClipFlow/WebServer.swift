@@ -170,6 +170,8 @@ class WebServer {
             handleArchivePost(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/archive/reader" {
             handleReaderPost(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/clips/pin" {
+            handleClipPin(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/archive") {
             handleArchiveClear(path: path, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
@@ -902,6 +904,12 @@ class WebServer {
         dict["hasUserContext"] = (item.userNote != nil)
             || (item.userStage != nil)
             || (item.userRating != nil)
+        if let pin = item.pinnedAt {
+            dict["pinned"] = true
+            dict["pinnedAt"] = pin.timeIntervalSince1970
+        } else {
+            dict["pinned"] = false
+        }
         // Thumb URL for image types — client never loads full blob in feed
         if item.type == .image {
             dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb"
@@ -1083,6 +1091,37 @@ class WebServer {
             "state": bundle.state,
             "ops": bundle.ops,
         ], connection: connection)
+    }
+
+    /// POST /api/clips/pin  { id, pinned? }  omitted pinned = toggle
+    private func handleClipPin(data: Data, connection: NWConnection) {
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        guard let brace = raw.range(of: "{"),
+              let jsonData = raw[brace.lowerBound...].data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let idStr = obj["id"] as? String,
+              let uuid = UUID(uuidString: idStr) else {
+            sendJSON(["ok": false, "message": "expected {id, pinned?}"], connection: connection)
+            return
+        }
+        func apply(_ pinned: Bool) {
+            database.setPinned(id: uuid, pinned: pinned) { [weak self] item in
+                guard let self else { return }
+                if let item {
+                    self.sendJSON(["ok": true, "item": self.itemToJSON(item)], connection: connection)
+                } else {
+                    self.sendJSON(["ok": false, "message": "置顶失败"], connection: connection)
+                }
+            }
+        }
+        if let pinned = obj["pinned"] as? Bool {
+            apply(pinned)
+        } else {
+            database.fetchItem(id: uuid) { [weak self] item in
+                guard self != nil else { return }
+                apply(item?.pinnedAt == nil)
+            }
+        }
     }
 
     /// POST /api/archive/reader  { id, kind, payload? }

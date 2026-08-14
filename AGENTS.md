@@ -73,6 +73,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **URL 归档（save useful）**：手动「归档网页」→ WKWebView+Readability；预览消毒不可点 | 前端 CORS fetch 当归档；自动爬每一个链接 |
 | **View**：弹层 iframe `src=/api/archive/view?embed=1`（真文档，浏览器引擎排版）；可再开新标签 | srcdoc / Turndown 自绘；毛玻璃+transform 包 iframe；只弹出孤立 tab |
 | **归档后同一按钮变「查看」**（同槽同尺寸）；已归档禁止再点「归档网页」 | 另塞一颗小「查看」；归档按钮归档后仍可点 |
+| **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶 | 改 timestamp 冒充置顶；钉子混进下一页重复出现 |
 | **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |
 | 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
 

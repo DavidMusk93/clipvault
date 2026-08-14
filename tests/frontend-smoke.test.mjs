@@ -296,6 +296,13 @@ test('archived URL uses View sheet — no inline HTML in cards', () => {
   assert.match(indexHtml, /function openArchiveReader/, 'reader opener');
 });
 
+test('cards can be pinned and stay at the top of the feed', () => {
+  assert.match(indexHtml, /function togglePin/, 'pin toggle');
+  assert.match(indexHtml, /function sortClipsForFeed/, 'pins sort before recency');
+  assert.match(indexHtml, /data-pin=/, 'pin control on cards');
+  assert.match(indexHtml, /\/api\/clips\/pin/, 'pin API');
+});
+
 test('feed JSON must not embed archive HTML into masonry items', () => {
   assert.match(indexHtml, /function dedupeClipsById/, 'dedupe clips');
   assert.match(indexHtml, /includeArchiveHTML|archived flag is the source/, 'list vs full html split');

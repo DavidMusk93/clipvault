@@ -362,6 +362,10 @@ final class DatabaseManager: ObservableObject {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN archive_html_sha TEXT;")
         }
         // Personal learning layer: projected snapshot + append-only ops.
+        if !columnExists("clipboard_items", "pinned_at") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN pinned_at REAL;")
+        }
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_pinned_at ON clipboard_items(pinned_at DESC) WHERE pinned_at IS NOT NULL;")
         if !columnExists("clipboard_items", "reader_state") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN reader_state TEXT;")
         }
@@ -1400,8 +1404,7 @@ final class DatabaseManager: ObservableObject {
                     }
                     // Keep recency for overflow — re-sort by timestamp desc
                     items.sort { a, b in
-                        if a.timestamp != b.timestamp { return a.timestamp > b.timestamp }
-                        return a.id.uuidString > b.id.uuidString
+                        Self.pinThenRecency(a, b)
                     }
                     if items.count > fetchLimit {
                         items = Array(items.prefix(fetchLimit))
@@ -1412,6 +1415,16 @@ final class DatabaseManager: ObservableObject {
                 items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit)
             } else {
                 items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: trashOnly)
+                if !trashOnly, cursor == nil {
+                    let pins = self.runPinned(db: db, fetchLimit: 40)
+                    if !pins.isEmpty {
+                        let pinIds = Set(pins.map(\.id))
+                        items = pins + items.filter { !pinIds.contains($0.id) }
+                    }
+                }
+            }
+            if hasQuery && !trashOnly {
+                items.sort { Self.pinThenRecency($0, $1) }
             }
 
             var next: ClipCursor? = nil
@@ -1429,6 +1442,15 @@ final class DatabaseManager: ObservableObject {
                 completion(ClipPage(items: items, nextCursor: next))
             }
         }
+    }
+
+    private static func pinThenRecency(_ a: ClipboardItem, _ b: ClipboardItem) -> Bool {
+        let ap = a.pinnedAt != nil
+        let bp = b.pinnedAt != nil
+        if ap != bp { return ap && !bp }
+        if let at = a.pinnedAt, let bt = b.pinnedAt, at != bt { return at > bt }
+        if a.timestamp != b.timestamp { return a.timestamp > b.timestamp }
+        return a.id.uuidString > b.id.uuidString
     }
 
     /// Exclusive keyset: strictly older than (timestamp, id) in DESC order.
@@ -1456,7 +1478,7 @@ final class DatabaseManager: ObservableObject {
         var sql = """
         SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, c.html_content, c.source_app, c.ocr_text,
                COALESCE(c.copy_count, 1), c.deleted_at, c.first_seen_at,
-               c.user_note, c.user_stage, c.user_rating, c.user_context_updated_at
+               c.user_note, c.user_stage, c.user_rating, c.user_context_updated_at, c.pinned_at
         FROM clipboard_fts f
         JOIN clipboard_items c ON c.id = f.id
         WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL
@@ -1493,7 +1515,7 @@ final class DatabaseManager: ObservableObject {
         fetchLimit: Int,
         trashOnly: Bool = false
     ) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
@@ -1529,11 +1551,11 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
-            sql += "deleted_at IS NULL"
+            sql += "deleted_at IS NULL AND pinned_at IS NULL"
         }
         if cursor != nil {
             sql += " AND " + Self.keysetSQL
@@ -1559,8 +1581,26 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
+    private func runPinned(db: OpaquePointer, fetchLimit: Int) -> [ClipboardItem] {
+        let sql = """
+        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at
+        FROM clipboard_items
+        WHERE deleted_at IS NULL AND pinned_at IS NOT NULL
+        ORDER BY pinned_at DESC, id DESC LIMIT ?;
+        """
+        var stmt: OpaquePointer?
+        var items: [ClipboardItem] = []
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_int(stmt, 1, Int32(max(1, min(fetchLimit, 40))))
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let item = rowToItem(stmt: stmt) { items.append(item) }
+        }
+        sqlite3_finalize(stmt)
+        return items
+    }
+
     /// Columns: id, timestamp, type, content_hash, text, file_urls, url, html, source, ocr,
-    /// copy_count, deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at
+    /// copy_count, deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at
     private func rowToItem(stmt: OpaquePointer?) -> ClipboardItem? {
         guard let stmt = stmt,
               let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
@@ -1612,6 +1652,10 @@ final class DatabaseManager: ObservableObject {
         if colCount >= 17, sqlite3_column_type(stmt, 16) != SQLITE_NULL {
             userContextUpdatedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 16))
         }
+        var pinnedAt: Date? = nil
+        if colCount >= 18, sqlite3_column_type(stmt, 17) != SQLITE_NULL {
+            pinnedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 17))
+        }
 
         return ClipboardItem(
             id: uuid,
@@ -1631,7 +1675,8 @@ final class DatabaseManager: ObservableObject {
             userNote: userNote,
             userStage: userStage,
             userRating: userRating,
-            userContextUpdatedAt: userContextUpdatedAt
+            userContextUpdatedAt: userContextUpdatedAt,
+            pinnedAt: pinnedAt
         )
     }
 
@@ -1887,7 +1932,7 @@ final class DatabaseManager: ObservableObject {
         var f: OpaquePointer?
         let fetchSQL = """
         SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text,
-               COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at
+               COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at
         FROM clipboard_items WHERE id = ? LIMIT 1;
         """
         var out: ClipboardItem?
@@ -1947,6 +1992,44 @@ final class DatabaseManager: ObservableObject {
     func fetchItem(id: UUID, completion: @escaping (ClipboardItem?) -> Void) {
         dbQueue.async { [weak self] in
             let item = self?.fetchItemByIdLocked(id.uuidString)
+            DispatchQueue.main.async { completion(item) }
+        }
+    }
+
+    /// Pin / unpin a card. Projection only — capture payload unchanged.
+    func setPinned(id: UUID, pinned: Bool, completion: @escaping (ClipboardItem?) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self = self, let db = self.db else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let idStr = id.uuidString
+            let sql = "UPDATE clipboard_items SET pinned_at = ? WHERE id = ?;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            if pinned {
+                sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+            } else {
+                sqlite3_bind_null(stmt, 1)
+            }
+            self.bindText(stmt, 2, idStr)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            _ = self.appendOperationLogSync(
+                action: pinned ? "pin" : "unpin",
+                itemId: idStr,
+                contentHash: nil,
+                detail: nil,
+                source: "web"
+            )
+            let item = self.fetchItemByIdLocked(idStr)
             DispatchQueue.main.async { completion(item) }
         }
     }
