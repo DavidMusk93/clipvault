@@ -900,16 +900,42 @@
       });
       ta.focus();
     }
+    var markClickTimer = 0;
+    function highlightFromMark(m) {
+      if (!m) return null;
+      var hid = m.dataset.hlId;
+      return (
+        highlights.filter(function (x) {
+          return x.id === hid;
+        })[0] || null
+      );
+    }
     root.addEventListener("click", function (e) {
       var m = e.target.closest && e.target.closest("mark.cv-hl");
       if (!m) return;
       e.preventDefault();
       e.stopPropagation();
-      var hid = m.dataset.hlId;
-      var h = highlights.filter(function (x) {
-        return x.id === hid;
-      })[0];
-      if (h) showSel(m, h);
+      var h = highlightFromMark(m);
+      if (!h) return;
+      if (markClickTimer) clearTimeout(markClickTimer);
+      markClickTimer = setTimeout(function () {
+        markClickTimer = 0;
+        showSel(m, h);
+      }, 220);
+    });
+    root.addEventListener("dblclick", function (e) {
+      var m = e.target.closest && e.target.closest("mark.cv-hl");
+      if (!m) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (markClickTimer) {
+        clearTimeout(markClickTimer);
+        markClickTimer = 0;
+      }
+      var h = highlightFromMark(m);
+      if (!h) return;
+      hideSel();
+      openNote(h, m);
     });
     saveBtn.addEventListener("click", function () {
       if (!editing) return;

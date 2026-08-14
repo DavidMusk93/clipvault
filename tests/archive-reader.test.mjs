@@ -32,7 +32,8 @@ test('selection chrome is a glass bar that never covers the rect', () => {
   assert.match(js, /评论/, 'comment action');
   assert.match(js, /is-sheet/, 'narrow viewport uses a sheet');
   assert.match(js, /allowSide/, 'wide viewport parks the note in the margin');
-  assert.match(swiftWeb, /archive-reader\.js\?v=20260814p/, 'cache bust');
+  assert.match(swiftWeb, /archive-reader\.js\?v=20260814q/, 'cache bust');
+  assert.match(js, /dblclick/, 'double-click mark opens comment');
   assert.match(js, /cv-note-tools/, 'header actions on the right');
   assert.match(js, /cv-hist-rail/, 'reddit-style thread rail');
   assert.match(js, /写下一句想法/, 'same copy as card evaluation');
