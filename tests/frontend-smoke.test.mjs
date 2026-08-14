@@ -301,6 +301,9 @@ test('cards can be pinned and stay at the top of the feed', () => {
   assert.match(indexHtml, /function sortClipsForFeed/, 'pins sort before recency');
   assert.match(indexHtml, /data-pin=/, 'pin control on cards');
   assert.match(indexHtml, /\/api\/clips\/pin/, 'pin API');
+  assert.match(indexHtml, /id="pinRail"/, 'pinned rail');
+  assert.match(indexHtml, /feed-split/, 'divider under pins');
+  assert.match(indexHtml, /pin-on/, 'filled keep when pinned');
 });
 
 test('feed JSON must not embed archive HTML into masonry items', () => {
