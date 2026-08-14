@@ -213,6 +213,8 @@ class WebServer {
             sendItemFrequency(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/evaluations") {
             sendItemEvaluations(path: path, connection: connection)
+        } else if pathOnly == "/api/archive/view" {
+            sendArchiveView(path: path, connection: connection)
         } else if pathOnly == "/api/archive" || pathOnly.hasPrefix("/api/archive/") {
             sendArchiveStatus(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/assets/") {
@@ -859,27 +861,23 @@ class WebServer {
             dict["inTrash"] = false
         }
         if let text = item.textContent { dict["textContent"] = text }
-        // URL archive is an overlay — never dump article HTML into the feed JSON
-        // (that produced extra/ugly cards). Full HTML only on id fetch for View.
-        if item.type == .url {
-            let hasHTML = (item.htmlContent?.count ?? 0) > 40
-            var archived = hasHTML
-            if let metaStr = database.webArchiveMetaJSON(id: item.id),
-               let metaData = metaStr.data(using: .utf8),
-               let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
-                archived = true
-                dict["archive"] = meta
-            }
-            dict["archived"] = archived
-            if includeArchiveHTML, let html = item.htmlContent {
-                dict["htmlContent"] = html
-            }
-        } else if let html = item.htmlContent {
-            dict["htmlContent"] = html
-            dict["archived"] = false
-        } else {
-            dict["archived"] = false
+        // URL archive is an overlay — never dump article HTML into clip JSON.
+        // View loads GET /api/archive/view (real document). Cards only get a flag.
+        var archived = false
+        if let metaStr = database.webArchiveMetaJSON(id: item.id),
+           let metaData = metaStr.data(using: .utf8),
+           let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
+            archived = true
+            dict["archive"] = meta
         }
+        if item.type == .url, (item.htmlContent?.count ?? 0) > 40 {
+            archived = true
+        }
+        dict["archived"] = archived
+        if item.type != .url, let html = item.htmlContent, !archived {
+            dict["htmlContent"] = html
+        }
+        _ = includeArchiveHTML
         if let ocr = item.ocrText { dict["ocrText"] = ocr }
         if let urls = item.fileURLs, !urls.isEmpty {
             dict["filePaths"] = urls.map { $0.path }
@@ -946,6 +944,107 @@ class WebServer {
             }
             self.sendJSON(["ok": ok], connection: connection)
         }
+    }
+
+    /// GET /api/archive/view?id=&embed=1
+    /// Full HTML document so the browser engine lays out `<pre>`/`<br>`/`&nbsp;`.
+    /// Sheet iframe uses embed=1 (no chrome). New-tab uses the same document.
+    private func sendArchiveView(path: String, connection: NWConnection) {
+        guard let comps = URLComponents(string: "http://localhost\(path)"),
+              let idStr = comps.queryItems?.first(where: { $0.name == "id" })?.value,
+              let uuid = UUID(uuidString: idStr) else {
+            sendErrorResponse(connection: connection, status: 400, message: "expected ?id=")
+            return
+        }
+        let embed = comps.queryItems?.contains(where: { $0.name == "embed" && ($0.value == "1" || $0.value == "true") }) == true
+        let html = database.fetchArchiveHTML(id: uuid)
+        let metaStr = database.webArchiveMetaJSON(id: uuid)
+        database.fetchItem(id: uuid) { [weak self] item in
+            guard let self else { return }
+            guard let html, html.count > 40 else {
+                self.sendErrorResponse(connection: connection, status: 404, message: "no archive")
+                return
+            }
+            var title = "归档"
+            var source = item?.textContent ?? ""
+            if let metaData = metaStr?.data(using: .utf8),
+               let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
+                if let t = meta["title"] as? String, !t.isEmpty { title = t }
+                if let u = meta["sourceUrl"] as? String, !u.isEmpty { source = u }
+            }
+            let doc = self.buildArchiveViewDocument(title: title, source: source, bodyHTML: html, embed: embed)
+            self.sendBinary(
+                status: 200,
+                reason: "OK",
+                contentType: "text/html; charset=utf-8",
+                body: Data(doc.utf8),
+                connection: connection,
+                extraHeaders: [
+                    ("Cache-Control", "private, no-store"),
+                    ("Content-Security-Policy", "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'none'"),
+                    ("X-Content-Type-Options", "nosniff"),
+                ]
+            )
+        }
+    }
+
+    private func buildArchiveViewDocument(title: String, source: String, bodyHTML: String, embed: Bool) -> String {
+        let safeTitle = htmlEscapeText(title)
+        let safeSource = htmlEscapeText(source)
+        let bar = embed ? "" : """
+          <header class="cv-bar">
+            <h1>\(safeTitle)</h1>
+            <p>\(safeSource)</p>
+          </header>
+        """
+        return """
+        <!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+          <meta charset="utf-8"/>
+          <meta name="viewport" content="width=device-width,initial-scale=1"/>
+          <title>\(safeTitle)</title>
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"/>
+          <style>
+            .cv-bar{
+              position:sticky;top:0;z-index:2;
+              display:flex;flex-direction:column;gap:4px;
+              padding:10px 18px 12px;
+              background:#fff;border-bottom:0.5px solid #e5e5ea;
+              font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+            }
+            .cv-bar h1{margin:0;font-size:15px;font-weight:650;letter-spacing:-0.02em;}
+            .cv-bar p{margin:0;font-size:12px;color:#6e6e73;word-break:break-all;}
+            main.cv-article{
+              max-width:46rem;margin:0 auto;padding:1.25rem 1.25rem 4rem;
+            }
+            pre,pre code{
+              white-space:pre !important;
+              word-break:normal;
+              overflow-wrap:normal;
+              overflow:auto;
+              font-variant-ligatures:none;
+              font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+            }
+            img,video{max-width:100%;height:auto;}
+            a{pointer-events:none;color:inherit;text-decoration:none;}
+          </style>
+        </head>
+        <body>
+        \(bar)
+          <main class="cv-article">
+        \(bodyHTML)
+          </main>
+        </body>
+        </html>
+        """
+    }
+
+    private func htmlEscapeText(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     /// GET /api/archive?job=  or /api/archive/{jobId}
@@ -1049,7 +1148,8 @@ class WebServer {
         if let idStr = items.first(where: { $0.name == "id" })?.value, let uuid = UUID(uuidString: idStr) {
             database.fetchItem(id: uuid) { [weak self] item in
                 guard let self else { return }
-                let arr = item.map { [self.itemToJSON($0, includeArchiveHTML: true)] } ?? []
+                // View document is GET /api/archive/view — never ship article HTML in clip JSON.
+                let arr = item.map { [self.itemToJSON($0, includeArchiveHTML: false)] } ?? []
                 self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
             }
             return

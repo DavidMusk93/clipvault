@@ -354,6 +354,13 @@ final class DatabaseManager: ObservableObject {
         if !columnExists("clipboard_items", "user_context_updated_at") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN user_context_updated_at REAL;")
         }
+        // Archive body is not clipboard html_content. Prefer CAS pointer, then TEXT.
+        if !columnExists("clipboard_items", "archive_html") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN archive_html TEXT;")
+        }
+        if !columnExists("clipboard_items", "archive_html_sha") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN archive_html_sha TEXT;")
+        }
         // Append-only user evaluations (each submit = one history row).
         execQuiet("""
         CREATE TABLE IF NOT EXISTS user_evaluations (
@@ -2054,6 +2061,53 @@ final class DatabaseManager: ObservableObject {
             out = self.metaGet("archive.\(id.uuidString)")
         }
         return out
+    }
+
+    /// Archive HTML for the View document. Never the clipboard capture payload.
+    /// Order: CAS `archive_html_sha` → `archive_html` → meta `htmlKey` → `html_content` (legacy overlay).
+    func fetchArchiveHTML(id: UUID) -> String? {
+        var html: String?
+        dbQueue.sync {
+            guard let db = self.db else { return }
+            let idStr = id.uuidString
+            var sha: String?
+            var inline: String?
+            var legacy: String?
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "SELECT archive_html_sha, archive_html, html_content FROM clipboard_items WHERE id = ?;",
+                -1, &stmt, nil
+            ) == SQLITE_OK {
+                self.bindText(stmt, 1, idStr)
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    sha = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+                    inline = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+                    legacy = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+                }
+            }
+            sqlite3_finalize(stmt)
+            if (sha == nil || sha?.isEmpty == true),
+               let metaStr = self.metaGet("archive.\(idStr)"),
+               let data = metaStr.data(using: .utf8),
+               let meta = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let key = meta["htmlKey"] as? String, !key.isEmpty {
+                sha = key
+            }
+            if let sha, !sha.isEmpty, let blob = self.readBlobFile(hash: sha),
+               let s = String(data: blob, encoding: .utf8), s.count > 40 {
+                html = s
+                return
+            }
+            if let inline, inline.count > 40 {
+                html = inline
+                return
+            }
+            if let legacy, legacy.count > 40 {
+                html = legacy
+            }
+        }
+        return html
     }
 
     // MARK: - Soft delete / recycle bin (TTL 30d)

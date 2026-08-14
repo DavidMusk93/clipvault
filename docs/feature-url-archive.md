@@ -41,7 +41,8 @@ URL 卡片
         → 确认（含成人门禁）
         → POST /api/archive { url, itemId?, mode: "readable" }
         → 状态：归档中… / 完成 / 失败原因
-        → 卡片展开：离线正文预览 + 「打开原站」
+        → 卡片「查看」：ClipVault 弹层 iframe 嵌 `GET /api/archive/view?embed=1`
+        → 同一份文档可再开浏览器新标签（排版与弹层一致）
 ```
 
 ## 架构
@@ -67,10 +68,10 @@ POST /api/archive
 GET /api/archive/jobs/{jobId}
 → { status: queued|running|ok|error, title?, bytes?, error? }
 
-# 完成后：原 clip 或新 clip 带
-# htmlContent = 归档正文（消毒后）
-# textContent 可补纯文本摘要
-# meta: sourceUrl, archivedAt, archiveMode, blobKey
+GET /api/archive/view?id=<uuid>&embed=1
+→ 完整 HTML 文档（浏览器引擎排版原文）。embed=1 去掉页内顶栏，给弹层用。
+
+# 列表 JSON 只带 archived + archive meta，不下发正文。
 ```
 
 ### 存储

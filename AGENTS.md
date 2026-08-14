@@ -68,6 +68,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **列表变更差分渲染 + 保持 scroll/cursor**（删/恢复卡片） | 删一条就 `innerHTML=''` 全量 rebuild 回顶 |
 | **滚动丝滑**：图框锁高；禁止 `img.onload → rebuildFromData`；append 离屏量高 | 滑动中瀑布流全量 rebalance（社交流不会这么做） |
 | **URL 归档（save useful）**：手动「归档网页」→ WKWebView+Readability；预览消毒不可点 | 前端 CORS fetch 当归档；自动爬每一个链接 |
+| **View**：弹层 iframe `src=/api/archive/view?embed=1`（真文档，浏览器引擎排版）；可再开新标签 | srcdoc / Turndown 自绘；毛玻璃+transform 包 iframe；只弹出孤立 tab |
 | 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
 
 ### 2.3 工程（always SOTA / 终局）

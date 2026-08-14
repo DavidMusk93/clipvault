@@ -1014,8 +1014,8 @@
     }
 
 
-    /* Archive reader — Apple sheet + isolated iframe (water.css inside).
-       Card never mounts archive HTML (masonry must not grow). */
+    /* Archive reader — sheet wrapping a real /api/archive/view document.
+       Never srcdoc. Never transform the card (WebKit blanks transformed iframes). */
     .archive-reader {
       position: fixed; inset: 0; z-index: 3800;
       display: none; align-items: flex-end; justify-content: center;
@@ -1025,32 +1025,24 @@
     .archive-reader-scrim {
       position: absolute; inset: 0;
       background: rgba(0, 0, 0, 0.32);
-      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
       opacity: 0; transition: opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1);
     }
     .archive-reader.open .archive-reader-scrim { opacity: 1; }
     .archive-reader-card {
       position: relative; z-index: 1;
-      width: min(760px, calc(100vw - 16px));
-      height: min(88vh, 900px);
+      width: min(860px, calc(100vw - 16px));
+      height: min(90vh, 960px);
       margin: 0 8px 10px;
       display: flex; flex-direction: column;
       border-radius: 22px 22px 18px 18px;
-      background: rgba(255, 255, 255, 0.88);
-      -webkit-backdrop-filter: blur(32px) saturate(180%);
-      backdrop-filter: blur(32px) saturate(180%);
-      border: 0.5px solid rgba(255,255,255,0.55);
-      box-shadow: 0 18px 56px rgba(0,0,0,0.22), 0 0 0 0.5px rgba(255,255,255,0.45) inset;
-      transform: translateY(28px);
+      background: #fff;
+      border: 0.5px solid rgba(0,0,0,0.08);
+      box-shadow: 0 18px 56px rgba(0,0,0,0.22);
       opacity: 0;
-      transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease;
+      transition: opacity 0.22s ease;
       overflow: hidden;
-      will-change: transform, opacity;
     }
-    .archive-reader.open .archive-reader-card {
-      transform: translateY(0);
-      opacity: 1;
-    }
+    .archive-reader.open .archive-reader-card { opacity: 1; }
     .archive-reader-grabber {
       width: 36px; height: 5px; border-radius: 999px;
       background: rgba(60, 60, 67, 0.22);
@@ -1079,26 +1071,16 @@
       display: flex; align-items: center; gap: 4px; flex-shrink: 0;
     }
     .archive-reader-frame {
-      flex: 1; min-height: 0; width: 100%; border: 0;
+      flex: 1; min-height: 0; min-width: 0; width: 100%; border: 0;
       background: #fff;
     }
     @media (min-width: 640px) {
       .archive-reader { align-items: center; }
-      .archive-reader-card {
-        border-radius: 18px; margin-bottom: 0;
-        transform: translateY(16px) scale(0.985);
-      }
-      .archive-reader.open .archive-reader-card { transform: translateY(0) scale(1); }
+      .archive-reader-card { border-radius: 18px; margin-bottom: 0; }
       .archive-reader-grabber { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .archive-reader-card, .archive-reader-scrim {
-        transition: opacity 0.16s ease; transform: none !important;
-      }
-    }
-    @media (prefers-reduced-transparency: reduce) {
-      .archive-reader-card { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
-      .archive-reader-scrim { backdrop-filter: none; -webkit-backdrop-filter: none; }
+      .archive-reader-card, .archive-reader-scrim { transition: none; }
     }
     /*
      * Evaluation sheet — Apple HIG-ish sheet (glass, spring, star rate).
@@ -1856,7 +1838,7 @@
   </div>
 
 
-  <!-- Archive reader: Apple sheet + sandboxed iframe (water.css). Not in masonry. -->
+  <!-- Archive reader: ClipVault sheet + real browser document (not srcdoc). -->
   <div id="archiveReader" class="archive-reader" aria-hidden="true">
     <div class="archive-reader-scrim" id="archiveReaderScrim"></div>
     <div class="archive-reader-card" role="dialog" aria-modal="true" aria-labelledby="archiveReaderTitle">
@@ -1867,6 +1849,9 @@
           <p class="archive-reader-url" id="archiveReaderUrl"></p>
         </div>
         <div class="archive-reader-actions">
+          <button type="button" class="btn-icon" id="archiveReaderNewTab" title="在新标签打开同一份文档" aria-label="在新标签打开">
+            <span class="material-symbols-outlined">tab</span>
+          </button>
           <button type="button" class="btn-icon" id="archiveReaderOpen" title="打开原站" aria-label="打开原站">
             <span class="material-symbols-outlined">open_in_new</span>
           </button>
@@ -3999,59 +3984,30 @@ window.ClipViewMasonry = Masonry;
       return renderNotesFragment(raw);
     }
 
-    function buildArchiveReaderDoc(title, html) {
-      const safe = sanitizeArchiveHtml(html);
-      // water.css: mature classless stylesheet for raw HTML articles (Readability output).
-      return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<meta name="color-scheme" content="light"/>
-<title>${esc(title || '归档')}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/light.min.css"/>
-<style>
-  html,body{background:#fff;}
-  body{
-    max-width:38rem; margin:0 auto; padding:1.75rem 1.35rem 3.5rem;
-    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
-    font-size:17px; line-height:1.55; letter-spacing:-0.016em; color:#1d1d1f;
-    -webkit-font-smoothing:antialiased;
-  }
-  h1,h2,h3{letter-spacing:-0.022em; line-height:1.22; font-weight:650;}
-  img{max-width:100%;height:auto;border-radius:10px;}
-  figure{margin:1em 0;}
-  pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
-  a{pointer-events:none; color:#0071e3; text-decoration:none;}
-</style></head><body>${safe}</body></html>`;
+    let archiveReaderHref = '';
+    let archiveReaderViewHref = '';
+
+    function archiveViewHref(id, embed) {
+      return API + '/api/archive/view?id=' + encodeURIComponent(id) + (embed ? '&embed=1' : '');
     }
 
-    let archiveReaderHref = '';
-    async function openArchiveReader(item) {
+    function openArchiveReader(item) {
       const sheet = document.getElementById('archiveReader');
       const frame = document.getElementById('archiveReaderFrame');
       const titleEl = document.getElementById('archiveReaderTitle');
       const urlEl = document.getElementById('archiveReaderUrl');
-      if (!sheet || !frame) return;
-      let live = item || {};
-      if (!live.htmlContent && live.id) {
-        try {
-          const res = await fetch(API + '/api/clips?id=' + encodeURIComponent(live.id) + '&limit=1');
-          const data = await res.json();
-          if (data.items && data.items[0]) live = data.items[0];
-        } catch (_) {}
-      }
-      if (!live.htmlContent) {
-        toast('没有归档正文');
-        return;
-      }
-      const title = (live.archive && live.archive.title) || '归档';
-      const href = live.textContent || (live.archive && live.archive.sourceUrl) || '';
-      archiveReaderHref = href;
-      titleEl.textContent = title;
-      urlEl.textContent = href;
-      urlEl.title = href;
-      frame.srcdoc = buildArchiveReaderDoc(title, live.htmlContent || '');
+      if (!sheet || !frame || !item || !item.id) return;
+      const src = String(item.textContent || (item.archive && item.archive.sourceUrl) || '').trim();
+      archiveReaderHref = src;
+      archiveReaderViewHref = archiveViewHref(item.id, false);
+      titleEl.textContent = (item.archive && item.archive.title) || '归档';
+      urlEl.textContent = src;
+      urlEl.title = src;
       sheet.classList.add('open');
       sheet.setAttribute('aria-hidden', 'false');
       document.body.style.overflow = 'hidden';
+      // Real document URL — same engine as a standalone tab. Never srcdoc.
+      frame.src = archiveViewHref(item.id, true);
     }
 
     function closeArchiveReader() {
@@ -4060,8 +4016,9 @@ window.ClipViewMasonry = Masonry;
       if (!sheet) return;
       sheet.classList.remove('open');
       sheet.setAttribute('aria-hidden', 'true');
-      if (frame) frame.srcdoc = '';
+      if (frame) frame.src = 'about:blank';
       archiveReaderHref = '';
+      archiveReaderViewHref = '';
       document.body.style.overflow = '';
     }
 
@@ -4070,6 +4027,9 @@ window.ClipViewMasonry = Masonry;
       wireArchiveReaderOnce._done = true;
       document.getElementById('archiveReaderScrim')?.addEventListener('click', closeArchiveReader);
       document.getElementById('archiveReaderClose')?.addEventListener('click', closeArchiveReader);
+      document.getElementById('archiveReaderNewTab')?.addEventListener('click', () => {
+        if (archiveReaderViewHref) window.open(archiveReaderViewHref, '_blank', 'noopener,noreferrer');
+      });
       document.getElementById('archiveReaderOpen')?.addEventListener('click', () => {
         if (archiveReaderHref) requestOpenExternalUrl(archiveReaderHref);
       });

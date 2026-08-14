@@ -275,9 +275,13 @@ test('clear archive is independent of URL clip', () => {
 
 test('archived URL uses View sheet — no inline HTML in cards', () => {
   assert.match(indexHtml, /data-view-archive/, 'View button after archive');
-  assert.match(indexHtml, /id="archiveReader"/, 'Apple reader sheet');
-  assert.match(indexHtml, /water\.css/, 'open-source classless reader (water.css)');
-  assert.match(indexHtml, /archive-reader-frame/, 'isolated iframe');
+  assert.match(indexHtml, /id="archiveReader"/, 'ClipVault reader sheet');
+  assert.match(indexHtml, /\/api\/archive\/view/, 'native HTML document');
+  assert.match(indexHtml, /embed=1/, 'sheet loads embed view');
+  assert.match(indexHtml, /function archiveViewHref/, 'same document for sheet and tab');
+  assert.match(indexHtml, /archiveReaderFrame/, 'isolated iframe');
+  assert.match(indexHtml, /archiveReaderNewTab/, 'escape hatch: real browser tab');
+  assert.doesNotMatch(indexHtml, /frame\.srcdoc|buildArchiveReaderDoc/, 'never srcdoc / JS rebuild');
   assert.doesNotMatch(indexHtml, /archive-preview md-preview/, 'must not dump archive HTML into masonry');
   assert.match(indexHtml, /function openArchiveReader/, 'reader opener');
 });
