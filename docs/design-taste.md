@@ -81,7 +81,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 | Token | 值 | 用途 |
 | --- | --- | --- |
-| 选区菜单 | `rgba(28,28,30,.94)` 深玻璃 + 白字 + 三角 caret | iOS 编辑菜单；是浮层，不跟正文抢可读性 |
+| 选区菜单 | macOS 浅玻璃 `rgba(246,246,248,.92)` blur 40 · 高 28 · 圆角 8 · 黄点=划线 | 备忘录/Safari Reader，不是 iOS 黑胶囊+粗三角 |
 | 评论卡片 | `rgba(250,250,252,.96)` 浅玻璃；宽屏优先栏外 | 写字面保持浅色；绝不压住当前划线 |
 | 高亮 | Apple Notes 黄 `#FFD60A` 叠层 | `mark.cv-hl` / `::selection` |
 | 有评论 | 底部 inset 1.5px `#0071E3` | 划线带想法 |
