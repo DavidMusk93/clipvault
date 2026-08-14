@@ -3863,9 +3863,30 @@ window.ClipViewMasonry = Masonry;
     }
 
 
+    function itemIsArchived(item) {
+      if (!item) return false;
+      if (item.archived) return true;
+      if (item.archive && (item.archive.htmlKey || item.archive.title || item.archive.sourceUrl)) return true;
+      return !!(item.htmlContent && String(item.htmlContent).length > 40);
+    }
+
+    function itemUrlHref(item) {
+      const candidates = [
+        item && item.textContent,
+        item && item.preview,
+        item && item.archive && item.archive.sourceUrl,
+      ];
+      for (const raw of candidates) {
+        const s = String(raw || '').trim();
+        if (!s) continue;
+        try { return new URL(s).href; } catch (_) {}
+      }
+      return '';
+    }
+
     function renderUrlCardBody(item, href) {
-      const raw = String(href || '').trim();
-      const archived = !!(item.archived || (item.htmlContent && String(item.htmlContent).length > 40));
+      const raw = String(href || itemUrlHref(item) || '').trim();
+      const archived = itemIsArchived(item);
       // htmlContent is omitted from feed JSON — archived flag is the source of truth.
       // Card stays compact: URL line + toolbar only. Archive HTML lives in the reader sheet.
       return renderPlainBody(raw, '', { itemId: item.id, archived, archiveItem: item });
@@ -4414,8 +4435,9 @@ window.ClipViewMasonry = Masonry;
             <div class="ocr-body"><span class="ocr-body-inner">${ocrHtml}</span></div>
           </div>`;
         }
-      } else if (item.type === 'url') {
-        const href = normalizePlainText(item.textContent || item.preview || '');
+      } else if (item.type === 'url' || itemUrlHref(item) || itemIsArchived(item)) {
+        // Clipboard often stores a URL as type=text. Same toolbar as type=url.
+        const href = itemUrlHref(item) || normalizePlainText(item.textContent || item.preview || '');
         body = renderUrlCardBody(item, href);
       } else if (item.type === 'rtf' || item.type === 'html' || item.htmlContent) {
         // Rich structure when useful (lists/emphasis); empty Cocoa holes collapsed in renderNotesFragment.
@@ -4440,9 +4462,9 @@ window.ClipViewMasonry = Masonry;
         } else if (notesFragmentUseful(fragment) && !looksLikeCode(plain || plainFromHtml)) {
           body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
         } else if (plain) {
-          body = renderPlainBody(plain, ' is-rtf', { itemId: item.id });
+          body = renderPlainBody(plain, ' is-rtf', { itemId: item.id, archived: itemIsArchived(item) });
         } else {
-          body = renderPlainBody('（富文本无正文，请重新复制）', ' is-rtf', { itemId: item.id });
+          body = renderPlainBody('（富文本无正文，请重新复制）', ' is-rtf', { itemId: item.id, archived: itemIsArchived(item) });
         }
       } else {
         const plain = normalizePlainText(item.textContent || item.preview || '');
@@ -4452,21 +4474,21 @@ window.ClipViewMasonry = Masonry;
             const forHit = fmt.pretty ? fmt.display : plain;
             if (fieldMatchesQuery(forHit, searchQuery) || fieldMatchesQuery(plain, searchQuery)) {
               // Search hit view still honors per-clip mode + URL actions
-              body = renderPlainBody(plain, '', { itemId: item.id, pretty: getClipDisplayMode(item.id, fmt.kind) === 'pretty' });
+              body = renderPlainBody(plain, '', { itemId: item.id, archived: itemIsArchived(item), pretty: getClipDisplayMode(item.id, fmt.kind) === 'pretty' });
               // Overlay marks: if pretty, re-highlight display; else raw
               // Keep simple: full pretty body without marks is ok; marks on raw path:
               if (!fmt.pretty) {
-                body = renderFormatToolbar(plain, fmt, { itemId: item.id, showRawToggle: fmt.kind !== 'plain', rawMode: true })
+                body = renderFormatToolbar(plain, fmt, { itemId: item.id, showRawToggle: fmt.kind !== 'plain', rawMode: true, archived: itemIsArchived(item) })
                   + `<div class="text-scroll${textLineModeClass(plain)}"><pre><code data-hljs="skip">${highlightEscaped(plain, searchQuery)}</code></pre></div>`;
               }
             } else {
-              body = renderPlainBody(plain, '', { itemId: item.id });
+              body = renderPlainBody(plain, '', { itemId: item.id, archived: itemIsArchived(item) });
             }
           } else {
-            body = renderPlainBody(plain, '', { itemId: item.id });
+            body = renderPlainBody(plain, '', { itemId: item.id, archived: itemIsArchived(item) });
           }
         } else {
-          body = renderPlainBody('（无正文）', '', { itemId: item.id });
+          body = renderPlainBody('（无正文）', '', { itemId: item.id, archived: itemIsArchived(item) });
         }
         // Text item with OCR field (rare) — still surface OCR hits
         if (item.ocrText && searchQuery && fieldMatchesQuery(item.ocrText, searchQuery)) {

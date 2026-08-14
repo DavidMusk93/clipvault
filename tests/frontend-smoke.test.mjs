@@ -273,6 +273,13 @@ test('clear archive is independent of URL clip', () => {
   assert.match(indexHtml, /DELETE/, 'uses DELETE /api/archive');
 });
 
+test('type=text URL clips still get archive/view toolbar', () => {
+  assert.match(indexHtml, /function itemIsArchived/, 'archived helper');
+  assert.match(indexHtml, /function itemUrlHref/, 'url-from-text helper');
+  assert.match(indexHtml, /item\.type === 'url' \|\| itemUrlHref\(item\) \|\| itemIsArchived\(item\)/, 'text URL uses url card body');
+  assert.match(indexHtml, /archived: itemIsArchived\(item\)/, 'text path forwards archived');
+});
+
 test('archived URL uses View sheet — no inline HTML in cards', () => {
   assert.match(indexHtml, /data-view-archive/, 'View button after archive');
   assert.match(indexHtml, /id="archiveReader"/, 'ClipVault reader sheet');
