@@ -168,6 +168,8 @@ class WebServer {
             handleClipEvaluate(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/archive" {
             handleArchivePost(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/archive/reader" {
+            handleReaderPost(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/archive") {
             handleArchiveClear(path: path, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
@@ -215,6 +217,8 @@ class WebServer {
             sendItemEvaluations(path: path, connection: connection)
         } else if pathOnly == "/api/archive/view" {
             sendArchiveView(path: path, connection: connection)
+        } else if pathOnly == "/api/archive/reader" {
+            sendReaderBundle(path: path, connection: connection)
         } else if pathOnly == "/api/archive" || pathOnly.hasPrefix("/api/archive/") {
             sendArchiveStatus(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/assets/") {
@@ -990,7 +994,7 @@ class WebServer {
                 connection: connection,
                 extraHeaders: [
                     ("Cache-Control", "private, no-store"),
-                    ("Content-Security-Policy", "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'"),
+                    ("Content-Security-Policy", "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'"),
                     ("X-Content-Type-Options", "nosniff"),
                 ]
             )
@@ -1045,7 +1049,7 @@ class WebServer {
             img,video{max-width:100%;height:auto;}
             a{pointer-events:none;color:inherit;text-decoration:none;}
           </style>
-          <script src="/assets/archive-reader.js?v=20260814" defer></script>
+          <script src="/assets/archive-reader.js?v=20260814c" defer></script>
         </head>
         <body>
         \(bar)
@@ -1062,6 +1066,47 @@ class WebServer {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    /// GET /api/archive/reader?id= — projected learning state + ops.
+    private func sendReaderBundle(path: String, connection: NWConnection) {
+        guard let comps = URLComponents(string: "http://localhost\(path)"),
+              let idStr = comps.queryItems?.first(where: { $0.name == "id" })?.value,
+              let uuid = UUID(uuidString: idStr) else {
+            sendJSON(["ok": false, "message": "expected ?id="], connection: connection)
+            return
+        }
+        let bundle = database.fetchReaderBundle(id: uuid)
+        sendJSON([
+            "ok": true,
+            "id": uuid.uuidString,
+            "state": bundle.state,
+            "ops": bundle.ops,
+        ], connection: connection)
+    }
+
+    /// POST /api/archive/reader  { id, kind, payload? }
+    private func handleReaderPost(data: Data, connection: NWConnection) {
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        guard let brace = raw.range(of: "{"),
+              let jsonData = raw[brace.lowerBound...].data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let idStr = obj["id"] as? String,
+              let uuid = UUID(uuidString: idStr),
+              let kind = obj["kind"] as? String else {
+            sendJSON(["ok": false, "message": "expected {id, kind, payload?}"], connection: connection)
+            return
+        }
+        let payload = obj["payload"] as? [String: Any] ?? [:]
+        let source = (obj["source"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "web"
+        database.appendReaderOp(itemId: uuid, kind: kind, payload: payload, source: source) { [weak self] state in
+            guard let self else { return }
+            if let state {
+                self.sendJSON(["ok": true, "state": state], connection: connection)
+            } else {
+                self.sendJSON(["ok": false, "message": "无法写入阅读记录"], connection: connection)
+            }
+        }
     }
 
     /// GET /api/archive?job=  or /api/archive/{jobId}

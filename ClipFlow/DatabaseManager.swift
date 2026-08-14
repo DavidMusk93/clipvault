@@ -361,6 +361,21 @@ final class DatabaseManager: ObservableObject {
         if !columnExists("clipboard_items", "archive_html_sha") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN archive_html_sha TEXT;")
         }
+        // Personal learning layer: projected snapshot + append-only ops.
+        if !columnExists("clipboard_items", "reader_state") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN reader_state TEXT;")
+        }
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS reader_ops (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            ts REAL NOT NULL,
+            kind TEXT NOT NULL,
+            payload TEXT,
+            source TEXT NOT NULL DEFAULT 'web'
+        );
+        """)
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_reader_ops_item_ts ON reader_ops(item_id, ts ASC);")
         // Append-only user evaluations (each submit = one history row).
         execQuiet("""
         CREATE TABLE IF NOT EXISTS user_evaluations (
@@ -2108,6 +2123,175 @@ final class DatabaseManager: ObservableObject {
             }
         }
         return html
+    }
+
+    // MARK: - Reader learning layer (personal, durable)
+
+    private static let readerKinds: Set<String> = [
+        "scroll_checkpoint", "highlight_add", "highlight_update", "highlight_delete", "comment",
+    ]
+
+    func fetchReaderBundle(id: UUID) -> (state: [String: Any], ops: [[String: Any]]) {
+        var state: [String: Any] = [:]
+        var ops: [[String: Any]] = []
+        dbQueue.sync {
+            guard let db = self.db else { return }
+            let idStr = id.uuidString
+            var sStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, "SELECT reader_state FROM clipboard_items WHERE id = ?;", -1, &sStmt, nil) == SQLITE_OK {
+                self.bindText(sStmt, 1, idStr)
+                if sqlite3_step(sStmt) == SQLITE_ROW,
+                   let raw = sqlite3_column_text(sStmt, 0).map({ String(cString: $0) }),
+                   let data = raw.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    state = obj
+                }
+            }
+            sqlite3_finalize(sStmt)
+            var oStmt: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "SELECT id, ts, kind, payload, source FROM reader_ops WHERE item_id = ? ORDER BY ts ASC;",
+                -1, &oStmt, nil
+            ) == SQLITE_OK {
+                self.bindText(oStmt, 1, idStr)
+                while sqlite3_step(oStmt) == SQLITE_ROW {
+                    var row: [String: Any] = [:]
+                    row["id"] = sqlite3_column_text(oStmt, 0).map { String(cString: $0) } ?? ""
+                    row["ts"] = sqlite3_column_double(oStmt, 1)
+                    row["kind"] = sqlite3_column_text(oStmt, 2).map { String(cString: $0) } ?? ""
+                    if let payload = sqlite3_column_text(oStmt, 3).map({ String(cString: $0) }) {
+                        row["payload"] = payload
+                    }
+                    row["source"] = sqlite3_column_text(oStmt, 4).map { String(cString: $0) } ?? "web"
+                    ops.append(row)
+                }
+            }
+            sqlite3_finalize(oStmt)
+        }
+        return (state, ops)
+    }
+
+    /// Append one reader op and refresh the projected snapshot. Scroll is cheap; highlights persist.
+    func appendReaderOp(
+        itemId: UUID,
+        kind: String,
+        payload: [String: Any],
+        source: String,
+        completion: @escaping ([String: Any]?) -> Void
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self = self else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let result = self.appendReaderOpLocked(itemId: itemId, kind: kind, payload: payload, source: source)
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    @discardableResult
+    private func appendReaderOpLocked(
+        itemId: UUID,
+        kind: String,
+        payload: [String: Any],
+        source: String
+    ) -> [String: Any]? {
+        guard let db = db else { return nil }
+        guard Self.readerKinds.contains(kind) else { return nil }
+        let idStr = itemId.uuidString
+        // Must belong to an existing clip (usually an archive).
+        var exists = false
+        var chk: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT 1 FROM clipboard_items WHERE id = ? LIMIT 1;", -1, &chk, nil) == SQLITE_OK {
+            bindText(chk, 1, idStr)
+            exists = sqlite3_step(chk) == SQLITE_ROW
+        }
+        sqlite3_finalize(chk)
+        guard exists else { return nil }
+
+        var payloadObj = payload
+        let opId = (payloadObj["id"] as? String).flatMap { UUID(uuidString: $0) != nil ? $0 : nil } ?? UUID().uuidString
+        if kind == "highlight_add" { payloadObj["id"] = opId }
+        let ts = Date().timeIntervalSince1970
+        let payloadData = (try? JSONSerialization.data(withJSONObject: payloadObj, options: [])) ?? Data("{}".utf8)
+        let payloadStr = String(data: payloadData, encoding: .utf8) ?? "{}"
+
+        let sql = "INSERT INTO reader_ops (id, item_id, ts, kind, payload, source) VALUES (?, ?, ?, ?, ?, ?);"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        bindText(stmt, 1, kind == "highlight_add" ? opId : UUID().uuidString)
+        bindText(stmt, 2, idStr)
+        sqlite3_bind_double(stmt, 3, ts)
+        bindText(stmt, 4, kind)
+        bindText(stmt, 5, payloadStr)
+        bindText(stmt, 6, source.isEmpty ? "web" : source)
+        let rc = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+        guard rc == SQLITE_DONE else { return nil }
+
+        var state: [String: Any] = [:]
+        var sStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT reader_state FROM clipboard_items WHERE id = ?;", -1, &sStmt, nil) == SQLITE_OK {
+            bindText(sStmt, 1, idStr)
+            if sqlite3_step(sStmt) == SQLITE_ROW,
+               let raw = sqlite3_column_text(sStmt, 0).map({ String(cString: $0) }),
+               let data = raw.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                state = obj
+            }
+        }
+        sqlite3_finalize(sStmt)
+        applyReaderOp(&state, kind: kind, payload: payloadObj, ts: ts)
+        let stateData = (try? JSONSerialization.data(withJSONObject: state, options: [])) ?? Data("{}".utf8)
+        let stateStr = String(data: stateData, encoding: .utf8) ?? "{}"
+        var uStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "UPDATE clipboard_items SET reader_state = ? WHERE id = ?;", -1, &uStmt, nil) == SQLITE_OK {
+            bindText(uStmt, 1, stateStr)
+            bindText(uStmt, 2, idStr)
+            _ = sqlite3_step(uStmt)
+        }
+        sqlite3_finalize(uStmt)
+        if kind != "scroll_checkpoint" {
+            _ = appendOperationLogSync(
+                action: "reader.\(kind)",
+                itemId: idStr,
+                contentHash: nil,
+                detail: String(payloadStr.prefix(240)),
+                source: source
+            )
+        }
+        return state
+    }
+
+    private func applyReaderOp(_ state: inout [String: Any], kind: String, payload: [String: Any], ts: Double) {
+        var highlights = state["highlights"] as? [[String: Any]] ?? []
+        switch kind {
+        case "scroll_checkpoint":
+            state["pos"] = payload
+        case "highlight_add":
+            highlights.append(payload)
+            state["highlights"] = highlights
+        case "highlight_update", "comment":
+            if let hid = payload["id"] as? String {
+                highlights = highlights.map { row in
+                    guard row["id"] as? String == hid else { return row }
+                    var next = row
+                    for (k, v) in payload where k != "id" { next[k] = v }
+                    return next
+                }
+                state["highlights"] = highlights
+            }
+        case "highlight_delete":
+            if let hid = payload["id"] as? String {
+                highlights.removeAll { $0["id"] as? String == hid }
+                state["highlights"] = highlights
+            }
+        default:
+            break
+        }
+        state["highlightCount"] = (state["highlights"] as? [[String: Any]])?.count ?? 0
+        state["updatedAt"] = ts
     }
 
     // MARK: - Soft delete / recycle bin (TTL 30d)
