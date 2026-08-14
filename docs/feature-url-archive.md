@@ -70,6 +70,7 @@ GET /api/archive/jobs/{jobId}
 
 GET /api/archive/view?id=<uuid>&embed=1
 → 完整 HTML 文档（浏览器引擎排版原文）。embed=1 去掉页内顶栏，给弹层用。
+→ 同域注入 `/assets/archive-reader.js`：悬浮目录 + IndexedDB 阅读位置（不写 SQLite）。
 
 # 列表 JSON 只带 archived + archive meta，不下发正文。
 ```

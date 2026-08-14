@@ -503,6 +503,9 @@ class WebServer {
         case "webp": ctype = "image/webp"
         case "svg": ctype = "image/svg+xml"
         case "ico": ctype = "image/x-icon"
+        case "js": ctype = "text/javascript; charset=utf-8"
+        case "css": ctype = "text/css; charset=utf-8"
+        case "mjs": ctype = "text/javascript; charset=utf-8"
         default: ctype = "application/octet-stream"
         }
         sendBinary(
@@ -972,7 +975,13 @@ class WebServer {
                 if let t = meta["title"] as? String, !t.isEmpty { title = t }
                 if let u = meta["sourceUrl"] as? String, !u.isEmpty { source = u }
             }
-            let doc = self.buildArchiveViewDocument(title: title, source: source, bodyHTML: html, embed: embed)
+            let doc = self.buildArchiveViewDocument(
+                title: title,
+                source: source,
+                bodyHTML: html,
+                archiveId: uuid.uuidString,
+                embed: embed
+            )
             self.sendBinary(
                 status: 200,
                 reason: "OK",
@@ -981,16 +990,23 @@ class WebServer {
                 connection: connection,
                 extraHeaders: [
                     ("Cache-Control", "private, no-store"),
-                    ("Content-Security-Policy", "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'none'"),
+                    ("Content-Security-Policy", "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'"),
                     ("X-Content-Type-Options", "nosniff"),
                 ]
             )
         }
     }
 
-    private func buildArchiveViewDocument(title: String, source: String, bodyHTML: String, embed: Bool) -> String {
+    private func buildArchiveViewDocument(
+        title: String,
+        source: String,
+        bodyHTML: String,
+        archiveId: String,
+        embed: Bool
+    ) -> String {
         let safeTitle = htmlEscapeText(title)
         let safeSource = htmlEscapeText(source)
+        let safeId = htmlEscapeText(archiveId)
         let bar = embed ? "" : """
           <header class="cv-bar">
             <h1>\(safeTitle)</h1>
@@ -999,7 +1015,7 @@ class WebServer {
         """
         return """
         <!DOCTYPE html>
-        <html lang="zh-CN">
+        <html lang="zh-CN" data-archive-id="\(safeId)">
         <head>
           <meta charset="utf-8"/>
           <meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -1029,6 +1045,7 @@ class WebServer {
             img,video{max-width:100%;height:auto;}
             a{pointer-events:none;color:inherit;text-decoration:none;}
           </style>
+          <script src="/assets/archive-reader.js?v=20260814" defer></script>
         </head>
         <body>
         \(bar)
