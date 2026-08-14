@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN" data-cv-preview>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClipVault reader chrome preview</title>
+  <style>
+    html, body { margin: 0; background: #f5f5f7; color: #1d1d1f; }
+    main.cv-article {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 88px 28px 360px;
+      font: 18px/1.75 ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      background: #fff;
+      min-height: 100vh;
+      box-shadow: 0 0 0 .5px rgba(0,0,0,.06);
+    }
+    h1 { font-size: 28px; letter-spacing: -.02em; line-height: 1.2; margin: 0 0 8px; }
+    .meta { color: #6e6e73; font: 13px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; margin: 0 0 28px; }
+    p { margin: 0 0 1.1em; }
+    .row { display: grid; gap: 48px; }
+  </style>
+</head>
+<body>
+  <main class="cv-article">
+    <h1>Attention Is All You Need</h1>
+    <p class="meta">Vaswani et al. · 归档阅读预览 · 选区菜单不得盖住文字</p>
+    <p>
+      The dominant sequence transduction models are based on complex recurrent or
+      convolutional neural networks that include an encoder and a decoder.
+      The best performing models also connect the encoder and decoder through an attention
+      mechanism. We propose a new simple network architecture, the Transformer,
+      based solely on <mark id="cv-preview-sel">attention mechanisms, dispensing with recurrence and convolutions entirely</mark>.
+      Experiments on two machine translation tasks show these models to be superior
+      in quality while being more parallelizable and requiring significantly less time to train.
+    </p>
+    <p>
+      The goal of reducing sequential computation also forms the foundation of the
+      Extended Neural GPU, ByteNet and ConvS2S, all of which use convolutional neural
+      networks as basic building block, computing hidden representations in parallel
+      for all input and output positions.
+    </p>
+    <p>
+      In these models, the number of operations required to relate signals from two
+      arbitrary input or output positions grows in the distance between positions,
+      linearly for ConvS2S and logarithmically for ByteNet. This makes it more difficult
+      to learn <mark id="cv-preview-note" class="cv-hl has-note">dependencies between distant positions</mark> in the sequence.
+    </p>
+  </main>
+  <script src="../../web/assets/archive-reader.js"></script>
+</body>
+</html>

@@ -21,6 +21,19 @@ test('reader chrome talks to SQLite via same-origin API', () => {
   assert.match(js, /collectHeadings/, 'TOC still derived');
 });
 
+test('selection chrome is a glass bar that never covers the rect', () => {
+  assert.match(js, /function placeNearRect/, 'placement helper');
+  assert.match(js, /Never cover the rect/, 'never-cover contract');
+  assert.match(js, /opts.prefer \|\| "above"/, 'selection prefers above');
+  assert.match(js, /class="cv-caret"/, 'caret points at selection');
+  assert.match(js, /backdrop-filter:blur\(28px\)/, 'glass material');
+  assert.match(js, /划线/, 'highlight action');
+  assert.match(js, /评论/, 'comment action');
+  assert.match(js, /is-sheet/, 'narrow viewport uses a sheet');
+  assert.match(js, /allowSide/, 'wide viewport parks the note in the margin');
+  assert.match(swiftWeb, /archive-reader\.js\?v=20260814d/, 'cache bust');
+});
+
 test('server persists reader_state + reader_ops, not archive HTML', () => {
   assert.match(swiftDb, /CREATE TABLE IF NOT EXISTS reader_ops/, 'ops table');
   assert.match(swiftDb, /reader_state/, 'projection column');
