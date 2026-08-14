@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.trae-cn/hooks_env/clipvault_hook.sh --event SessionStart",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.trae-cn/hooks_env/clipvault_hook.sh --event UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.trae-cn/hooks_env/clipvault_hook.sh --event PreToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.trae-cn/hooks_env/clipvault_hook.sh --event PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "loop_limit": 5,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.trae-cn/hooks_env/clipvault_hook.sh --event Stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/.trae-cn/hooks_env/clipvault_hook.sh --event Notification",
+            "timeout": 8
+          }
+        ]
+      }
+    ]
+  }
+}

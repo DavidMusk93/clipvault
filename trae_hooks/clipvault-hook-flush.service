@@ -1,0 +1,14 @@
+[Unit]
+Description=ClipVault Trae hook spool flush (Quack to Mac via 127.0.0.1:19494)
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/root/.trae-cn/hooks_env/trae-hooks.env
+ExecStart=/root/.trae-cn/hooks_env/venv/bin/python /root/.trae-cn/hooks_env/spool_flush.py --loop --interval 15
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

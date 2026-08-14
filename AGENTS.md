@@ -381,4 +381,24 @@ AGENTS.md §8             本门禁
 
 相关 nmem：`clipvault_gate_url_html_safety_20260813`
 
+---
+
+## 9. Trae hook 过程库（独立 DuckDB，不动 clipflow.db）
+
+Hook 事件进 **单独 DuckDB**，禁止写入 `clipboard_items`。
+
+| 项 | 值 |
+| --- | --- |
+| 代码 | `trae_hooks/` |
+| 库 | `$CLIPVAULT_HOME/trae/hook_events.duckdb` |
+| Quack | `127.0.0.1:9494`（单写者） |
+| HTTP / UI | `http://127.0.0.1:9488/` |
+| LaunchAgent | `com.davidmusk.clipvault-trae` |
+| Trae 配置 | `~/.trae-cn/hooks.json`（官方 `{version,hooks}`） |
+| wrapper | `~/.trae-cn/hooks_env/clipvault_hook.sh`（**禁止空格路径**，Trae 不引号） |
+| d2 | `ssh d2` 同套 hook；Quack 经 **Tunnel Manager** `clipvault-quack-d2`（`127.0.0.1:19494`，勿占 d2 `:9494` metrics） |
+| spool | `/var/tmp/clipvault-hooks/spool`（Quack 不通只落盘，flush 重试） |
+
+安装：`bash trae_hooks/install.sh`。改配置后 **硬重启 Trae** 才加载 hook。采集脚本必须永远 exit 0。
+
 

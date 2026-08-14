@@ -26,6 +26,7 @@ build/DerivedData/
 ## Python virtual environments & caches
 tools/paddleocr_venv/
 **/__pycache__/
+trae_hooks/**/__pycache__/
 *.pyc
 
 ## Editors / IDEs
