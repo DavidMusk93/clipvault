@@ -168,19 +168,20 @@
       ".cv-note.open{opacity:1;pointer-events:auto;transform:translate3d(0,0,0) scale(1);}",
       ".cv-note .cv-grabber{width:28px;height:4px;border-radius:999px;background:rgba(60,60,67,.22);",
       "margin:0 auto 2px;display:none;flex-shrink:0;}",
-      ".cv-note .cv-note-head{display:flex;align-items:center;gap:6px;min-width:0;}",
-      ".cv-note .cv-note-head strong{font-size:13px;font-weight:600;letter-spacing:-.02em;flex-shrink:0;}",
-      ".cv-note .cv-quote{font-size:11px;line-height:1.3;color:#6e6e73;letter-spacing:-.01em;margin:0;",
+      ".cv-note .cv-note-head{display:flex;align-items:center;justify-content:space-between;gap:10px;height:28px;min-width:0;}",
+      ".cv-note-lead{display:flex;align-items:center;gap:6px;min-width:0;height:28px;flex:1;}",
+      ".cv-note .cv-note-head strong{font-size:13px;font-weight:600;letter-spacing:-.02em;line-height:28px;flex-shrink:0;}",
+      ".cv-note .cv-quote{font-size:12px;line-height:28px;color:#6e6e73;letter-spacing:-.01em;margin:0;",
       "padding-left:6px;border-left:2px solid #ffd60a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0;}",
-      ".cv-note-tools{display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:auto;}",
-      ".cv-note .cv-mini{appearance:none;border:0;height:24px;padding:0 9px;border-radius:6px;cursor:pointer;",
-      "font:inherit;font-size:12px;font-weight:590;letter-spacing:-.016em;}",
+      ".cv-note-tools{display:flex;align-items:center;gap:6px;flex-shrink:0;height:28px;}",
+      ".cv-note .cv-mini{appearance:none;border:0;height:28px;padding:0 11px;border-radius:7px;cursor:pointer;",
+      "font:inherit;font-size:13px;font-weight:590;letter-spacing:-.016em;line-height:28px;}",
       ".cv-note .cv-mini:active{transform:scale(.97);}",
       ".cv-note .cv-ghost{background:rgba(120,120,128,.12);color:#1d1d1f;}",
       ".cv-note .cv-ok{background:#0071e3;color:#fff;}",
       ".cv-note .cv-ok:disabled{opacity:.4;cursor:not-allowed;}",
-      ".cv-note textarea{width:100%;min-height:52px;box-sizing:border-box;border:0;",
-      "border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;letter-spacing:-.01em;line-height:1.35;",
+      ".cv-note textarea{width:100%;min-height:96px;box-sizing:border-box;border:0;",
+      "border-radius:10px;padding:10px 12px;font:inherit;font-size:15px;letter-spacing:-.011em;line-height:1.4;",
       "resize:vertical;outline:none;background:rgba(120,120,128,.08);color:#1d1d1f;}",
       ".cv-note textarea:focus{background:rgba(120,120,128,.12);box-shadow:inset 0 0 0 .5px rgba(0,113,227,.45);}",
       ".cv-note-body{display:flex;flex-direction:column;gap:8px;}",
@@ -551,12 +552,14 @@
     var note = el("div", "cv-note");
     var grabber = el("div", "cv-grabber");
     var head = el("div", "cv-note-head");
-    head.appendChild(el("strong", "", "评论"));
+    var lead = el("div", "cv-note-lead");
+    lead.appendChild(el("strong", "", "评论"));
     var quote = el("p", "cv-quote");
-    head.appendChild(quote);
+    lead.appendChild(quote);
+    head.appendChild(lead);
     var ta = document.createElement("textarea");
     ta.placeholder = "写下一句想法（可选）…";
-    ta.rows = 2;
+    ta.rows = 4;
     ta.maxLength = 4000;
     var tools = el("div", "cv-note-tools");
     var cancelBtn = el("button", "cv-mini cv-ghost", "取消");
@@ -951,11 +954,11 @@
     var note = el("div", "cv-note open");
     note.innerHTML =
       '<div class="cv-grabber"></div>' +
-      '<div class="cv-note-head"><strong>评论</strong><p class="cv-quote">语义边界</p>' +
+      '<div class="cv-note-head"><div class="cv-note-lead"><strong>评论</strong><p class="cv-quote">语义边界</p></div>' +
       '<div class="cv-note-tools"><button class="cv-mini cv-ghost" type="button">取消</button>' +
       '<button class="cv-mini cv-ok" type="button">提交</button></div></div>' +
       '<div class="cv-note-body">' +
-      '<textarea rows="2" maxlength="4000" placeholder="写下一句想法（可选）…"></textarea>' +
+      '<textarea rows="4" maxlength="4000" placeholder="写下一句想法（可选）…"></textarea>' +
       '<div class="cv-hist-title">记录</div>' +
       '<ul class="cv-hist">' +
       '<li class="cv-hist-item"><i class="cv-hist-rail"></i><div class="cv-hist-main">' +
