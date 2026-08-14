@@ -168,14 +168,16 @@
       ".cv-note.open{opacity:1;pointer-events:auto;transform:translate3d(0,0,0) scale(1);}",
       ".cv-note .cv-grabber{width:28px;height:4px;border-radius:999px;background:rgba(60,60,67,.22);",
       "margin:0 auto 2px;display:none;flex-shrink:0;}",
-      ".cv-note .cv-note-head{display:flex;align-items:center;justify-content:space-between;gap:10px;height:28px;min-width:0;}",
-      ".cv-note-lead{display:flex;align-items:center;gap:6px;min-width:0;height:28px;flex:1;}",
-      ".cv-note .cv-note-head strong{font-size:13px;font-weight:600;letter-spacing:-.02em;line-height:28px;flex-shrink:0;}",
-      ".cv-note .cv-quote{font-size:12px;line-height:28px;color:#6e6e73;letter-spacing:-.01em;margin:0;",
-      "padding-left:6px;border-left:2px solid #ffd60a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0;}",
-      ".cv-note-tools{display:flex;align-items:center;gap:6px;flex-shrink:0;height:28px;}",
+      ".cv-note .cv-note-head{display:flex;align-items:center;justify-content:space-between;gap:10px;height:32px;min-width:0;}",
+      ".cv-note-lead{display:flex;align-items:center;gap:7px;min-width:0;height:32px;flex:1;}",
+      ".cv-note .cv-note-head strong{font-size:13px;font-weight:600;letter-spacing:-.02em;line-height:1;flex-shrink:0;}",
+      ".cv-note .cv-quote-bar{width:2px;height:12px;border-radius:1px;background:#ffd60a;flex-shrink:0;}",
+      ".cv-note .cv-quote{font-size:13px;line-height:1;color:#6e6e73;letter-spacing:-.01em;margin:0;",
+      "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 0;}",
+      ".cv-note-tools{display:flex;align-items:center;gap:6px;flex-shrink:0;height:32px;}",
       ".cv-note .cv-mini{appearance:none;border:0;height:28px;padding:0 11px;border-radius:7px;cursor:pointer;",
-      "font:inherit;font-size:13px;font-weight:590;letter-spacing:-.016em;line-height:28px;}",
+      "display:inline-flex;align-items:center;justify-content:center;",
+      "font:inherit;font-size:13px;font-weight:590;letter-spacing:-.016em;line-height:1;}",
       ".cv-note .cv-mini:active{transform:scale(.97);}",
       ".cv-note .cv-ghost{background:rgba(120,120,128,.12);color:#1d1d1f;}",
       ".cv-note .cv-ok{background:#0071e3;color:#fff;}",
@@ -554,6 +556,7 @@
     var head = el("div", "cv-note-head");
     var lead = el("div", "cv-note-lead");
     lead.appendChild(el("strong", "", "评论"));
+    lead.appendChild(el("i", "cv-quote-bar"));
     var quote = el("p", "cv-quote");
     lead.appendChild(quote);
     head.appendChild(lead);
@@ -954,7 +957,7 @@
     var note = el("div", "cv-note open");
     note.innerHTML =
       '<div class="cv-grabber"></div>' +
-      '<div class="cv-note-head"><div class="cv-note-lead"><strong>评论</strong><p class="cv-quote">语义边界</p></div>' +
+      '<div class="cv-note-head"><div class="cv-note-lead"><strong>评论</strong><i class="cv-quote-bar"></i><p class="cv-quote">语义边界</p></div>' +
       '<div class="cv-note-tools"><button class="cv-mini cv-ghost" type="button">取消</button>' +
       '<button class="cv-mini cv-ok" type="button">提交</button></div></div>' +
       '<div class="cv-note-body">' +
