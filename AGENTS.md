@@ -48,6 +48,9 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 
 **目标**：随着批评与取舍累积，ClipVault 形成 **Owner 个性化的设计语言**，而不是通用 Material/工具腔皮肤。
 
+**产品哲学（演进新能力前必读）**：nmem `clipvault_design_philosophy_layered_memory_20260814`  
+一句话：正确性交给浏览器引擎，陪伴感留在产品里，运行时体验不污染 capture。五层：Capture / Judgment / Archive / View / Runtime。
+
 ### 2.1 品牌与叙事
 
 | Do | Don't |
