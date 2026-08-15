@@ -2308,10 +2308,19 @@ final class DatabaseManager: ObservableObject {
         guard exists else { return nil }
 
         var payloadObj = payload
-        let opId = forcedOpId
-            ?? (payloadObj["id"] as? String).flatMap { UUID(uuidString: $0) != nil ? $0 : nil }
-            ?? UUID().uuidString
-        if kind == "highlight_add" { payloadObj["id"] = opId }
+        // highlight_add may reuse the highlight UUID as the row id (idempotent add).
+        // delete / comment / update MUST get a fresh row id — payload.id is the highlight, not the op.
+        let highlightId = (payloadObj["id"] as? String).flatMap { UUID(uuidString: $0)?.uuidString }
+        let opId: String
+        if let forced = forcedOpId, !forced.isEmpty {
+            opId = forced
+        } else if kind == "highlight_add" {
+            opId = highlightId ?? UUID().uuidString
+            payloadObj["id"] = opId
+        } else {
+            opId = UUID().uuidString
+        }
+        if let highlightId { payloadObj["id"] = highlightId }
         let ts = forcedTs ?? Date().timeIntervalSince1970
         let payloadData = (try? JSONSerialization.data(withJSONObject: payloadObj, options: [])) ?? Data("{}".utf8)
         let payloadStr = String(data: payloadData, encoding: .utf8) ?? "{}"
@@ -2467,7 +2476,7 @@ final class DatabaseManager: ObservableObject {
         case "highlight_update", "comment":
             if let hid = payload["id"] as? String {
                 highlights = highlights.map { row in
-                    guard row["id"] as? String == hid else { return row }
+                    guard (row["id"] as? String)?.caseInsensitiveCompare(hid) == .orderedSame else { return row }
                     var next = row
                     for (k, v) in payload where k != "id" { next[k] = v }
                     return next
@@ -2476,7 +2485,9 @@ final class DatabaseManager: ObservableObject {
             }
         case "highlight_delete":
             if let hid = payload["id"] as? String {
-                highlights.removeAll { $0["id"] as? String == hid }
+                highlights.removeAll {
+                    ($0["id"] as? String)?.caseInsensitiveCompare(hid) == .orderedSame
+                }
                 state["highlights"] = highlights
             }
         default:

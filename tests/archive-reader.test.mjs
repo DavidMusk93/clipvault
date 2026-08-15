@@ -36,13 +36,23 @@ test('selection chrome is a glass bar that never covers the rect', () => {
   assert.match(js, /评论/, 'comment action');
   assert.match(js, /is-sheet/, 'narrow viewport uses a sheet');
   assert.match(js, /allowSide/, 'wide viewport parks the note in the margin');
-  assert.match(swiftWeb, /archive-reader\.js\?v=20260814u/, 'cache bust');
+  assert.match(swiftWeb, /archive-reader\.js\?v=20260815a/, 'cache bust');
   assert.match(js, /dblclick/, 'double-click mark opens comment');
   assert.match(js, /cv-note-kicker/, 'header title is a span, not a nested lead');
   assert.match(js, /line-height:28px/, 'header text and buttons share one strut');
   assert.match(js, /cv-note-tools/, 'header actions on the right');
   assert.match(js, /cv-hist-rail/, 'reddit-style thread rail');
   assert.match(js, /写下一句想法/, 'same copy as card evaluation');
+});
+
+test('highlight_delete must not reuse the highlight UUID as reader_ops PK', () => {
+  assert.match(
+    swiftDb,
+    /delete \/ comment \/ update MUST get a fresh row id/,
+    'delete/comment cannot collide with highlight_add row'
+  );
+  assert.match(js, /highlight_delete/, 'client posts delete');
+  assert.match(js, /function sameHlId/, 'id compare is case-insensitive');
 });
 
 test('delete highlight lives on the selection bar, not the comment sheet', () => {

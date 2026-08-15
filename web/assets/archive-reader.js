@@ -855,6 +855,9 @@
       pendingSel = null;
       activeHl = null;
     }
+    function sameHlId(a, b) {
+      return String(a || "").toLowerCase() === String(b || "").toLowerCase();
+    }
     function highlightFromNode(node) {
       var eln = node && node.nodeType === 1 ? node : node && node.parentElement;
       var mark = eln && eln.closest && eln.closest("mark.cv-hl");
@@ -862,7 +865,7 @@
       var hid = mark.dataset.hlId;
       return (
         highlights.filter(function (x) {
-          return x.id === hid;
+          return sameHlId(x.id, hid);
         })[0] || null
       );
     }
@@ -1026,7 +1029,7 @@
       var hid = m.dataset.hlId;
       return (
         highlights.filter(function (x) {
-          return x.id === hid;
+          return sameHlId(x.id, hid);
         })[0] || null
       );
     }
