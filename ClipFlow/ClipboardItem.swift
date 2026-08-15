@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CryptoKit
 
 enum ClipboardType: String, Codable {
     case text
@@ -99,6 +100,33 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.userContextUpdatedAt = userContextUpdatedAt
         self.pinnedAt = pinnedAt
         self.archiveHtmlSha = archiveHtmlSha
+    }
+
+    /// Visible-text identity for latest-alive. RTF/HTML wrappers must not mint a new row.
+    static var textLikeTypes: Set<ClipboardType> { [.text, .html, .rtf] }
+
+    static func normalizedPlain(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func strippedHTML(_ html: String) -> String {
+        html.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+    }
+
+    /// SHA-256 of normalized visible text (plain, else stripped HTML).
+    static func semanticTextHash(plain: String?, html: String?) -> String? {
+        var s = plain.map { normalizedPlain($0) } ?? ""
+        if s.isEmpty, let html, !html.isEmpty {
+            s = normalizedPlain(strippedHTML(html))
+        }
+        guard !s.isEmpty else { return nil }
+        return SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Normalize to half-star steps in 0.5…5.0; nil if invalid.

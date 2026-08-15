@@ -2560,6 +2560,8 @@ window.ClipViewMasonry = Masonry;
     });
 
     function clientFilter(items) {
+      // Search is type-agnostic — a type chip must not hide FTS hits.
+      if (searchQuery) return items;
       if (currentFilter === 'all') return items;
       // 「富文本/HTML」chip also includes RTF (Notes etc.)
       if (currentFilter === 'html') {

@@ -241,6 +241,7 @@ final class DatabaseManager: ObservableObject {
                 guard let self = self else { return }
                 self.migrateInlineBlobsToFiles(maxBatches: 200)
                 self.peelArchiveHtmlOutOfRow()
+                self.backfillTextHashes(limit: 2000)
                 self.drainDuplicates(maxBatches: 40)
                 // Undo any substr_fold soft-deletes (feature removed — too aggressive).
                 let restored = self.restoreSubstrFoldVictims(limit: 5000)
@@ -436,6 +437,10 @@ final class DatabaseManager: ObservableObject {
             // One-time: avoid length() on list scans. 752 rows is cheap.
             execQuiet("UPDATE clipboard_items SET html_bytes = length(html_content) WHERE html_content IS NOT NULL AND html_bytes IS NULL;")
         }
+        if !columnExists("clipboard_items", "text_hash") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN text_hash TEXT;")
+        }
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_text_hash ON clipboard_items(text_hash);")
         execQuiet("CREATE INDEX IF NOT EXISTS idx_list_alive ON clipboard_items(timestamp DESC, id DESC) WHERE deleted_at IS NULL AND pinned_at IS NULL;")
         // Personal learning layer: projected snapshot + append-only ops.
         if !columnExists("clipboard_items", "pinned_at") {
@@ -829,7 +834,13 @@ final class DatabaseManager: ObservableObject {
             FROM clipboard_items c
             WHERE EXISTS (
                 SELECT 1 FROM clipboard_items k
-                WHERE k.content_hash = c.content_hash
+                WHERE (
+                    k.content_hash = c.content_hash
+                    OR (
+                        c.text_hash IS NOT NULL AND k.text_hash IS NOT NULL
+                        AND k.text_hash = c.text_hash
+                    )
+                )
                   AND (
                     k.timestamp > c.timestamp
                     OR (k.timestamp = c.timestamp AND k.id > c.id)
@@ -929,6 +940,64 @@ final class DatabaseManager: ObservableObject {
         return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
     }
 
+    private func findIdByTextHash(_ hash: String) -> String? {
+        guard let db = db else { return nil }
+        var stmt: OpaquePointer?
+        defer { if stmt != nil { sqlite3_finalize(stmt) } }
+        let sql = "SELECT id FROM clipboard_items WHERE text_hash = ? ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, timestamp DESC, id DESC LIMIT 1;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        bindText(stmt, 1, hash)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+    }
+
+    private func persistTextHash(id: String, item: ClipboardItem) {
+        guard let th = ClipboardItem.semanticTextHash(plain: item.textContent, html: item.htmlContent) else { return }
+        setTextHash(id: id, hash: th)
+    }
+
+    private func setTextHash(id: String, hash: String) {
+        guard let db = db else { return }
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "UPDATE clipboard_items SET text_hash = ? WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, hash)
+            bindText(stmt, 2, id)
+            _ = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    @discardableResult
+    private func backfillTextHashes(limit: Int) -> Int {
+        guard let db = db, limit > 0 else { return 0 }
+        let sql = """
+        SELECT id, text_content, html_content FROM clipboard_items
+        WHERE text_hash IS NULL AND type IN ('text','html','rtf')
+        LIMIT ?;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        sqlite3_bind_int(stmt, 1, Int32(limit))
+        var rows: [(String, String?, String?)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+            let t = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+            let h = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+            if !id.isEmpty { rows.append((id, t, h)) }
+        }
+        sqlite3_finalize(stmt)
+        var n = 0
+        for (id, t, h) in rows {
+            guard let th = ClipboardItem.semanticTextHash(plain: t, html: h) else { continue }
+            setTextHash(id: id, hash: th)
+            n += 1
+        }
+        if n > 0 {
+            print("[DatabaseManager] backfill text_hash rows=\(n)")
+        }
+        return n
+    }
+
     private func upsertFTS(id: String, text: String?, ocr: String?, source: String?, html: String?) {
         var del: OpaquePointer?
         if sqlite3_prepare_v2(db, "DELETE FROM clipboard_fts WHERE id = ?;", -1, &del, nil) == SQLITE_OK {
@@ -968,7 +1037,16 @@ final class DatabaseManager: ObservableObject {
         guard !trimmed.isEmpty else { return nil }
 
         if ftsTokenizer == "trigram" {
-            // Trigram needs ≥3 chars for matches; escape double quotes.
+            // Trigram needs ≥3 chars. Multi-word: AND of substrings so
+            // "ssh localhost" hits `ssh -R 3001:localhost:22` (and RTF/HTML bodies).
+            let parts = trimmed.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+            let terms = parts.filter { $0.count >= 3 }
+            if terms.count >= 2 {
+                return terms.map { t -> String in
+                    let e = t.replacingOccurrences(of: "\"", with: "\"\"")
+                    return "\"\(e)\""
+                }.joined(separator: " AND ")
+            }
             guard trimmed.count >= 3 else { return nil }
             let escaped = trimmed.replacingOccurrences(of: "\"", with: "\"\"")
             return "\"\(escaped)\""
@@ -1015,7 +1093,13 @@ final class DatabaseManager: ObservableObject {
                 return
             }
 
-            if let existingId = self.findIdByContentHash(item.contentHash) {
+            var existingId = self.findIdByContentHash(item.contentHash)
+            if existingId == nil,
+               ClipboardItem.textLikeTypes.contains(item.type),
+               let th = ClipboardItem.semanticTextHash(plain: item.textContent, html: item.htmlContent) {
+                existingId = self.findIdByTextHash(th)
+            }
+            if let existingId = existingId {
                 let ok = self.bumpLatestAlive(id: existingId, item: item)
                 let uuid = UUID(uuidString: existingId)
                 DispatchQueue.main.async {
@@ -1103,7 +1187,12 @@ final class DatabaseManager: ObservableObject {
         let type = ClipboardType(rawValue: typeRaw) ?? .other
 
         // Same content already present under any id → bump that row (dedupe across hosts).
-        if let existing = findIdByContentHash(contentHash) {
+        var existing = findIdByContentHash(contentHash)
+        if existing == nil, ClipboardItem.textLikeTypes.contains(type),
+           let th = ClipboardItem.semanticTextHash(plain: textContent, html: htmlContent) {
+            existing = findIdByTextHash(th)
+        }
+        if let existing = existing {
             if existing == idStr {
                 return refreshRemoteFields(
                     id: idStr,
@@ -1321,6 +1410,24 @@ final class DatabaseManager: ObservableObject {
             metaDelete("archive.\(id)")
             touchHtmlBytes(id: id)
         }
+        persistTextHash(id: id, item: item)
+        if !wasDeleted, let incomingHtml = item.htmlContent, incomingHtml.utf8.count <= 8192 {
+            var fill: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "UPDATE clipboard_items SET html_content = COALESCE(html_content, ?) WHERE id = ?;",
+                -1, &fill, nil
+            ) == SQLITE_OK {
+                bindText(fill, 1, incomingHtml)
+                bindText(fill, 2, id)
+                _ = sqlite3_step(fill)
+            }
+            sqlite3_finalize(fill)
+            touchHtmlBytes(id: id)
+        }
+        if let rtf = item.rtfData, !rtf.isEmpty {
+            _ = writeBlobFile(hash: item.contentHash + ".rtf", data: rtf)
+        }
         // Alive bump: keep existing archive HTML in row; FTS must re-read it.
         var htmlForFts = item.htmlContent
         if !wasDeleted {
@@ -1408,6 +1515,7 @@ final class DatabaseManager: ObservableObject {
         sqlite3_finalize(stmt)
         guard stepRes == SQLITE_DONE else { return false }
         touchHtmlBytes(id: idStr)
+        persistTextHash(id: idStr, item: item)
 
         // first_seen_at on insert
         let fsSQL = "UPDATE clipboard_items SET first_seen_at = COALESCE(first_seen_at, ?) WHERE id = ?;"
@@ -3320,6 +3428,7 @@ final class DatabaseManager: ObservableObject {
             self.bootstrapFTSIfNeeded()
             self.migrateInlineBlobsToFiles(maxBatches: 200)
             self.peelArchiveHtmlOutOfRow()
+            self.backfillTextHashes(limit: 2000)
             self.runAnalyze()
             self.appendOperationLogSync(
                 action: "restore_db",
