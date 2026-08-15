@@ -152,17 +152,19 @@ When reviewing or implementing SQLite code, verify:
 
 ## 8. Keepsake / ClipFlow binding
 
-Product DB: `~/Documents/ClipFlow/clipflow.db` via `DatabaseManager` (single `dbQueue`).
+Product DB: `CLIPVAULT_HOME`/`KEEPSAKE_HOME` `clipflow.db` (mac-home: `~/Library/Application Support/Keepsake`). `DatabaseManager` is **one writer** (`db` + `dbQueue`) plus a **WAL read-only** connection (`readDB` + `readQueue`). WAL without a second connection is not concurrency.
 
 Must-have runtime profile for this product:
 
-1. Connection pragmas in §1 on open and after restore reopen  
-2. FTS5 **trigram** (fallback unicode61) + bm25 + LIKE hybrid for web search  
+1. Connection pragmas in §1 on **every** open (writer and reader) and after restore reopen  
+2. FTS5 **trigram** (fallback unicode61) + bm25; LIKE only for &lt;3 chars or FTS-empty **non-FTS fields** (`user_note`/`url`). Never `LIKE html_content`  
 3. `ANALYZE` after schema/FTS bootstrap; `PRAGMA optimize` + FTS optimize on a slow timer  
-4. CloudDocs path already uses `sqlite3_backup` — keep that; never hot-copy  
-5. `clearAll` / mass delete → batched  
-6. List queries: no `image_data`; keyset `(timestamp DESC, id DESC)`  
-7. **Latest-alive** upsert by `content_hash` + **10min batched** dupe drain (not one-shot only)
+4. CloudDocs: `sqlite3_backup` then dest `VACUUM INTO` — never hot-copy; never `VACUUM` the **live** writer  
+5. `auto_vacuum=INCREMENTAL` only on empty files; existing DBs stay NONE. `incremental_vacuum` only if `PRAGMA auto_vacuum=2`  
+6. `clearAll` / mass delete / dedupe → batched short transactions  
+7. List: no `image_data`; no archive HTML; `html_bytes` gate (do not `length()` overflow pages); keyset `(timestamp DESC, id DESC)`  
+8. Archive body = CAS `archive_html_sha` + `blobs/{sha}.bin`. Do not write archive HTML back into `html_content`  
+9. **Latest-alive** upsert by `content_hash` + **10min batched** dupe drain (not one-shot only)
 
 ## 9. References
 

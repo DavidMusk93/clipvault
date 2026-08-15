@@ -50,6 +50,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let userContextUpdatedAt: Date?
     /// When the user pinned this card; nil = not pinned. Not part of capture payload.
     let pinnedAt: Date?
+    /// Web-archive body pointer (`blobs/{sha}.bin`). List/search must not load that TEXT.
+    let archiveHtmlSha: String?
     
     init(id: UUID = UUID(),
          timestamp: Date = Date(),
@@ -72,7 +74,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
          userStage: String? = nil,
          userRating: Double? = nil,
          userContextUpdatedAt: Date? = nil,
-         pinnedAt: Date? = nil) {
+         pinnedAt: Date? = nil,
+         archiveHtmlSha: String? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.type = type
@@ -95,6 +98,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.userRating = userRating
         self.userContextUpdatedAt = userContextUpdatedAt
         self.pinnedAt = pinnedAt
+        self.archiveHtmlSha = archiveHtmlSha
     }
 
     /// Normalize to half-star steps in 0.5…5.0; nil if invalid.

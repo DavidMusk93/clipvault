@@ -873,17 +873,16 @@ class WebServer {
         if let text = item.textContent { dict["textContent"] = text }
         // URL archive is an overlay — never dump article HTML into clip JSON.
         // View loads GET /api/archive/view (real document). Cards only get a flag.
-        var archived = false
-        if let metaStr = database.webArchiveMetaJSON(id: item.id),
+        var archived = item.archiveHtmlSha != nil
+        let shouldLoadArchiveMeta = archived || item.type == .url
+        if shouldLoadArchiveMeta,
+           let metaStr = database.webArchiveMetaJSON(id: item.id),
            let metaData = metaStr.data(using: .utf8),
            let meta = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
             archived = true
             dict["archive"] = meta
         }
         if item.type == .url, (item.htmlContent?.count ?? 0) > 40 {
-            archived = true
-        }
-        if !archived, (item.htmlContent?.count ?? 0) > 40, database.webArchiveMetaJSON(id: item.id) != nil {
             archived = true
         }
         dict["archived"] = archived
