@@ -832,17 +832,26 @@ final class DatabaseManager: ObservableObject {
         WHERE id IN (
             SELECT c.id
             FROM clipboard_items c
-            WHERE EXISTS (
+            WHERE c.pinned_at IS NULL
+              AND c.archive_html_sha IS NULL
+              AND c.reader_state IS NULL
+              AND NOT EXISTS (SELECT 1 FROM reader_ops r WHERE r.item_id = c.id)
+              AND EXISTS (
                 SELECT 1 FROM clipboard_items k
-                WHERE (
+                WHERE k.id != c.id
+                  AND (
                     k.content_hash = c.content_hash
                     OR (
                         c.text_hash IS NOT NULL AND k.text_hash IS NOT NULL
                         AND k.text_hash = c.text_hash
                     )
-                )
+                  )
                   AND (
-                    k.timestamp > c.timestamp
+                    k.pinned_at IS NOT NULL
+                    OR k.archive_html_sha IS NOT NULL
+                    OR k.reader_state IS NOT NULL
+                    OR EXISTS (SELECT 1 FROM reader_ops r WHERE r.item_id = k.id)
+                    OR k.timestamp > c.timestamp
                     OR (k.timestamp = c.timestamp AND k.id > c.id)
                   )
             )
