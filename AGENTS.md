@@ -92,7 +92,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | SQLite 备份用 `sqlite3_backup`；**按机器**写 `backup/hosts/{hostId}/` | 热 copy 开着的 db；双机写同一 `latest/` 互盖 |
 | **同步 = 每机 `trx/` 事务 + 云盘运输**；附件走 `live/attach/` | 用 `ops/` 当事务目录；共享 CAS / 整库覆盖当同步 |
 | **备份增量是核心**：本机切片里 size-match skip；只补 missing/partial | **每轮 forceFull 重拷全部 blob**（GDrive File Provider 会 EDEADLK） |
-| SQLite 运行时按 `sqlite-runtime-tricks` skill：WAL / busy_timeout / ANALYZE / FTS5 / 分批清理 | 裸 `sqlite3_open` + 全表 `LIKE '%q%'` + 一次 `DELETE` 清库 |
+| SQLite 按 `.trae/skills/sqlite-runtime-tricks`：WAL 读写分离、busy_timeout、ANALYZE、FTS5、分批清理；检索先 FTS | 写读同一条队列；全表 `LIKE html_content`；维护 tick 里 `VACUUM` |
 | CI = 能绿的真构建（`swift build` + 单测） | 为旧 xcodeproj+DuckDB 殉葬 |
 
 **SQLite 运维 skill（agent 必读）**：本机 `~/.trae-cn/skills/sqlite-runtime-tricks/` 与仓库 `.trae/skills/sqlite-runtime-tricks/`（同源）；源文 [jvns 2026-07](https://jvns.ca/blog/2026/07/17/learning-about-running-sqlite/)。改 `DatabaseManager` / 备份 / 搜索前先加载。

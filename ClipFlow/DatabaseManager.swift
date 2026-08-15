@@ -43,14 +43,18 @@ struct ClipPage {
 
 /// SQLite store for ClipVault.
 /// Runtime: `sqlite-runtime-tricks` — WAL, busy_timeout, ANALYZE, FTS5 trigram,
-/// latest-alive upsert by content_hash, **periodic batched** dupe cleanup, online backup.
+/// writer queue + WAL read connection, latest-alive upsert, batched cleanup, online backup.
+/// Never full-scan `html_content` with LIKE; never VACUUM on the live writer tick.
 final class DatabaseManager: ObservableObject {
     private let appDir: URL
     private let dbPath: URL
     /// Content-addressed blob store: `blobs/{content_hash}.bin` (images/pdf/rtf out of SQLite).
     private let blobsDir: URL
     private let dbQueue = DispatchQueue(label: "com.clipflow.database", qos: .userInitiated)
+    /// WAL readers must not share the writer handle or sit behind VACUUM/backup on dbQueue.
+    private let readQueue = DispatchQueue(label: "com.clipflow.database.read", qos: .userInitiated)
     private var db: OpaquePointer?
+    private var readDB: OpaquePointer?
     private var maintenanceTimer: DispatchSourceTimer?
     private let fm = FileManager.default
 
@@ -252,24 +256,54 @@ final class DatabaseManager: ObservableObject {
 
     @discardableResult
     private func openAndConfigure() -> Bool {
+        closeReadConnection()
         if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
             return false
         }
-        applyConnectionPragmas()
+        applyConnectionPragmas(db)
+        _ = openReadConnection()
         return true
     }
 
-    private func applyConnectionPragmas() {
-        guard db != nil else { return }
-        execQuiet("PRAGMA journal_mode=WAL;")
-        execQuiet("PRAGMA synchronous=NORMAL;")
-        execQuiet("PRAGMA busy_timeout=5000;")
-        execQuiet("PRAGMA temp_store=MEMORY;")
-        execQuiet("PRAGMA foreign_keys=ON;")
-        execQuiet("PRAGMA mmap_size=268435456;")
-        execQuiet("PRAGMA cache_size=-64000;")
-        execQuiet("PRAGMA wal_autocheckpoint=1000;")
+    private func applyConnectionPragmas(_ handle: OpaquePointer?) {
+        guard let handle else { return }
+        execQuiet("PRAGMA journal_mode=WAL;", on: handle)
+        execQuiet("PRAGMA synchronous=NORMAL;", on: handle)
+        execQuiet("PRAGMA busy_timeout=5000;", on: handle)
+        execQuiet("PRAGMA temp_store=MEMORY;", on: handle)
+        execQuiet("PRAGMA foreign_keys=ON;", on: handle)
+        execQuiet("PRAGMA mmap_size=268435456;", on: handle)
+        execQuiet("PRAGMA cache_size=-64000;", on: handle)
+        execQuiet("PRAGMA wal_autocheckpoint=1000;", on: handle)
     }
+
+    @discardableResult
+    private func openReadConnection() -> Bool {
+        closeReadConnection()
+        guard db != nil else { return false }
+        let flags = SQLITE_OPEN_READONLY
+        if sqlite3_open_v2(dbPath.path, &readDB, flags, nil) != SQLITE_OK {
+            print("[DatabaseManager] read connection failed — list/search share writer queue")
+            readDB = nil
+            return false
+        }
+        applyConnectionPragmas(readDB)
+        execQuiet("PRAGMA query_only=ON;", on: readDB)
+        return true
+    }
+
+    private func closeReadConnection() {
+        if let h = readDB {
+            sqlite3_close(h)
+            readDB = nil
+        }
+    }
+
+    /// List/search never ship archive-sized HTML (skill §7).
+    private static let listHtmlSQL =
+        "CASE WHEN html_content IS NOT NULL AND length(html_content) <= 8192 THEN html_content ELSE NULL END"
+    private static let listHtmlSQLAliased =
+        "CASE WHEN c.html_content IS NOT NULL AND length(c.html_content) <= 8192 THEN c.html_content ELSE NULL END"
 
     private func createTables() {
         let createSQL = """
@@ -716,7 +750,8 @@ final class DatabaseManager: ObservableObject {
 
         // Keep peeling any residual inline BLOBs (new code paths should not insert them).
         _ = migrateInlineBlobsBatch(limit: 4)
-        maybeVacuumAfterBlobMigration()
+        // Incremental only — never full VACUUM on the live writer tick (skill §3).
+        _ = execQuiet("PRAGMA incremental_vacuum(32);")
 
         if forceOptimize || maintenanceTicks % Self.optimizeEveryNMaintenances == 0 {
             runOptimize()
@@ -797,8 +832,8 @@ final class DatabaseManager: ObservableObject {
     // MARK: - Helpers
 
     @discardableResult
-    private func execQuiet(_ sql: String) -> Bool {
-        guard let db = db else { return false }
+    private func execQuiet(_ sql: String, on handle: OpaquePointer? = nil) -> Bool {
+        guard let db = handle ?? db else { return false }
         var err: UnsafeMutablePointer<CChar>?
         let rc = sqlite3_exec(db, sql, nil, nil, &err)
         if rc != SQLITE_OK {
@@ -1368,8 +1403,8 @@ final class DatabaseManager: ObservableObject {
         trashOnly: Bool = false,
         completion: @escaping (ClipPage) -> Void
     ) {
-        dbQueue.async { [weak self] in
-            guard let self = self, let db = self.db else {
+        let run: () -> Void = { [weak self] in
+            guard let self = self, let db = self.readDB ?? self.db else {
                 completion(ClipPage(items: [], nextCursor: nil))
                 return
             }
@@ -1390,29 +1425,13 @@ final class DatabaseManager: ObservableObject {
                     items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true)
                 }
             } else if hasQuery, let match = ftsMatch {
+                // skill §5: FTS first. LIKE only if FTS empty — never unindexed html scan.
                 items = self.runSearchFTS(db: db, match: match, cursor: cursor, fetchLimit: fetchLimit)
-                // Hybrid: always merge LIKE (text/ocr/html/source/note) so OCR hits are never
-                // lost when FTS tokenizer/ranking under-matches CJK or short tokens.
-                let likeItems = self.runSearchLike(db: db, q: q!, cursor: cursor, fetchLimit: fetchLimit)
-                if items.isEmpty {
-                    items = likeItems
-                } else if !likeItems.isEmpty {
-                    var seen = Set(items.map { $0.id })
-                    for it in likeItems where !seen.contains(it.id) {
-                        items.append(it)
-                        seen.insert(it.id)
-                        if items.count >= fetchLimit { break }
-                    }
-                    // Keep recency for overflow — re-sort by timestamp desc
-                    items.sort { a, b in
-                        Self.pinThenRecency(a, b)
-                    }
-                    if items.count > fetchLimit {
-                        items = Array(items.prefix(fetchLimit))
-                    }
+                if items.isEmpty, let q = q {
+                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit)
                 }
             } else if hasQuery, let q = q {
-                // Short query (<3) with trigram: LIKE path.
+                // Short query (<3) with trigram: LIKE path (no html_content).
                 items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit)
             } else {
                 items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: trashOnly)
@@ -1442,6 +1461,11 @@ final class DatabaseManager: ObservableObject {
             DispatchQueue.main.async {
                 completion(ClipPage(items: items, nextCursor: next))
             }
+        }
+        if readDB != nil {
+            readQueue.async(execute: run)
+        } else {
+            dbQueue.async(execute: run)
         }
     }
 
@@ -1477,7 +1501,7 @@ final class DatabaseManager: ObservableObject {
         fetchLimit: Int
     ) -> [ClipboardItem] {
         var sql = """
-        SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, c.html_content, c.source_app, c.ocr_text,
+        SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, \(Self.listHtmlSQLAliased), c.source_app, c.ocr_text,
                COALESCE(c.copy_count, 1), c.deleted_at, c.first_seen_at,
                c.user_note, c.user_stage, c.user_rating, c.user_context_updated_at, c.pinned_at
         FROM clipboard_fts f
@@ -1516,13 +1540,14 @@ final class DatabaseManager: ObservableObject {
         fetchLimit: Int,
         trashOnly: Bool = false
     ) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
             sql += "deleted_at IS NULL"
         }
-        sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(html_content,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ?)"
+        // skill §5/§7: no unindexed LIKE on html_content (archive bodies). FTS covers html.
+        sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
         if cursor != nil {
             sql += " AND " + Self.keysetSQL
         }
@@ -1552,7 +1577,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
@@ -1584,7 +1609,7 @@ final class DatabaseManager: ObservableObject {
 
     private func runPinned(db: OpaquePointer, fetchLimit: Int) -> [ClipboardItem] {
         let sql = """
-        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at
+        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at
         FROM clipboard_items
         WHERE deleted_at IS NULL AND pinned_at IS NOT NULL
         ORDER BY pinned_at DESC, id DESC LIMIT ?;
@@ -2052,15 +2077,15 @@ final class DatabaseManager: ObservableObject {
             let htmlData = Data(html.utf8)
             let sha = SHA256.hash(data: htmlData).map { String(format: "%02x", $0) }.joined()
             _ = self.writeBlobFile(hash: sha, data: htmlData)
-            let sql = "UPDATE clipboard_items SET html_content = ?, archive_html_sha = ? WHERE id = ?;"
+            // Pointer only — do not park archive HTML in the list-scan TEXT column.
+            let sql = "UPDATE clipboard_items SET archive_html_sha = ? WHERE id = ?;"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
                 DispatchQueue.main.async { completion?(false) }
                 return
             }
-            self.bindText(stmt, 1, html)
-            self.bindText(stmt, 2, sha)
-            self.bindText(stmt, 3, idStr)
+            self.bindText(stmt, 1, sha)
+            self.bindText(stmt, 2, idStr)
             let rc = sqlite3_step(stmt)
             sqlite3_finalize(stmt)
             guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else {
@@ -3171,6 +3196,7 @@ final class DatabaseManager: ObservableObject {
                 return
             }
 
+            self.closeReadConnection()
             if let db = self.db {
                 self.runOptimize()
                 sqlite3_close(db)
@@ -3222,6 +3248,7 @@ final class DatabaseManager: ObservableObject {
     deinit {
         maintenanceTimer?.cancel()
         maintenanceTimer = nil
+        closeReadConnection()
         if let db = db {
             sqlite3_exec(db, "PRAGMA optimize;", nil, nil, nil)
             sqlite3_close(db)
