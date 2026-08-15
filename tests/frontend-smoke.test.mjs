@@ -232,6 +232,16 @@ test('SSE clip_deleted must not fetchPage reset (scroll thrash root cause)', () 
   );
 });
 
+test('search reset is not dropped while a fetch is in flight', () => {
+  assert.match(indexHtml, /pendingReset/, 'queue a search reset');
+  assert.match(indexHtml, /if \(reset\) pendingReset = true/, 'mark pending when loading');
+  const idx = indexHtml.indexOf('async function fetchPage');
+  assert.ok(idx > 0, 'fetchPage');
+  const chunk = indexHtml.slice(idx, idx + 2800);
+  assert.match(chunk, /loading = false/, 'always clear loading');
+  assert.match(chunk, /if \(pendingReset\)/, 'replay queued search');
+});
+
 test('markdown preview uses marked + DOMPurify CDN', () => {
   assert.match(indexHtml, /marked(\.min)?\.js|marked@/, 'marked CDN');
   assert.match(indexHtml, /dompurify|purify\.min\.js/i, 'DOMPurify CDN');

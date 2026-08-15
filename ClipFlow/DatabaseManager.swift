@@ -523,13 +523,13 @@ final class DatabaseManager: ObservableObject {
             """) ?? 0
         guard remaining == 0 else { return }
 
-        // Re-VACUUM if file still fat (interrupted vacuum / freelist not reclaimed).
+        // One-shot after peel. In-row html/archive keeps the file >2MB; retrying
+        // every maintenance tick exclusive-locks dbQueue and freezes /api/clips?q=.
+        if metaGet("blob_vacuum_v1") == "1" { return }
+
         let pages = scalarInt64("PRAGMA page_count;") ?? 0
         let pageSize = scalarInt64("PRAGMA page_size;") ?? 4096
         let bytes = pages * pageSize
-        let already = metaGet("blob_vacuum_v1") == "1"
-        if already && bytes < 2_000_000 { return }
-
         print("[DatabaseManager] VACUUM after blob externalization (pages=\(pages) ~\(bytes / 1024)KB)…")
         if execQuiet("VACUUM;") {
             metaSet("blob_vacuum_v1", "1")

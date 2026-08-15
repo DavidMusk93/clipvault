@@ -2169,6 +2169,7 @@ window.ClipViewMasonry = Masonry;
     let clips = [];
     let nextCursor = null;
     let loading = false;
+    let pendingReset = false;
     let exhausted = false;
     /** Bumps on reset so late load-more responses cannot append into a fresh list. */
     let fetchGen = 0;
@@ -2568,7 +2569,12 @@ window.ClipViewMasonry = Masonry;
     }
 
     async function fetchPage({ reset = false } = {}) {
-      if (loading) return;
+      if (loading) {
+        // A reset (search / filter) must not be dropped: the in-flight finally
+        // used to skip `loading=false` when fetchGen moved, which wedged search.
+        if (reset) pendingReset = true;
+        return;
+      }
       // Load-more without a keyset cursor re-fetches page 1 and used to paint duplicates
       // after refresh when IntersectionObserver fired before nextCursor was set.
       if (!reset && !Pagination.canLoadMore({ loading, exhausted, nextCursor })) return;
@@ -2576,6 +2582,7 @@ window.ClipViewMasonry = Masonry;
       if (reset) {
         fetchGen += 1;
         exhausted = false;
+        pendingReset = false;
       }
       const gen = fetchGen;
       const cursorForRequest = reset ? null : nextCursor;
@@ -2634,9 +2641,13 @@ window.ClipViewMasonry = Masonry;
             `<div class="empty"><p>加载失败，请刷新</p></div>`;
         }
       } finally {
+        loading = false;
         if (gen === fetchGen) {
-          loading = false;
           document.getElementById('loadingMore').hidden = true;
+        }
+        if (pendingReset) {
+          pendingReset = false;
+          fetchPage({ reset: true });
         }
       }
     }
