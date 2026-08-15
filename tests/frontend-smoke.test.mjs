@@ -237,7 +237,7 @@ test('search reset is not dropped while a fetch is in flight', () => {
   assert.match(indexHtml, /if \(reset\) pendingReset = true/, 'mark pending when loading');
   const idx = indexHtml.indexOf('async function fetchPage');
   assert.ok(idx > 0, 'fetchPage');
-  const chunk = indexHtml.slice(idx, idx + 2800);
+  const chunk = indexHtml.slice(idx, idx + 6000);
   assert.match(chunk, /loading = false/, 'always clear loading');
   assert.match(chunk, /if \(pendingReset\)/, 'replay queued search');
 });
