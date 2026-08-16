@@ -192,6 +192,22 @@ class WebServer {
         sendResponse(response, connection: connection)
     }
 
+    /// `URLComponents.queryItems` is RFC 3986: `+` stays `+`.
+    /// Browsers' `URLSearchParams` is form-urlencoded: space → `+`.
+    /// Decode `q=ssh+localhost` as `ssh localhost` without turning `c%2B%2B` into spaces.
+    static func formQueryValue(path: String, name: String) -> String? {
+        guard let qMark = path.firstIndex(of: "?") else { return nil }
+        let qs = path[path.index(after: qMark)...]
+        for pair in qs.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2, parts[0] == name else { continue }
+            return String(parts[1])
+                .replacingOccurrences(of: "+", with: " ")
+                .removingPercentEncoding
+        }
+        return nil
+    }
+
     private func handleGetRequest(path: String, connection: NWConnection) {
         // path may include query string, e.g. /api/clips?cursor=...
         let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
@@ -1260,7 +1276,8 @@ class WebServer {
         let limit = items.first(where: { $0.name == "limit" }).flatMap { Int($0.value ?? "") } ?? 30
         let cursorRaw = items.first(where: { $0.name == "cursor" })?.value
         let cursor = cursorRaw.flatMap { ClipCursor.decode($0) }
-        let q = items.first(where: { $0.name == "q" })?.value
+        let q = Self.formQueryValue(path: path, name: "q")
+            ?? items.first(where: { $0.name == "q" })?.value
         let view = items.first(where: { $0.name == "view" })?.value
         let trashOnly = (view == "trash")
         if let idStr = items.first(where: { $0.name == "id" })?.value, let uuid = UUID(uuidString: idStr) {

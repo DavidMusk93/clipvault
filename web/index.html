@@ -2599,7 +2599,7 @@ window.ClipViewMasonry = Masonry;
       if (currentView === 'trash') params.set('view', 'trash');
 
       try {
-        const res = await fetch(`${API}/api/clips?${params}`);
+        const res = await fetch(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
         if (!res.ok) throw new Error('API ' + res.status);
         const data = await res.json();
         // Support both envelope and legacy array
@@ -2685,7 +2685,7 @@ window.ClipViewMasonry = Masonry;
         const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
         if (searchQuery) params.set('q', searchQuery);
         if (currentView === 'trash') params.set('view', 'trash');
-        const res = await fetch(`${API}/api/clips?${params}`);
+        const res = await fetch(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
         if (!res.ok) return;
         const data = await res.json();
         const items = Array.isArray(data) ? data : (data.items || []);
@@ -3952,7 +3952,8 @@ window.ClipViewMasonry = Masonry;
       if (!item) return false;
       if (item.archived) return true;
       if (item.archive && (item.archive.htmlKey || item.archive.title || item.archive.sourceUrl)) return true;
-      return !!(item.htmlContent && String(item.htmlContent).length > 40);
+      // Cocoa HTML on RTF/HTML clips is not a web archive — do not route those cards as URLs.
+      return false;
     }
 
     function itemUrlHref(item) {
