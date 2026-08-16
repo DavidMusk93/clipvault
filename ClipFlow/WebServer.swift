@@ -1009,7 +1009,7 @@ class WebServer {
             let doc = self.buildArchiveViewDocument(
                 title: title,
                 source: source,
-                bodyHTML: html,
+                bodyHTML: self.decorateArchiveMedia(html),
                 archiveId: uuid.uuidString,
                 embed: embed
             )
@@ -1021,7 +1021,7 @@ class WebServer {
                 connection: connection,
                 extraHeaders: [
                     ("Cache-Control", "private, no-store"),
-                    ("Content-Security-Policy", "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'"),
+                    ("Content-Security-Policy", "default-src 'none'; img-src * data: blob:; media-src * blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com"),
                     ("X-Content-Type-Options", "nosniff"),
                 ]
             )
@@ -1074,7 +1074,30 @@ class WebServer {
               font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
             }
             img,video{max-width:100%;height:auto;}
-            a{pointer-events:none;color:inherit;text-decoration:none;}
+            a{color:inherit;}
+            a[href]{text-decoration:underline;text-underline-offset:2px;}
+            iframe[src*="youtube"],iframe[src*="youtube-nocookie"],iframe[src*="vimeo"]{
+              display:block;width:100%;max-width:100%;aspect-ratio:16/9;height:auto;
+              min-height:220px;border:0;border-radius:12px;background:#111;
+            }
+            .cv-video-fallback{margin:.45rem 0 1.1rem;font-size:.92rem;}
+            .cv-video-fallback a{color:#0071e3;}
+            /* Mermaid bakes geometry but leaves message lines stroke="none"
+               (real paint lived in page <style>, stripped by Readability). */
+            svg[aria-roledescription],svg[id^="mermaid"]{
+              display:block;max-width:100%;height:auto;
+              background:#f4f3ee;border-radius:12px;padding:8px 4px;
+            }
+            svg[aria-roledescription="sequence"] line[marker-end]{
+              stroke:#1d1d1f;stroke-width:2;
+            }
+            svg[aria-roledescription="sequence"] line[id^="actor"]{
+              stroke:#8e8e93;stroke-width:1.25px;
+            }
+            svg[aria-roledescription="sequence"] marker path{
+              fill:#1d1d1f;stroke:#1d1d1f;
+            }
+            svg[aria-roledescription] text{fill:#1d1d1f;}
           </style>
           <script src="/assets/archive-reader.js?v=20260815a" defer></script>
         </head>
@@ -1093,6 +1116,50 @@ class WebServer {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    /// View-time only: add a clickable watch link after YouTube/Vimeo iframes.
+    /// Does not mutate the CAS archive.
+    private func decorateArchiveMedia(_ html: String) -> String {
+        let pattern = #"<iframe[^>]+src="(https://(?:www\.youtube(?:-nocookie)?\.com/embed/|player\.vimeo\.com/video/)([^"?]+))"[^>]*>\s*</iframe>"#
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return html
+        }
+        let ns = html as NSString
+        let matches = re.matches(in: html, options: [], range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return html }
+        var out = ""
+        var cursor = 0
+        for m in matches {
+            let full = m.range
+            out += ns.substring(with: NSRange(location: cursor, length: full.location - cursor))
+            out += ns.substring(with: full)
+            let hostPath = ns.substring(with: m.range(at: 1))
+            let id = ns.substring(with: m.range(at: 2))
+            let watch: String
+            if hostPath.contains("vimeo") {
+                watch = "https://vimeo.com/\(id)"
+            } else {
+                watch = "https://www.youtube.com/watch?v=\(id)"
+            }
+            let title: String = {
+                let chunk = ns.substring(with: full)
+                if let tm = chunk.range(of: #"title="([^"]+)""#, options: .regularExpression) {
+                    let raw = String(chunk[tm])
+                    if let q1 = raw.firstIndex(of: "\""), let q2 = raw.lastIndex(of: "\""), q1 < q2 {
+                        let inner = raw[raw.index(after: q1)..<q2]
+                        if !inner.isEmpty { return htmlEscapeText(String(inner)) }
+                    }
+                }
+                return "Watch video"
+            }()
+            out += "<p class=\"cv-video-fallback\"><a href=\"\(watch)\" rel=\"noreferrer\">\(title)</a></p>"
+            cursor = full.location + full.length
+        }
+        if cursor < ns.length {
+            out += ns.substring(from: cursor)
+        }
+        return out
     }
 
     /// GET /api/archive/reader?id= — projected learning state + ops.

@@ -298,7 +298,7 @@ test('archived URL uses View sheet — no inline HTML in cards', () => {
   assert.match(indexHtml, /function archiveViewHref/, 'same document for sheet and tab');
   assert.match(indexHtml, /function morphArchiveButtonToView/, 'archive button becomes view');
   assert.match(indexHtml, /archiveReaderFrame/, 'isolated iframe');
-  assert.match(indexHtml, /sandbox="allow-scripts allow-same-origin"/, 'reader JS + same-origin API in iframe');
+  assert.match(indexHtml, /sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation"/, 'reader JS + same-origin API + video popups in iframe');
   assert.match(indexHtml, /archiveReaderNewTab/, 'escape hatch: real browser tab');
   assert.doesNotMatch(indexHtml, /class="archive-badge"/, 'no tiny 已归档 chip replacing the control');
   assert.doesNotMatch(indexHtml, /frame\.srcdoc|buildArchiveReaderDoc/, 'never srcdoc / JS rebuild');
