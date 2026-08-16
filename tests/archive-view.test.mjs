@@ -28,3 +28,17 @@ test('archive view sizes youtube iframes and adds a watch link', () => {
 test('archive view does not disable article links', () => {
   assert.doesNotMatch(swift, /a\{pointer-events:none;color:inherit;text-decoration:none;\}/);
 });
+
+test('archive view promotes weixin lazy data-src over 1px svg src', () => {
+  assert.match(swift, /promoteLazyImages/);
+  assert.match(swift, /data-src/);
+  assert.match(swift, /data:image\/svg/);
+});
+
+test('archive images are CAS assets, not publisher CDN', () => {
+  const inliner = readFileSync(join(root, 'ClipFlow/ArchiveImageInliner.swift'), 'utf8');
+  assert.match(inliner, /\/api\/archive\/asset\?sha=/);
+  assert.match(swift, /sendArchiveAsset/);
+  assert.match(swift, /img-src 'self' data: blob:/);
+  assert.doesNotMatch(swift, /img-src \*/);
+});

@@ -24,6 +24,24 @@
     return document.querySelector("main.cv-article") || document.body;
   }
 
+  /** WeChat lazy-load keeps a 1×1 SVG in src; the real URL is data-src. */
+  function promoteLazyImages(root) {
+    var imgs = (root || document).querySelectorAll("img");
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      var real =
+        img.getAttribute("data-src") ||
+        img.getAttribute("data-original") ||
+        img.getAttribute("data-lazy-src") ||
+        img.getAttribute("data-actualsrc");
+      if (!real) continue;
+      if (real.indexOf("//") === 0) real = (location.protocol || "https:") + real;
+      if (!/^https?:/i.test(real)) continue;
+      var src = img.getAttribute("src") || "";
+      if (!src || src.indexOf("data:image") === 0) img.setAttribute("src", real);
+    }
+  }
+
   function headingText(el) {
     return String(el.textContent || "").replace(/\s+/g, " ").trim();
   }
@@ -1155,6 +1173,7 @@
     var root = articleRoot();
     var id = archiveId();
     if (!root || !id) return;
+    promoteLazyImages(root);
     var headings = collectHeadings(root);
     apiGet(id)
       .then(function (res) {

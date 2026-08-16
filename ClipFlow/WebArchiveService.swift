@@ -160,36 +160,48 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         text: String,
         done: @escaping () -> Void
     ) {
-        guard let database else {
+        guard database != nil else {
             done()
             return
         }
-        let meta: [String: Any] = [
-            "sourceUrl": url,
-            "title": title,
-            "mode": "readable",
-            "archivedAt": ClipTimeFormat.isoLocal(Date()),
-            "bytes": html.utf8.count,
-            "engine": "webkit+readability",
-        ]
-        let metaData = (try? JSONSerialization.data(withJSONObject: meta)) ?? Data()
-        let metaStr = String(data: metaData, encoding: .utf8) ?? "{}"
-        database.applyWebArchive(
-            id: itemId,
-            html: html,
-            textSnippet: text,
-            title: title,
-            metaJSON: metaStr
-        ) { ok in
-            if ok {
-                let sha = SHA256.hash(data: Data(html.utf8)).map { String(format: "%02x", $0) }.joined()
-                CloudDocsSyncService.shared?.recordLocalArchive(
-                    itemId: itemId,
-                    htmlSHA: sha,
-                    metaJSON: metaStr
-                )
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self, let database = self.database else {
+                done()
+                return
             }
-            done()
+            let localHTML = ArchiveImageInliner.embed(
+                html: html,
+                pageURL: URL(string: url),
+                writeBlob: { hash, data in database.writeBlobFile(hash: hash, data: data) }
+            )
+            let meta: [String: Any] = [
+                "sourceUrl": url,
+                "title": title,
+                "mode": "readable",
+                "archivedAt": ClipTimeFormat.isoLocal(Date()),
+                "bytes": localHTML.utf8.count,
+                "engine": "webkit+readability",
+                "imagesOffline": !ArchiveImageInliner.containsRemoteImages(localHTML),
+            ]
+            let metaData = (try? JSONSerialization.data(withJSONObject: meta)) ?? Data()
+            let metaStr = String(data: metaData, encoding: .utf8) ?? "{}"
+            database.applyWebArchive(
+                id: itemId,
+                html: localHTML,
+                textSnippet: text,
+                title: title,
+                metaJSON: metaStr
+            ) { ok in
+                if ok {
+                    let sha = SHA256.hash(data: Data(localHTML.utf8)).map { String(format: "%02x", $0) }.joined()
+                    CloudDocsSyncService.shared?.recordLocalArchive(
+                        itemId: itemId,
+                        htmlSHA: sha,
+                        metaJSON: metaStr
+                    )
+                }
+                done()
+            }
         }
     }
 
@@ -328,6 +340,16 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
               try {
                 if (typeof Readability !== 'function') {
                   return JSON.stringify({ok:false, reason:'Readability 未注入'});
+                }
+                var live = document.querySelectorAll('img');
+                for (var i = 0; i < live.length; i++) {
+                  var im = live[i];
+                  var real = im.getAttribute('data-src') || im.getAttribute('data-original') || im.getAttribute('data-lazy-src') || im.getAttribute('data-actualsrc');
+                  if (!real) continue;
+                  if (real.indexOf('//') === 0) real = (location.protocol || 'https:') + real;
+                  if (!/^https?:/i.test(real)) continue;
+                  var src = im.getAttribute('src') || '';
+                  if (!src || src.indexOf('data:image') === 0) im.setAttribute('src', real);
                 }
                 var clone = document.cloneNode(true);
                 var article = new Readability(clone).parse();

@@ -3,6 +3,7 @@ import Network
 import AppKit
 import ImageIO
 import CoreGraphics
+import CryptoKit
 
 class WebServer {
     private var listener: NWListener?
@@ -235,6 +236,8 @@ class WebServer {
             sendItemEvaluations(path: path, connection: connection)
         } else if pathOnly == "/api/archive/view" {
             sendArchiveView(path: path, connection: connection)
+        } else if pathOnly == "/api/archive/asset" {
+            sendArchiveAsset(path: path, connection: connection)
         } else if pathOnly == "/api/archive/reader" {
             sendReaderBundle(path: path, connection: connection)
         } else if pathOnly == "/api/archive" || pathOnly.hasPrefix("/api/archive/") {
@@ -1006,26 +1009,89 @@ class WebServer {
                 if let t = meta["title"] as? String, !t.isEmpty { title = t }
                 if let u = meta["sourceUrl"] as? String, !u.isEmpty { source = u }
             }
-            let doc = self.buildArchiveViewDocument(
-                title: title,
-                source: source,
-                bodyHTML: self.decorateArchiveMedia(html),
-                archiveId: uuid.uuidString,
-                embed: embed
-            )
-            self.sendBinary(
-                status: 200,
-                reason: "OK",
-                contentType: "text/html; charset=utf-8",
-                body: Data(doc.utf8),
-                connection: connection,
-                extraHeaders: [
-                    ("Cache-Control", "private, no-store"),
-                    ("Content-Security-Policy", "default-src 'none'; img-src * data: blob:; media-src * blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com"),
-                    ("X-Content-Type-Options", "nosniff"),
-                ]
-            )
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                var body = self.promoteLazyImages(html)
+                if ArchiveImageInliner.containsRemoteImages(body) {
+                    let local = ArchiveImageInliner.embed(
+                        html: body,
+                        pageURL: URL(string: source),
+                        writeBlob: { hash, data in self.database.writeBlobFile(hash: hash, data: data) }
+                    )
+                    if local != body {
+                        var metaObj: [String: Any] = [:]
+                        if let metaStr, let data = metaStr.data(using: .utf8),
+                           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            metaObj = parsed
+                        }
+                        metaObj["imagesOffline"] = !ArchiveImageInliner.containsRemoteImages(local)
+                        metaObj["bytes"] = local.utf8.count
+                        let newMeta = String(data: (try? JSONSerialization.data(withJSONObject: metaObj)) ?? Data(), encoding: .utf8) ?? metaStr ?? "{}"
+                        self.database.applyWebArchive(
+                            id: uuid,
+                            html: local,
+                            textSnippet: "",
+                            title: title,
+                            metaJSON: newMeta
+                        ) { ok in
+                            if ok {
+                                let sha = SHA256.hash(data: Data(local.utf8)).map { String(format: "%02x", $0) }.joined()
+                                CloudDocsSyncService.shared?.recordLocalArchive(
+                                    itemId: uuid,
+                                    htmlSHA: sha,
+                                    metaJSON: newMeta
+                                )
+                            }
+                        }
+                    }
+                    body = local
+                }
+                let doc = self.buildArchiveViewDocument(
+                    title: title,
+                    source: source,
+                    bodyHTML: self.decorateArchiveMedia(body),
+                    archiveId: uuid.uuidString,
+                    embed: embed
+                )
+                self.sendBinary(
+                    status: 200,
+                    reason: "OK",
+                    contentType: "text/html; charset=utf-8",
+                    body: Data(doc.utf8),
+                    connection: connection,
+                    extraHeaders: [
+                        ("Cache-Control", "private, no-store"),
+                        ("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; media-src * blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com"),
+                        ("X-Content-Type-Options", "nosniff"),
+                    ]
+                )
+            }
         }
+    }
+
+    /// GET /api/archive/asset?sha=  — CAS image for an archive view. Never a publisher CDN.
+    private func sendArchiveAsset(path: String, connection: NWConnection) {
+        guard let comps = URLComponents(string: "http://localhost\(path)"),
+              let sha = comps.queryItems?.first(where: { $0.name == "sha" })?.value?.lowercased(),
+              ArchiveImageInliner.isAssetSHA(sha) else {
+            sendErrorResponse(connection: connection, status: 400, message: "expected ?sha=")
+            return
+        }
+        guard let data = database.readBlobFile(hash: sha), data.count > 16 else {
+            sendErrorResponse(connection: connection, status: 404, message: "not an archive asset")
+            return
+        }
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: ArchiveImageInliner.mimeType(for: data),
+            body: data,
+            connection: connection,
+            extraHeaders: [
+                ("Cache-Control", "private, max-age=31536000, immutable"),
+                ("X-Content-Type-Options", "nosniff"),
+            ]
+        )
     }
 
     private func buildArchiveViewDocument(
@@ -1074,6 +1140,7 @@ class WebServer {
               font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
             }
             img,video{max-width:100%;height:auto;}
+            img[data-src],img[data-original]{max-width:100%;height:auto;}
             a{color:inherit;}
             a[href]{text-decoration:underline;text-underline-offset:2px;}
             iframe[src*="youtube"],iframe[src*="youtube-nocookie"],iframe[src*="vimeo"]{
@@ -1099,7 +1166,7 @@ class WebServer {
             }
             svg[aria-roledescription] text{fill:#1d1d1f;}
           </style>
-          <script src="/assets/archive-reader.js?v=20260815a" defer></script>
+          <script src="/assets/archive-reader.js?v=20260817a" defer></script>
         </head>
         <body>
         \(bar)
@@ -1116,6 +1183,61 @@ class WebServer {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    private func htmlAttr(_ tag: String, _ name: String) -> String? {
+        let pat = #"(?i)\b"# + NSRegularExpression.escapedPattern(for: name) + #"\s*=\s*"([^"]*)""#
+        guard let re = try? NSRegularExpression(pattern: pat) else { return nil }
+        let ns = tag as NSString
+        guard let m = re.firstMatch(in: tag, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > 1 else { return nil }
+        return ns.substring(with: m.range(at: 1))
+    }
+
+    private func isPlaceholderImageSrc(_ src: String) -> Bool {
+        let s = src.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty { return true }
+        if s.hasPrefix("data:image/svg") { return true }
+        if s.hasPrefix("data:image/gif") && s.count < 400 { return true }
+        return false
+    }
+
+    /// WeChat / lazy-load: real URL is data-src, src is a 1×1 SVG. View has no site JS.
+    /// Does not mutate the CAS archive.
+    private func promoteLazyImages(_ html: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: [.caseInsensitive]) else {
+            return html
+        }
+        let ns = html as NSString
+        let matches = re.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return html }
+        var out = ""
+        var cursor = 0
+        for m in matches {
+            out += ns.substring(with: NSRange(location: cursor, length: m.range.location - cursor))
+            var tag = ns.substring(with: m.range)
+            let src = htmlAttr(tag, "src") ?? ""
+            let real = ["data-src", "data-original", "data-lazy-src", "data-actualsrc"]
+                .compactMap { htmlAttr(tag, $0) }
+                .map { $0.hasPrefix("//") ? "https:\($0)" : $0 }
+                .first { $0.hasPrefix("http://") || $0.hasPrefix("https://") }
+            if let real, isPlaceholderImageSrc(src) {
+                if htmlAttr(tag, "src") != nil,
+                   let srcRe = try? NSRegularExpression(pattern: #"(?i)\bsrc\s*=\s*"[^"]*""#) {
+                    tag = srcRe.stringByReplacingMatches(
+                        in: tag,
+                        range: NSRange(location: 0, length: (tag as NSString).length),
+                        withTemplate: "src=\"\(real)\""
+                    )
+                } else {
+                    tag = tag.replacingOccurrences(of: "<img", with: "<img src=\"\(real)\"", options: .caseInsensitive)
+                }
+            }
+            out += tag
+            cursor = m.range.location + m.range.length
+        }
+        if cursor < ns.length { out += ns.substring(from: cursor) }
+        return out
     }
 
     /// View-time only: add a clickable watch link after YouTube/Vimeo iframes.
