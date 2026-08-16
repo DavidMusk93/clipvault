@@ -2508,15 +2508,8 @@ final class DatabaseManager: ObservableObject {
         guard let db = db else { return nil }
         guard Self.readerKinds.contains(kind) else { return nil }
         let idStr = itemId.uuidString
-        // Must belong to an existing clip (usually an archive).
-        var exists = false
-        var chk: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT 1 FROM clipboard_items WHERE id = ? LIMIT 1;", -1, &chk, nil) == SQLITE_OK {
-            bindText(chk, 1, idStr)
-            exists = sqlite3_step(chk) == SQLITE_ROW
-        }
-        sqlite3_finalize(chk)
-        guard exists else { return nil }
+        // Always persist the op. If the clip row was deleted (bad dedupe),
+        // ops must still land so restore can replay them.
 
         var payloadObj = payload
         // highlight_add may reuse the highlight UUID as the row id (idempotent add).
@@ -2697,9 +2690,21 @@ final class DatabaseManager: ObservableObject {
         var highlights = state["highlights"] as? [[String: Any]] ?? []
         switch kind {
         case "scroll_checkpoint":
-            state["pos"] = payload
+            let y = (payload["y"] as? Double) ?? (payload["y"] as? NSNumber)?.doubleValue ?? 0
+            let ratio = (payload["ratio"] as? Double) ?? (payload["ratio"] as? NSNumber)?.doubleValue ?? 0
+            let degenerate = y < 1 && ratio < 0.001
+            if !degenerate || state["pos"] == nil {
+                state["pos"] = payload
+            }
         case "highlight_add":
-            highlights.append(payload)
+            if let hid = payload["id"] as? String,
+               let idx = highlights.firstIndex(where: {
+                   ($0["id"] as? String)?.caseInsensitiveCompare(hid) == .orderedSame
+               }) {
+                highlights[idx] = payload
+            } else {
+                highlights.append(payload)
+            }
             state["highlights"] = highlights
         case "highlight_update", "comment":
             if let hid = payload["id"] as? String {

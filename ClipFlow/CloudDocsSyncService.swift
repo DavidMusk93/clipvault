@@ -156,6 +156,7 @@ final class CloudDocsSyncService {
                 }
             }
             self.bootstrapLocalHistoryIfNeeded()
+            self.replayDiskReaderOps()
             self.startPollTimer()
             if self.config.enabled {
                 self.queue.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -728,12 +729,20 @@ final class CloudDocsSyncService {
 
                 let sem = DispatchSemaphore(value: 0)
                 var changed = false
+                var appliedOk = false
                 database.performSyncWork {
                     changed = self.applyOpLocked(op)
-                    self.database.metaSetSync(self.appliedKey(host: head.host), String(next))
+                    appliedOk = changed || self.applyIsIdempotentSuccess(op)
+                    if appliedOk {
+                        self.database.metaSetSync(self.appliedKey(host: head.host), String(next))
+                    }
                     sem.signal()
                 }
                 sem.wait()
+                if !appliedOk {
+                    lastPhase = "pull:retry \(op.kind) \(op.itemId.prefix(8))"
+                    break
+                }
                 cursor = next
                 applied += 1
                 batch += 1
@@ -820,6 +829,55 @@ final class CloudDocsSyncService {
         default:
             return false
         }
+    }
+
+    /// `applyOpLocked` returns false for no-op upserts; those must not stall the cursor.
+    /// Failed pin/archive/reader while the clip is missing must retry.
+    private func applyIsIdempotentSuccess(_ op: SyncOp) -> Bool {
+        switch op.kind {
+        case "reader_op", "pin", "unpin", "web_archive":
+            return false
+        default:
+            return true
+        }
+    }
+
+    /// Re-apply every on-disk `reader_op` (trx/ + leftover ops/). INSERT OR IGNORE.
+    func replayDiskReaderOps() {
+        queue.async { [weak self] in
+            guard let self, let root = self.syncRootURL() else { return }
+            var files: [URL] = []
+            for hostDir in (try? self.fm.contentsOfDirectory(
+                at: root.appendingPathComponent("trx", isDirectory: true),
+                includingPropertiesForKeys: nil
+            )) ?? [] {
+                files.append(contentsOf: self.listJson(in: hostDir))
+            }
+            for hostDir in (try? self.fm.contentsOfDirectory(
+                at: root.appendingPathComponent("ops", isDirectory: true),
+                includingPropertiesForKeys: nil
+            )) ?? [] {
+                files.append(contentsOf: self.listJson(in: hostDir))
+            }
+            let decoder = JSONDecoder()
+            var n = 0
+            self.database.performSyncWork {
+                for url in files {
+                    guard let data = try? Data(contentsOf: url),
+                          let op = try? decoder.decode(SyncOp.self, from: data),
+                          op.kind == "reader_op" else { continue }
+                    if self.applyOpLocked(op) { n += 1 }
+                }
+            }
+            if n > 0 {
+                print("[Sync] replayDiskReaderOps applied \(n)")
+            }
+        }
+    }
+
+    private func listJson(in dir: URL) -> [URL] {
+        ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }
     }
 
     private func appliedKey(host: String) -> String { "sync.applied.\(host)" }
