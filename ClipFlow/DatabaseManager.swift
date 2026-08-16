@@ -2437,17 +2437,8 @@ final class DatabaseManager: ObservableObject {
         performReadSync {
             guard let db = self.readDB ?? self.db else { return }
             let idStr = id.uuidString
-            var sStmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, "SELECT reader_state FROM clipboard_items WHERE id = ?;", -1, &sStmt, nil) == SQLITE_OK {
-                self.bindText(sStmt, 1, idStr)
-                if sqlite3_step(sStmt) == SQLITE_ROW,
-                   let raw = sqlite3_column_text(sStmt, 0).map({ String(cString: $0) }),
-                   let data = raw.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    state = obj
-                }
-            }
-            sqlite3_finalize(sStmt)
+            // reader_state is a cache. Ops are the source of truth — a stale
+            // snapshot (e.g. restored from an older backup) must not hide highlights.
             var oStmt: OpaquePointer?
             if sqlite3_prepare_v2(
                 db,
@@ -2475,6 +2466,14 @@ final class DatabaseManager: ObservableObject {
                 }
             }
             sqlite3_finalize(oStmt)
+            var rebuilt: [String: Any] = [:]
+            for row in ops {
+                let kind = row["kind"] as? String ?? ""
+                let ts = row["ts"] as? Double ?? 0
+                let payload = row["payload"] as? [String: Any] ?? [:]
+                self.applyReaderOp(&rebuilt, kind: kind, payload: payload, ts: ts)
+            }
+            state = rebuilt
         }
         return (state, ops)
     }
