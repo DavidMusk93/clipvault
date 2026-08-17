@@ -212,6 +212,11 @@ class ClipboardViewModel: ObservableObject {
             if let pdfData = item.pdfData {
                 pasteboard.setData(pdfData, forType: .pdf)
             }
+        case .note:
+            if let text = item.textContent {
+                pasteboard.declareTypes([.string], owner: nil)
+                pasteboard.setString(text, forType: .string)
+            }
         case .html:
             // Always public.utf8-plain-text — never public.html (avoids re-capture as type=html).
             let plain: String? = {

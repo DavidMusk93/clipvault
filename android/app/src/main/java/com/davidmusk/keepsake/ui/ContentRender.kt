@@ -90,6 +90,7 @@ fun typeStyle(type: String): TypeStyle = when (type.lowercase()) {
     "rtf" -> TypeStyle("富文本", Icons.Default.Description, Color(0xFFEF6C00))
     "pdf" -> TypeStyle("PDF", Icons.Default.PictureAsPdf, Color(0xFFC62828))
     "text" -> TypeStyle("文本", Icons.Default.TextFields, Color(0xFFC47A2C)) // Honey brand
+    "note" -> TypeStyle("笔记", Icons.Default.Description, Color(0xFFC47A2C))
     "file" -> TypeStyle("文件", Icons.Default.FolderOpen, Color(0xFF455A64))
     else -> TypeStyle(
         if (type.isBlank()) "其他" else type,

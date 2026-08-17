@@ -10,6 +10,7 @@ enum ClipboardType: String, Codable {
     case rtf
     case pdf
     case html
+    case note
     case other
 }
 
@@ -174,6 +175,11 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
             return "Rich Text"
         case .pdf:
             return "PDF"
+        case .note:
+            if let text = textContent {
+                return String(text.prefix(120))
+            }
+            return "笔记"
         case .html:
             if let text = textContent, !text.isEmpty {
                 return String(text.prefix(200))

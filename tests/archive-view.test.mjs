@@ -48,6 +48,12 @@ test('public tunnel hosts require TOTP session, Access JWT, or optional origin t
   assert.match(auth, /CCHmacAlgorithm\(kCCHmacAlgSHA1\)/);
 });
 
+test('compose notes use CAS image sha and a dedicated type', () => {
+  assert.match(swift, /handleComposeSave/);
+  assert.match(swift, /\/api\/compose/);
+  assert.match(swift, /isCompose/);
+});
+
 test('public tunnel path /clipvault is stripped to local routes', () => {
   assert.match(swift, /static let publicPathPrefix = "\/clipvault"/);
   assert.match(swift, /stripPublicPrefix/);

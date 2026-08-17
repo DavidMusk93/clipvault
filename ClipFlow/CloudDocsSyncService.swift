@@ -45,7 +45,7 @@ final class CloudDocsSyncService {
         var opId: String
         var host: String
         var seq: Int
-        /// `upsert` | `tombstone` | `touch` | `user_evaluation` | `pin` | `unpin` | `web_archive` | `reader_op`
+        /// `upsert` | `tombstone` | `touch` | `user_evaluation` | `pin` | `unpin` | `web_archive` | `reader_op` | `compose`
         var kind: String
         var itemId: String
         var contentHash: String?
@@ -334,6 +334,25 @@ final class CloudDocsSyncService {
             out.append(k)
         }
         return out
+    }
+
+    func recordLocalCompose(item: ClipboardItem) {
+        guard config.enabled else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            let keys = ComposeNotes.blobKeys(in: item.textContent ?? "")
+            var op = self.makeOp(
+                kind: "compose",
+                itemId: item.id.uuidString,
+                item: item,
+                blobKeys: keys.isEmpty ? nil : keys
+            )
+            op.type = ClipboardType.note.rawValue
+            op.sourceApp = ComposeNotes.sourceApp
+            op.note = "compose"
+            self.enqueue(op)
+            self.scheduleDrain(reason: "compose")
+        }
     }
 
     func recordLocalReaderOp(itemId: UUID, opId: String, kind: String, payload: [String: Any], ts: Double, source: String) {
@@ -813,7 +832,7 @@ final class CloudDocsSyncService {
     }
 
     private func needsBlob(op: SyncOp, key: String) -> Bool {
-        if op.kind == "web_archive" { return true }
+        if op.kind == "web_archive" || op.kind == "compose" { return true }
         // Text-only upserts may list empty blobKeys; if key listed, require it for image/rtf/pdf types.
         guard let t = op.type else { return true }
         switch t {
@@ -858,6 +877,20 @@ final class CloudDocsSyncService {
                 metaJSON: op.note,
                 htmlFallback: op.htmlContent
             )
+        case "compose":
+            return database.applySyncComposeLocked(
+                id: uuid,
+                opId: op.opId,
+                timestamp: Date(timeIntervalSince1970: op.wallTs),
+                contentHash: op.contentHash ?? ComposeNotes.contentHash(id: uuid, body: op.textContent ?? ""),
+                body: op.textContent ?? "",
+                refURLString: op.url,
+                blobKeysJSON: {
+                    guard let keys = op.blobKeys, let data = try? JSONSerialization.data(withJSONObject: keys) else { return nil }
+                    return String(data: data, encoding: .utf8)
+                }(),
+                source: "sync:\(op.host)"
+            )
         case "reader_op":
             return database.applySyncReaderOpLocked(
                 itemId: uuid,
@@ -890,7 +923,7 @@ final class CloudDocsSyncService {
     /// Failed pin/archive/reader while the clip is missing must retry.
     private func applyIsIdempotentSuccess(_ op: SyncOp) -> Bool {
         switch op.kind {
-        case "reader_op", "pin", "unpin", "web_archive":
+        case "reader_op", "pin", "unpin", "web_archive", "compose":
             return false
         default:
             return true

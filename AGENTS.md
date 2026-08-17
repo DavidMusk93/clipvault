@@ -9,9 +9,9 @@
 | 项 | 值 |
 | --- | --- |
 | **产品名** | **ClipVault** |
-| **一句话** | 你的剪贴板记忆 |
-| **定位** | 个人 Mac 上的剪贴板记忆层：捕获 · 检索 · OCR · 本机 Web · iCloud Drive 备份 |
-| **不是** | 企业协同剪贴板、云笔记、又一个 `ClipXxx` 工具箱皮肤 |
+| **一句话** | 遇到的留下，想到的写下 |
+| **定位** | 个人记忆：静默捕获世界 + 主动写下自己。Mac 源站 · 本机/公网 Web · 手机当野外记事本。检索 · OCR · 归档 · Compose |
+| **不是** | 企业协同剪贴板、Notion/备忘录替代品、又一个 `ClipXxx` 工具箱皮肤 |
 | **仓库历史名** | GitHub / 目录可能仍叫 `ClipView`；二进制/模块可能仍叫 `ClipFlow*` |
 | **品牌规则** | **对外文案、README、窗口标题、用户可见 UI 字符串 → ClipVault**。内部 SPM target / LaunchAgent label / 数据目录可仍为 ClipFlow* 或历史 Keepsake 路径；禁止把 ClipView/ClipFlow 当产品品牌回潮 |
 
@@ -48,8 +48,8 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 
 **目标**：随着批评与取舍累积，ClipVault 形成 **Owner 个性化的设计语言**，而不是通用 Material/工具腔皮肤。
 
-**产品哲学（演进新能力前必读）**：nmem `clipvault_design_philosophy_layered_memory_20260814`（身份/五层）+ `clipvault_reader_learning_layer_sqlite_20260814`（阅读态进 SQLite）  
-一句话：私人游乐场 + 学习工具。正确性交给引擎，陪伴感留在产品里；划线/评论/续读是个人知识，进 SQLite，不进浏览器一次性库。
+**产品哲学（演进新能力前必读）**：nmem `clipvault_design_philosophy_layered_memory_20260814`（身份/分层）+ `clipvault_reader_learning_layer_sqlite_20260814`（阅读态进 SQLite）+ `c2c20497-bc52-4204-99fc-34191bb98a99`（Compose 野外记事本）  
+一句话：私人游乐场 + 学习工具。正确性交给引擎，陪伴感留在产品里。**Capture 不可变**；**Compose 可变**（投影 + append-only `compose_ops`）。禁止就地改剪贴板正文当笔记。
 
 **评论 header 对齐（修前必搜 nmem，不靠会话记忆）**：`clipvault_reader_comment_header_strut_20260814`（怎么修）+ `clipvault_reader_header_align_fail_loop_20260814`（为何翻车）+ `owner_nmem_only_not_grok_session_memory_20260814`（Owner：依据只认 nmem）。
 
@@ -86,6 +86,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | Do | Don't |
 | --- | --- |
 | **Capture payload 不可变**；评价：`user_evaluations` append-only；星级可改；紧凑星在 sheet header；铅笔入口；历史时间线；禁主卡片 body | 阶段芯片；评价 strip 进 masonry；为大星行浪费 sheet 垂直空间 |
+| **Compose**：`type=note` 新行 + `compose_ops`；图进 CAS `![](/api/image?sha=)`；跨机 `kind=compose` | 改 capture 正文当笔记；卡片上堆富文本工具栏；外链图床 |
 | 一次做对：分页、多档图、备份一致性、CI 对齐生产路径 | P0/P1 菜单式半吊子交付 |
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |

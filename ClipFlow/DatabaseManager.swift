@@ -498,6 +498,19 @@ final class DatabaseManager: ObservableObject {
         );
         CREATE INDEX IF NOT EXISTS idx_eval_item_ts ON user_evaluations(item_id, ts DESC);
         """)
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS compose_ops (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            ts REAL NOT NULL,
+            title TEXT,
+            body TEXT NOT NULL,
+            ref_item_id TEXT,
+            blob_keys TEXT,
+            source TEXT NOT NULL DEFAULT 'web'
+        );
+        """)
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_compose_ops_item_ts ON compose_ops(item_id, ts ASC);")
         // Ensure aux tables exist on upgraded DBs.
         execQuiet("""
         CREATE TABLE IF NOT EXISTS clipboard_events (
@@ -1597,6 +1610,7 @@ final class DatabaseManager: ObservableObject {
         cursor: ClipCursor? = nil,
         query: String? = nil,
         trashOnly: Bool = false,
+        typeFilter: String? = nil,
         completion: @escaping (ClipPage) -> Void
     ) {
         let run: () -> Void = { [weak self] in
@@ -1610,31 +1624,32 @@ final class DatabaseManager: ObservableObject {
             let q = query?.trimmingCharacters(in: .whitespacesAndNewlines)
             let hasQuery = !(q ?? "").isEmpty
             let ftsMatch = hasQuery ? self.ftsMatchQuery(from: q!) : nil
+            let typeEq = typeFilter.flatMap { ClipboardType(rawValue: $0) }?.rawValue
 
             var items: [ClipboardItem] = []
 
             if trashOnly {
                 // Trash view: no FTS; optional LIKE on alive fields of deleted rows.
                 if hasQuery, let q = q {
-                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true)
+                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true, typeFilter: typeEq)
                 } else {
-                    items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true)
+                    items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true, typeFilter: typeEq)
                 }
             } else if hasQuery, let match = ftsMatch {
                 // skill §5: FTS first. LIKE only if FTS empty — never unindexed html scan.
-                items = self.runSearchFTS(db: db, match: match, cursor: cursor, fetchLimit: fetchLimit)
+                items = self.runSearchFTS(db: db, match: match, cursor: cursor, fetchLimit: fetchLimit, typeFilter: typeEq)
                 if items.isEmpty, let q = q {
                     // Trigram already covers text/ocr/html. LIKE only fields not in FTS.
                     let narrow = self.ftsTokenizer == "trigram" && q.count >= 3
-                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, narrowFields: narrow)
+                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, narrowFields: narrow, typeFilter: typeEq)
                 }
             } else if hasQuery, let q = q {
                 // Short query (<3) with trigram: LIKE path (no html_content).
-                items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit)
+                items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, typeFilter: typeEq)
             } else {
-                items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: trashOnly)
+                items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: trashOnly, typeFilter: typeEq)
                 if !trashOnly, cursor == nil {
-                    let pins = self.runPinned(db: db, fetchLimit: 40)
+                    let pins = self.runPinned(db: db, fetchLimit: 40, typeFilter: typeEq)
                     if !pins.isEmpty {
                         let pinIds = Set(pins.map(\.id))
                         items = pins + items.filter { !pinIds.contains($0.id) }
@@ -1696,7 +1711,8 @@ final class DatabaseManager: ObservableObject {
         db: OpaquePointer,
         match: String,
         cursor: ClipCursor?,
-        fetchLimit: Int
+        fetchLimit: Int,
+        typeFilter: String? = nil
     ) -> [ClipboardItem] {
         var sql = """
         SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, \(Self.listHtmlSQLAliased), c.source_app, c.ocr_text,
@@ -1706,6 +1722,9 @@ final class DatabaseManager: ObservableObject {
         JOIN clipboard_items c ON c.id = f.id
         WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL
         """
+        if typeFilter != nil {
+            sql += " AND c.type = ?"
+        }
         if cursor != nil {
             sql += " AND \(Self.keysetSQLAliased)"
         }
@@ -1720,6 +1739,9 @@ final class DatabaseManager: ObservableObject {
         }
         var bind = 1
         bindText(stmt, Int32(bind), match); bind += 1
+        if let typeFilter {
+            bindText(stmt, Int32(bind), typeFilter); bind += 1
+        }
         if let cursor = cursor {
             bind = bindKeysetCursor(stmt, startBind: bind, cursor: cursor)
         }
@@ -1737,13 +1759,17 @@ final class DatabaseManager: ObservableObject {
         cursor: ClipCursor?,
         fetchLimit: Int,
         trashOnly: Bool = false,
-        narrowFields: Bool = false
+        narrowFields: Bool = false,
+        typeFilter: String? = nil
     ) -> [ClipboardItem] {
         var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
             sql += "deleted_at IS NULL"
+        }
+        if typeFilter != nil {
+            sql += " AND type = ?"
         }
         // skill §5/§7: no unindexed LIKE on html_content. FTS covers text/ocr/html.
         if narrowFields {
@@ -1764,6 +1790,9 @@ final class DatabaseManager: ObservableObject {
         var items: [ClipboardItem] = []
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         var bind = 1
+        if let typeFilter {
+            bindText(stmt, Int32(bind), typeFilter); bind += 1
+        }
         let like = "%\(q)%"
         let likeSlots = narrowFields ? 3 : 6
         for _ in 0..<likeSlots {
@@ -1780,12 +1809,15 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
-    private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false) -> [ClipboardItem] {
+    private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false, typeFilter: String? = nil) -> [ClipboardItem] {
         var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
             sql += "deleted_at IS NULL AND pinned_at IS NULL"
+        }
+        if typeFilter != nil {
+            sql += " AND type = ?"
         }
         if cursor != nil {
             sql += " AND " + Self.keysetSQL
@@ -1800,6 +1832,9 @@ final class DatabaseManager: ObservableObject {
         var items: [ClipboardItem] = []
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         var bind = 1
+        if let typeFilter {
+            bindText(stmt, Int32(bind), typeFilter); bind += 1
+        }
         if let cursor = cursor {
             bind = bindKeysetCursor(stmt, startBind: bind, cursor: cursor)
         }
@@ -1811,17 +1846,24 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
-    private func runPinned(db: OpaquePointer, fetchLimit: Int) -> [ClipboardItem] {
-        let sql = """
+    private func runPinned(db: OpaquePointer, fetchLimit: Int, typeFilter: String? = nil) -> [ClipboardItem] {
+        var sql = """
         SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha
         FROM clipboard_items
         WHERE deleted_at IS NULL AND pinned_at IS NOT NULL
-        ORDER BY pinned_at DESC, id DESC LIMIT ?;
         """
+        if typeFilter != nil {
+            sql += " AND type = ?"
+        }
+        sql += " ORDER BY pinned_at DESC, id DESC LIMIT ?;"
         var stmt: OpaquePointer?
         var items: [ClipboardItem] = []
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        sqlite3_bind_int(stmt, 1, Int32(max(1, min(fetchLimit, 40))))
+        var bind = 1
+        if let typeFilter {
+            bindText(stmt, Int32(bind), typeFilter); bind += 1
+        }
+        sqlite3_bind_int(stmt, Int32(bind), Int32(max(1, min(fetchLimit, 40))))
         while sqlite3_step(stmt) == SQLITE_ROW {
             if let item = rowToItem(stmt: stmt) { items.append(item) }
         }
@@ -2219,6 +2261,236 @@ final class DatabaseManager: ObservableObject {
             sqlite3_finalize(stmt)
             DispatchQueue.main.async { completion(rows) }
         }
+    }
+
+    // MARK: - Compose (authored notes; not capture)
+
+    func saveComposeNote(
+        id: UUID?,
+        title: String?,
+        body: String,
+        refId: String?,
+        source: String = "web",
+        completion: @escaping (ClipboardItem?, String?) -> Void
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self else {
+                DispatchQueue.main.async { completion(nil, "internal") }
+                return
+            }
+            do {
+                let item = try self.saveComposeNoteLocked(
+                    id: id, title: title, body: body, refId: refId, source: source
+                )
+                DispatchQueue.main.async { completion(item, nil) }
+            } catch {
+                DispatchQueue.main.async { completion(nil, error.localizedDescription) }
+            }
+        }
+    }
+
+    enum ComposeError: LocalizedError {
+        case empty
+        case notANote
+        case missing
+        var errorDescription: String? {
+            switch self {
+            case .empty: return "先写点什么"
+            case .notANote: return "只能改自己写下的笔记"
+            case .missing: return "笔记不存在"
+            }
+        }
+    }
+
+    @discardableResult
+    func saveComposeNoteLocked(
+        id existingId: UUID?,
+        title: String?,
+        body rawBody: String,
+        refId: String?,
+        source: String
+    ) throws -> ClipboardItem {
+        guard let db = db else { throw ComposeError.missing }
+        let body = ComposeNotes.normalizedBody(title: title, body: rawBody)
+        guard !body.isEmpty else { throw ComposeError.empty }
+        let now = Date()
+        let id: UUID
+        let isUpdate: Bool
+        if let existingId {
+            guard let current = fetchItemByIdLocked(existingId.uuidString, on: db) else {
+                throw ComposeError.missing
+            }
+            guard current.type == .note else { throw ComposeError.notANote }
+            id = existingId
+            isUpdate = true
+        } else {
+            id = UUID()
+            isUpdate = false
+        }
+        let hash = ComposeNotes.contentHash(id: id, body: body)
+        let refURL = ComposeNotes.refURL(from: refId)
+        let keys = ComposeNotes.blobKeys(in: body)
+        let keysJSON = (try? JSONSerialization.data(withJSONObject: keys)).flatMap { String(data: $0, encoding: .utf8) }
+
+        if isUpdate {
+            let sql = """
+            UPDATE clipboard_items SET
+                timestamp = ?, content_hash = ?, text_content = ?, url = ?, source_app = ?
+            WHERE id = ? AND type = 'note';
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw ComposeError.missing }
+            sqlite3_bind_double(stmt, 1, now.timeIntervalSince1970)
+            bindText(stmt, 2, hash)
+            bindText(stmt, 3, body)
+            if let refURL { bindText(stmt, 4, refURL.absoluteString) } else { sqlite3_bind_null(stmt, 4) }
+            bindText(stmt, 5, ComposeNotes.sourceApp)
+            bindText(stmt, 6, id.uuidString)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else { throw ComposeError.missing }
+        } else {
+            let item = ClipboardItem(
+                id: id,
+                timestamp: now,
+                type: .note,
+                contentHash: hash,
+                textContent: body,
+                url: refURL,
+                sourceApp: ComposeNotes.sourceApp,
+                firstSeenAt: now
+            )
+            guard insertNewItem(item, db: db) else { throw ComposeError.missing }
+        }
+        persistTextHash(
+            id: id.uuidString,
+            item: ClipboardItem(id: id, timestamp: now, type: .note, contentHash: hash, textContent: body)
+        )
+        upsertFTS(id: id.uuidString, text: body, ocr: nil, source: ComposeNotes.sourceApp, html: nil)
+        insertComposeOpLocked(
+            itemId: id.uuidString,
+            ts: now.timeIntervalSince1970,
+            title: title,
+            body: body,
+            refItemId: refId,
+            blobKeys: keysJSON,
+            source: source
+        )
+        _ = recordClipboardEvent(
+            itemId: id.uuidString,
+            contentHash: hash,
+            eventTs: now,
+            type: ClipboardType.note.rawValue,
+            sourceApp: ComposeNotes.sourceApp,
+            kind: isUpdate ? "compose_edit" : "compose",
+            detail: isUpdate ? "edit" : "create"
+        )
+        _ = appendOperationLogSync(
+            action: isUpdate ? "compose_edit" : "compose_create",
+            itemId: id.uuidString,
+            contentHash: hash,
+            detail: "keys=\(keys.count)",
+            source: source
+        )
+        guard let out = fetchItemByIdLocked(id.uuidString, on: db) else { throw ComposeError.missing }
+        return out
+    }
+
+    private func insertComposeOpLocked(
+        itemId: String,
+        ts: Double,
+        title: String?,
+        body: String,
+        refItemId: String?,
+        blobKeys: String?,
+        source: String
+    ) {
+        guard let db = db else { return }
+        let sql = """
+        INSERT OR IGNORE INTO compose_ops (id, item_id, ts, title, body, ref_item_id, blob_keys, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        bindText(stmt, 1, UUID().uuidString)
+        bindText(stmt, 2, itemId)
+        sqlite3_bind_double(stmt, 3, ts)
+        bindText(stmt, 4, title)
+        bindText(stmt, 5, body)
+        bindText(stmt, 6, refItemId)
+        bindText(stmt, 7, blobKeys)
+        bindText(stmt, 8, source)
+        _ = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+    }
+
+    @discardableResult
+    func applySyncComposeLocked(
+        id: UUID,
+        opId: String,
+        timestamp: Date,
+        contentHash: String,
+        body: String,
+        refURLString: String?,
+        blobKeysJSON: String?,
+        source: String
+    ) -> Bool {
+        guard let db = db else { return false }
+        let body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return false }
+        if let existing = fetchItemByIdLocked(id.uuidString, on: db), existing.type != .note {
+            return false
+        }
+        if rowExists(id: id.uuidString) {
+            let sql = """
+            UPDATE clipboard_items SET
+                timestamp = MAX(timestamp, ?), content_hash = ?, text_content = ?, url = COALESCE(?, url),
+                source_app = ?, type = 'note'
+            WHERE id = ? AND type = 'note';
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            sqlite3_bind_double(stmt, 1, timestamp.timeIntervalSince1970)
+            bindText(stmt, 2, contentHash)
+            bindText(stmt, 3, body)
+            bindText(stmt, 4, refURLString)
+            bindText(stmt, 5, ComposeNotes.sourceApp)
+            bindText(stmt, 6, id.uuidString)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE else { return false }
+        } else {
+            let url = refURLString.flatMap { URL(string: $0) }
+            let item = ClipboardItem(
+                id: id,
+                timestamp: timestamp,
+                type: .note,
+                contentHash: contentHash,
+                textContent: body,
+                url: url,
+                sourceApp: ComposeNotes.sourceApp,
+                firstSeenAt: timestamp
+            )
+            guard insertNewItem(item, db: db) else { return false }
+        }
+        upsertFTS(id: id.uuidString, text: body, ocr: nil, source: ComposeNotes.sourceApp, html: nil)
+        let sql = """
+        INSERT OR IGNORE INTO compose_ops (id, item_id, ts, title, body, ref_item_id, blob_keys, source)
+        VALUES (?, ?, ?, NULL, ?, ?, ?, ?);
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, opId)
+            bindText(stmt, 2, id.uuidString)
+            sqlite3_bind_double(stmt, 3, timestamp.timeIntervalSince1970)
+            bindText(stmt, 4, body)
+            bindText(stmt, 5, ComposeNotes.refId(from: refURLString.flatMap { URL(string: $0) }))
+            bindText(stmt, 6, blobKeysJSON)
+            bindText(stmt, 7, source)
+            _ = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+        return true
     }
 
     // MARK: - Web archive (manual, useful-first)

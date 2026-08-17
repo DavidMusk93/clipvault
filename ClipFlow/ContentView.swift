@@ -409,6 +409,7 @@ struct TypeBadge: View {
         case .rtf: return .purple
         case .pdf: return .red
         case .html: return .teal
+        case .note: return Color(red: 0.77, green: 0.48, blue: 0.17)
         case .other: return .gray
         }
     }
@@ -498,6 +499,10 @@ struct ItemDetailView: View {
         case .html:
             if let html = item.htmlContent {
                 HTMLContent(html: html)
+            }
+        case .note:
+            if let text = item.textContent {
+                TextContent(text: text)
             }
         case .other:
             OtherContent()

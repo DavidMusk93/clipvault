@@ -28,6 +28,7 @@ Web 与 Android 可有平台壳差异，**语义色必须一致**。
 | type | 中文 | Hex | 软底 α≈12% |
 | --- | --- | --- | --- |
 | `text` | 文本 | `#C47A2C` | Honey |
+| `note` | 笔记 | `#C47A2C` | Honey（主动写下，与捕获文本同色不同字） |
 | `image` | 图片 | `#2E7D32` | 绿 |
 | `url` | 链接 | `#1565C0` | 蓝 |
 | `html` | HTML | `#6A1B9A` | 紫 |
@@ -112,7 +113,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | 灰 badge 通吃类型 | 扫一眼分不清介质 |
 | 堆彩虹装饰、无语义 | 像玩具不是器物 |
 | 为「好看」改交互语义色 | 色 = 信息通道 |
-| 就地改 capture 正文当「备注」 | 毁掉 hash/同步/审计 |
+| 就地改 capture 正文当「备注」或当笔记 | 毁掉 hash/同步/审计；Compose 必须是新的 `type=note` 行 |
 | 评价内容挂主卡片 / 多阶段芯片 | 触发 masonry 重绘；交互过重 |
 
 ## 交互密度（轻量 & lazy）

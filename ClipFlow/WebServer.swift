@@ -167,16 +167,56 @@ class WebServer {
     }
     
     private func receiveRequest(from connection: NWConnection) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, isComplete, error in
-            guard let self = self, let data = data, !data.isEmpty else {
-                if isComplete || error != nil {
-                    connection.cancel()
-                }
+        accumulateRequest(from: connection, buffer: Data())
+    }
+
+    private static let maxRequestBytes = 8 * 1024 * 1024
+
+    private func accumulateRequest(from connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self else {
+                connection.cancel()
                 return
             }
-            
-            self.handleRequest(data: data, connection: connection)
+            var buf = buffer
+            if let data, !data.isEmpty { buf.append(data) }
+            if buf.count > Self.maxRequestBytes {
+                self.sendErrorResponse(connection: connection, status: 413, message: "Payload Too Large")
+                return
+            }
+            if self.httpMessageComplete(buf) || isComplete {
+                if buf.isEmpty {
+                    connection.cancel()
+                    return
+                }
+                self.handleRequest(data: buf, connection: connection)
+                return
+            }
+            if error != nil {
+                connection.cancel()
+                return
+            }
+            self.accumulateRequest(from: connection, buffer: buf)
         }
+    }
+
+    private func httpMessageComplete(_ data: Data) -> Bool {
+        guard let sep = data.range(of: Data("\r\n\r\n".utf8)) else { return false }
+        let header = String(data: data[..<sep.lowerBound], encoding: .utf8) ?? ""
+        var contentLength: Int?
+        for line in header.split(separator: "\r\n").dropFirst() {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            if parts[0].trimmingCharacters(in: .whitespaces).lowercased() == "content-length" {
+                contentLength = Int(parts[1].trimmingCharacters(in: .whitespaces))
+            }
+        }
+        if let contentLength {
+            return data.count - sep.upperBound >= contentLength
+        }
+        let first = header.split(separator: "\r\n").first.map(String.init) ?? ""
+        return first.hasPrefix("GET ") || first.hasPrefix("HEAD ")
+            || first.hasPrefix("OPTIONS ") || first.hasPrefix("DELETE ")
     }
     
     private func handleRequest(data: Data, connection: NWConnection) {
@@ -248,6 +288,10 @@ class WebServer {
             handleArchivePost(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/archive/reader" {
             handleReaderPost(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/compose" {
+            handleComposeSave(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/compose/image" {
+            handleComposeImage(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/pin" {
             handleClipPin(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/archive") {
@@ -1097,7 +1141,58 @@ class WebServer {
             dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb"
             dict["fullUrl"] = "/api/image?id=\(item.id.uuidString)&size=full"
         }
+        if item.type == .note {
+            dict["isCompose"] = true
+            if let ref = ComposeNotes.refId(from: item.url) {
+                dict["composeRefId"] = ref
+            }
+        }
         return dict
+    }
+
+    /// POST /api/compose  { id?, title?, body, refId? }
+    private func handleComposeSave(data: Data, connection: NWConnection) {
+        guard let obj = jsonBody(from: data) else {
+            sendJSON(["ok": false, "message": "expected {body}"], connection: connection)
+            return
+        }
+        let body = (obj["body"] as? String) ?? ""
+        let title = obj["title"] as? String
+        let refId = obj["refId"] as? String
+        let id = (obj["id"] as? String).flatMap { UUID(uuidString: $0) }
+        database.saveComposeNote(id: id, title: title, body: body, refId: refId, source: "web") { [weak self] item, err in
+            guard let self else { return }
+            guard let item else {
+                self.sendJSON(["ok": false, "message": err ?? "保存失败"], connection: connection)
+                return
+            }
+            CloudDocsSyncService.shared?.recordLocalCompose(item: item)
+            self.broadcastSSE(event: "update")
+            self.sendJSON(["ok": true, "item": self.itemToJSON(item)], connection: connection)
+        }
+    }
+
+    /// POST /api/compose/image  { data: base64, mime? }
+    private func handleComposeImage(data: Data, connection: NWConnection) {
+        guard let obj = jsonBody(from: data),
+              var raw = obj["data"] as? String else {
+            sendJSON(["ok": false, "message": "expected {data}"], connection: connection)
+            return
+        }
+        if let comma = raw.firstIndex(of: ","), raw.lowercased().contains("base64") {
+            raw = String(raw[raw.index(after: comma)...])
+        }
+        raw = raw.replacingOccurrences(of: "\\s", with: "", options: .regularExpression)
+        guard let bytes = Data(base64Encoded: raw), !bytes.isEmpty, bytes.count <= 6_000_000 else {
+            sendJSON(["ok": false, "message": "图片太大或无法解码"], connection: connection)
+            return
+        }
+        let sha = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        guard database.writeBlobFile(hash: sha, data: bytes) else {
+            sendJSON(["ok": false, "message": "写入失败"], connection: connection)
+            return
+        }
+        sendJSON(["ok": true, "sha": sha, "url": "/api/image?sha=\(sha)"], connection: connection)
     }
 
     /// POST /api/archive  { url, itemId? }
@@ -1636,6 +1731,7 @@ class WebServer {
             ?? items.first(where: { $0.name == "q" })?.value
         let view = items.first(where: { $0.name == "view" })?.value
         let trashOnly = (view == "trash")
+        let typeFilter = items.first(where: { $0.name == "type" })?.value
         if let idStr = items.first(where: { $0.name == "id" })?.value, let uuid = UUID(uuidString: idStr) {
             database.fetchItem(id: uuid) { [weak self] item in
                 guard let self else { return }
@@ -1646,7 +1742,7 @@ class WebServer {
             return
         }
 
-        database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly) { [weak self] page in
+        database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter) { [weak self] page in
             guard let self = self else { return }
             let jsonItems = page.items.map { self.itemToJSON($0) }
             var payload: [String: Any] = [
@@ -1798,14 +1894,40 @@ class WebServer {
     }
 
     private func sendImage(path: String, connection: NWConnection) {
-        guard let comps = URLComponents(string: "http://localhost\(path)"),
-              let idValue = comps.queryItems?.first(where: { $0.name == "id" })?.value,
-              let uuid = UUID(uuidString: idValue) else {
+        guard let comps = URLComponents(string: "http://localhost\(path)") else {
             sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
             return
         }
         let sizeRaw = comps.queryItems?.first(where: { $0.name == "size" })?.value ?? "full"
         let tier = ImageSizeTier(rawValue: sizeRaw) ?? .full
+
+        if let sha = comps.queryItems?.first(where: { $0.name == "sha" })?.value?.lowercased(),
+           ArchiveImageInliner.isAssetSHA(sha) {
+            guard let data = database.readBlobFile(hash: sha), !data.isEmpty else {
+                sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+                return
+            }
+            guard let (body, contentType) = encodeImage(data, tier: tier) else {
+                sendErrorResponse(connection: connection, status: 500, message: "Encode Failed")
+                return
+            }
+            let cache = tier == .full ? "private, max-age=120" : "private, max-age=86400"
+            sendBinary(
+                status: 200,
+                reason: "OK",
+                contentType: contentType,
+                body: body,
+                connection: connection,
+                extraHeaders: [("Cache-Control", cache), ("X-Image-Size", tier.rawValue)]
+            )
+            return
+        }
+
+        guard let idValue = comps.queryItems?.first(where: { $0.name == "id" })?.value,
+              let uuid = UUID(uuidString: idValue) else {
+            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+            return
+        }
 
         database.fetchImageData(id: uuid) { [weak self] imageData in
             guard let self = self, let data = imageData, !data.isEmpty else {

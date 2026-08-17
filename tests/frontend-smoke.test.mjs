@@ -73,6 +73,13 @@ test('product brand is ClipVault in title', () => {
   assert.match(indexHtml, /<title>ClipVault<\/title>/);
 });
 
+test('compose sheet and note chip exist', () => {
+  assert.match(indexHtml, /id="composeSheet"/);
+  assert.match(indexHtml, /id="composeFab"/);
+  assert.match(indexHtml, /data-type="note"/);
+  assert.match(indexHtml, /\/api\/compose/);
+});
+
 test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {
   assert.match(indexHtml, /notes-rich\$\{tiny\}/, 'structured HTML may use notes-rich');
   assert.match(indexHtml, /function looksLikeCode/);
