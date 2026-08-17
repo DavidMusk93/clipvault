@@ -6,6 +6,22 @@ import CoreGraphics
 import CryptoKit
 
 class WebServer {
+    /// Public path on <tunnel-domain>; local :8080 stays `/`. Incoming `/clipvault` is stripped.
+    static let publicPathPrefix = "/clipvault"
+
+    static func stripPublicPrefix(_ path: String) -> String {
+        let p = publicPathPrefix
+        if path == p { return "/" }
+        if path.hasPrefix(p + "/") {
+            let rest = String(path.dropFirst(p.count))
+            return rest.isEmpty ? "/" : rest
+        }
+        if path.hasPrefix(p + "?") {
+            return "/" + String(path.dropFirst(p.count))
+        }
+        return path
+    }
+
     private var listener: NWListener?
     private let port: UInt16
     private let database: DatabaseManager
@@ -142,7 +158,7 @@ class WebServer {
         }
         
         let method = parts[0]
-        let path = parts[1]
+        let path = Self.stripPublicPrefix(parts[1])
         
         let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
         if method == "OPTIONS" {

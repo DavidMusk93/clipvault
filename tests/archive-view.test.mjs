@@ -35,6 +35,11 @@ test('archive view promotes weixin lazy data-src over 1px svg src', () => {
   assert.match(swift, /data:image\/svg/);
 });
 
+test('public tunnel path /clipvault is stripped to local routes', () => {
+  assert.match(swift, /static let publicPathPrefix = "\/clipvault"/);
+  assert.match(swift, /stripPublicPrefix/);
+});
+
 test('archive images are CAS assets, not publisher CDN', () => {
   const inliner = readFileSync(join(root, 'ClipFlow/ArchiveImageInliner.swift'), 'utf8');
   assert.match(inliner, /\/api\/archive\/asset\?sha=/);
