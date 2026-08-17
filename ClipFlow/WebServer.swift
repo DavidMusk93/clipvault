@@ -31,10 +31,10 @@ class WebServer {
         return false
     }
 
-    /// Public tunnel hosts are closed unless Cloudflare Access signed the request
-    /// or CLIPVAULT_ORIGIN_TOKEN matches (Bearer / X-ClipVault-Token / Basic).
+    /// Public tunnel hosts are closed unless a TOTP session cookie, Cloudflare Access JWT,
+    /// or optional CLIPVAULT_ORIGIN_TOKEN (scripts) is present.
     static func publicRequestAuthorized(_ headers: [String: String]) -> Bool {
-        if let jwt = headers["cf-access-jwt-assertion"], !jwt.isEmpty { return true }
+        if ClipVaultAuth.shared.isSessionAuthorized(headers) { return true }
         guard let token = ProcessInfo.processInfo.environment["CLIPVAULT_ORIGIN_TOKEN"]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !token.isEmpty else {
@@ -43,24 +43,6 @@ class WebServer {
         if headers["x-clipvault-token"] == token { return true }
         let auth = headers["authorization"] ?? ""
         if auth == "Bearer \(token)" { return true }
-        if auth.lowercased().hasPrefix("basic ") {
-            let b64 = String(auth.dropFirst(6)).trimmingCharacters(in: .whitespaces)
-            if let data = Data(base64Encoded: b64),
-               let decoded = String(data: data, encoding: .utf8) {
-                let pass = decoded.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? decoded
-                if pass == token { return true }
-            }
-        }
-        if let cookie = headers["cookie"] {
-            for part in cookie.split(separator: ";") {
-                let kv = part.split(separator: "=", maxSplits: 1)
-                if kv.count == 2,
-                   kv[0].trimmingCharacters(in: .whitespaces) == "clipvault_token",
-                   kv[1].trimmingCharacters(in: .whitespaces) == token {
-                    return true
-                }
-            }
-        }
         return false
     }
 
@@ -215,13 +197,31 @@ class WebServer {
         let method = parts[0]
         let path = Self.stripPublicPrefix(parts[1])
         let headers = Self.requestHeaders(lines)
+        let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
+        let loopback = Self.isLoopbackRequest(headers)
 
-        if !Self.isLoopbackRequest(headers), !Self.publicRequestAuthorized(headers) {
-            sendUnauthorized(connection: connection)
+        if pathOnly == "/login/setup" {
+            if !loopback {
+                sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+                return
+            }
+            sendLoginHTML(ClipVaultAuth.shared.setupPageHTML(), connection: connection)
             return
         }
-        
-        let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
+        if pathOnly == "/login" {
+            handleLogin(method: method, data: data, connection: connection)
+            return
+        }
+        if pathOnly == "/logout" {
+            handleLogout(connection: connection)
+            return
+        }
+
+        if !loopback, !Self.publicRequestAuthorized(headers) {
+            sendUnauthorized(connection: connection, path: pathOnly)
+            return
+        }
+
         if method == "OPTIONS" {
             handleOptionsRequest(connection: connection)
         } else if method == "GET" || method == "HEAD" {
@@ -259,19 +259,84 @@ class WebServer {
         }
     }
     
-    private func sendUnauthorized(connection: NWConnection) {
-        let body = Data("""
-        <!DOCTYPE html><meta charset="utf-8"><title>ClipVault</title>
-        <p>This host is not public. Use Cloudflare Access, or set CLIPVAULT_ORIGIN_TOKEN.</p>
-        """.utf8)
+    private func sendUnauthorized(connection: NWConnection, path: String) {
+        if path.hasPrefix("/api/") {
+            let body = Data(#"{"error":"unauthorized"}"#.utf8)
+            sendBinary(
+                status: 401,
+                reason: "Unauthorized",
+                contentType: "application/json",
+                body: body,
+                connection: connection,
+                extraHeaders: [("Cache-Control", "no-store")]
+            )
+            return
+        }
         sendBinary(
-            status: 401,
-            reason: "Unauthorized",
+            status: 302,
+            reason: "Found",
             contentType: "text/html; charset=utf-8",
-            body: body,
+            body: Data(),
             connection: connection,
             extraHeaders: [
-                ("WWW-Authenticate", "Basic realm=\"ClipVault\""),
+                ("Location", "\(Self.publicPathPrefix)/login"),
+                ("Cache-Control", "no-store"),
+            ]
+        )
+    }
+
+    private func sendLoginHTML(_ html: String, connection: NWConnection) {
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: "text/html; charset=utf-8",
+            body: Data(html.utf8),
+            connection: connection,
+            extraHeaders: [("Cache-Control", "no-store")]
+        )
+    }
+
+    private func handleLogin(method: String, data: Data, connection: NWConnection) {
+        if method == "GET" || method == "HEAD" {
+            sendLoginHTML(ClipVaultAuth.shared.loginPageHTML(error: nil), connection: connection)
+            return
+        }
+        guard method == "POST" else {
+            sendErrorResponse(connection: connection, status: 405, message: "Method Not Allowed")
+            return
+        }
+        let requestString = String(data: data, encoding: .utf8) ?? ""
+        let body = requestString.range(of: "\r\n\r\n").map { String(requestString[$0.upperBound...]) } ?? ""
+        let code = Self.formQueryValue(path: "?\(body)", name: "code") ?? ""
+        if ClipVaultAuth.shared.verifyCode(code) {
+            sendBinary(
+                status: 302,
+                reason: "Found",
+                contentType: "text/html; charset=utf-8",
+                body: Data(),
+                connection: connection,
+                extraHeaders: [
+                    ("Location", "\(Self.publicPathPrefix)/"),
+                    ("Set-Cookie", ClipVaultAuth.shared.newSessionCookie()),
+                    ("Cache-Control", "no-store"),
+                ]
+            )
+            return
+        }
+        sendLoginHTML(ClipVaultAuth.shared.loginPageHTML(error: "验证码不对或尝试太多次，请再试。"), connection: connection)
+    }
+
+    private func handleLogout(connection: NWConnection) {
+        let clear = "\(ClipVaultAuth.cookieName)=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"
+        sendBinary(
+            status: 302,
+            reason: "Found",
+            contentType: "text/html; charset=utf-8",
+            body: Data(),
+            connection: connection,
+            extraHeaders: [
+                ("Location", "\(Self.publicPathPrefix)/login"),
+                ("Set-Cookie", clear),
                 ("Cache-Control", "no-store"),
             ]
         )

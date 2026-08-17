@@ -35,11 +35,17 @@ test('archive view promotes weixin lazy data-src over 1px svg src', () => {
   assert.match(swift, /data:image\/svg/);
 });
 
-test('public tunnel hosts require Access JWT or origin token', () => {
+test('public tunnel hosts require TOTP session, Access JWT, or optional origin token', () => {
+  const auth = readFileSync(join(root, 'ClipFlow/ClipVaultAuth.swift'), 'utf8');
   assert.match(swift, /publicRequestAuthorized/);
-  assert.match(swift, /cf-access-jwt-assertion/);
-  assert.match(swift, /CLIPVAULT_ORIGIN_TOKEN/);
   assert.match(swift, /isLoopbackRequest/);
+  assert.match(swift, /ClipVaultAuth\.shared\.isSessionAuthorized/);
+  assert.match(swift, /pathOnly == "\/login"/);
+  assert.match(swift, /login\/setup/);
+  assert.doesNotMatch(swift, /WWW-Authenticate/);
+  assert.match(auth, /otpauth:\/\/totp/);
+  assert.match(auth, /clipvault_sess/);
+  assert.match(auth, /CCHmacAlgorithm\(kCCHmacAlgSHA1\)/);
 });
 
 test('public tunnel path /clipvault is stripped to local routes', () => {
