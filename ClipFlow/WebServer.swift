@@ -9,6 +9,61 @@ class WebServer {
     /// Public path on <tunnel-domain>; local :8080 stays `/`. Incoming `/clipvault` is stripped.
     static let publicPathPrefix = "/clipvault"
 
+    static func requestHeaders(_ lines: [String]) -> [String: String] {
+        var out: [String: String] = [:]
+        for line in lines.dropFirst() {
+            if line.isEmpty { break }
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            out[name] = value
+        }
+        return out
+    }
+
+    static func isLoopbackRequest(_ headers: [String: String]) -> Bool {
+        let host = (headers["host"] ?? "").lowercased()
+        let name = host.split(separator: ":").first.map(String.init) ?? host
+        if name == "127.0.0.1" || name == "localhost" || name == "::1" || name == "[::1]" {
+            return true
+        }
+        // Cloudflare / other reverse proxies must not inherit loopback via X-Forwarded-For.
+        return false
+    }
+
+    /// Public tunnel hosts are closed unless Cloudflare Access signed the request
+    /// or CLIPVAULT_ORIGIN_TOKEN matches (Bearer / X-ClipVault-Token / Basic).
+    static func publicRequestAuthorized(_ headers: [String: String]) -> Bool {
+        if let jwt = headers["cf-access-jwt-assertion"], !jwt.isEmpty { return true }
+        guard let token = ProcessInfo.processInfo.environment["CLIPVAULT_ORIGIN_TOKEN"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            return false
+        }
+        if headers["x-clipvault-token"] == token { return true }
+        let auth = headers["authorization"] ?? ""
+        if auth == "Bearer \(token)" { return true }
+        if auth.lowercased().hasPrefix("basic ") {
+            let b64 = String(auth.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            if let data = Data(base64Encoded: b64),
+               let decoded = String(data: data, encoding: .utf8) {
+                let pass = decoded.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? decoded
+                if pass == token { return true }
+            }
+        }
+        if let cookie = headers["cookie"] {
+            for part in cookie.split(separator: ";") {
+                let kv = part.split(separator: "=", maxSplits: 1)
+                if kv.count == 2,
+                   kv[0].trimmingCharacters(in: .whitespaces) == "clipvault_token",
+                   kv[1].trimmingCharacters(in: .whitespaces) == token {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     static func stripPublicPrefix(_ path: String) -> String {
         let p = publicPathPrefix
         if path == p { return "/" }
@@ -159,6 +214,12 @@ class WebServer {
         
         let method = parts[0]
         let path = Self.stripPublicPrefix(parts[1])
+        let headers = Self.requestHeaders(lines)
+
+        if !Self.isLoopbackRequest(headers), !Self.publicRequestAuthorized(headers) {
+            sendUnauthorized(connection: connection)
+            return
+        }
         
         let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
         if method == "OPTIONS" {
@@ -198,6 +259,24 @@ class WebServer {
         }
     }
     
+    private func sendUnauthorized(connection: NWConnection) {
+        let body = Data("""
+        <!DOCTYPE html><meta charset="utf-8"><title>ClipVault</title>
+        <p>This host is not public. Use Cloudflare Access, or set CLIPVAULT_ORIGIN_TOKEN.</p>
+        """.utf8)
+        sendBinary(
+            status: 401,
+            reason: "Unauthorized",
+            contentType: "text/html; charset=utf-8",
+            body: body,
+            connection: connection,
+            extraHeaders: [
+                ("WWW-Authenticate", "Basic realm=\"ClipVault\""),
+                ("Cache-Control", "no-store"),
+            ]
+        )
+    }
+
     private func handleOptionsRequest(connection: NWConnection) {
         let response = """
         HTTP/1.1 204 No Content

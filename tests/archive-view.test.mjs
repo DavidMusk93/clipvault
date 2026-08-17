@@ -35,6 +35,13 @@ test('archive view promotes weixin lazy data-src over 1px svg src', () => {
   assert.match(swift, /data:image\/svg/);
 });
 
+test('public tunnel hosts require Access JWT or origin token', () => {
+  assert.match(swift, /publicRequestAuthorized/);
+  assert.match(swift, /cf-access-jwt-assertion/);
+  assert.match(swift, /CLIPVAULT_ORIGIN_TOKEN/);
+  assert.match(swift, /isLoopbackRequest/);
+});
+
 test('public tunnel path /clipvault is stripped to local routes', () => {
   assert.match(swift, /static let publicPathPrefix = "\/clipvault"/);
   assert.match(swift, /stripPublicPrefix/);
