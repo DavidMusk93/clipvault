@@ -1040,9 +1040,10 @@ class WebServer {
                            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                             metaObj = parsed
                         }
-                        metaObj["imagesOffline"] = !ArchiveImageInliner.containsRemoteImages(local)
                         metaObj["bytes"] = local.utf8.count
-                        let newMeta = String(data: (try? JSONSerialization.data(withJSONObject: metaObj)) ?? Data(), encoding: .utf8) ?? metaStr ?? "{}"
+                        let sha = SHA256.hash(data: Data(local.utf8)).map { String(format: "%02x", $0) }.joined()
+                        let keys = ArchiveBlobClosure.stamp(&metaObj, root: sha, html: local)
+                        let newMeta = ArchiveBlobClosure.encodeMeta(metaObj)
                         self.database.applyWebArchive(
                             id: uuid,
                             html: local,
@@ -1051,11 +1052,11 @@ class WebServer {
                             metaJSON: newMeta
                         ) { ok in
                             if ok {
-                                let sha = SHA256.hash(data: Data(local.utf8)).map { String(format: "%02x", $0) }.joined()
                                 CloudDocsSyncService.shared?.recordLocalArchive(
                                     itemId: uuid,
                                     htmlSHA: sha,
-                                    metaJSON: newMeta
+                                    metaJSON: newMeta,
+                                    blobKeys: keys
                                 )
                             }
                         }
@@ -1093,7 +1094,13 @@ class WebServer {
             sendErrorResponse(connection: connection, status: 400, message: "expected ?sha=")
             return
         }
-        guard let data = database.readBlobFile(hash: sha), data.count > 16 else {
+        var data = database.readBlobFile(hash: sha)
+        if data == nil || (data?.count ?? 0) <= 16 {
+            if sync?.hydrateBlob(sha) == true {
+                data = database.readBlobFile(hash: sha)
+            }
+        }
+        guard let data, data.count > 16 else {
             sendErrorResponse(connection: connection, status: 404, message: "not an archive asset")
             return
         }

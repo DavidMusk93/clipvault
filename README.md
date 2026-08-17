@@ -116,7 +116,7 @@ node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.
 ├── trx/{host_id}/{seq:016d}.json   # 事务（新写入）
 ├── ops/{host_id}/                  # 旧目录，只读回退
 └── heads/{host_id}.json
-…/CloudDocs/ClipFlow/live/attach/   # 同步附件
+…/CloudDocs/ClipFlow/live/attach/   # 同步附件（web_archive 闭包 = HTML + 文内图）
 ```
 
 Web：右上角 **备份** 侧栏 → 灾备开关 / 立即备份 / 恢复；同侧栏 **多机同步** → 开关 / 立即同步 / peer lag。

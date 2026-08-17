@@ -228,6 +228,30 @@ final class DatabaseManager: ObservableObject {
         try? fm.copyItem(at: source, to: dest)
     }
 
+    /// Living archive roots (HTML sha). Used to repair incomplete `web_archive` closures.
+    func archivedPointers() -> [(id: UUID, sha: String)] {
+        performReadSync {
+            guard let db = self.readDB ?? self.db else { return [] }
+            var stmt: OpaquePointer?
+            let sql = """
+            SELECT id, archive_html_sha FROM clipboard_items
+            WHERE archive_html_sha IS NOT NULL AND TRIM(archive_html_sha) != ''
+              AND deleted_at IS NULL;
+            """
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            var out: [(UUID, String)] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let idStr = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                let sha = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                if let id = UUID(uuidString: idStr), ArchiveImageInliner.isAssetSHA(sha.lowercased()) {
+                    out.append((id, sha.lowercased()))
+                }
+            }
+            sqlite3_finalize(stmt)
+            return out
+        }
+    }
+
     // MARK: - Open / pragmas / schema
 
     private func initializeDatabase() {

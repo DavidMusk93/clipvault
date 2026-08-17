@@ -174,17 +174,17 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 pageURL: URL(string: url),
                 writeBlob: { hash, data in database.writeBlobFile(hash: hash, data: data) }
             )
-            let meta: [String: Any] = [
+            let sha = SHA256.hash(data: Data(localHTML.utf8)).map { String(format: "%02x", $0) }.joined()
+            var meta: [String: Any] = [
                 "sourceUrl": url,
                 "title": title,
                 "mode": "readable",
                 "archivedAt": ClipTimeFormat.isoLocal(Date()),
                 "bytes": localHTML.utf8.count,
                 "engine": "webkit+readability",
-                "imagesOffline": !ArchiveImageInliner.containsRemoteImages(localHTML),
             ]
-            let metaData = (try? JSONSerialization.data(withJSONObject: meta)) ?? Data()
-            let metaStr = String(data: metaData, encoding: .utf8) ?? "{}"
+            let keys = ArchiveBlobClosure.stamp(&meta, root: sha, html: localHTML)
+            let metaStr = ArchiveBlobClosure.encodeMeta(meta)
             database.applyWebArchive(
                 id: itemId,
                 html: localHTML,
@@ -193,11 +193,11 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 metaJSON: metaStr
             ) { ok in
                 if ok {
-                    let sha = SHA256.hash(data: Data(localHTML.utf8)).map { String(format: "%02x", $0) }.joined()
                     CloudDocsSyncService.shared?.recordLocalArchive(
                         itemId: itemId,
                         htmlSHA: sha,
-                        metaJSON: metaStr
+                        metaJSON: metaStr,
+                        blobKeys: keys
                     )
                 }
                 done()

@@ -76,7 +76,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **View**：弹层 iframe `src=/api/archive/view?embed=1`（真文档，浏览器引擎排版）；可再开新标签 | srcdoc / Turndown 自绘；毛玻璃+transform 包 iframe；只弹出孤立 tab |
 | **归档后同一按钮变「查看」**（同槽同尺寸）；已归档禁止再点「归档网页」 | 另塞一颗小「查看」；归档按钮归档后仍可点 |
 | **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶；**跨机必须走 op-log `pin`/`unpin`** | 改 timestamp 冒充置顶；钉子混进下一页重复出现；只写本机列不同步 |
-| **归档 / 阅读态跨机**：`web_archive`（CAS sha）+ `reader_op` | 归档 HTML / 划线只留本机 SQLite |
+| **归档 / 阅读态跨机**：`web_archive` 的 `blob_keys` = HTML **闭包**（root + 文内 `/api/archive/asset` CAS）+ `reader_op` | 只传 html sha；图只躺在对端 `hosts/*/blobs` 灾备里 |
 | **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |
 | **阅读选区菜单**：macOS 浅玻璃小条（28px），黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**；评论 header 单行 28px（评论/摘录与取消/提交同一 strut）；底部「记录」= `reader_ops` | 评论卡里放大号「删除划线」；菜单压在高亮上；header 左右不共线 |
 | 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
@@ -90,12 +90,54 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |
 | SQLite 备份用 `sqlite3_backup`；**按机器**写 `backup/hosts/{hostId}/` | 热 copy 开着的 db；双机写同一 `latest/` 互盖 |
-| **同步 = 每机 `trx/` 事务 + 云盘运输**；附件走 `live/attach/` | 用 `ops/` 当事务目录；共享 CAS / 整库覆盖当同步 |
+| **同步 = 每机 `trx/` 事务 + 云盘运输**；事务点名的 CAS 全部进 `blob_keys` → `live/attach/` | 用 `ops/` 当事务目录；共享 CAS / 整库覆盖当同步；备份切片当同步总线 |
 | **备份增量是核心**：本机切片里 size-match skip；只补 missing/partial | **每轮 forceFull 重拷全部 blob**（GDrive File Provider 会 EDEADLK） |
 | SQLite 按 `.trae/skills/sqlite-runtime-tricks`：WAL 读写分离、busy_timeout、ANALYZE、FTS5、分批清理；检索先 FTS | 写读同一条队列；全表 `LIKE html_content`；维护 tick 里 `VACUUM` |
 | CI = 能绿的真构建（`swift build` + 单测） | 为旧 xcodeproj+DuckDB 殉葬 |
 
 **SQLite 运维 skill（agent 必读）**：本机 `~/.trae-cn/skills/sqlite-runtime-tricks/` 与仓库 `.trae/skills/sqlite-runtime-tricks/`（同源）；源文 [jvns 2026-07](https://jvns.ca/blog/2026/07/17/learning-about-running-sqlite/)。改 `DatabaseManager` / 备份 / 搜索前先加载。
+
+### 2.3.1 归档文档闭包（同步终局，2026-08-17）
+
+离线归档不是「一篇 HTML sha」。它是 **根文档 + 文档点名的全部 CAS 对象**（闭包）。微信图空白若 HTML 已是 `/api/archive/asset?sha=`，先查闭包有没有进 `trx.blob_keys`，不要先怪 CDN / CSP / `data-src`。
+
+三平面不可混：
+
+| 平面 | 职责 | 不是 |
+| --- | --- | --- |
+| **CAS** | 内容寻址：本机 `blobs/{sha}.bin` | 同步协议 |
+| **同步** | 每机 `trx/{host}/{seq}.json`；`blob_keys` = 闭包；文件走 `live/attach/{sha}.bin` | 整库覆盖；用 `ops/` 写新事务 |
+| **备份** | `backup/hosts/{hostId}/` 灾备；可当 hydrate 副本 | 同步总线；对端去扫别人的 host 切片当协议 |
+
+```text
+归档 / 首次改写 HTML
+  → ArchiveBlobClosure.keys(root, html)
+  → meta.closure = {v:1, root, blobs:[root, …deps]}
+  → web_archive.blob_keys = blobs
+  → push 每个 key → live/attach
+
+pull
+  → blob_keys 齐了才 apply（新事务缺图则 cursor 不推进）
+  → 旧事务只列了 root：apply 后再扫 HTML 补 hydrate
+
+启动 repair + GET /api/archive/asset 404
+  → hydrateBlob：live/attach ∪ backup/hosts/*/blobs ∪ backup/blobs
+  → 齐了再发一条完整 web_archive（对端不再依赖灾备）
+```
+
+| Do | Don't |
+| --- | --- |
+| `recordLocalArchive` 传完整 `blobKeys`（root + 文内 asset sha） | `blobKeys: [htmlSHA]` 了事 |
+| 新资产种类只加 `ArchiveBlobClosure.patterns` 正则 | 为图/字体/srcset 各开一个 trx kind |
+| `imagesOffline` = HTML **不再指向出版商 CDN** | 用它表示「对端磁盘一定有图」 |
+| View `img-src 'self' data: blob:`；图只走 `/api/archive/asset` | 给微信/qpic 开 `img-src *` 当「同步」 |
+| 旧库靠 repair + hydrate 自愈，再补发完整 trx | 只在 View 里临时回源 CDN 糊过去 |
+
+样本（已修）：`mp.weixin.qq.com/s/ZloR4kbXacxpcEkIEv3oUQ` / `8314752F-…` — 26 张 asset，旧 trx 只带 HTML sha，对端 404。闭包进 trx 后 `blob_keys=27`。
+
+代码锚点：`ClipFlow/ArchiveBlobClosure.swift` · `CloudDocsSyncService.enqueueArchive` / `repairArchiveClosures` / `hydrateBlob` · `WebArchiveService.persist` · `WebServer.sendArchiveAsset`。
+
+nmem：`clipvault_archive_closure_sync_20260817`（替换 `clipvault_archive_images_not_in_trx_20260817`）。
 
 ### 2.4 隐私与本机
 
@@ -162,6 +204,8 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 - **DatabaseManager**：存储与备份原语（含 `sqlite3_backup`）  
 - **WebServer**：协议与静态面，不塞业务特例  
 - **CloudDocsBackupService**：备份策略与快照生命周期  
+- **CloudDocsSyncService**：每机 trx + 闭包 `blob_keys`；附件只走 `live/attach`  
+- **ArchiveBlobClosure**：归档 HTML → CAS 闭包（新资产种类加正则，不加 trx kind）  
 
 ---
 

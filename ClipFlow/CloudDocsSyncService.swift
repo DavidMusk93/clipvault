@@ -157,6 +157,7 @@ final class CloudDocsSyncService {
             }
             self.bootstrapLocalHistoryIfNeeded()
             self.replayDiskReaderOps()
+            self.repairArchiveClosures()
             self.startPollTimer()
             if self.config.enabled {
                 self.queue.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -270,21 +271,69 @@ final class CloudDocsSyncService {
         }
     }
 
-    func recordLocalArchive(itemId: UUID, htmlSHA: String, metaJSON: String) {
+    func recordLocalArchive(itemId: UUID, htmlSHA: String, metaJSON: String, blobKeys: [String]? = nil) {
         guard config.enabled else { return }
         queue.async { [weak self] in
-            guard let self else { return }
-            var op = self.makeOp(
-                kind: "web_archive",
-                itemId: itemId.uuidString,
-                item: nil,
-                blobKeys: [htmlSHA]
-            )
-            op.contentHash = htmlSHA
-            op.note = metaJSON
-            self.enqueue(op)
-            self.scheduleDrain(reason: "web_archive")
+            self?.enqueueArchive(itemId: itemId, htmlSHA: htmlSHA, metaJSON: metaJSON, blobKeys: blobKeys)
         }
+    }
+
+    /// Pull one CAS object into the local store from live/attach or any backup replica.
+    @discardableResult
+    func hydrateBlob(_ hash: String) -> Bool {
+        let hash = hash.lowercased()
+        guard ArchiveImageInliner.isAssetSHA(hash) else { return false }
+        if database.readBlobFile(hash: hash) != nil { return true }
+        for root in blobSearchRoots() {
+            let remote = root.appendingPathComponent(hash + ".bin")
+            startDownloadIfNeeded(remote)
+            if readCloudData(remote, attempts: 4, delayMs: 80) != nil || fm.fileExists(atPath: remote.path) {
+                database.importBlobIfNeeded(hash: hash, from: remote)
+                if database.readBlobFile(hash: hash) != nil { return true }
+            }
+        }
+        return false
+    }
+
+    private func enqueueArchive(itemId: UUID, htmlSHA: String, metaJSON: String, blobKeys: [String]?) {
+        let keys: [String]
+        if let blobKeys, !blobKeys.isEmpty {
+            keys = uniqueKeys(blobKeys)
+        } else if let data = database.readBlobFile(hash: htmlSHA),
+                  let html = String(data: data, encoding: .utf8) {
+            keys = ArchiveBlobClosure.keys(root: htmlSHA, html: html)
+        } else {
+            keys = [htmlSHA.lowercased()]
+        }
+        var meta = ArchiveBlobClosure.parseMeta(metaJSON)
+        if let data = database.readBlobFile(hash: htmlSHA),
+           let html = String(data: data, encoding: .utf8) {
+            ArchiveBlobClosure.stamp(&meta, root: htmlSHA, html: html)
+        } else {
+            meta["closure"] = ["v": 1, "root": htmlSHA.lowercased(), "blobs": keys] as [String: Any]
+        }
+        var op = makeOp(
+            kind: "web_archive",
+            itemId: itemId.uuidString,
+            item: nil,
+            blobKeys: keys
+        )
+        op.contentHash = htmlSHA.lowercased()
+        op.note = ArchiveBlobClosure.encodeMeta(meta)
+        enqueue(op)
+        scheduleDrain(reason: "web_archive")
+    }
+
+    private func uniqueKeys(_ keys: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for raw in keys {
+            let k = raw.lowercased()
+            guard ArchiveImageInliner.isAssetSHA(k), !seen.contains(k) else { continue }
+            seen.insert(k)
+            out.append(k)
+        }
+        return out
     }
 
     func recordLocalReaderOp(itemId: UUID, opId: String, kind: String, payload: [String: Any], ts: Double, source: String) {
@@ -743,6 +792,12 @@ final class CloudDocsSyncService {
                     lastPhase = "pull:retry \(op.kind) \(op.itemId.prefix(8))"
                     break
                 }
+                if op.kind == "web_archive" {
+                    hydrateArchiveDependents(
+                        htmlSHA: op.contentHash ?? op.blobKeys?.first,
+                        listed: op.blobKeys
+                    )
+                }
                 cursor = next
                 applied += 1
                 batch += 1
@@ -872,6 +927,55 @@ final class CloudDocsSyncService {
             if n > 0 {
                 print("[Sync] replayDiskReaderOps applied \(n)")
             }
+        }
+    }
+
+    /// Old `web_archive` rows listed only the HTML sha. Rebuild the document closure,
+    /// hydrate missing CAS from live/attach or host backup replicas, and emit one
+    /// complete trx so later peers do not depend on backup.
+    private func repairArchiveClosures() {
+        let pointers = database.archivedPointers()
+        guard !pointers.isEmpty else { return }
+        var republished = 0
+        var hydrated = 0
+        for (id, sha) in pointers {
+            guard let html = database.fetchArchiveHTML(id: id) else { continue }
+            let oldMeta = database.webArchiveMetaJSON(id: id)
+            let oldKeys = Set(ArchiveBlobClosure.blobs(fromMeta: oldMeta) ?? [])
+            var meta = ArchiveBlobClosure.parseMeta(oldMeta)
+            let keys = ArchiveBlobClosure.stamp(&meta, root: sha, html: html)
+            for key in keys where database.readBlobFile(hash: key) == nil {
+                if hydrateBlob(key) { hydrated += 1 }
+            }
+            let stamped = ArchiveBlobClosure.encodeMeta(meta)
+            let sem = DispatchSemaphore(value: 0)
+            database.performSyncWork {
+                self.database.metaSetSync("archive.\(id.uuidString)", stamped)
+                sem.signal()
+            }
+            sem.wait()
+            let missing = keys.contains { database.readBlobFile(hash: $0) == nil }
+            let alreadyListed = !keys.isEmpty && Set(keys).isSubset(of: oldKeys)
+            if !missing, !alreadyListed, config.enabled {
+                enqueueArchive(itemId: id, htmlSHA: sha, metaJSON: ArchiveBlobClosure.encodeMeta(meta), blobKeys: keys)
+                republished += 1
+            }
+        }
+        if hydrated > 0 || republished > 0 {
+            print("[Sync] archive closure repair hydrated=\(hydrated) republished=\(republished)")
+        }
+    }
+
+    /// After applying a possibly incomplete trx, pull dependents named by the HTML.
+    private func hydrateArchiveDependents(htmlSHA: String?, listed: [String]?) {
+        let listed = Set((listed ?? []).map { $0.lowercased() })
+        var extra: [String] = []
+        if let htmlSHA, let data = database.readBlobFile(hash: htmlSHA),
+           let html = String(data: data, encoding: .utf8) {
+            extra = ArchiveBlobClosure.refs(inHTML: html)
+        }
+        for key in extra where !listed.contains(key) {
+            _ = hydrateBlob(key)
         }
     }
 

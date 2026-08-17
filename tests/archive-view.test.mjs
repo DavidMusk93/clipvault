@@ -47,3 +47,24 @@ test('archive images are CAS assets, not publisher CDN', () => {
   assert.match(swift, /img-src 'self' data: blob:/);
   assert.doesNotMatch(swift, /img-src \*/);
 });
+
+test('archive sync ships the document closure, not just the HTML sha', () => {
+  const closure = readFileSync(join(root, 'ClipFlow/ArchiveBlobClosure.swift'), 'utf8');
+  const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
+  assert.match(closure, /archive/);
+  assert.match(closure, /asset/);
+  assert.match(closure, /blob_keys/);
+  assert.match(closure, /\[0-9a-f\]\{64\}/);
+  assert.match(closure, /static func keys\(root:/);
+  assert.match(sync, /enqueueArchive/);
+  assert.match(sync, /repairArchiveClosures/);
+  assert.match(sync, /hydrateBlob/);
+  assert.doesNotMatch(sync, /blobKeys: \[htmlSHA\]/);
+});
+
+test('archive HTML contract: asset sha is 64 hex and extractable', () => {
+  const sha = '50e702b10be74b6200de24bce7a5ab906ef6a137a2beefbc3e9966e109eb42da';
+  const html = `<img src="/api/archive/asset?sha=${sha}" alt="x">`;
+  const refs = [...html.matchAll(/\/api\/archive\/asset\?sha=([0-9a-f]{64})/gi)].map((m) => m[1]);
+  assert.deepEqual(refs, [sha]);
+});
