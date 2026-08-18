@@ -47,6 +47,19 @@ test('notes are a same-page panel, not clip-card chrome', () => {
   assert.match(html, /toolbarConfig:\s*\{\s*hide:\s*false/);
   assert.match(html, /#notesEditor \.vditor-toolbar \{[\s\S]{0,280}?display:\s*flex/);
   assert.doesNotMatch(html, /#notesEditor \.vditor-toolbar \{[\s\S]{0,180}?background:\s*transparent/);
+  assert.match(html, /vditorIconScript/);
+  assert.match(html, /\/assets\/vditor\/dist\/js\/icons\/ant\.js/);
+});
+
+test('local Vditor ships the ant icon sprite the toolbar uses', () => {
+  const sprite = readFileSync(join(root, 'web/assets/vditor/dist/js/icons/ant.js'), 'utf8');
+  for (const id of [
+    'vditor-icon-bold', 'vditor-icon-italic', 'vditor-icon-headings',
+    'vditor-icon-list', 'vditor-icon-code', 'vditor-icon-upload',
+    'vditor-icon-undo', 'vditor-icon-table',
+  ]) {
+    assert.match(sprite, new RegExp(`id="${id}"`));
+  }
 });
 
 test('design-taste lists note badge', () => {
