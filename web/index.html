@@ -17,8 +17,8 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/vditor/dist/index.css" />
-  <script src="/assets/vditor/dist/index.min.js"></script>
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css" />
+  <script src="/assets/notes-editor/notes-editor.js"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -1670,57 +1670,35 @@
     }
     #notesEditor {
       flex: 1; min-height: 0;
-      display: flex; flex-direction: column;
+      overflow: auto;
     }
-    #notesEditor.vditor,
-    #notesEditor .vditor {
-      flex: 1; min-height: 0;
-      height: 100% !important;
-      border: 0 !important;
-      background: transparent !important;
+    #notesEditor .milkdown {
+      --crepe-color-background: transparent;
+      --crepe-color-surface: rgba(255,255,255,0.48);
+      --crepe-color-surface-low: rgba(255,255,255,0.32);
+      --crepe-color-on-background: #1d1d1f;
+      --crepe-color-on-surface: #1d1d1f;
+      --crepe-color-on-surface-variant: #6e6e73;
+      --crepe-color-outline: rgba(60,60,67,0.28);
+      --crepe-color-primary: #1d1d1f;
+      --crepe-color-inline-code: #c62828;
+      --crepe-font-title: var(--font-ui);
+      --crepe-font-default: var(--font-ui);
+      --crepe-font-code: var(--font-mono);
+      --crepe-base-font-size: 17px;
+      background: transparent;
+      min-height: 100%;
     }
-    #notesEditor .vditor-toolbar {
-      display: flex !important;
-      flex-wrap: wrap;
-      align-items: center;
-      flex: none;
-      float: none;
-      min-height: 44px;
-      padding: 4px 12px !important;
-      border: 0 !important;
-      border-bottom: 0.5px solid rgba(60,60,67,0.14) !important;
-      background: rgba(255,255,255,0.42) !important;
+    #notesEditor .milkdown .milkdown-top-bar {
+      background: rgba(255,255,255,0.46);
       -webkit-backdrop-filter: blur(16px) saturate(160%);
       backdrop-filter: blur(16px) saturate(160%);
+      border-bottom: 0.5px solid rgba(60,60,67,0.14);
     }
-    #notesEditor .vditor-toolbar--hide {
-      height: auto !important;
-      overflow: visible !important;
+    #notesEditor .milkdown .ProseMirror {
+      outline: none;
+      padding: 8px 22px 40px;
     }
-    #notesEditor .vditor-toolbar__item {
-      float: none !important;
-      display: inline-flex;
-    }
-    #notesEditor .vditor-toolbar__item .vditor-tooltipped {
-      display: inline-flex !important;
-      align-items: center;
-      justify-content: center;
-      width: 32px !important;
-      height: 32px !important;
-      color: #1d1d1f !important;
-    }
-    #notesEditor .vditor-toolbar__item svg {
-      width: 16px !important;
-      height: 16px !important;
-      fill: currentColor !important;
-    }
-    #notesEditor .vditor-toolbar__divider {
-      float: none !important;
-      height: 16px;
-      margin: 0 6px;
-    }
-    #notesEditor .vditor-content { flex: 1; min-height: 0; background: transparent !important; }
-    #notesEditor .vditor-reset { font-size: 17px !important; line-height: 1.55 !important; }
     .notes-close {
       position: absolute; top: 18px; right: 20px; z-index: 2;
       width: 32px; height: 32px; border: 0; border-radius: 980px;
@@ -1740,7 +1718,7 @@
     @media (prefers-reduced-transparency: reduce) {
       .notes-panel { background: #f5f5f7; }
       .notes-frost { display: none; }
-      .notes-rail, .notes-paper, #notesEditor .vditor-toolbar {
+      .notes-rail, .notes-paper, #notesEditor .milkdown .milkdown-top-bar {
         background: #fff !important; backdrop-filter: none; -webkit-backdrop-filter: none;
       }
     }
@@ -1911,7 +1889,6 @@
   </style>
 </head>
 <body>
-  <script src="/assets/vditor/dist/js/icons/ant.js" id="vditorIconScript"></script>
   <header class="top-bar">
     <div class="brand">
       <div class="brand-logo" title="ClipVault">
@@ -2782,7 +2759,7 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, vditor: null, timer: null, dirty: false, loaded: false };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false };
 
     function noteExcerpt(md) {
       return (md || '').replace(/^#+\s+/gm, '').replace(/!\[[^\]]*]\([^)]+\)/g, '')
@@ -2808,23 +2785,43 @@ window.ClipViewMasonry = Masonry;
       return raw.replace(new RegExp('^#\\s+' + t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\n?'), '');
     }
 
+    function fillNoteRow(btn, n) {
+      btn.dataset.noteId = n.id;
+      btn.classList.toggle('is-on', n.id === notesState.id);
+      let t = btn.querySelector('.nt');
+      let x = btn.querySelector('.nx');
+      let m = btn.querySelector('.nm');
+      if (!t) {
+        t = document.createElement('div'); t.className = 'nt';
+        x = document.createElement('div'); x.className = 'nx';
+        m = document.createElement('div'); m.className = 'nm';
+        btn.replaceChildren(t, x, m);
+      }
+      t.textContent = noteTitleOf(n) || '未命名';
+      x.textContent = noteExcerpt(n.textContent || '');
+      m.textContent = formatItemTime(n);
+    }
     function paintNotesList() {
       const q = (document.getElementById('notesSearch')?.value || '').trim().toLowerCase();
       const root = document.getElementById('notesList');
       if (!root) return;
       const rows = notesState.items.filter(n => !q || (n.textContent || '').toLowerCase().includes(q));
-      root.innerHTML = '';
-      rows.forEach(n => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'note-row' + (n.id === notesState.id ? ' is-on' : '');
-        const t = document.createElement('div'); t.className = 'nt'; t.textContent = noteTitleOf(n) || '未命名';
-        const x = document.createElement('div'); x.className = 'nx'; x.textContent = noteExcerpt(n.textContent || '');
-        const m = document.createElement('div'); m.className = 'nm';
-        m.textContent = formatItemTime(n);
-        btn.append(t, x, m);
-        btn.addEventListener('click', () => openNoteInPanel(n.id));
-        root.appendChild(btn);
+      const keep = new Set(rows.map(n => n.id));
+      [...root.children].forEach(el => {
+        if (!keep.has(el.dataset.noteId)) el.remove();
+      });
+      rows.forEach((n, i) => {
+        let btn = root.querySelector(`[data-note-id="${n.id}"]`);
+        if (!btn) {
+          btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'note-row';
+          btn.addEventListener('click', () => openNoteInPanel(n.id));
+          root.insertBefore(btn, root.children[i] || null);
+        } else if (btn !== root.children[i]) {
+          root.insertBefore(btn, root.children[i] || null);
+        }
+        fillNoteRow(btn, n);
       });
     }
 
@@ -2856,51 +2853,26 @@ window.ClipViewMasonry = Masonry;
       if (el) el.textContent = text || '';
     }
 
-    function ensureNotesEditor(markdown) {
+    async function ensureNotesEditor(markdown) {
       const host = document.getElementById('notesEditor');
-      if (!host || typeof Vditor === 'undefined') return;
+      if (!host || typeof ClipNotesEditor === 'undefined') return;
       const text = decodeNoteBody(markdown);
-      if (notesState.vditor) {
-        notesState.vditor.setValue(text || '');
+      if (notesState.editor) {
+        notesState.applying = true;
+        notesState.editor.setMarkdown(text || '');
+        queueMicrotask(() => { notesState.applying = false; });
         return;
       }
-      notesState.vditor = new Vditor('notesEditor', {
-        height: '100%',
-        mode: 'wysiwyg',
-        lang: 'zh_CN',
-        cdn: '/assets/vditor',
-        icon: 'ant',
-        placeholder: '',
-        cache: { enable: false },
-        toolbarConfig: { hide: false, pin: false },
-        preview: { markdown: { toc: true, mark: true, sanitize: true } },
-        toolbar: [
-          'headings', 'bold', 'italic', 'strike', '|',
-          'list', 'ordered-list', 'check', 'outdent', 'indent', '|',
-          'quote', 'line', 'code', 'inline-code', 'insert-before', 'insert-after', '|',
-          'link', 'upload', 'table', '|',
-          'undo', 'redo', '|',
-          'fullscreen', 'outline', 'edit-mode',
-        ],
-        upload: {
-          accept: 'image/*',
-          handler(files) {
-            return (async () => {
-              try {
-                for (const file of files) {
-                  const url = await uploadNoteImage(file);
-                  notesState.vditor.insertValue(`![](${url})`);
-                }
-                return null;
-              } catch (e) {
-                return String(e.message || e);
-              }
-            })();
-          },
+      notesState.applying = true;
+      notesState.editor = await ClipNotesEditor.mount(host, {
+        markdown: text || '',
+        uploadImage: uploadNoteImage,
+        onUpdate() {
+          if (notesState.applying) return;
+          scheduleNoteSave();
         },
-        input() { scheduleNoteSave(); },
-        after() { notesState.vditor.setValue(text || ''); },
       });
+      notesState.applying = false;
     }
 
     function scheduleNoteSave() {
@@ -2911,9 +2883,9 @@ window.ClipViewMasonry = Masonry;
     }
 
     async function saveNoteNow() {
-      if (!notesState.vditor) return;
+      if (!notesState.editor) return;
       const title = (document.getElementById('notesTitle')?.value || '').trim();
-      const body = notesState.vditor.getValue();
+      const body = notesState.editor.getMarkdown();
       if (!title && !String(body || '').trim()) return;
       const payload = { body, title: title || null };
       if (notesState.id) payload.id = notesState.id;
@@ -2973,7 +2945,7 @@ window.ClipViewMasonry = Masonry;
         try { await loadNotesList(); } catch (e) { notesState.items = []; }
       }
       if (!notesState.id && notesState.items[0]) await openNoteInPanel(notesState.items[0].id);
-      else if (!notesState.vditor) await newNoteInPanel();
+      else if (!notesState.editor) await newNoteInPanel();
       if (location.hash !== '#notes') history.replaceState(null, '', '#notes');
     }
 

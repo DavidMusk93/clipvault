@@ -30,7 +30,7 @@ test('compose images go to CAS sha URLs', () => {
   assert.match(auth, /sha=/);
   assert.match(web, /\/api\/image\?sha=/);
   assert.match(html, /\/api\/compose\/image/);
-  assert.match(html, /vditor/i);
+  assert.match(html, /ClipNotesEditor/);
 });
 
 test('notes are a same-page panel, not clip-card chrome', () => {
@@ -40,26 +40,22 @@ test('notes are a same-page panel, not clip-card chrome', () => {
   assert.doesNotMatch(html, /id="composeSheet"/);
   assert.doesNotMatch(html, /想到的写下/);
   assert.doesNotMatch(html, /不挂在剪贴墙上/);
-  assert.match(html, /new Vditor/);
+  assert.doesNotMatch(html, /new Vditor|vditor/i);
+  assert.match(html, /ClipNotesEditor\.mount/);
   assert.match(html, /\/api\/clips\?type=note/);
   assert.match(web, /excludeType/);
   assert.match(html, /class="notes-frost"/);
-  assert.match(html, /toolbarConfig:\s*\{\s*hide:\s*false/);
-  assert.match(html, /#notesEditor \.vditor-toolbar \{[\s\S]{0,280}?display:\s*flex/);
-  assert.doesNotMatch(html, /#notesEditor \.vditor-toolbar \{[\s\S]{0,180}?background:\s*transparent/);
-  assert.match(html, /vditorIconScript/);
-  assert.match(html, /\/assets\/vditor\/dist\/js\/icons\/ant\.js/);
+  assert.match(html, /milkdown-top-bar/);
 });
 
-test('local Vditor ships the ant icon sprite the toolbar uses', () => {
-  const sprite = readFileSync(join(root, 'web/assets/vditor/dist/js/icons/ant.js'), 'utf8');
-  for (const id of [
-    'vditor-icon-bold', 'vditor-icon-italic', 'vditor-icon-headings',
-    'vditor-icon-list', 'vditor-icon-code', 'vditor-icon-upload',
-    'vditor-icon-undo', 'vditor-icon-table',
-  ]) {
-    assert.match(sprite, new RegExp(`id="${id}"`));
-  }
+test('notes editor is a local Milkdown Crepe bundle', () => {
+  const js = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.js'), 'utf8');
+  const css = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.css'), 'utf8');
+  const entry = readFileSync(join(root, 'web/assets/notes-editor/entry.js'), 'utf8');
+  assert.match(js, /ClipNotesEditor|milkdown/i);
+  assert.match(css, /milkdown-top-bar/);
+  assert.match(entry, /from '@milkdown\/crepe'/);
+  assert.match(html, /\/assets\/notes-editor\/notes-editor\.js/);
 });
 
 test('design-taste lists note badge', () => {
