@@ -714,7 +714,7 @@ class WebServer {
             .replacingOccurrences(of: "/assets/", with: "")
             .replacingOccurrences(of: "..", with: "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !name.isEmpty, !name.contains("/") else {
+        guard !name.isEmpty, !name.contains("..") else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
         }
