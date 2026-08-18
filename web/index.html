@@ -121,6 +121,7 @@
       backdrop-filter: blur(20px) saturate(180%);
       border-bottom: 0.5px solid var(--separator);
       box-shadow: none;
+      transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
     }
     .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .brand-logo {
@@ -164,7 +165,15 @@
       -webkit-backdrop-filter: blur(16px) saturate(160%);
       backdrop-filter: blur(16px) saturate(160%);
       scrollbar-width: none;
+      transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
     }
+    body.notes-open .top-bar,
+    body.notes-open .chips {
+      transform: translateY(-120%);
+      opacity: 0;
+      pointer-events: none;
+    }
+    body.notes-open .notes-fab { display: none !important; }
     .chips::-webkit-scrollbar { display: none; }
     .chip {
       height: 32px; padding: 0 14px; border-radius: var(--radius-pill);
@@ -1570,13 +1579,13 @@
 
     /* Notes: same page, panel from the 笔记 control. No second document. */
     .notes-panel {
-      position: fixed; inset: 0; top: 58px; z-index: 70;
+      position: fixed; inset: 0; z-index: 200;
       display: grid; grid-template-columns: min(300px, 36vw) 1fr;
-      padding: 10px 12px 12px;
+      padding: 12px;
       gap: 10px;
       pointer-events: none;
       opacity: 0;
-      transform: translateX(28px);
+      transform: translateY(18px) scale(0.985);
       transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
     }
     .notes-panel.open {
@@ -1671,7 +1680,7 @@
       .notes-panel:not(.is-writing) .notes-paper { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .notes-panel { transition: opacity 180ms ease; transform: none; }
+      .notes-panel, .top-bar, .chips { transition: opacity 180ms ease; transform: none; }
     }
     @media (prefers-reduced-transparency: reduce) {
       .notes-rail, .notes-paper { background: #fff; backdrop-filter: none; }
@@ -2895,6 +2904,7 @@ window.ClipViewMasonry = Masonry;
       if (!panel) return;
       panel.classList.add('open');
       panel.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('notes-open');
       document.getElementById('notesOpenBtn')?.classList.add('is-on');
       if (!notesState.loaded) {
         try { await loadNotesList(); } catch (e) { notesState.items = []; }
@@ -2909,6 +2919,7 @@ window.ClipViewMasonry = Masonry;
       const panel = document.getElementById('notesPanel');
       panel?.classList.remove('open', 'is-writing');
       panel?.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('notes-open');
       document.getElementById('notesOpenBtn')?.classList.remove('is-on');
       if (location.hash === '#notes') history.replaceState(null, '', location.pathname + location.search);
     }

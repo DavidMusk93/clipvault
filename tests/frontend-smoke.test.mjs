@@ -76,6 +76,7 @@ test('product brand is ClipVault in title', () => {
 test('notes are a panel on the same page', () => {
   assert.match(indexHtml, /id="notesPanel"/);
   assert.match(indexHtml, /exclude.*note/);
+  assert.match(indexHtml, /body\.notes-open \.top-bar/);
   assert.doesNotMatch(indexHtml, /id="composeSheet"/);
   assert.doesNotMatch(indexHtml, /想到的写下/);
 });
