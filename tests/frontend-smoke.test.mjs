@@ -73,11 +73,11 @@ test('product brand is ClipVault in title', () => {
   assert.match(indexHtml, /<title>ClipVault<\/title>/);
 });
 
-test('notes live on /notes.html, not the clip wall', () => {
-  assert.match(indexHtml, /href="\/notes.html"/);
+test('notes are a panel on the same page', () => {
+  assert.match(indexHtml, /id="notesPanel"/);
   assert.match(indexHtml, /exclude.*note/);
   assert.doesNotMatch(indexHtml, /id="composeSheet"/);
-  assert.doesNotMatch(indexHtml, /id="composeFab"/);
+  assert.doesNotMatch(indexHtml, /想到的写下/);
 });
 
 test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {

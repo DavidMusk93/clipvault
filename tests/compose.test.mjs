@@ -29,20 +29,19 @@ test('compose images go to CAS sha URLs', () => {
   assert.match(auth, /blobKeys\(in markdown/);
   assert.match(auth, /sha=/);
   assert.match(web, /\/api\/image\?sha=/);
-  assert.match(notesPage, /\/api\/compose\/image/);
-  assert.match(notesPage, /vditor/i);
+  assert.match(html, /\/api\/compose\/image/);
+  assert.match(html, /vditor/i);
 });
 
-test('notes are a separate surface, not bound to clip cards', () => {
-  assert.match(html, /href="\/notes.html"/);
+test('notes are a same-page panel, not clip-card chrome', () => {
+  assert.match(html, /id="notesPanel"/);
   assert.match(html, /exclude.*note|exclude', 'note'/);
   assert.doesNotMatch(html, /data-compose-from/);
   assert.doesNotMatch(html, /id="composeSheet"/);
-  assert.doesNotMatch(html, /id="composeFab"/);
-  assert.doesNotMatch(html, /data-type="note"/);
-  assert.match(notesPage, /new Vditor/);
-  assert.match(notesPage, /\/api\/clips\?type=note/);
-  assert.match(web, /notes\.html/);
+  assert.doesNotMatch(html, /想到的写下/);
+  assert.doesNotMatch(html, /不挂在剪贴墙上/);
+  assert.match(html, /new Vditor/);
+  assert.match(html, /\/api\/clips\?type=note/);
   assert.match(web, /excludeType/);
 });
 

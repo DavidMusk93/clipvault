@@ -17,6 +17,8 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vditor@3.10.8/dist/index.css" />
+  <script src="https://cdn.jsdelivr.net/npm/vditor@3.10.8/dist/index.min.js"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -1562,6 +1564,118 @@
       text-decoration: none;
     }
     .notes-fab:active { transform: scale(0.97); }
+    #notesOpenBtn.is-on {
+      background: var(--ink); color: #fff; border-color: transparent;
+    }
+
+    /* Notes: same page, panel from the 笔记 control. No second document. */
+    .notes-panel {
+      position: fixed; inset: 0; top: 58px; z-index: 70;
+      display: grid; grid-template-columns: min(300px, 36vw) 1fr;
+      padding: 10px 12px 12px;
+      gap: 10px;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateX(28px);
+      transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
+    }
+    .notes-panel.open {
+      pointer-events: auto;
+      opacity: 1;
+      transform: translateX(0);
+    }
+    .notes-rail, .notes-paper {
+      min-width: 0; min-height: 0;
+      background: rgba(255,255,255,0.78);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      backdrop-filter: blur(28px) saturate(180%);
+      border: 0.5px solid rgba(255,255,255,0.55);
+      box-shadow: var(--elev-2);
+    }
+    .notes-rail {
+      border-radius: 18px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .notes-rail-top {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 10px 8px;
+    }
+    .notes-rail-top input {
+      flex: 1; height: 32px; border: 0; border-radius: 10px;
+      padding: 0 10px; background: var(--fill);
+      font: inherit; font-size: 13px; color: var(--ink); outline: none;
+    }
+    .notes-new {
+      height: 32px; padding: 0 11px; border: 0; border-radius: 10px;
+      background: var(--ink); color: #fff;
+      font: inherit; font-size: 13px; font-weight: 600; letter-spacing: -0.02em;
+      cursor: pointer;
+    }
+    .notes-new:active { transform: scale(0.97); }
+    .notes-list { flex: 1; overflow: auto; padding: 4px 8px 12px; }
+    .note-row {
+      width: 100%; text-align: left; border: 0; background: transparent;
+      border-radius: 12px; padding: 10px 10px 11px; cursor: pointer;
+      display: block; color: inherit;
+    }
+    .note-row:active { transform: scale(0.99); }
+    .note-row.is-on { background: rgba(196, 122, 44, 0.12); }
+    .note-row .nt {
+      font-size: 15px; font-weight: 620; letter-spacing: -0.02em;
+      line-height: 1.25;
+    }
+    .note-row .nx {
+      margin-top: 3px; font-size: 12px; line-height: 1.35; color: var(--muted);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .note-row .nm {
+      margin-top: 5px; font-size: 11px; color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .notes-paper {
+      border-radius: 20px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .notes-title {
+      flex: none; border: 0; outline: none; background: transparent;
+      padding: 18px 22px 6px;
+      font: 700 28px/1.15 var(--font-ui);
+      letter-spacing: -0.03em; color: var(--ink);
+    }
+    .notes-title::placeholder { color: rgba(60,60,67,0.28); font-weight: 650; }
+    .notes-meta {
+      flex: none; padding: 0 22px 8px;
+      font-size: 12px; color: var(--muted); min-height: 16px;
+    }
+    #notesEditor { flex: 1; min-height: 0; }
+    #notesEditor .vditor { border: 0 !important; background: transparent !important; }
+    #notesEditor .vditor-toolbar {
+      border: 0 !important; background: transparent !important;
+      padding: 0 14px !important;
+    }
+    #notesEditor .vditor-content { background: transparent !important; }
+    #notesEditor .vditor-reset { font-size: 17px !important; line-height: 1.55 !important; }
+    .notes-close {
+      position: absolute; top: 18px; right: 20px; z-index: 2;
+      width: 32px; height: 32px; border: 0; border-radius: 980px;
+      background: var(--fill); color: var(--ink); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .notes-close:active { transform: scale(0.94); }
+    .notes-paper { position: relative; }
+    @media (max-width: 820px) {
+      .notes-panel { grid-template-columns: 1fr; padding: 8px; }
+      .notes-panel.is-writing .notes-rail { display: none; }
+      .notes-panel:not(.is-writing) .notes-paper { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .notes-panel { transition: opacity 180ms ease; transform: none; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .notes-rail, .notes-paper { background: #fff; backdrop-filter: none; }
+    }
 
     /* —— Backup / Sync sheet —— */
     .backup-btn {
@@ -1745,10 +1859,10 @@
         <span class="material-symbols-outlined" style="font-size:18px">account_tree</span>
         <span>会话</span>
       </a>
-      <a class="backup-btn" id="notesOpenBtn" href="/notes.html" title="笔记">
+      <button type="button" class="backup-btn" id="notesOpenBtn" title="笔记">
         <span class="material-symbols-outlined" style="font-size:18px">edit_note</span>
         <span>笔记</span>
-      </a>
+      </button>
       <button type="button" class="backup-btn" id="opsOpenBtn" title="操作日志">
         <span class="material-symbols-outlined" style="font-size:18px">history</span>
         <span>操作</span>
@@ -1924,9 +2038,27 @@
   </div>
 
   <!-- Evaluation sheet (Apple-style): stars + note + history; never mounts into masonry cards -->
-  <a class="notes-fab" id="notesFab" href="/notes.html" aria-label="笔记">
+  <button type="button" class="notes-fab" id="notesFab" aria-label="笔记">
     <span class="material-symbols-outlined">edit_note</span>笔记
-  </a>
+  </button>
+
+  <div id="notesPanel" class="notes-panel" aria-hidden="true">
+    <aside class="notes-rail">
+      <div class="notes-rail-top">
+        <input id="notesSearch" type="search" placeholder="搜索" autocomplete="off" />
+        <button type="button" class="notes-new" id="notesNew">新一篇</button>
+      </div>
+      <div class="notes-list" id="notesList"></div>
+    </aside>
+    <section class="notes-paper">
+      <button type="button" class="notes-close" id="notesClose" title="关闭" aria-label="关闭">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+      <input id="notesTitle" class="notes-title" maxlength="120" placeholder="标题" />
+      <div class="notes-meta" id="notesMeta"></div>
+      <div id="notesEditor"></div>
+    </section>
+  </div>
 
   <div id="evalSheet" class="eval-sheet" aria-hidden="true">
     <div class="eval-sheet-scrim" id="evalSheetScrim"></div>
@@ -2578,147 +2710,216 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    let composeEditId = null;
-    let composeRefId = null;
+    const notesState = { items: [], id: null, vditor: null, timer: null, dirty: false, loaded: false };
 
-    function closeComposeSheet() {
-      const root = document.getElementById('composeSheet');
-      root?.classList.remove('open');
-      root?.setAttribute('aria-hidden', 'true');
-      composeEditId = null;
-      composeRefId = null;
+    function noteExcerpt(md) {
+      return (md || '').replace(/^#+\s+/gm, '').replace(/!\[[^\]]*]\([^)]+\)/g, '')
+        .replace(/\[([^\]]+)]\([^)]+\)/g, '$1').replace(/[`*_>#-]/g, '')
+        .replace(/\s+/g, ' ').trim();
+    }
+    function noteTitleOf(item) {
+      const raw = item.textContent || '';
+      const m = raw.match(/^#\s+(.+)$/m);
+      if (m) return m[1].trim();
+      return noteExcerpt(raw).slice(0, 36) || '';
+    }
+    function noteStripTitle(md, title) {
+      const t = (title || '').trim();
+      if (!t) return md || '';
+      return (md || '').replace(new RegExp('^#\\s+' + t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\n?'), '');
     }
 
-    function quoteFromItem(item) {
-      const raw = normalizePlainText(item.textContent || item.preview || item.url || '');
-      const clip = raw.length > 280 ? raw.slice(0, 280) + '…' : raw;
-      return clip ? `> ${clip.replace(/\n/g, '\n> ')}\n\n` : '';
+    function paintNotesList() {
+      const q = (document.getElementById('notesSearch')?.value || '').trim().toLowerCase();
+      const root = document.getElementById('notesList');
+      if (!root) return;
+      const rows = notesState.items.filter(n => !q || (n.textContent || '').toLowerCase().includes(q));
+      root.innerHTML = '';
+      rows.forEach(n => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'note-row' + (n.id === notesState.id ? ' is-on' : '');
+        const t = document.createElement('div'); t.className = 'nt'; t.textContent = noteTitleOf(n) || '未命名';
+        const x = document.createElement('div'); x.className = 'nx'; x.textContent = noteExcerpt(n.textContent || '');
+        const m = document.createElement('div'); m.className = 'nm';
+        m.textContent = formatItemTime(n);
+        btn.append(t, x, m);
+        btn.addEventListener('click', () => openNoteInPanel(n.id));
+        root.appendChild(btn);
+      });
     }
 
-    function openComposeSheet(opts = {}) {
-      composeEditId = opts.item && (opts.item.type === 'note' || opts.item.isCompose) ? opts.item.id : null;
-      composeRefId = opts.from ? opts.from.id : (opts.item && opts.item.composeRefId) || null;
-      const titleEl = document.getElementById('composeTitle');
-      const bodyEl = document.getElementById('composeBody');
-      const sub = document.getElementById('composeSheetSub');
-      const head = document.getElementById('composeSheetTitle');
-      if (titleEl) titleEl.value = '';
-      if (bodyEl) {
-        if (composeEditId) bodyEl.value = opts.item.textContent || '';
-        else if (opts.from) bodyEl.value = quoteFromItem(opts.from);
-        else bodyEl.value = '';
-      }
-      if (head) head.textContent = composeEditId ? '改这篇' : '记一笔';
-      if (sub) {
-        sub.textContent = composeRefId
-          ? '引用一条捕获 · 不改原文'
-          : 'Markdown · 图进本机 · 离开键盘即渲染';
-      }
-      document.getElementById('composeThumbs').innerHTML = '';
-      const root = document.getElementById('composeSheet');
-      root?.classList.add('open');
-      root?.setAttribute('aria-hidden', 'false');
-      setTimeout(() => bodyEl?.focus(), 40);
+    async function loadNotesList() {
+      const res = await fetch(API + '/api/clips?type=note&limit=80');
+      const data = await res.json();
+      notesState.items = Array.isArray(data) ? data : (data.items || []);
+      notesState.loaded = true;
+      paintNotesList();
     }
 
-    async function uploadComposeImage(file) {
+    async function uploadNoteImage(file) {
       const buf = await file.arrayBuffer();
       const bytes = new Uint8Array(buf);
       let bin = '';
       for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-      const b64 = btoa(bin);
       const res = await fetch(API + '/api/compose/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: b64, mime: file.type || 'image/jpeg' }),
+        body: JSON.stringify({ data: btoa(bin), mime: file.type || 'image/jpeg' }),
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j.ok || !j.sha) throw new Error(j.message || 'upload');
-      return j;
+      const j = await res.json();
+      if (!res.ok || !j.ok || !j.url) throw new Error(j.message || 'upload');
+      return j.url;
     }
 
-    async function attachComposeFiles(files) {
-      const bodyEl = document.getElementById('composeBody');
-      const thumbs = document.getElementById('composeThumbs');
-      for (const file of files) {
-        if (!file.type.startsWith('image/')) continue;
-        try {
-          const j = await uploadComposeImage(file);
-          if (bodyEl) {
-            const nl = bodyEl.value && !bodyEl.value.endsWith('\n') ? '\n' : '';
-            bodyEl.value += `${nl}![](${j.url})\n`;
-          }
-          if (thumbs) {
-            const img = document.createElement('img');
-            img.src = j.url;
-            img.alt = '';
-            thumbs.appendChild(img);
-          }
-        } catch (e) {
-          console.error(e);
-          toast('图片没写进去');
-        }
-      }
+    function notesHint(text) {
+      const el = document.getElementById('notesMeta');
+      if (el) el.textContent = text || '';
     }
 
-    async function submitCompose() {
-      const body = (document.getElementById('composeBody')?.value || '').trim();
-      const title = (document.getElementById('composeTitle')?.value || '').trim();
-      if (!body && !title) {
-        toast('先写点什么');
+    function ensureNotesEditor(markdown) {
+      const host = document.getElementById('notesEditor');
+      if (!host || typeof Vditor === 'undefined') return;
+      const h = Math.max(320, host.clientHeight || (window.innerHeight - 180));
+      if (notesState.vditor) {
+        notesState.vditor.setValue(markdown || '');
         return;
       }
-      const submit = document.getElementById('composeSubmit');
-      if (submit) submit.disabled = true;
+      notesState.vditor = new Vditor('notesEditor', {
+        height: h,
+        mode: 'ir',
+        lang: 'zh_CN',
+        placeholder: '',
+        cache: { enable: false },
+        toolbar: [
+          'headings', 'bold', 'italic', '|',
+          'list', 'ordered-list', 'check', 'quote', '|',
+          'code', 'link', 'upload', '|',
+          'undo', 'redo', 'fullscreen', 'outline',
+        ],
+        upload: {
+          accept: 'image/*',
+          handler(files) {
+            return (async () => {
+              try {
+                for (const file of files) {
+                  const url = await uploadNoteImage(file);
+                  notesState.vditor.insertValue(`![](${url})`);
+                }
+                return null;
+              } catch (e) {
+                return String(e.message || e);
+              }
+            })();
+          },
+        },
+        input() { scheduleNoteSave(); },
+        after() { notesState.vditor.setValue(markdown || ''); },
+      });
+    }
+
+    function scheduleNoteSave() {
+      notesState.dirty = true;
+      notesHint('…');
+      clearTimeout(notesState.timer);
+      notesState.timer = setTimeout(() => saveNoteNow(), 800);
+    }
+
+    async function saveNoteNow() {
+      if (!notesState.vditor) return;
+      const title = (document.getElementById('notesTitle')?.value || '').trim();
+      const body = notesState.vditor.getValue();
+      if (!title && !String(body || '').trim()) return;
+      const payload = { body, title: title || null };
+      if (notesState.id) payload.id = notesState.id;
       try {
-        const payload = { body, title: title || null };
-        if (composeEditId) payload.id = composeEditId;
-        if (composeRefId) payload.refId = composeRefId;
         const res = await fetch(API + '/api/compose', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok || j.ok === false) {
-          toast(j.message || '没记下');
-          return;
-        }
-        if (j.item) {
-          const idx = clips.findIndex(c => c.id === j.item.id);
-          if (idx >= 0) clips[idx] = { ...clips[idx], ...j.item };
-          else clips.unshift(j.item);
-          cardCache.delete(j.item.id);
-          clips = sortClipsForFeed(dedupeClipsById(clips));
-          colHeights = null;
-          rebuildFromData({ preserveScroll: true });
-        }
-        toast(composeEditId ? '已改' : '已记下');
-        closeComposeSheet();
+        const j = await res.json();
+        if (!res.ok || j.ok === false) { notesHint(j.message || ''); return; }
+        notesState.id = j.item.id;
+        const idx = notesState.items.findIndex(n => n.id === notesState.id);
+        if (idx >= 0) notesState.items[idx] = j.item;
+        else notesState.items.unshift(j.item);
+        notesState.dirty = false;
+        notesHint('');
+        paintNotesList();
       } catch (e) {
-        console.error(e);
-        toast('没记下');
-      } finally {
-        if (submit) submit.disabled = false;
+        notesHint('');
       }
     }
 
-    document.getElementById('composeOpenBtn')?.addEventListener('click', () => openComposeSheet());
-    document.getElementById('composeFab')?.addEventListener('click', () => openComposeSheet());
-    document.getElementById('composeSheetScrim')?.addEventListener('click', closeComposeSheet);
-    document.getElementById('composeSheetClose')?.addEventListener('click', closeComposeSheet);
-    document.getElementById('composeCancel')?.addEventListener('click', closeComposeSheet);
-    document.getElementById('composeSubmit')?.addEventListener('click', () => submitCompose());
-    document.getElementById('composeFile')?.addEventListener('change', e => {
-      const files = [...(e.target.files || [])];
-      e.target.value = '';
-      if (files.length) attachComposeFiles(files);
-    });
+    async function openNoteInPanel(id) {
+      if (notesState.dirty) await saveNoteNow();
+      const item = notesState.items.find(n => n.id === id);
+      if (!item) return;
+      notesState.id = id;
+      const t = noteTitleOf(item);
+      const titleEl = document.getElementById('notesTitle');
+      if (titleEl) titleEl.value = t;
+      ensureNotesEditor(noteStripTitle(item.textContent || '', t));
+      document.getElementById('notesPanel')?.classList.add('is-writing');
+      paintNotesList();
+    }
+
+    async function newNoteInPanel() {
+      if (notesState.dirty) await saveNoteNow();
+      notesState.id = null;
+      const titleEl = document.getElementById('notesTitle');
+      if (titleEl) titleEl.value = '';
+      notesHint('');
+      ensureNotesEditor('');
+      document.getElementById('notesPanel')?.classList.add('is-writing');
+      paintNotesList();
+      titleEl?.focus();
+    }
+
+    async function openNotesPanel() {
+      const panel = document.getElementById('notesPanel');
+      if (!panel) return;
+      panel.classList.add('open');
+      panel.setAttribute('aria-hidden', 'false');
+      document.getElementById('notesOpenBtn')?.classList.add('is-on');
+      if (!notesState.loaded) {
+        try { await loadNotesList(); } catch (e) { notesState.items = []; }
+      }
+      if (!notesState.id && notesState.items[0]) await openNoteInPanel(notesState.items[0].id);
+      else if (!notesState.vditor) await newNoteInPanel();
+      if (location.hash !== '#notes') history.replaceState(null, '', '#notes');
+    }
+
+    async function closeNotesPanel() {
+      if (notesState.dirty) await saveNoteNow();
+      const panel = document.getElementById('notesPanel');
+      panel?.classList.remove('open', 'is-writing');
+      panel?.setAttribute('aria-hidden', 'true');
+      document.getElementById('notesOpenBtn')?.classList.remove('is-on');
+      if (location.hash === '#notes') history.replaceState(null, '', location.pathname + location.search);
+    }
+
+    function toggleNotesPanel() {
+      const open = document.getElementById('notesPanel')?.classList.contains('open');
+      if (open) closeNotesPanel();
+      else openNotesPanel();
+    }
+
+    document.getElementById('notesOpenBtn')?.addEventListener('click', toggleNotesPanel);
+    document.getElementById('notesFab')?.addEventListener('click', toggleNotesPanel);
+    document.getElementById('notesClose')?.addEventListener('click', closeNotesPanel);
+    document.getElementById('notesNew')?.addEventListener('click', newNoteInPanel);
+    document.getElementById('notesTitle')?.addEventListener('input', scheduleNoteSave);
+    document.getElementById('notesSearch')?.addEventListener('input', paintNotesList);
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && document.getElementById('composeSheet')?.classList.contains('open')) {
-        closeComposeSheet();
+      if (e.key === 'Escape' && document.getElementById('notesPanel')?.classList.contains('open')) {
+        closeNotesPanel();
       }
     });
+    if (location.hash === '#notes') {
+      requestAnimationFrame(() => openNotesPanel());
+    }
     document.getElementById('evalNote')?.addEventListener('input', paintEvalStars);
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && document.getElementById('evalSheet')?.classList.contains('open')) {
