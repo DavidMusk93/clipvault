@@ -1611,6 +1611,7 @@ final class DatabaseManager: ObservableObject {
         query: String? = nil,
         trashOnly: Bool = false,
         typeFilter: String? = nil,
+        excludeType: String? = nil,
         completion: @escaping (ClipPage) -> Void
     ) {
         let run: () -> Void = { [weak self] in
@@ -1625,31 +1626,32 @@ final class DatabaseManager: ObservableObject {
             let hasQuery = !(q ?? "").isEmpty
             let ftsMatch = hasQuery ? self.ftsMatchQuery(from: q!) : nil
             let typeEq = typeFilter.flatMap { ClipboardType(rawValue: $0) }?.rawValue
+            let excludeEq = typeEq == nil ? excludeType.flatMap { ClipboardType(rawValue: $0) }?.rawValue : nil
 
             var items: [ClipboardItem] = []
 
             if trashOnly {
                 // Trash view: no FTS; optional LIKE on alive fields of deleted rows.
                 if hasQuery, let q = q {
-                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true, typeFilter: typeEq)
+                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true, typeFilter: typeEq, excludeType: excludeEq)
                 } else {
-                    items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true, typeFilter: typeEq)
+                    items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true, typeFilter: typeEq, excludeType: excludeEq)
                 }
             } else if hasQuery, let match = ftsMatch {
                 // skill §5: FTS first. LIKE only if FTS empty — never unindexed html scan.
-                items = self.runSearchFTS(db: db, match: match, cursor: cursor, fetchLimit: fetchLimit, typeFilter: typeEq)
+                items = self.runSearchFTS(db: db, match: match, cursor: cursor, fetchLimit: fetchLimit, typeFilter: typeEq, excludeType: excludeEq)
                 if items.isEmpty, let q = q {
                     // Trigram already covers text/ocr/html. LIKE only fields not in FTS.
                     let narrow = self.ftsTokenizer == "trigram" && q.count >= 3
-                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, narrowFields: narrow, typeFilter: typeEq)
+                    items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, narrowFields: narrow, typeFilter: typeEq, excludeType: excludeEq)
                 }
             } else if hasQuery, let q = q {
                 // Short query (<3) with trigram: LIKE path (no html_content).
-                items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, typeFilter: typeEq)
+                items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, typeFilter: typeEq, excludeType: excludeEq)
             } else {
-                items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: trashOnly, typeFilter: typeEq)
+                items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: trashOnly, typeFilter: typeEq, excludeType: excludeEq)
                 if !trashOnly, cursor == nil {
-                    let pins = self.runPinned(db: db, fetchLimit: 40, typeFilter: typeEq)
+                    let pins = self.runPinned(db: db, fetchLimit: 40, typeFilter: typeEq, excludeType: excludeEq)
                     if !pins.isEmpty {
                         let pinIds = Set(pins.map(\.id))
                         items = pins + items.filter { !pinIds.contains($0.id) }
@@ -1707,12 +1709,28 @@ final class DatabaseManager: ObservableObject {
     private static let keysetSQLAliased =
         "(c.timestamp < ? OR (c.timestamp = ? AND c.id < ?)) AND c.id != ?"
 
+    private static func typePredicateSQL(alias: String? = nil, typeFilter: String?, excludeType: String?) -> String {
+        let col = alias.map { "\($0).type" } ?? "type"
+        if typeFilter != nil { return " AND \(col) = ?" }
+        if excludeType != nil { return " AND \(col) != ?" }
+        return ""
+    }
+
+    private func bindTypePredicate(_ stmt: OpaquePointer?, bind: inout Int, typeFilter: String?, excludeType: String?) {
+        if let typeFilter {
+            bindText(stmt, Int32(bind), typeFilter); bind += 1
+        } else if let excludeType {
+            bindText(stmt, Int32(bind), excludeType); bind += 1
+        }
+    }
+
     private func runSearchFTS(
         db: OpaquePointer,
         match: String,
         cursor: ClipCursor?,
         fetchLimit: Int,
-        typeFilter: String? = nil
+        typeFilter: String? = nil,
+        excludeType: String? = nil
     ) -> [ClipboardItem] {
         var sql = """
         SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, \(Self.listHtmlSQLAliased), c.source_app, c.ocr_text,
@@ -1722,9 +1740,7 @@ final class DatabaseManager: ObservableObject {
         JOIN clipboard_items c ON c.id = f.id
         WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL
         """
-        if typeFilter != nil {
-            sql += " AND c.type = ?"
-        }
+        sql += Self.typePredicateSQL(alias: "c", typeFilter: typeFilter, excludeType: excludeType)
         if cursor != nil {
             sql += " AND \(Self.keysetSQLAliased)"
         }
@@ -1739,9 +1755,7 @@ final class DatabaseManager: ObservableObject {
         }
         var bind = 1
         bindText(stmt, Int32(bind), match); bind += 1
-        if let typeFilter {
-            bindText(stmt, Int32(bind), typeFilter); bind += 1
-        }
+        bindTypePredicate(stmt, bind: &bind, typeFilter: typeFilter, excludeType: excludeType)
         if let cursor = cursor {
             bind = bindKeysetCursor(stmt, startBind: bind, cursor: cursor)
         }
@@ -1760,7 +1774,8 @@ final class DatabaseManager: ObservableObject {
         fetchLimit: Int,
         trashOnly: Bool = false,
         narrowFields: Bool = false,
-        typeFilter: String? = nil
+        typeFilter: String? = nil,
+        excludeType: String? = nil
     ) -> [ClipboardItem] {
         var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha FROM clipboard_items WHERE "
         if trashOnly {
@@ -1768,9 +1783,7 @@ final class DatabaseManager: ObservableObject {
         } else {
             sql += "deleted_at IS NULL"
         }
-        if typeFilter != nil {
-            sql += " AND type = ?"
-        }
+        sql += Self.typePredicateSQL(typeFilter: typeFilter, excludeType: excludeType)
         // skill §5/§7: no unindexed LIKE on html_content. FTS covers text/ocr/html.
         if narrowFields {
             sql += " AND (IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
@@ -1790,9 +1803,7 @@ final class DatabaseManager: ObservableObject {
         var items: [ClipboardItem] = []
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         var bind = 1
-        if let typeFilter {
-            bindText(stmt, Int32(bind), typeFilter); bind += 1
-        }
+        bindTypePredicate(stmt, bind: &bind, typeFilter: typeFilter, excludeType: excludeType)
         let like = "%\(q)%"
         let likeSlots = narrowFields ? 3 : 6
         for _ in 0..<likeSlots {
@@ -1809,16 +1820,14 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
-    private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false, typeFilter: String? = nil) -> [ClipboardItem] {
+    private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false, typeFilter: String? = nil, excludeType: String? = nil) -> [ClipboardItem] {
         var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
             sql += "deleted_at IS NULL AND pinned_at IS NULL"
         }
-        if typeFilter != nil {
-            sql += " AND type = ?"
-        }
+        sql += Self.typePredicateSQL(typeFilter: typeFilter, excludeType: excludeType)
         if cursor != nil {
             sql += " AND " + Self.keysetSQL
         }
@@ -1832,9 +1841,7 @@ final class DatabaseManager: ObservableObject {
         var items: [ClipboardItem] = []
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         var bind = 1
-        if let typeFilter {
-            bindText(stmt, Int32(bind), typeFilter); bind += 1
-        }
+        bindTypePredicate(stmt, bind: &bind, typeFilter: typeFilter, excludeType: excludeType)
         if let cursor = cursor {
             bind = bindKeysetCursor(stmt, startBind: bind, cursor: cursor)
         }
@@ -1846,23 +1853,19 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
-    private func runPinned(db: OpaquePointer, fetchLimit: Int, typeFilter: String? = nil) -> [ClipboardItem] {
+    private func runPinned(db: OpaquePointer, fetchLimit: Int, typeFilter: String? = nil, excludeType: String? = nil) -> [ClipboardItem] {
         var sql = """
         SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha
         FROM clipboard_items
         WHERE deleted_at IS NULL AND pinned_at IS NOT NULL
         """
-        if typeFilter != nil {
-            sql += " AND type = ?"
-        }
+        sql += Self.typePredicateSQL(typeFilter: typeFilter, excludeType: excludeType)
         sql += " ORDER BY pinned_at DESC, id DESC LIMIT ?;"
         var stmt: OpaquePointer?
         var items: [ClipboardItem] = []
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         var bind = 1
-        if let typeFilter {
-            bindText(stmt, Int32(bind), typeFilter); bind += 1
-        }
+        bindTypePredicate(stmt, bind: &bind, typeFilter: typeFilter, excludeType: excludeType)
         sqlite3_bind_int(stmt, Int32(bind), Int32(max(1, min(fetchLimit, 40))))
         while sqlite3_step(stmt) == SQLITE_ROW {
             if let item = rowToItem(stmt: stmt) { items.append(item) }

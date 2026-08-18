@@ -418,6 +418,8 @@ class WebServer {
         let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
         if pathOnly == "/" || pathOnly == "/index.html" {
             sendHTMLResponse(connection: connection)
+        } else if pathOnly == "/notes" || pathOnly == "/notes.html" {
+            sendWebFile("notes.html", connection: connection)
         } else if pathOnly == "/api/items" || pathOnly == "/api/clips" {
             sendItemsJSON(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/image") {
@@ -745,6 +747,29 @@ class WebServer {
             body: data,
             connection: connection,
             extraHeaders: [("Cache-Control", "public, max-age=86400")]
+        )
+    }
+
+    private func sendWebFile(_ name: String, connection: NWConnection) {
+        guard let webRoot = projectWebDirectory() else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        let path = webRoot + "/" + name
+        guard let html = try? String(contentsOfFile: path, encoding: .utf8) else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: "text/html; charset=utf-8",
+            body: Data(html.utf8),
+            connection: connection,
+            extraHeaders: [
+                ("Cache-Control", "no-store, no-cache, must-revalidate"),
+                ("Pragma", "no-cache"),
+            ]
         )
     }
 
@@ -1732,6 +1757,7 @@ class WebServer {
         let view = items.first(where: { $0.name == "view" })?.value
         let trashOnly = (view == "trash")
         let typeFilter = items.first(where: { $0.name == "type" })?.value
+        let excludeType = items.first(where: { $0.name == "exclude" })?.value
         if let idStr = items.first(where: { $0.name == "id" })?.value, let uuid = UUID(uuidString: idStr) {
             database.fetchItem(id: uuid) { [weak self] item in
                 guard let self else { return }
@@ -1742,7 +1768,7 @@ class WebServer {
             return
         }
 
-        database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter) { [weak self] page in
+        database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType) { [weak self] page in
             guard let self = self else { return }
             let jsonItems = page.items.map { self.itemToJSON($0) }
             var payload: [String: Any] = [

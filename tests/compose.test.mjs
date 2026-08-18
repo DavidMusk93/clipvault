@@ -6,6 +6,7 @@ import test from 'node:test';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
+const notesPage = readFileSync(join(root, 'web/notes.html'), 'utf8');
 const auth = readFileSync(join(root, 'ClipFlow/ComposeNotes.swift'), 'utf8');
 const db = readFileSync(join(root, 'ClipFlow/DatabaseManager.swift'), 'utf8');
 const web = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
@@ -25,19 +26,24 @@ test('compose is a note type, not an edit of capture', () => {
 });
 
 test('compose images go to CAS sha URLs', () => {
-  assert.match(auth, /\/api\/(?:image|archive\/asset)\?sha=/);
+  assert.match(auth, /blobKeys\(in markdown/);
+  assert.match(auth, /sha=/);
   assert.match(web, /\/api\/image\?sha=/);
-  assert.match(html, /\/api\/compose\/image/);
-  assert.match(html, /!\[\]\(\$\{j\.url\}\)/);
+  assert.match(notesPage, /\/api\/compose\/image/);
+  assert.match(notesPage, /vditor/i);
 });
 
-test('web has 记一笔 sheet and note chip', () => {
-  assert.match(html, /id="composeSheet"/);
-  assert.match(html, /id="composeFab"/);
-  assert.match(html, /data-type="note"/);
-  assert.match(html, /openComposeSheet/);
-  assert.match(html, /type === 'note'/);
-  assert.match(html, /label: '笔记'/);
+test('notes are a separate surface, not bound to clip cards', () => {
+  assert.match(html, /href="\/notes.html"/);
+  assert.match(html, /exclude.*note|exclude', 'note'/);
+  assert.doesNotMatch(html, /data-compose-from/);
+  assert.doesNotMatch(html, /id="composeSheet"/);
+  assert.doesNotMatch(html, /id="composeFab"/);
+  assert.doesNotMatch(html, /data-type="note"/);
+  assert.match(notesPage, /new Vditor/);
+  assert.match(notesPage, /\/api\/clips\?type=note/);
+  assert.match(web, /notes\.html/);
+  assert.match(web, /excludeType/);
 });
 
 test('design-taste lists note badge', () => {

@@ -73,11 +73,11 @@ test('product brand is ClipVault in title', () => {
   assert.match(indexHtml, /<title>ClipVault<\/title>/);
 });
 
-test('compose sheet and note chip exist', () => {
-  assert.match(indexHtml, /id="composeSheet"/);
-  assert.match(indexHtml, /id="composeFab"/);
-  assert.match(indexHtml, /data-type="note"/);
-  assert.match(indexHtml, /\/api\/compose/);
+test('notes live on /notes.html, not the clip wall', () => {
+  assert.match(indexHtml, /href="\/notes.html"/);
+  assert.match(indexHtml, /exclude.*note/);
+  assert.doesNotMatch(indexHtml, /id="composeSheet"/);
+  assert.doesNotMatch(indexHtml, /id="composeFab"/);
 });
 
 test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {
