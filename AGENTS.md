@@ -86,7 +86,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | Do | Don't |
 | --- | --- |
 | **Capture payload 不可变**；评价：`user_evaluations` append-only；星级可改；紧凑星在 sheet header；铅笔入口；历史时间线；禁主卡片 body | 阶段芯片；评价 strip 进 masonry；为大星行浪费 sheet 垂直空间 |
-| **Compose / 笔记**：同一页右侧 panel（`#notesPanel`），独立卡片列表 + Vditor；空态不写设计意图；`type=note` + `compose_ops` | 另开文档割裂；绑在每张剪贴卡；textarea 玩具编辑器；页面上解释「为什么这样设计」 |
+| **Compose / 笔记**：同一页右侧 panel（`#notesPanel`），独立卡片列表 + Vditor；空态不写设计意图；`type=note` + `compose_ops`；背景是毛玻璃；工具栏必须可见（flex 铺开，禁止透明 0 高） | 另开文档割裂；绑在每张剪贴卡；textarea 玩具编辑器；页面上解释「为什么这样设计」；白实心底 + 看不见的编辑器组件 |
 | 一次做对：分页、多档图、备份一致性、CI 对齐生产路径 | P0/P1 菜单式半吊子交付 |
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |

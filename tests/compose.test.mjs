@@ -43,6 +43,10 @@ test('notes are a same-page panel, not clip-card chrome', () => {
   assert.match(html, /new Vditor/);
   assert.match(html, /\/api\/clips\?type=note/);
   assert.match(web, /excludeType/);
+  assert.match(html, /class="notes-frost"/);
+  assert.match(html, /toolbarConfig:\s*\{\s*hide:\s*false/);
+  assert.match(html, /#notesEditor \.vditor-toolbar \{[\s\S]{0,280}?display:\s*flex/);
+  assert.doesNotMatch(html, /#notesEditor \.vditor-toolbar \{[\s\S]{0,180}?background:\s*transparent/);
 });
 
 test('design-taste lists note badge', () => {
