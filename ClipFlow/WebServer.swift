@@ -1342,7 +1342,7 @@ class WebServer {
                     connection: connection,
                     extraHeaders: [
                         ("Cache-Control", "private, no-store"),
-                        ("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; media-src * blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; script-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com"),
+                        ("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; media-src * blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com"),
                         ("X-Content-Type-Options", "nosniff"),
                     ]
                 )
@@ -1404,56 +1404,9 @@ class WebServer {
           <meta charset="utf-8"/>
           <meta name="viewport" content="width=device-width,initial-scale=1"/>
           <title>\(safeTitle)</title>
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"/>
-          <style>
-            .cv-bar{
-              position:sticky;top:0;z-index:2;
-              display:flex;flex-direction:column;gap:4px;
-              padding:10px 18px 12px;
-              background:#fff;border-bottom:0.5px solid #e5e5ea;
-              font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
-            }
-            .cv-bar h1{margin:0;font-size:15px;font-weight:650;letter-spacing:-0.02em;}
-            .cv-bar p{margin:0;font-size:12px;color:#6e6e73;word-break:break-all;}
-            main.cv-article{
-              max-width:46rem;margin:0 auto;padding:1.25rem 1.25rem 4rem;
-            }
-            pre,pre code{
-              white-space:pre !important;
-              word-break:normal;
-              overflow-wrap:normal;
-              overflow:auto;
-              font-variant-ligatures:none;
-              font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-            }
-            img,video{max-width:100%;height:auto;}
-            img[data-src],img[data-original]{max-width:100%;height:auto;}
-            a{color:inherit;}
-            a[href]{text-decoration:underline;text-underline-offset:2px;}
-            iframe[src*="youtube"],iframe[src*="youtube-nocookie"],iframe[src*="vimeo"]{
-              display:block;width:100%;max-width:100%;aspect-ratio:16/9;height:auto;
-              min-height:220px;border:0;border-radius:12px;background:#111;
-            }
-            .cv-video-fallback{margin:.45rem 0 1.1rem;font-size:.92rem;}
-            .cv-video-fallback a{color:#0071e3;}
-            /* Mermaid bakes geometry but leaves message lines stroke="none"
-               (real paint lived in page <style>, stripped by Readability). */
-            svg[aria-roledescription],svg[id^="mermaid"]{
-              display:block;max-width:100%;height:auto;
-              background:#f4f3ee;border-radius:12px;padding:8px 4px;
-            }
-            svg[aria-roledescription="sequence"] line[marker-end]{
-              stroke:#1d1d1f;stroke-width:2;
-            }
-            svg[aria-roledescription="sequence"] line[id^="actor"]{
-              stroke:#8e8e93;stroke-width:1.25px;
-            }
-            svg[aria-roledescription="sequence"] marker path{
-              fill:#1d1d1f;stroke:#1d1d1f;
-            }
-            svg[aria-roledescription] text{fill:#1d1d1f;}
-          </style>
-          <script src="/assets/archive-reader.js?v=20260817a" defer></script>
+          <meta name="color-scheme" content="light"/>
+          <link rel="stylesheet" href="/assets/archive-view.css?v=20260827b"/>
+          <script src="/assets/archive-reader.js?v=20260827b" defer></script>
         </head>
         <body>
         \(bar)

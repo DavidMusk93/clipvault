@@ -6,21 +6,42 @@ import test from 'node:test';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const swift = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
+const viewCss = readFileSync(join(root, 'web/assets/archive-view.css'), 'utf8');
+const readerJs = readFileSync(join(root, 'web/assets/archive-reader.js'), 'utf8');
 
 test('archive view allows youtube/vimeo frames', () => {
   assert.match(swift, /frame-src https:\/\/www\.youtube-nocookie\.com https:\/\/www\.youtube\.com https:\/\/player\.vimeo\.com/);
 });
 
 test('archive view restores mermaid sequence strokes dropped by Readability', () => {
-  assert.match(swift, /svg\[aria-roledescription="sequence"\] line\[marker-end\]/);
-  assert.match(swift, /stroke:#1d1d1f/);
-  assert.match(swift, /svg\[aria-roledescription="sequence"\] marker path/);
+  assert.match(viewCss, /svg\[aria-roledescription="sequence"\] line\[marker-end\]/);
+  assert.match(viewCss, /stroke: #1d1d1f/);
+  assert.match(viewCss, /svg\[aria-roledescription="sequence"\] marker path/);
+});
+
+test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
+  assert.doesNotMatch(swift, /picocss/);
+  assert.match(swift, /archive-view\.css\?v=20260827b/);
+  assert.match(swift, /style-src 'self' 'unsafe-inline'/);
+  assert.match(viewCss, /background: #1d1d1f/);
+  assert.match(viewCss, /\.cv-code/);
+  assert.match(viewCss, /\.cv-figure/);
+  assert.match(viewCss, /\.cv-lightbox/);
+  assert.match(viewCss, /figcaption/);
+  assert.match(readerJs, /function enhanceTechnicalMedia/);
+  assert.match(readerJs, /function wrapCodeBlocks/);
+  assert.match(readerJs, /function wrapFigures/);
+  assert.match(readerJs, /function highlightSource/);
+  assert.match(readerJs, /Line wrapping/);
+  assert.match(readerJs, /cv-code-copy/);
+  assert.match(readerJs, /function toneFigure/);
+  assert.match(viewCss, /\.cv-figure\.is-dark/);
 });
 
 test('archive view sizes youtube iframes and adds a watch link', () => {
-  assert.match(swift, /iframe\[src\*="youtube-nocookie"\]/);
-  assert.match(swift, /aspect-ratio:16\/9/);
-  assert.match(swift, /cv-video-fallback/);
+  assert.match(viewCss, /iframe\[src\*="youtube-nocookie"\]/);
+  assert.match(viewCss, /aspect-ratio: 16 \/ 9/);
+  assert.match(viewCss, /cv-video-fallback/);
   assert.match(swift, /decorateArchiveMedia/);
   assert.match(swift, /youtube\.com\/watch\?v=/);
 });

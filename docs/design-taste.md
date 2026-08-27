@@ -80,6 +80,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | 端 | 文件 |
 | --- | --- |
 | Web | `web/index.html` — `:root` type tokens、`.badge.type-*`、`typeMeta()` |
+| 归档 View | `web/assets/archive-view.css` + `archive-reader.js` `enhanceTechnicalMedia` |
 | Android | `ui/ContentRender.kt` `typeStyle()`；`MainActivity.kt` `opsSourceStyle()` |
 | 产品约定 | `AGENTS.md` §2 + **本文** |
 
@@ -104,6 +105,22 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | 有评论 | 底部 inset 1.5px `#0071E3` | 划线带想法 |
 | 动效 | 从选区长出 `scale(.96→1)` + 16–200ms ease-out | 空间来源是文字，不是屏幕中心 |
 | 位置 | 优先选区上方，空隙不够再翻到下方；caret 对准中点 | **永不覆盖选中文字** |
+
+## 归档 View 技术介质（代码 / 流程图 / 图表）
+
+Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `pre` + 拆开的 `img`/`figcaption`。View 必须自己给这些介质一张「板」，不要让它们和正文灰底糊在一起。
+
+| Token | 值 | 用途 |
+| --- | --- | --- |
+| 纸 | `#fff` 正文，不用 Pico 灰洗 | 长文阅读面 |
+| 代码表面 | `#1D1D1F`（Ink 反相）+ `#F5F5F7` 字 | 代码是另一种介质，不是浅灰盒子 |
+| 代码工具条 | 32px · 11px 语言 · 24px「复制」 | 与评论 header 同一套小控件密度 |
+| 语法色 | keyword `#FF7AB2` · string `#FF8170` · comment `#8E8E93` · number `#D0BF69` | Xcode Dark，不另开彩虹主题 |
+| 图板 | 14 圆角 · 0.5px 分隔 · 图顶满 · 题注 `#F5F5F7` 底栏 | 浅色不透明图 |
+| 深图板 | 透明浅线稿或整体偏暗 → `.is-dark` 底 `#1D1D1F`，题注 `#2C2C2E` | 出版商把流程图铺在深蓝底上；Readability 剥 CSS 后必须还一块墨井，不要白纸透底 |
+| 放大 | 暗 scrim `rgba(15,15,16,.86)` · 点击图/点空白关闭 | 看清流程图；不改 CAS |
+
+规则：只在 View 运行时包 `.cv-code` / `.cv-figure` / `.cv-table`。禁止为了高亮去改 `archive_html`。
 
 ## 品味禁区
 

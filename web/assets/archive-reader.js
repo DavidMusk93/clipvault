@@ -1165,15 +1165,407 @@
     }
   }
 
+  var LANG_ALIAS = {
+    golang: "go",
+    shell: "sh",
+    bash: "sh",
+    zsh: "sh",
+    console: "sh",
+    plaintext: "text",
+    txt: "text",
+    javascript: "js",
+    typescript: "ts",
+    python: "py",
+    rust: "rs",
+    cxx: "cpp",
+    "c++": "cpp",
+    yml: "yaml",
+  };
+  var LANG_LABEL = {
+    go: "Go",
+    sh: "Shell",
+    text: "Text",
+    js: "JavaScript",
+    ts: "TypeScript",
+    py: "Python",
+    rs: "Rust",
+    c: "C",
+    cpp: "C++",
+    java: "Java",
+    sql: "SQL",
+    json: "JSON",
+    yaml: "YAML",
+    html: "HTML",
+    xml: "XML",
+    css: "CSS",
+    swift: "Swift",
+  };
+  var LANG_KEYS = {
+    go: "func type struct interface map chan go defer return if else for range switch case select break continue package import var const make new nil true false default fallthrough goto len cap append copy delete panic recover iota any comparable error string bool byte rune int int8 int16 int32 int64 uint uint8 uint16 uint32 uint64 uintptr float32 float64 complex64 complex128",
+    js: "async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new return static super switch this throw try typeof var void while with yield of from as",
+    ts: "async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new return static super switch this throw try typeof var void while with yield of from as type interface enum namespace declare implements private public protected readonly abstract as satisfies",
+    py: "and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield",
+    rs: "as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while",
+    c: "auto break case char const continue default do double else enum extern float for goto if inline int long register return short signed sizeof static struct switch typedef union unsigned void volatile while",
+    cpp: "alignas alignof and and_eq asm auto bitand bitor bool break case catch char class compl concept const consteval constexpr constinit continue co_await co_return co_yield decltype default delete do double dynamic_cast else enum explicit export extern false float for friend goto if inline int long mutable namespace new noexcept not nullptr operator or private protected public register reinterpret_cast return short signed sizeof static static_assert static_cast struct switch template this throw true try typedef typeid typename union unsigned using virtual void volatile while xor",
+    java: "abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for goto if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while true false null var record sealed permits yield",
+    swift: "associatedtype class deinit enum extension fileprivate func import init inout internal let open operator private protocol public rethrows return static struct subscript typealias var break case continue default defer do else fallthrough for guard if in repeat switch where while as Any catch false is nil super self Self throw throws true try actor some async await",
+    sql: "select from where and or not in is null like between join inner left right full outer on group by order asc desc insert into values update set delete create table index view as distinct limit offset having union all case when then else end",
+    sh: "if then else elif fi for while do done in case esac function return exit echo export local readonly true false",
+  };
+
+  function normLang(raw) {
+    var s = String(raw || "").toLowerCase().replace(/^\./, "");
+    if (LANG_ALIAS[s]) return LANG_ALIAS[s];
+    return s;
+  }
+
+  function langOf(code) {
+    var d = normLang(code.getAttribute("data-lang"));
+    if (d) return d;
+    var cls = String(code.className || "") + " " + String((code.parentNode && code.parentNode.className) || "");
+    var m = cls.match(/(?:language|lang|highlight)-([a-z0-9+#]+)/i);
+    return m ? normLang(m[1]) : "";
+  }
+
+  function langLabel(lang) {
+    if (!lang) return "代码";
+    return LANG_LABEL[lang] || lang.toUpperCase();
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function highlightSource(src, lang) {
+    if (!src || src.length > 80000) return "";
+    var keys = LANG_KEYS[lang] || "";
+    var style = "c";
+    if (lang === "py" || lang === "sh" || lang === "yaml") style = "hash";
+    else if (lang === "sql") style = "sql";
+    else if (lang === "html" || lang === "xml") style = "html";
+    else if (lang === "json") style = "json";
+    if (!keys && style !== "json") return "";
+    var keyRe = keys
+      ? new RegExp("\\b(?:" + keys.trim().split(/\s+/).map(function (k) { return k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join("|") + ")\\b", "g")
+      : null;
+    var tokenRe;
+    if (style === "hash") {
+      tokenRe = /(#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?)\b)/g;
+    } else if (style === "sql") {
+      tokenRe = /(--[^\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'|\b(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?)\b)/g;
+    } else if (style === "html") {
+      tokenRe = /(<!--[\s\S]*?-->|"[^"]*"|'[^']*')/g;
+    } else if (style === "json") {
+      tokenRe = /("(?:\\.|[^"\\])*")\s*(:)?|\b(?:true|false|null)\b|\b-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g;
+    } else {
+      tokenRe = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|`[^`]*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])+'|\b(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?)\b)/g;
+    }
+    var out = "";
+    var last = 0;
+    var m;
+    tokenRe.lastIndex = 0;
+    while ((m = tokenRe.exec(src))) {
+      var chunk = src.slice(last, m.index);
+      if (keyRe && chunk) out += paintKeys(chunk, keyRe);
+      else out += escapeHtml(chunk);
+      var tok = m[0];
+      var cls = "n";
+      if (style === "json") {
+        if (m[1]) cls = m[2] ? "k" : "s";
+        else if (/true|false|null/.test(tok)) cls = "k";
+        else cls = "n";
+        out += '<span class="cv-' + cls + '">' + escapeHtml(tok) + "</span>";
+      } else {
+        if (tok.indexOf("//") === 0 || tok.indexOf("/*") === 0 || tok.indexOf("#") === 0 || tok.indexOf("--") === 0 || tok.indexOf("<!--") === 0) cls = "c";
+        else if (tok.charAt(0) === '"' || tok.charAt(0) === "'" || tok.charAt(0) === "`") cls = "s";
+        else cls = "n";
+        out += '<span class="cv-' + cls + '">' + escapeHtml(tok) + "</span>";
+      }
+      last = m.index + tok.length;
+    }
+    var rest = src.slice(last);
+    if (keyRe && rest) out += paintKeys(rest, keyRe);
+    else out += escapeHtml(rest);
+    return out;
+  }
+
+  function paintKeys(chunk, keyRe) {
+    var out = "";
+    var last = 0;
+    var m;
+    keyRe.lastIndex = 0;
+    while ((m = keyRe.exec(chunk))) {
+      out += escapeHtml(chunk.slice(last, m.index));
+      out += '<span class="cv-k">' + escapeHtml(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    out += escapeHtml(chunk.slice(last));
+    return out;
+  }
+
+  function copyText(text, btn) {
+    function ok() {
+      btn.textContent = "已复制";
+      setTimeout(function () {
+        btn.textContent = "复制";
+      }, 1400);
+    }
+    function fallback() {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        ok();
+      } catch (_) {}
+      document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(ok).catch(fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  function stripLineWrapToggles(root) {
+    var ps = root.querySelectorAll("p");
+    for (var i = 0; i < ps.length; i++) {
+      var t = String(ps[i].textContent || "").replace(/\s+/g, " ").trim();
+      if (/^Line wrapping:\s*(ON|OFF)$/i.test(t)) ps[i].parentNode.removeChild(ps[i]);
+    }
+  }
+
+  function isBareParagraph(p, img) {
+    if (!p || p.nodeName !== "P") return false;
+    var kids = p.childNodes;
+    for (var i = 0; i < kids.length; i++) {
+      var n = kids[i];
+      if (n === img) continue;
+      if (n.nodeType === 3 && !String(n.nodeValue).trim()) continue;
+      if (n.nodeType === 1 && (n.nodeName === "BR" || n.nodeName === "WBR")) continue;
+      return false;
+    }
+    return true;
+  }
+
+  function isTinyIcon(img) {
+    var w = parseInt(img.getAttribute("width") || "0", 10);
+    var h = parseInt(img.getAttribute("height") || "0", 10);
+    if (w && w <= 48) return true;
+    if (h && h <= 48) return true;
+    return false;
+  }
+
+  function wrapCodeBlocks(root) {
+    var pres = root.querySelectorAll("pre");
+    for (var i = 0; i < pres.length; i++) {
+      var pre = pres[i];
+      if (pre.closest(".cv-code, .cv-reader-ui")) continue;
+      var code = null;
+      for (var c = 0; c < pre.childNodes.length; c++) {
+        if (pre.childNodes[c].nodeName === "CODE") {
+          code = pre.childNodes[c];
+          break;
+        }
+      }
+      if (!code) {
+        code = document.createElement("code");
+        while (pre.firstChild) code.appendChild(pre.firstChild);
+        pre.appendChild(code);
+      }
+      var raw = code.textContent || "";
+      code.textContent = raw;
+      var lang = langOf(code) || langOf(pre);
+      if (lang) code.setAttribute("data-lang", lang);
+      var painted = lang ? highlightSource(raw, lang) : "";
+      if (painted) code.innerHTML = painted;
+      var wrap = document.createElement("div");
+      wrap.className = "cv-code";
+      if (lang) wrap.setAttribute("data-lang", lang);
+      var head = document.createElement("div");
+      head.className = "cv-code-head";
+      var lab = document.createElement("span");
+      lab.className = "cv-code-lang";
+      lab.textContent = langLabel(lang);
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cv-code-copy";
+      btn.textContent = "复制";
+      btn.addEventListener("click", function (text, button) {
+        return function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          copyText(text, button);
+        };
+      }(raw, btn));
+      head.appendChild(lab);
+      head.appendChild(btn);
+      pre.parentNode.insertBefore(wrap, pre);
+      wrap.appendChild(head);
+      wrap.appendChild(pre);
+    }
+  }
+
+  function toneFigure(img) {
+    function apply() {
+      var fig = img.closest("figure");
+      if (!fig) return;
+      try {
+        var w = img.naturalWidth;
+        var h = img.naturalHeight;
+        if (!w || !h) return;
+        var sw = Math.min(48, w);
+        var sh = Math.min(48, h);
+        var c = document.createElement("canvas");
+        c.width = sw;
+        c.height = sh;
+        var ctx = c.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, sw, sh);
+        var data = ctx.getImageData(0, 0, sw, sh).data;
+        var opaque = 0;
+        var lum = 0;
+        var n = data.length / 4;
+        for (var i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 24) continue;
+          opaque++;
+          lum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+        }
+        var trans = n ? 1 - opaque / n : 0;
+        var avg = opaque ? lum / opaque : 255;
+        if (avg < 80 || (trans > 0.4 && avg > 160)) fig.classList.add("is-dark");
+      } catch (_) {}
+    }
+    if (img.complete && img.naturalWidth) apply();
+    else img.addEventListener("load", apply);
+  }
+
+  function wrapFigures(root) {
+    var imgs = root.querySelectorAll("img");
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      if (img.closest("figure, .cv-figure, .cv-reader-ui, .cv-lightbox, a[href]")) continue;
+      if (isTinyIcon(img)) continue;
+      var p = img.parentNode;
+      var probe = isBareParagraph(p, img) ? p.nextElementSibling : img.nextElementSibling;
+      var cap = probe && probe.nodeName === "FIGCAPTION" ? probe : null;
+      var fig = document.createElement("figure");
+      fig.className = "cv-figure";
+      if (isBareParagraph(p, img)) {
+        p.parentNode.insertBefore(fig, p);
+        fig.appendChild(img);
+        if (p.parentNode) p.parentNode.removeChild(p);
+      } else {
+        img.parentNode.insertBefore(fig, img);
+        fig.appendChild(img);
+      }
+      if (cap) fig.appendChild(cap);
+      img.removeAttribute("role");
+      img.removeAttribute("tabindex");
+      img.removeAttribute("aria-haspopup");
+      img.removeAttribute("aria-label");
+      toneFigure(img);
+    }
+    var svgs = root.querySelectorAll("svg[aria-roledescription], svg[id^='mermaid']");
+    for (var j = 0; j < svgs.length; j++) {
+      var svg = svgs[j];
+      if (svg.closest("figure, .cv-figure, .cv-reader-ui")) continue;
+      var plate = document.createElement("figure");
+      plate.className = "cv-figure cv-diagram";
+      svg.parentNode.insertBefore(plate, svg);
+      plate.appendChild(svg);
+    }
+  }
+
+  function wrapTables(root) {
+    var tables = root.querySelectorAll("table");
+    for (var i = 0; i < tables.length; i++) {
+      var table = tables[i];
+      if (table.closest(".cv-table, .cv-reader-ui")) continue;
+      var wrap = document.createElement("div");
+      wrap.className = "cv-table";
+      table.parentNode.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    }
+  }
+
+  function mountLightbox(root) {
+    if (document.querySelector(".cv-lightbox")) return;
+    var box = document.createElement("div");
+    box.className = "cv-lightbox";
+    box.setAttribute("hidden", "");
+    box.innerHTML =
+      '<button type="button" class="cv-lightbox-close" aria-label="关闭">×</button>' +
+      '<img alt="">' +
+      '<p class="cv-lightbox-cap"></p>';
+    document.body.appendChild(box);
+    var pic = box.querySelector("img");
+    var cap = box.querySelector(".cv-lightbox-cap");
+    function close() {
+      box.classList.remove("open");
+      box.setAttribute("hidden", "");
+      document.body.classList.remove("cv-lb-open");
+      pic.removeAttribute("src");
+    }
+    function open(img) {
+      var src = img.currentSrc || img.src;
+      if (!src) return;
+      pic.src = src;
+      pic.alt = img.alt || "";
+      var figcap = img.closest("figure") && img.closest("figure").querySelector("figcaption");
+      cap.textContent = (figcap && figcap.textContent) || img.alt || "";
+      box.removeAttribute("hidden");
+      box.classList.add("open");
+      document.body.classList.add("cv-lb-open");
+    }
+    box.addEventListener("click", function (e) {
+      if (e.target === box || e.target === pic || e.target.classList.contains("cv-lightbox-close")) close();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && box.classList.contains("open")) close();
+    });
+    root.addEventListener("click", function (e) {
+      if (e.target.closest("a[href], .cv-reader-ui, .cv-code, button")) return;
+      var img = e.target.closest(".cv-figure img, figure img, main.cv-article img");
+      if (!img || img.closest(".cv-lightbox")) return;
+      if (isTinyIcon(img)) return;
+      e.preventDefault();
+      open(img);
+    });
+  }
+
+  function enhanceTechnicalMedia(root) {
+    if (!root) return;
+    stripLineWrapToggles(root);
+    wrapCodeBlocks(root);
+    wrapFigures(root);
+    wrapTables(root);
+    mountLightbox(root);
+  }
+
   function boot() {
     if (document.documentElement.hasAttribute("data-cv-preview")) {
       previewMount();
       return;
     }
     var root = articleRoot();
+    if (document.documentElement.hasAttribute("data-cv-enhance")) {
+      promoteLazyImages(root);
+      enhanceTechnicalMedia(root);
+      return;
+    }
     var id = archiveId();
     if (!root || !id) return;
     promoteLazyImages(root);
+    enhanceTechnicalMedia(root);
     var headings = collectHeadings(root);
     apiGet(id)
       .then(function (res) {

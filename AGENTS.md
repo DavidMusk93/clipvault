@@ -78,6 +78,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶；**跨机必须走 op-log `pin`/`unpin`** | 改 timestamp 冒充置顶；钉子混进下一页重复出现；只写本机列不同步 |
 | **归档 / 阅读态跨机**：`web_archive` 的 `blob_keys` = HTML **闭包**（root + 文内 `/api/archive/asset` CAS）+ `reader_op` | 只传 html sha；图只躺在对端 `hosts/*/blobs` 灾备里 |
 | **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |
+| **View 技术介质**：白纸正文；代码炭黑表面 + 语言/复制 + View 时重高亮；图/流程图圆角画板 + 题注条 + 点击放大。CSS 在 `archive-view.css`。不改 CAS | Pico 灰底把代码/图糊成一坨；靠出版商 stylesheet；把高亮写回 archive HTML |
 | **阅读选区菜单**：macOS 浅玻璃小条（28px），黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**；评论 header 单行 28px（评论/摘录与取消/提交同一 strut）；底部「记录」= `reader_ops` | 评论卡里放大号「删除划线」；菜单压在高亮上；header 左右不共线 |
 | 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
 
