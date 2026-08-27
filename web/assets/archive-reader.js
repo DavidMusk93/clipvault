@@ -1441,7 +1441,10 @@
         }
         var trans = n ? 1 - opaque / n : 0;
         var avg = opaque ? lum / opaque : 255;
-        if (avg < 80 || (trans > 0.4 && avg > 160)) fig.classList.add("is-dark");
+        // Paper first. Transparent line art often keeps DARK labels/arrows
+        // as the minority ink; a black well eats those (child 0 / dashed edges).
+        // Dark plate only for a mostly-opaque dark raster (screenshot, dark UI).
+        if (avg < 72 && trans < 0.3) fig.classList.add("is-dark");
       } catch (_) {}
     }
     if (img.complete && img.naturalWidth) apply();
@@ -1510,7 +1513,7 @@
     var pic = box.querySelector("img");
     var cap = box.querySelector(".cv-lightbox-cap");
     function close() {
-      box.classList.remove("open");
+      box.classList.remove("open", "is-dark-media");
       box.setAttribute("hidden", "");
       document.body.classList.remove("cv-lb-open");
       pic.removeAttribute("src");
@@ -1520,8 +1523,10 @@
       if (!src) return;
       pic.src = src;
       pic.alt = img.alt || "";
-      var figcap = img.closest("figure") && img.closest("figure").querySelector("figcaption");
+      var fig = img.closest("figure");
+      var figcap = fig && fig.querySelector("figcaption");
       cap.textContent = (figcap && figcap.textContent) || img.alt || "";
+      box.classList.toggle("is-dark-media", !!(fig && fig.classList.contains("is-dark")));
       box.removeAttribute("hidden");
       box.classList.add("open");
       document.body.classList.add("cv-lb-open");

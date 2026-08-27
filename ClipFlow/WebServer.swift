@@ -1405,8 +1405,8 @@ class WebServer {
           <meta name="viewport" content="width=device-width,initial-scale=1"/>
           <title>\(safeTitle)</title>
           <meta name="color-scheme" content="light"/>
-          <link rel="stylesheet" href="/assets/archive-view.css?v=20260827b"/>
-          <script src="/assets/archive-reader.js?v=20260827b" defer></script>
+          <link rel="stylesheet" href="/assets/archive-view.css?v=20260827c"/>
+          <script src="/assets/archive-reader.js?v=20260827c" defer></script>
         </head>
         <body>
         \(bar)

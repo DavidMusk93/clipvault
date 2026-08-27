@@ -21,7 +21,7 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20260827b/);
+  assert.match(swift, /archive-view\.css\?v=20260827c/);
   assert.match(swift, /style-src 'self' 'unsafe-inline'/);
   assert.match(viewCss, /background: #1d1d1f/);
   assert.match(viewCss, /\.cv-code/);
@@ -35,7 +35,10 @@ test('archive view drops Pico gray wash and styles code/figures as their own med
   assert.match(readerJs, /Line wrapping/);
   assert.match(readerJs, /cv-code-copy/);
   assert.match(readerJs, /function toneFigure/);
+  assert.match(readerJs, /avg < 72 && trans < 0\.3/);
+  assert.doesNotMatch(readerJs, /trans > 0\.4 && avg > 160/);
   assert.match(viewCss, /\.cv-figure\.is-dark/);
+  assert.match(viewCss, /background: #f5f5f7/);
 });
 
 test('archive view sizes youtube iframes and adds a watch link', () => {
