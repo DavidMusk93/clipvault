@@ -352,6 +352,32 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                   if (!src || src.indexOf('data:image') === 0) im.setAttribute('src', real);
                 }
                 var clone = document.cloneNode(true);
+                // Invalid <figcaption> next to <img> (not in <figure>) is common in
+                // technical blogs. Readability then drops the parent <ul> because
+                // img>1 && each <li> has >1 element child. Wrap first so diagram
+                // lists survive (swap-expand-entry / swap-full-hash-overflow).
+                (function repairOrphanFigures(doc) {
+                  var caps = doc.querySelectorAll('figcaption');
+                  for (var i = 0; i < caps.length; i++) {
+                    var cap = caps[i];
+                    if (cap.closest('figure')) continue;
+                    var img = cap.previousElementSibling;
+                    if (!img || String(img.tagName || '').toUpperCase() !== 'IMG') {
+                      img = null;
+                      var parent = cap.parentNode;
+                      var kids = parent ? parent.children : [];
+                      for (var s = 0; s < kids.length; s++) {
+                        if (kids[s] === cap) break;
+                        if (String(kids[s].tagName || '').toUpperCase() === 'IMG') img = kids[s];
+                      }
+                    }
+                    if (!img) continue;
+                    var fig = doc.createElement('figure');
+                    img.parentNode.insertBefore(fig, img);
+                    fig.appendChild(img);
+                    fig.appendChild(cap);
+                  }
+                })(clone);
                 var article = new Readability(clone).parse();
                 if (!article || !article.content) {
                   return JSON.stringify({ok:false, reason:'Readability 无正文'});

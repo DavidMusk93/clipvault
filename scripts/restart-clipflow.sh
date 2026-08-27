@@ -29,12 +29,19 @@ if [ -n "${NEW_BIN:-}" ] && [ -x "$NEW_BIN" ]; then
   mkdir -p "$(dirname "$LIVE_BIN")"
   cp "$NEW_BIN" "$LIVE_BIN"
   chmod +x "$LIVE_BIN"
+  if [ -f "$REPO_ROOT/ClipFlow/Resources/Readability.js" ]; then
+    cp "$REPO_ROOT/ClipFlow/Resources/Readability.js" "$(dirname "$LIVE_BIN")/Readability.js"
+  fi
 elif [ -x "$REPO_ROOT/.build/release/ClipFlowServer" ]; then
   if [ "${INSTALL_RELEASE:-0}" = "1" ]; then
     echo "Installing .build/release/ClipFlowServer -> $LIVE_BIN"
     mkdir -p "$(dirname "$LIVE_BIN")"
     cp "$REPO_ROOT/.build/release/ClipFlowServer" "$LIVE_BIN"
     chmod +x "$LIVE_BIN"
+    if [ -f "$REPO_ROOT/ClipFlow/Resources/Readability.js" ]; then
+      cp "$REPO_ROOT/ClipFlow/Resources/Readability.js" "$(dirname "$LIVE_BIN")/Readability.js"
+      echo "Installed Readability.js next to binary"
+    fi
   fi
 fi
 

@@ -21,7 +21,7 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20260827e/);
+  assert.match(swift, /archive-view\.css\?v=20260827f/);
   assert.match(swift, /style-src 'self' 'unsafe-inline'/);
   assert.match(viewCss, /background: #1d1d1f/);
   assert.match(viewCss, /\.cv-code/);
@@ -58,6 +58,15 @@ test('archive view self-hosts JetBrains Mono for code, not a font CDN', () => {
   assert.doesNotMatch(viewCss, /fonts\.googleapis|cdn\.jsdelivr.*jetbrains/i);
   assert.match(swift, /font-src 'self'/);
   assert.match(swift, /case "woff2": ctype = "font\/woff2"/);
+});
+
+test('archive extract keeps diagram lists Readability would drop', () => {
+  const svc = readFileSync(join(root, 'ClipFlow/WebArchiveService.swift'), 'utf8');
+  const rdb = readFileSync(join(root, 'ClipFlow/Resources/Readability.js'), 'utf8');
+  assert.match(svc, /repairOrphanFigures/);
+  assert.match(svc, /figcaption/);
+  assert.match(rdb, /diagramList/);
+  assert.match(rdb, /keep technical-article diagram lists/);
 });
 
 test('archive view sizes youtube iframes and adds a watch link', () => {

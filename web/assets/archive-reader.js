@@ -1477,6 +1477,12 @@
       img.removeAttribute("aria-label");
       toneFigure(img);
     }
+    var figs = root.querySelectorAll("figure");
+    for (var f = 0; f < figs.length; f++) {
+      figs[f].classList.add("cv-figure");
+      var fim = figs[f].querySelector("img");
+      if (fim) toneFigure(fim);
+    }
     var svgs = root.querySelectorAll("svg[aria-roledescription], svg[id^='mermaid']");
     for (var j = 0; j < svgs.length; j++) {
       var svg = svgs[j];

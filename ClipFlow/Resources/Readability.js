@@ -2149,6 +2149,19 @@ Readability.prototype = {
           (!isList && weight < 25 && linkDensity > 0.2) ||
           (weight >= 25 && linkDensity > 0.5) ||
           ((embedCount === 1 && contentLength < 75) || embedCount > 1);
+        // ClipVault: keep technical-article diagram lists. Upstream drops
+        // <ul> where each <li> is "caption + img + figcaption" because
+        // img>1 && p/img<0.5 and li.children.length>1.
+        if (isList && haveToRemove) {
+          var diagramList = node.children.length > 0;
+          for (var di = 0; di < node.children.length && diagramList; di++) {
+            var dli = node.children[di];
+            if (dli.nodeName !== "LI") continue;
+            if (!dli.getElementsByTagName("img").length) diagramList = false;
+            else if (this._getInnerText(dli).replace(/\s+/g, " ").trim().length < 24) diagramList = false;
+          }
+          if (diagramList) return false;
+        }
         // Allow simple lists of images to remain in pages
         if (isList && haveToRemove) {
           for (var x = 0; x < node.children.length; x++) {
