@@ -2,6 +2,27 @@
    View-time only. Does not mutate CAS / archive HTML.
    Tokens: docs/design-taste.md */
 
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/fonts/JetBrainsMono-Variable.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/fonts/JetBrainsMono-VariableItalic.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  --cv-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Segoe UI", system-ui, sans-serif;
+  --cv-mono: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 html { -webkit-text-size-adjust: 100%; }
 html, body {
   margin: 0;
@@ -9,8 +30,7 @@ html, body {
   color: #1d1d1f;
 }
 body {
-  font: 17px/1.62 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
-    "Hiragino Sans GB", "Segoe UI", system-ui, sans-serif;
+  font: 17px/1.65 var(--cv-sans);
   letter-spacing: -0.011em;
   text-rendering: optimizeLegibility;
 }
@@ -25,7 +45,7 @@ body {
   padding: 10px 18px 12px;
   background: #fff;
   border-bottom: 0.5px solid #e5e5ea;
-  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-family: var(--cv-sans);
 }
 .cv-bar h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.02em; }
 .cv-bar p { margin: 0; font-size: 12px; color: #6e6e73; word-break: break-all; }
@@ -83,9 +103,9 @@ main.cv-article {
 
 /* Inline code stays a chip. Block code is a different medium. */
 .cv-article :not(pre) > code {
-  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--cv-mono);
   font-size: 0.86em;
-  font-variant-ligatures: none;
+  font-variant-ligatures: contextual;
   background: rgba(120, 120, 128, 0.12);
   color: #1d1d1f;
   padding: 0.12em 0.38em;
@@ -98,8 +118,9 @@ main.cv-article {
   word-break: normal;
   overflow-wrap: normal;
   overflow: auto;
-  font-variant-ligatures: none;
-  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--cv-mono);
+  font-variant-ligatures: contextual;
+  font-feature-settings: "calt" 1;
 }
 .cv-article pre {
   margin: 1.1rem 0;
@@ -107,8 +128,8 @@ main.cv-article {
   background: #1d1d1f;
   color: #f5f5f7;
   border-radius: 12px;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 13.5px;
+  line-height: 1.58;
   -webkit-overflow-scrolling: touch;
 }
 .cv-article pre code {
@@ -166,7 +187,7 @@ main.cv-article {
   border-radius: 0;
   color: #f5f5f7;
 }
-.cv-code .cv-k { color: #ff7ab2; } /* keyword — Xcode dark */
+.cv-code .cv-k { color: #ff7ab2; font-weight: 500; } /* keyword — Xcode dark */
 .cv-code .cv-s { color: #ff8170; } /* string */
 .cv-code .cv-c { color: #8e8e93; } /* comment */
 .cv-code .cv-n { color: #d0bf69; } /* number */

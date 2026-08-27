@@ -738,6 +738,9 @@ class WebServer {
         case "js": ctype = "text/javascript; charset=utf-8"
         case "css": ctype = "text/css; charset=utf-8"
         case "mjs": ctype = "text/javascript; charset=utf-8"
+        case "woff2": ctype = "font/woff2"
+        case "woff": ctype = "font/woff"
+        case "ttf": ctype = "font/ttf"
         default: ctype = "application/octet-stream"
         }
         sendBinary(
@@ -1405,8 +1408,8 @@ class WebServer {
           <meta name="viewport" content="width=device-width,initial-scale=1"/>
           <title>\(safeTitle)</title>
           <meta name="color-scheme" content="light"/>
-          <link rel="stylesheet" href="/assets/archive-view.css?v=20260827c"/>
-          <script src="/assets/archive-reader.js?v=20260827c" defer></script>
+          <link rel="stylesheet" href="/assets/archive-view.css?v=20260827d"/>
+          <script src="/assets/archive-reader.js?v=20260827d" defer></script>
         </head>
         <body>
         \(bar)

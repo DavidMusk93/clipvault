@@ -113,6 +113,8 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 | Token | 值 | 用途 |
 | --- | --- | --- |
 | 纸 | `#fff` 正文，不用 Pico 灰洗 | 长文阅读面 |
+| 正文字体 | 系统黑体：SF Pro / PingFang SC | 中文技术文不能用等宽体当正文 |
+| 代码字体 | **JetBrains Mono**（OFL-1.1，自托管 `web/assets/fonts/`） | `pre` / `code` / `.cv-code`。禁止 Google Fonts / jsDelivr；`font-src 'self'` |
 | 代码表面 | `#1D1D1F`（Ink 反相）+ `#F5F5F7` 字 | 代码是另一种介质，不是浅灰盒子 |
 | 代码工具条 | 32px · 11px 语言 · 24px「复制」 | 与评论 header 同一套小控件密度 |
 | 语法色 | keyword `#FF7AB2` · string `#FF8170` · comment `#8E8E93` · number `#D0BF69` | Xcode Dark，不另开彩虹主题 |

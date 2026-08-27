@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -21,7 +21,7 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20260827c/);
+  assert.match(swift, /archive-view\.css\?v=20260827d/);
   assert.match(swift, /style-src 'self' 'unsafe-inline'/);
   assert.match(viewCss, /background: #1d1d1f/);
   assert.match(viewCss, /\.cv-code/);
@@ -39,6 +39,21 @@ test('archive view drops Pico gray wash and styles code/figures as their own med
   assert.doesNotMatch(readerJs, /trans > 0\.4 && avg > 160/);
   assert.match(viewCss, /\.cv-figure\.is-dark/);
   assert.match(viewCss, /background: #f5f5f7/);
+});
+
+test('archive view self-hosts JetBrains Mono for code, not a font CDN', () => {
+  const font = join(root, 'web/assets/fonts/JetBrainsMono-Variable.woff2');
+  const ofl = join(root, 'web/assets/fonts/OFL.txt');
+  assert.equal(existsSync(font), true);
+  assert.ok(statSync(font).size > 80_000);
+  assert.match(readFileSync(font).subarray(0, 4).toString('ascii'), /wOF2/);
+  assert.match(readFileSync(ofl, 'utf8'), /SIL OPEN FONT LICENSE/i);
+  assert.match(viewCss, /font-family: "JetBrains Mono"/);
+  assert.match(viewCss, /--cv-mono/);
+  assert.match(viewCss, /\/assets\/fonts\/JetBrainsMono-Variable\.woff2/);
+  assert.doesNotMatch(viewCss, /fonts\.googleapis|cdn\.jsdelivr.*jetbrains/i);
+  assert.match(swift, /font-src 'self'/);
+  assert.match(swift, /case "woff2": ctype = "font\/woff2"/);
 });
 
 test('archive view sizes youtube iframes and adds a watch link', () => {
