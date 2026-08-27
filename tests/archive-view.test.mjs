@@ -21,7 +21,7 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20260827d/);
+  assert.match(swift, /archive-view\.css\?v=20260827e/);
   assert.match(swift, /style-src 'self' 'unsafe-inline'/);
   assert.match(viewCss, /background: #1d1d1f/);
   assert.match(viewCss, /\.cv-code/);
@@ -39,6 +39,10 @@ test('archive view drops Pico gray wash and styles code/figures as their own med
   assert.doesNotMatch(readerJs, /trans > 0\.4 && avg > 160/);
   assert.match(viewCss, /\.cv-figure\.is-dark/);
   assert.match(viewCss, /background: #f5f5f7/);
+  assert.match(readerJs, /function wrapCallouts/);
+  assert.match(readerJs, /isCalloutArticle/);
+  assert.match(viewCss, /\.cv-callout/);
+  assert.match(viewCss, /cv-callout-ico/);
 });
 
 test('archive view self-hosts JetBrains Mono for code, not a font CDN', () => {

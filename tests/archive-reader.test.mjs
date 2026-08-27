@@ -36,7 +36,8 @@ test('selection chrome is a glass bar that never covers the rect', () => {
   assert.match(js, /评论/, 'comment action');
   assert.match(js, /is-sheet/, 'narrow viewport uses a sheet');
   assert.match(js, /allowSide/, 'wide viewport parks the note in the margin');
-  assert.match(swiftWeb, /archive-reader\.js\?v=20260827d/, 'cache bust');
+  assert.match(swiftWeb, /archive-reader\.js\?v=20260827e/, 'cache bust');
+  assert.match(js, /function wrapCallouts/, 'nested article callouts');
   assert.match(js, /function enhanceTechnicalMedia/, 'code/figure plate is View-time');
   assert.match(js, /data-cv-enhance/, 'fixture can run media enhance without reader API');
   assert.match(js, /function promoteLazyImages/, 'weixin data-src → src');

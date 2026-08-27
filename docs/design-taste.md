@@ -121,6 +121,7 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 | 图板 | 14 圆角 · 浅纸 `#F5F5F7` · 题注同色底栏 | **默认**。透明流程图常混着深色标注/虚线箭头，黑井会把它们吃掉 |
 | 深图板 | 仅当图本身整体偏暗且不太透明 → `.is-dark` `#1D1D1F` | 暗色截图 / 暗色 UI。禁止「透明 + 浅色节点」就铺黑底 |
 | 放大 | 暗 scrim `rgba(15,15,16,.86)` · 点击图/点空白关闭 | 看清流程图；不改 CAS |
+| 标注框 | 16 圆角 · 1.5px Accent 描边 · 20px 「i」圈 · 首段加粗当标题 | Readability 把 aside/callout 收成嵌套 `<article>`；View 再画回来。禁止当正文 h2 进 TOC |
 
 规则：只在 View 运行时包 `.cv-code` / `.cv-figure` / `.cv-table`。禁止为了高亮去改 `archive_html`。
 

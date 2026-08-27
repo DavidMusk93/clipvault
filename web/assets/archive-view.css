@@ -88,6 +88,45 @@ main.cv-article {
   color: #6e6e73;
 }
 
+/* Readability keeps callouts as nested <article> and drops the publisher chrome. */
+.cv-callout {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  column-gap: 12px;
+  row-gap: 6px;
+  align-items: start;
+  margin: 1.25rem 0;
+  padding: 14px 16px 14px 14px;
+  background: #fff;
+  border: 1.5px solid rgba(0, 113, 227, 0.45);
+  border-radius: 16px;
+}
+.cv-callout > .cv-callout-ico { grid-column: 1; grid-row: 1; }
+.cv-callout > :not(.cv-callout-ico) { grid-column: 2; }
+.cv-callout-ico {
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 1.5px solid #0071e3;
+  border-radius: 50%;
+  color: #0071e3;
+  font: 700 11px/17px var(--cv-sans);
+  text-align: center;
+  letter-spacing: 0;
+}
+.cv-callout-ico::after { content: "i"; }
+.cv-callout-title {
+  margin: 0;
+  font-weight: 650;
+  letter-spacing: -0.016em;
+  color: #1d1d1f;
+}
+.cv-callout p { margin: 0.2rem 0 0; }
+.cv-callout p:first-of-type { margin-top: 0; }
+.cv-callout .cv-code { margin: 0.65rem 0 0; }
+.cv-callout ul, .cv-callout ol { margin: 0.35rem 0 0; }
+
 .cv-article a { color: inherit; }
 .cv-article a[href] {
   color: #0071e3;

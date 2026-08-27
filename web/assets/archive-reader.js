@@ -53,7 +53,7 @@
       var el = nodes[i];
       var text = headingText(el);
       if (!text || text.length > 96) continue;
-      if (el.closest(".cv-toc, .cv-bar, .cv-reader-ui")) continue;
+      if (el.closest(".cv-toc, .cv-bar, .cv-reader-ui, .cv-callout")) continue;
       if (!el.id) el.id = "cv-h-" + (out.length + 1);
       out.push({ el: el, id: el.id, text: text, level: Number(el.tagName.charAt(1)) });
     }
@@ -1488,6 +1488,58 @@
     }
   }
 
+  function unwrapLoneDiv(el) {
+    var kids = [];
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var n = el.childNodes[i];
+      if (n.nodeType === 3 && !String(n.nodeValue).trim()) continue;
+      kids.push(n);
+    }
+    if (kids.length !== 1 || kids[0].nodeName !== "DIV") return;
+    var d = kids[0];
+    while (d.firstChild) el.insertBefore(d.firstChild, d);
+    el.removeChild(d);
+  }
+
+  function isCalloutArticle(el, root) {
+    if (!el || el === root) return false;
+    if (el.closest(".cv-callout, .cv-reader-ui, .cv-code")) return false;
+    if (el.querySelector("h1, h2, h3")) return false;
+    var text = String(el.textContent || "").replace(/\s+/g, " ").trim();
+    if (text.length < 24 || text.length > 1600) return false;
+    var host = Math.max(1, String(root.textContent || "").length);
+    if (text.length / host > 0.35) return false;
+    return true;
+  }
+
+  function wrapCallouts(root) {
+    var nodes = root.querySelectorAll("article, aside, [role='note']");
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (!isCalloutArticle(el, root)) continue;
+      unwrapLoneDiv(el);
+      el.classList.add("cv-callout");
+      if (!el.querySelector(":scope > .cv-callout-ico")) {
+        var ico = document.createElement("span");
+        ico.className = "cv-callout-ico";
+        ico.setAttribute("aria-hidden", "true");
+        el.insertBefore(ico, el.firstChild);
+      }
+      var first = null;
+      for (var c = 0; c < el.children.length; c++) {
+        if (el.children[c].classList.contains("cv-callout-ico")) continue;
+        first = el.children[c];
+        break;
+      }
+      if (!first || first.nodeName !== "P") continue;
+      var more = 0;
+      for (var j = 0; j < el.children.length; j++) {
+        if (el.children[j] !== first && !el.children[j].classList.contains("cv-callout-ico")) more++;
+      }
+      if (more > 0) first.classList.add("cv-callout-title");
+    }
+  }
+
   function wrapTables(root) {
     var tables = root.querySelectorAll("table");
     for (var i = 0; i < tables.length; i++) {
@@ -1553,6 +1605,7 @@
     wrapCodeBlocks(root);
     wrapFigures(root);
     wrapTables(root);
+    wrapCallouts(root);
     mountLightbox(root);
   }
 
