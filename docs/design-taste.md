@@ -135,6 +135,7 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 | 为「好看」改交互语义色 | 色 = 信息通道 |
 | 就地改 capture 正文当「备注」或当笔记 | 毁掉 hash/同步/审计；Compose 必须是新的 `type=note` 行 |
 | 评价内容挂主卡片 / 多阶段芯片 | 触发 masonry 重绘；交互过重 |
+| 主卡 body 挂关联列表 / 图可视化 | 密度与抖动；关联入口 = 同槽 icon-btn，popover 同 ×N |
 
 ## 交互密度（轻量 & lazy）
 
@@ -152,6 +153,8 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 瀑布流内 **禁止就地 expand**（列高/重排不稳）。多 ref 时间线用 **底部可交互 toast 卡片** （毛玻璃 sheet + scrim，lazy fetch，Esc/遮罩关闭）—— 列表零布局扰动。
 
 **入口**：不要单独「事件时间线」按钮；用 header 的 **×N 引用徽章** 作为唯一 affordance（单 ref 无徽章、无入口）。
+
+**关联入口**：`action-pair` 里与评价同槽的 32×32 `icon-btn`（`data-link`）；`linkCount>0` 时 `has-ctx`。详情在锚定毛玻璃 popover `#linkToast`（克隆 ×N），lazy GET。禁止 header 第二条 chip、禁止卡片 body 挂关联列表。跳转禁止 `fetchPage({reset:true})`。
 
 
 ## 紧凑布局 + 锚定 popover

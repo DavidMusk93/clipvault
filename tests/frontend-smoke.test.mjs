@@ -248,6 +248,23 @@ test('hash locator jumps after first fetchPage, never reset or disconnected repl
   assert.match(chunk, /目标在回收箱/, 'trash toast');
 });
 
+test('clip link popover is the only associate UI; mergeHead overlays linkCount', () => {
+  assert.match(indexHtml, /id="linkToast"/, 'link toast');
+  assert.match(indexHtml, /data-link/, 'action-pair link button');
+  assert.match(indexHtml, /function openLinkToast/, 'openLinkToast');
+  assert.match(indexHtml, /function patchCardLinkState/, 'patchCardLinkState');
+  assert.match(indexHtml, /function positionAnchoredCard/, 'shared anchor');
+  const mh = indexHtml.indexOf('async function mergeHead');
+  assert.ok(mh > 0, 'mergeHead');
+  const mhChunk = indexHtml.slice(mh, mh + 2500);
+  assert.match(mhChunk, /linkCount/, 'mergeHead must overlay linkCount');
+  assert.match(mhChunk, /patchCardLinkState/, 'mergeHead patches link button');
+  const bodyIdx = indexHtml.indexOf('<div class="card-body">${body}</div>');
+  assert.ok(bodyIdx > 0, 'card body');
+  const around = indexHtml.slice(bodyIdx - 80, bodyIdx + 220);
+  assert.doesNotMatch(around, /已关联|link-row|linkToast/, 'do not mount link list on the card body');
+});
+
 test('SSE clip_deleted must not fetchPage reset (scroll thrash root cause)', () => {
   assert.match(indexHtml, /function applyRemoteClipRemoval/, 'SSE delete path required');
   assert.match(indexHtml, /noteLocalListMutation/, 'local mutation suppress required');

@@ -391,6 +391,50 @@
     @media (prefers-reduced-transparency: reduce) {
       .event-toast-card { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
     }
+    .link-toast .event-toast-card {
+      width: min(320px, calc(100vw - 20px));
+      max-height: min(42vh, 360px);
+    }
+    .link-toast-search { padding: 0 12px 8px; }
+    .link-toast-search input {
+      width: 100%; box-sizing: border-box;
+      border: 0; border-radius: 8px;
+      background: var(--fill);
+      padding: 8px 10px;
+      font-size: 13px; color: var(--ink);
+      outline: none;
+    }
+    .link-toast-search input:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
+    .link-toast-tabs { display: flex; gap: 6px; margin-top: 8px; }
+    .link-tab {
+      border: 0; border-radius: 999px;
+      background: var(--fill); color: var(--muted);
+      font-size: 12px; font-weight: 600; padding: 4px 10px; cursor: pointer;
+    }
+    .link-tab.is-on { background: var(--accent-soft); color: var(--accent); }
+    .link-sec {
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      letter-spacing: -0.01em; margin: 4px 0 6px;
+    }
+    .link-row {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 8px 0; border-bottom: 0.5px solid var(--separator);
+      cursor: pointer;
+    }
+    .link-row:last-child { border-bottom: 0; }
+    .link-row.is-missing { cursor: default; opacity: 0.55; }
+    .link-row-main { flex: 1; min-width: 0; }
+    .link-row-preview {
+      font-size: 13px; color: var(--ink);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .link-row-un {
+      flex-shrink: 0; border: 0; background: none; cursor: pointer;
+      font-size: 11px; color: var(--muted); padding: 4px 0 0;
+    }
+    .link-row-un:hover { color: var(--ink); }
+    .link-empty { font-size: 13px; color: var(--muted); padding: 10px 0 6px; line-height: 1.4; }
     .top-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
     main { flex: 1; padding: 6px var(--chrome-pad-x) 48px; }
@@ -2063,6 +2107,30 @@
     </div>
   </div>
 
+  <div id="linkToast" class="event-toast link-toast" aria-hidden="true">
+    <div class="event-toast-scrim" id="linkToastScrim"></div>
+    <div class="event-toast-card" role="dialog" aria-modal="true" aria-labelledby="linkToastTitle">
+      <div class="event-toast-head">
+        <h3 id="linkToastTitle">关联</h3>
+        <button type="button" class="btn-icon" id="linkToastClose" title="关闭" aria-label="关闭">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="event-toast-sub" id="linkToastSub"></div>
+      <div class="link-toast-search">
+        <input id="linkToastQ" type="search" placeholder="搜索片段或笔记…" autocomplete="off" />
+        <div class="link-toast-tabs" role="tablist">
+          <button type="button" class="link-tab is-on" data-link-tab="clip" role="tab" aria-selected="true">片段</button>
+          <button type="button" class="link-tab" data-link-tab="note" role="tab" aria-selected="false">笔记</button>
+        </div>
+      </div>
+      <div class="event-toast-body">
+        <div id="linkToastHits" hidden></div>
+        <div id="linkToastLinked"></div>
+      </div>
+    </div>
+  </div>
+
 
   <!-- Archive reader: ClipVault sheet + real browser document (not srcdoc). -->
   <div id="archiveReader" class="archive-reader" aria-hidden="true">
@@ -2543,25 +2611,47 @@ window.ClipViewMasonry = Masonry;
         toast('库里没有这份内容');
         return;
       }
-      if (item.type === 'note') {
+      if (item.type === 'note' || item.isCompose) {
         await openNotesPanel();
         if (item.id && typeof openNoteInPanel === 'function') await openNoteInPanel(item.id);
+        try { history.replaceState(null, '', '#id=' + item.id); } catch (_) {}
         return;
       }
       if (item.inTrash) {
         toast('目标在回收箱');
         return;
       }
+      if (currentView === 'trash') {
+        toast('目标不在回收箱');
+        return;
+      }
+      if (searchQuery && !clips.some((c) => c.id === item.id)) {
+        toast('不在当前结果里');
+        return;
+      }
+      if (currentFilter !== 'all' && !searchQuery && clientFilter([item]).length === 0) {
+        currentFilter = 'all';
+        document.querySelectorAll('.chip').forEach((b) => {
+          const on = (b.dataset.view || 'library') !== 'trash' && (b.dataset.type || 'all') === 'all';
+          b.classList.toggle('active', on);
+        });
+      }
       const mounted = cardCache.get(item.id);
       if (mounted && mounted.isConnected) {
         flashAndScrollCard(mounted);
+        try { history.replaceState(null, '', '#h=' + item.contentHash); } catch (_) {}
         return;
       }
       if (!clips.some((c) => c.id === item.id)) {
         clips = sortClipsForFeed(dedupeClipsById([item, ...clips]));
       }
       rebuildFromData({ preserveScroll: true });
-      requestAnimationFrame(() => flashAndScrollCard(cardCache.get(item.id)));
+      requestAnimationFrame(() => {
+        const el = cardCache.get(item.id);
+        if (el && el.isConnected) flashAndScrollCard(el);
+        else toast('无法定位到卡片');
+      });
+      try { history.replaceState(null, '', '#h=' + item.contentHash); } catch (_) {}
     }
 
     async function applyAppHash() {
@@ -2802,6 +2892,18 @@ window.ClipViewMasonry = Masonry;
         btn.classList.toggle('has-ctx', has);
         btn.title = has ? '评价（有记录）' : '评价';
       }
+    }
+
+    function patchCardLinkState(itemId, patch) {
+      const n = Math.max(0, Number(patch && patch.linkCount) || 0);
+      const idx = clips.findIndex((c) => c.id === itemId);
+      if (idx >= 0) clips[idx] = { ...clips[idx], linkCount: n };
+      const btn = cardCache.get(itemId)?.querySelector('[data-link]');
+      if (!btn) return;
+      btn.classList.toggle('has-ctx', n > 0);
+      const label = n > 0 ? `关联（${n}）` : '关联';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
     }
 
     async function submitEvaluation() {
@@ -3226,9 +3328,13 @@ window.ClipViewMasonry = Masonry;
             textContent: n.textContent || c.textContent,
             pinned: n.pinned,
             pinnedAt: n.pinnedAt,
+            linkCount: n.linkCount != null ? n.linkCount : c.linkCount,
           };
           if (!!c.pinned !== !!n.pinned) pinChanged = true;
           if (!!c.archived !== !!n.archived || !!c.pinned !== !!n.pinned) flagDirty.push(next);
+          if ((Number(c.linkCount) || 0) !== (Number(next.linkCount) || 0)) {
+            patchCardLinkState(c.id, { linkCount: next.linkCount || 0 });
+          }
           return next;
         });
         if (!fresh.length) {
@@ -3529,34 +3635,35 @@ window.ClipViewMasonry = Masonry;
       host.setAttribute('aria-hidden', 'true');
     }
 
-    /** Anchor popover under/above the ×N trigger (spatial consistency). */
-    function positionEventToastCard(anchorEl) {
-      const card = document.querySelector('#eventToast .event-toast-card');
-      if (!card || !anchorEl) return;
+    /** Anchor a popover card on the trigger (spatial consistency). Shared by ×N and 关联. */
+    function positionAnchoredCard(anchorEl, cardEl) {
+      if (!cardEl || !anchorEl) return;
       const pad = 8;
       const vw = window.innerWidth;
       const vh = window.innerHeight;
-      // Temporarily show for measure
-      const prevVis = card.style.visibility;
-      card.style.visibility = 'hidden';
-      card.style.left = '0px';
-      card.style.top = '0px';
-      const cr = card.getBoundingClientRect();
+      const prevVis = cardEl.style.visibility;
+      cardEl.style.visibility = 'hidden';
+      cardEl.style.left = '0px';
+      cardEl.style.top = '0px';
+      const cr = cardEl.getBoundingClientRect();
       const r = anchorEl.getBoundingClientRect();
       let left = r.left + r.width / 2 - cr.width / 2;
       let top = r.bottom + pad;
       if (top + cr.height > vh - 10) {
-        top = r.top - cr.height - pad; // flip above
+        top = r.top - cr.height - pad;
       }
       left = Math.max(10, Math.min(left, vw - cr.width - 10));
       top = Math.max(10, Math.min(top, vh - cr.height - 10));
-      card.style.left = left + 'px';
-      card.style.top = top + 'px';
-      // Scale from trigger center
+      cardEl.style.left = left + 'px';
+      cardEl.style.top = top + 'px';
       const ox = (r.left + r.width / 2) - left;
       const oy = (r.top + r.height / 2) - top;
-      card.style.transformOrigin = `${Math.round(ox)}px ${Math.round(oy)}px`;
-      card.style.visibility = prevVis || '';
+      cardEl.style.transformOrigin = `${Math.round(ox)}px ${Math.round(oy)}px`;
+      cardEl.style.visibility = prevVis || '';
+    }
+
+    function positionEventToastCard(anchorEl) {
+      positionAnchoredCard(anchorEl, document.querySelector('#eventToast .event-toast-card'));
     }
 
     /**
@@ -3629,9 +3736,218 @@ window.ClipViewMasonry = Masonry;
       });
     }
     wireEventToastOnce();
+    wireLinkToastOnce();
     wireFormatToolbarDelegateOnce();
     wireArchiveReaderOnce();
     wireUrlSafetyDelegateOnce();
+
+    let linkFromId = null;
+    let linkTab = 'clip';
+    let linkSearchTimer = 0;
+    let linkAnchor = null;
+
+    function closeLinkToast() {
+      const host = document.getElementById('linkToast');
+      if (!host) return;
+      host.classList.remove('open');
+      host.setAttribute('aria-hidden', 'true');
+      linkFromId = null;
+      linkAnchor = null;
+    }
+
+    function placeLinkToast() {
+      positionAnchoredCard(linkAnchor, document.querySelector('#linkToast .event-toast-card'));
+    }
+
+    function linkRowHtml(row, { hit } = {}) {
+      const resolved = row.resolved || {};
+      const missing = !!resolved.missing;
+      const preview = resolved.preview || row.preview || '（无预览）';
+      const type = resolved.type || row.type || 'other';
+      const tm = typeMeta(type);
+      const id = resolved.id || row.id || row.toId || '';
+      const un = hit ? '' : `<button type="button" class="link-row-un" data-link-un="${escAttr(id)}" data-link-hash="${escAttr(row.toHash || '')}">取消关联</button>`;
+      return `<div class="link-row${missing ? ' is-missing' : ''}" data-link-jump="${escAttr(id)}" data-link-hash="${escAttr(resolved.contentHash || row.toHash || row.contentHash || '')}" data-link-note="${resolved.isCompose || type === 'note' ? '1' : ''}">
+        <span class="badge ${tm.cls}"><span class="material-symbols-outlined">${tm.icon}</span>${esc(tm.label)}</span>
+        <div class="link-row-main">
+          <div class="link-row-preview">${esc(missing ? '（已不在库中）' : preview)}</div>
+        </div>
+        ${un}
+      </div>`;
+    }
+
+    async function refreshLinkToast() {
+      const linkedEl = document.getElementById('linkToastLinked');
+      const sub = document.getElementById('linkToastSub');
+      if (!linkedEl || !linkFromId) return;
+      try {
+        const res = await fetch(`${API}/api/items/${encodeURIComponent(linkFromId)}/links?limit=32`);
+        const j = await res.json().catch(() => ({}));
+        const links = j.links || [];
+        const n = Number(j.linkCount != null ? j.linkCount : links.length) || 0;
+        if (sub) sub.textContent = n ? `${n} 条 · 手动` : '手动';
+        patchCardLinkState(linkFromId, { linkCount: n });
+        if (!links.length) {
+          linkedEl.innerHTML = '<div class="link-sec">已关联</div><div class="link-empty">还没有关联。搜一下值得留下的另一张。</div>';
+        } else {
+          linkedEl.innerHTML = '<div class="link-sec">已关联</div>' + links.map((row) => linkRowHtml(row)).join('');
+        }
+      } catch (_) {
+        linkedEl.innerHTML = '<div class="link-empty">加载失败</div>';
+      }
+      requestAnimationFrame(placeLinkToast);
+    }
+
+    async function searchLinkHits(q) {
+      const hitsEl = document.getElementById('linkToastHits');
+      if (!hitsEl) return;
+      const query = String(q || '').trim();
+      if (!query) {
+        hitsEl.hidden = true;
+        hitsEl.innerHTML = '';
+        return;
+      }
+      const params = new URLSearchParams({ q: query, limit: '12' });
+      if (linkTab === 'note') params.set('type', 'note');
+      else params.set('exclude', 'note');
+      try {
+        const res = await fetch(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
+        const data = await res.json().catch(() => ({}));
+        const items = (data.items || []).filter((it) => it && it.id && it.id !== linkFromId);
+        hitsEl.hidden = false;
+        if (!items.length) {
+          hitsEl.innerHTML = '<div class="link-sec">搜索</div><div class="link-empty">没有匹配</div>';
+        } else {
+          hitsEl.innerHTML = '<div class="link-sec">搜索</div>' + items.map((it) => linkRowHtml({
+            id: it.id,
+            toId: it.id,
+            toHash: it.contentHash,
+            resolved: {
+              id: it.id,
+              type: it.type,
+              preview: it.preview || it.textContent || '',
+              contentHash: it.contentHash,
+              missing: false,
+              inTrash: !!it.inTrash,
+              isCompose: it.type === 'note' || !!it.isCompose,
+            },
+          }, { hit: true })).join('');
+        }
+      } catch (_) {
+        hitsEl.hidden = false;
+        hitsEl.innerHTML = '<div class="link-empty">搜索失败</div>';
+      }
+      requestAnimationFrame(placeLinkToast);
+    }
+
+    async function postClipLink({ toId, toHash, linked }) {
+      if (!linkFromId) return null;
+      const res = await fetch(API + '/api/clips/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromId: linkFromId,
+          toId: toId || null,
+          toHash: toHash || null,
+          kind: 'related',
+          linked: !!linked,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.ok === false) {
+        toast(j.message || '关联失败');
+        return null;
+      }
+      if (j.item) patchCardLinkState(j.item.id, { linkCount: j.item.linkCount || 0 });
+      if (j.peerItem && j.peerItem.id) {
+        patchCardLinkState(j.peerItem.id, { linkCount: j.peerItem.linkCount || 0 });
+      }
+      return j;
+    }
+
+    async function openLinkToast(item, anchorEl) {
+      const host = document.getElementById('linkToast');
+      if (!host || !item || !item.id) return;
+      closeEventToast();
+      linkFromId = item.id;
+      linkAnchor = anchorEl || document.querySelector(`[data-link="${CSS.escape(item.id)}"]`);
+      const q = document.getElementById('linkToastQ');
+      if (q) q.value = '';
+      const hitsEl = document.getElementById('linkToastHits');
+      if (hitsEl) { hitsEl.hidden = true; hitsEl.innerHTML = ''; }
+      document.querySelectorAll('[data-link-tab]').forEach((b) => {
+        const on = (b.getAttribute('data-link-tab') || '') === linkTab;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      host.classList.add('open');
+      host.setAttribute('aria-hidden', 'false');
+      requestAnimationFrame(placeLinkToast);
+      await refreshLinkToast();
+    }
+
+    function wireLinkToastOnce() {
+      if (wireLinkToastOnce._done) return;
+      wireLinkToastOnce._done = true;
+      document.getElementById('linkToastClose')?.addEventListener('click', closeLinkToast);
+      document.getElementById('linkToastScrim')?.addEventListener('click', closeLinkToast);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeLinkToast();
+      });
+      document.getElementById('linkToastQ')?.addEventListener('input', (e) => {
+        clearTimeout(linkSearchTimer);
+        const val = e.target.value;
+        linkSearchTimer = setTimeout(() => searchLinkHits(val), 200);
+      });
+      document.querySelectorAll('[data-link-tab]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          linkTab = btn.getAttribute('data-link-tab') || 'clip';
+          document.querySelectorAll('[data-link-tab]').forEach((b) => {
+            const on = b === btn;
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+          });
+          const q = document.getElementById('linkToastQ')?.value || '';
+          if (q.trim()) searchLinkHits(q);
+        });
+      });
+      document.getElementById('linkToast')?.addEventListener('click', async (e) => {
+        const un = e.target.closest('[data-link-un]');
+        if (un) {
+          e.preventDefault();
+          e.stopPropagation();
+          const toId = un.getAttribute('data-link-un');
+          const toHash = un.getAttribute('data-link-hash');
+          const j = await postClipLink({ toId, toHash, linked: false });
+          if (j) {
+            toast('已取消关联');
+            await refreshLinkToast();
+          }
+          return;
+        }
+        const row = e.target.closest('.link-row');
+        if (!row || row.classList.contains('is-missing')) return;
+        const inHits = !!e.target.closest('#linkToastHits');
+        const id = row.getAttribute('data-link-jump');
+        const hash = row.getAttribute('data-link-hash');
+        const isNote = row.getAttribute('data-link-note') === '1';
+        if (inHits) {
+          const j = await postClipLink({ toId: id, toHash: hash, linked: true });
+          if (j) {
+            toast('已关联');
+            const q = document.getElementById('linkToastQ');
+            if (q) q.value = '';
+            await searchLinkHits('');
+            await refreshLinkToast();
+          }
+          return;
+        }
+        closeLinkToast();
+        if (isNote) await jumpToLocator({ kind: 'id', id });
+        else if (hash) await jumpToLocator({ kind: 'hash', hash });
+        else if (id) await jumpToLocator({ kind: 'id', id });
+      });
+    }
 
 
     /** Clipboard type → label/icon/class. Shared palette: docs/design-taste.md + Android typeStyle(). */
@@ -5126,13 +5442,15 @@ window.ClipViewMasonry = Masonry;
         ? `<span class="time" title="删除 · 30 天后清除">${delTs || timeStr}</span>`
         : `<span class="time">${timeStr}</span>`;
       const hasEval = !!(item.userNote || item.userRating || item.hasUserContext);
+      const linkN = Math.max(0, Number(item.linkCount) || 0);
+      const linkLabel = linkN > 0 ? `关联（${linkN}）` : '关联';
       const actions = inTrash
         ? `<div class="action-pair">
             <button type="button" class="icon-btn" data-restore="${item.id}" title="恢复" aria-label="恢复"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 12a5 5 0 1 1 1.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 8v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           </div>`
         : `<div class="action-pair">
             <button type="button" class="icon-btn${pinned ? ' is-pinned' : ''}" data-pin="${item.id}" title="${pinned ? '取消置顶' : '置顶'}" aria-label="${pinned ? '取消置顶' : '置顶'}"><span class="material-symbols-outlined pin-off">keep</span><span class="material-symbols-outlined pin-on">keep</span></button>
-
+            <button type="button" class="icon-btn${linkN > 0 ? ' has-ctx' : ''}" data-link="${item.id}" title="${linkLabel}" aria-label="${linkLabel}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 1 0-7.07-7.07L9.7 6.23" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M14 11a5 5 0 0 0-7.07 0L5.52 12.41a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
             <button type="button" class="icon-btn${hasEval ? ' has-ctx' : ''}" data-eval="${item.id}" title="${hasEval ? '评价（有记录）' : '评价'}" aria-label="评价"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 20h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
             <button type="button" class="icon-btn" data-copy-plain="1" title="复制为纯文本" aria-label="复制"><svg class="icon-off" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5.5 12.5l4 4 9-9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button type="button" class="icon-btn is-danger" data-del="${item.id}" title="移入回收箱" aria-label="删除"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9.5 7.5V6.2A1.7 1.7 0 0 1 11.2 4.5h1.6a1.7 1.7 0 0 1 1.7 1.7v1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.2 7.5l.6 11.2a1.7 1.7 0 0 0 1.7 1.6h3a1.7 1.7 0 0 0 1.7-1.6l.6-11.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10.2 11v5.5M13.8 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
@@ -5183,6 +5501,11 @@ window.ClipViewMasonry = Masonry;
         togglePin(item);
       });
 
+      card.querySelector('[data-link]')?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        openLinkToast(item, e.currentTarget);
+      });
       card.querySelector('[data-eval]')?.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();

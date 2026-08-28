@@ -133,6 +133,21 @@ test('touchLinkCounts hooks insert/bump/upsert/compose/tombstone', () => {
   assert.match(applyCompose, /touchLinkCountsForItem/);
 });
 
+test('web link UI: popover, same-slot button, no wall reset', () => {
+  const html = readFileSync(join(root, 'web/index.html'), 'utf8');
+  assert.match(html, /id="linkToast"/);
+  assert.match(html, /data-link=/);
+  assert.match(html, /function openLinkToast/);
+  assert.match(html, /function patchCardLinkState/);
+  assert.match(html, /positionAnchoredCard/);
+  const j = html.indexOf('async function jumpToLocator');
+  const end = html.indexOf('async function applyAppHash', j);
+  const jump = html.slice(j, end > j ? end : j + 2000);
+  assert.doesNotMatch(jump, /fetchPage\(\{\s*reset:\s*true/);
+  const taste = readFileSync(join(root, 'docs/design-taste.md'), 'utf8');
+  assert.match(taste, /关联入口/);
+});
+
 test('AGENTS.md requires recordLocalClipLink; check-frontend lists this file', () => {
   assert.match(agents, /recordLocalClipLink/);
   assert.match(agents, /clip_link/);
