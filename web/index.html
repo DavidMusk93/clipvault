@@ -418,10 +418,15 @@
     }
     .link-row {
       display: flex; align-items: flex-start; gap: 8px;
-      padding: 8px 0; border-bottom: 0.5px solid var(--separator);
+      padding: 8px 6px; margin: 0 -6px; border-radius: 8px;
+      border-bottom: 0.5px solid var(--separator);
       cursor: pointer;
     }
     .link-row:last-child { border-bottom: 0; }
+    @media (hover: hover) and (pointer: fine) {
+      .link-row:hover { background: var(--fill); }
+    }
+    .link-row:active { background: var(--accent-soft); }
     .link-row.is-missing { cursor: default; opacity: 0.55; }
     .link-row-main { flex: 1; min-width: 0; }
     .link-row-preview {
@@ -474,7 +479,13 @@
       min-width: 0; /* flex item: allow inner overflow scroll */
       max-width: 100%;
       box-shadow: var(--elev-1);
-      transition: box-shadow 0.28s var(--spring), border-color 0.2s ease;
+      outline: 2px solid transparent;
+      outline-offset: 2px;
+      transition:
+        box-shadow 0.28s var(--spring),
+        border-color 0.2s ease,
+        transform 180ms var(--spring),
+        outline-color 180ms var(--spring);
       /* do NOT use content-visibility here: masonry measures real height;
          placeholder intrinsic size made columns uneven at the bottom */
       position: relative; z-index: 0;
@@ -486,12 +497,16 @@
       z-index: 1;
     }
     .m3-card.is-compact { padding: 10px 11px; gap: 6px; }
-    @keyframes cv-card-flash {
-      from { box-shadow: 0 0 0 3px var(--accent-soft); }
-      to { box-shadow: var(--elev-1); }
-    }
+    /* Jump / pick beacon: layout-neutral ring + 2% lift. No translateY (masonry). */
     .m3-card.is-flash {
-      animation: cv-card-flash 0.9s ease-out;
+      z-index: 6;
+      border-color: var(--accent);
+      outline-color: var(--accent);
+      box-shadow: var(--elev-2), 0 10px 28px rgba(0, 113, 227, 0.28);
+      transform: scale(1.02);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .m3-card.is-flash { transform: none; }
     }
     .card-header {
       display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0;
@@ -2570,12 +2585,55 @@ window.ClipViewMasonry = Masonry;
       return { kind: null };
     }
 
-    function flashAndScrollCard(el) {
+    const cardFlashTimers = new WeakMap();
+
+    function reduceMotion() {
+      try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; }
+    }
+
+    function cardMostlyInView(el) {
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight || 1;
+      const vis = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+      return vis > Math.min(Math.max(r.height, 1), vh) * 0.55;
+    }
+
+    function waitForScrollSettle(el) {
+      return new Promise((resolve) => {
+        if (reduceMotion() || cardMostlyInView(el)) { resolve(); return; }
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          window.removeEventListener('scrollend', finish);
+          clearTimeout(t);
+          resolve();
+        };
+        window.addEventListener('scrollend', finish, { once: true });
+        const t = setTimeout(finish, 480);
+      });
+    }
+
+    function flashCard(el) {
       if (!el) return;
-      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
+      const prev = cardFlashTimers.get(el);
+      if (prev) clearTimeout(prev);
       el.classList.remove('is-flash');
       void el.offsetWidth;
       el.classList.add('is-flash');
+      const hold = setTimeout(() => {
+        el.classList.remove('is-flash');
+        cardFlashTimers.delete(el);
+      }, reduceMotion() ? 1100 : 850);
+      cardFlashTimers.set(el, hold);
+    }
+
+    function flashAndScrollCard(el) {
+      if (!el) return;
+      try {
+        el.scrollIntoView({ block: 'center', behavior: reduceMotion() ? 'auto' : 'smooth' });
+      } catch (_) {}
+      waitForScrollSettle(el).then(() => flashCard(el));
     }
 
     async function jumpToLocator(loc) {
@@ -3935,6 +3993,8 @@ window.ClipViewMasonry = Masonry;
           const j = await postClipLink({ toId: id, toHash: hash, linked: true });
           if (j) {
             toast('已关联');
+            const peerEl = cardCache.get(id);
+            if (peerEl && peerEl.isConnected) flashCard(peerEl);
             const q = document.getElementById('linkToastQ');
             if (q) q.value = '';
             await searchLinkHits('');

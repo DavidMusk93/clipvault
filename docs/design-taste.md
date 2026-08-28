@@ -156,6 +156,8 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 
 **关联入口**：`action-pair` 里与评价同槽的 32×32 `icon-btn`（`data-link`）；`linkCount>0` 时 `has-ctx`。详情在锚定毛玻璃 popover `#linkToast`（克隆 ×N），lazy GET。禁止 header 第二条 chip、禁止卡片 body 挂关联列表。跳转禁止 `fetchPage({reset:true})`。
 
+**落地信标（跳转 / 从 picker 选中）**：墙卡 `.is-flash` = Accent `#0071E3` 描边（`outline` 2px / offset 2px，不改 `border-width`）+ `scale(1.02)` + 抬高 `z-index`，卡片进视口后再亮、持约 850ms 后 transition 收回。两张卡很近时也要一眼能分清落点。禁止 `translateY` / 持久选中态 / 改 border 宽度（会撑 masonry）。`prefers-reduced-motion` 只留描边，去掉 scale。
+
 
 ## 紧凑布局 + 锚定 popover
 

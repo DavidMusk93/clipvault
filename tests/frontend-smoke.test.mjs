@@ -235,6 +235,16 @@ test('hash locator jumps after first fetchPage, never reset or disconnected repl
   assert.match(indexHtml, /function jumpToLocator/, 'jumpToLocator');
   assert.match(indexHtml, /function applyAppHash/, 'applyAppHash');
   assert.match(indexHtml, /m3-card\.is-flash/, 'flash ring');
+  const flashCss = indexHtml.slice(indexHtml.indexOf('.m3-card.is-flash'), indexHtml.indexOf('.m3-card.is-flash') + 420);
+  assert.match(flashCss, /outline-color:\s*var\(--accent\)/, 'landing ring is Accent outline');
+  assert.match(flashCss, /scale\(1\.02\)/, '2% lift, not a hover translate');
+  assert.doesNotMatch(flashCss, /translateY/, 'jump must not translateY (masonry overlap)');
+  assert.match(indexHtml, /function flashCard/, 'shared beacon');
+  assert.match(indexHtml, /prefers-reduced-motion: reduce/, 'reduced motion drops scale');
+  assert.match(indexHtml, /cardMostlyInView/, 'nearby cards flash immediately');
+  const pickIdx = indexHtml.indexOf("toast('已关联')");
+  assert.ok(pickIdx > 0, 'associate toast');
+  assert.match(indexHtml.slice(pickIdx, pickIdx + 280), /flashCard\(peerEl\)/, 'picker lights the wall card');
   assert.match(indexHtml, /hashchange/, 'hashchange');
   assert.match(indexHtml, /fetchPage\(\{\s*reset:\s*true\s*\}\)\s*\.then\(\s*\(\)\s*=>\s*applyAppHash\(\)\s*\)/, 'boot hash after first page');
   const j = indexHtml.indexOf('async function jumpToLocator');

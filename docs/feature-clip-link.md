@@ -333,7 +333,7 @@ sequenceDiagram
 | `fetchPage({reset:true})` | 清 `cardCache`、`rebuildFromData({preserveScroll:false})`；boot（脚本末尾）、搜索、类型 chip 会走它 |
 | `#notes` | 脚本中段 `requestAnimationFrame(openNotesPanel)`，**早于** 首屏 `fetchPage` |
 | `hashchange` | 今日无监听；`history.replaceState` 只用于 `#notes`，且 **不触发** `hashchange` |
-| `is-flash` | **新** CSS：Accent `box-shadow` 脉冲 ~800ms；**禁止** `translateY` |
+| `is-flash` | Accent `outline` 2px + `scale(1.02)`；进视口后再亮、持 ~850ms；**禁止** `translateY` / 改 `border-width` |
 | `parseAppHash` / `jumpToLocator` / `applyAppHash` | **新** |
 
 ```mermaid

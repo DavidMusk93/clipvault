@@ -146,6 +146,13 @@ test('web link UI: popover, same-slot button, no wall reset', () => {
   assert.doesNotMatch(jump, /fetchPage\(\{\s*reset:\s*true/);
   const taste = readFileSync(join(root, 'docs/design-taste.md'), 'utf8');
   assert.match(taste, /关联入口/);
+  assert.match(taste, /落地信标/);
+  assert.match(html, /function flashCard/);
+  assert.match(html, /scale\(1\.02\)/);
+  assert.doesNotMatch(
+    html.slice(html.indexOf('.m3-card.is-flash'), html.indexOf('.m3-card.is-flash') + 500),
+    /translateY/,
+  );
 });
 
 test('AGENTS.md requires recordLocalClipLink; check-frontend lists this file', () => {
