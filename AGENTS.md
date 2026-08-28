@@ -76,6 +76,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **View**：弹层 iframe `src=/api/archive/view?embed=1`（真文档，浏览器引擎排版）；可再开新标签 | srcdoc / Turndown 自绘；毛玻璃+transform 包 iframe；只弹出孤立 tab |
 | **归档后同一按钮变「查看」**（同槽同尺寸）；已归档禁止再点「归档网页」 | 另塞一颗小「查看」；归档按钮归档后仍可点 |
 | **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶；**跨机必须走 op-log `pin`/`unpin`** | 改 timestamp 冒充置顶；钉子混进下一页重复出现；只写本机列不同步 |
+| **关联 clip_link**：判断层；append-only `clip_link_ops` + 投影 `clip_links`/`link_count`；跨机必须 `recordLocalClipLink`；捕获目标 exact `content_hash`，笔记目标 UUID；禁止改 capture 正文、禁止跳转 `fetchPage(reset)` | 把 hash 当行 PK；只写本机表不同步；用 `text_hash` 当 locator |
 | **归档 / 阅读态跨机**：`web_archive` 的 `blob_keys` = HTML **闭包**（root + 文内 `/api/archive/asset` CAS）+ `reader_op` | 只传 html sha；图只躺在对端 `hosts/*/blobs` 灾备里 |
 | **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |
 | **View 技术介质**：白纸正文；代码炭黑表面 + JetBrains Mono（自托管 OFL）+ 语言/复制 + View 时重高亮；图/流程图默认浅纸画板 + 题注 + 点击放大；嵌套 `<article>` 还原为 info 标注框。只有整体偏暗的不透明图才用墨井。CSS 在 `archive-view.css`。不改 CAS | Pico 灰底；黑井吞掉深色箭头/标注；正文用等宽体排中文；CDN 拉字体；把高亮写回 archive HTML |
@@ -185,8 +186,9 @@ nmem：`clipvault_archive_closure_sync_20260817`（替换 `clipvault_archive_ima
 
 ```bash
 ./scripts/check-frontend.sh
-# 或: node --test tests/*.test.mjs
 ```
+
+门禁是 `scripts/check-frontend.sh` 的**硬编码** `node --test` 文件列表（不 glob）。`deploy-server.sh` 只跑这一列表。**不要**把 `node --test tests/*.test.mjs` 写成与脚本等价——新测试文件必须追加进脚本才会进部署门禁。
 
 `tests/frontend-smoke.test.mjs` 会用 `node --check` 校验主脚本语法，并回归 `anyAvail` 等易被注入截断的表达式。**语法不过禁止上线。**
 

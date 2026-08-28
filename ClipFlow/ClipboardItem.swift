@@ -54,6 +54,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let pinnedAt: Date?
     /// Web-archive body pointer (`blobs/{sha}.bin`). List/search must not load that TEXT.
     let archiveHtmlSha: String?
+    /// Undirected related-edge degree (projection of `clip_links`). Judgment, not capture.
+    let linkCount: Int
     
     init(id: UUID = UUID(),
          timestamp: Date = Date(),
@@ -77,7 +79,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
          userRating: Double? = nil,
          userContextUpdatedAt: Date? = nil,
          pinnedAt: Date? = nil,
-         archiveHtmlSha: String? = nil) {
+         archiveHtmlSha: String? = nil,
+         linkCount: Int = 0) {
         self.id = id
         self.timestamp = timestamp
         self.type = type
@@ -101,6 +104,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.userContextUpdatedAt = userContextUpdatedAt
         self.pinnedAt = pinnedAt
         self.archiveHtmlSha = archiveHtmlSha
+        self.linkCount = max(0, linkCount)
     }
 
     /// Visible-text identity for latest-alive. RTF/HTML wrappers must not mint a new row.

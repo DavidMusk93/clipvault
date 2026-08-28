@@ -294,6 +294,8 @@ class WebServer {
             handleComposeImage(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/pin" {
             handleClipPin(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/clips/link" {
+            handleClipLink(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/archive") {
             handleArchiveClear(path: path, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/clips") {
@@ -440,6 +442,8 @@ class WebServer {
             sendItemFrequency(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/evaluations") {
             sendItemEvaluations(path: path, connection: connection)
+        } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/links") {
+            sendItemLinks(path: path, connection: connection)
         } else if pathOnly == "/api/archive/view" {
             sendArchiveView(path: path, connection: connection)
         } else if pathOnly == "/api/archive/asset" {
@@ -1164,6 +1168,7 @@ class WebServer {
         } else {
             dict["pinned"] = false
         }
+        dict["linkCount"] = item.linkCount
         // Thumb URL for image types — client never loads full blob in feed
         if item.type == .image {
             dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb"
@@ -1542,6 +1547,81 @@ class WebServer {
             "state": bundle.state,
             "ops": bundle.ops,
         ], connection: connection)
+    }
+
+    /// POST /api/clips/link  { fromId, toId?, toHash?, kind?, linked? }
+    /// Judgment write. No SSE `update` — caller patches from+peer.
+    private func handleClipLink(data: Data, connection: NWConnection) {
+        guard let obj = jsonBody(from: data),
+              let fromRaw = obj["fromId"] as? String,
+              let fromId = UUID(uuidString: fromRaw) else {
+            sendJSON(["ok": false, "message": "expected {fromId, toId?|toHash?}"], connection: connection)
+            return
+        }
+        let toId = (obj["toId"] as? String).flatMap { UUID(uuidString: $0) }
+        let toHash = obj["toHash"] as? String
+        let kind = obj["kind"] as? String
+        var linked = true
+        if let b = obj["linked"] as? Bool {
+            linked = b
+        } else if let n = obj["linked"] as? NSNumber {
+            linked = n.boolValue
+        }
+        database.submitClipLink(fromId: fromId, toId: toId, toHash: toHash, kind: kind, linked: linked, source: "web") { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let out):
+                if out.changed, let opId = out.opId, let action = out.action {
+                    CloudDocsSyncService.shared?.recordLocalClipLink(
+                        opId: opId,
+                        action: action,
+                        fromId: out.fromId,
+                        toContentHash: out.toContentHash,
+                        toItemId: out.toItemId,
+                        toIsNote: out.toIsNote,
+                        kind: out.kind,
+                        pairKey: out.pairKey,
+                        ts: out.ts
+                    )
+                }
+                var payload: [String: Any] = [
+                    "ok": true,
+                    "item": self.itemToJSON(out.item),
+                ]
+                if let peer = out.peerItem {
+                    payload["peerItem"] = self.itemToJSON(peer)
+                } else {
+                    payload["peerItem"] = NSNull()
+                }
+                payload["link"] = out.link ?? NSNull()
+                self.sendJSON(payload, connection: connection)
+            case .failure(let err):
+                let msg = err.errorDescription ?? "关联失败"
+                self.sendJSON(["ok": false, "message": msg], connection: connection)
+            }
+        }
+    }
+
+    /// GET /api/items/{uuid}/links
+    private func sendItemLinks(path: String, connection: NWConnection) {
+        let pathOnly = path.split(separator: "?").map(String.init).first ?? path
+        let parts = pathOnly.split(separator: "/").map(String.init)
+        guard parts.count >= 4,
+              let uuid = UUID(uuidString: parts[2]) else {
+            sendJSON(["ok": false, "message": "bad id"], connection: connection)
+            return
+        }
+        let comps = URLComponents(string: "http://localhost" + path)
+        let limit = comps?.queryItems?.first(where: { $0.name == "limit" }).flatMap { Int($0.value ?? "") } ?? 32
+        database.fetchClipLinks(itemId: uuid, limit: limit) { [weak self] item, links in
+            guard let self else { return }
+            self.sendJSON([
+                "ok": true,
+                "id": uuid.uuidString,
+                "linkCount": item?.linkCount ?? links.count,
+                "links": links,
+            ], connection: connection)
+        }
     }
 
     /// POST /api/clips/pin  { id, pinned? }  omitted pinned = toggle

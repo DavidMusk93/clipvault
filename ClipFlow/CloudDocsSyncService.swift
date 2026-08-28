@@ -45,7 +45,7 @@ final class CloudDocsSyncService {
         var opId: String
         var host: String
         var seq: Int
-        /// `upsert` | `tombstone` | `touch` | `user_evaluation` | `pin` | `unpin` | `web_archive` | `reader_op` | `compose`
+        /// `upsert` | `tombstone` | `touch` | `user_evaluation` | `pin` | `unpin` | `web_archive` | `reader_op` | `compose` | `clip_link`
         var kind: String
         var itemId: String
         var contentHash: String?
@@ -157,6 +157,7 @@ final class CloudDocsSyncService {
             }
             self.bootstrapLocalHistoryIfNeeded()
             self.replayDiskReaderOps()
+            self.replayDiskClipLinks()
             self.repairArchiveClosures()
             self.startPollTimer()
             if self.config.enabled {
@@ -251,6 +252,49 @@ final class CloudDocsSyncService {
             op.note = "user_evaluation"
             self.enqueue(op)
             self.scheduleDrain(reason: "user_evaluation")
+        }
+    }
+
+    func recordLocalClipLink(
+        opId: String,
+        action: String,
+        fromId: UUID,
+        toContentHash: String?,
+        toItemId: String?,
+        toIsNote: Bool,
+        kind: String,
+        pairKey: String,
+        ts: Double
+    ) {
+        guard config.enabled else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            var op = self.makeOp(
+                kind: "clip_link",
+                itemId: fromId.uuidString,
+                item: nil,
+                blobKeys: nil
+            )
+            if let eid = UUID(uuidString: opId) {
+                op.opId = eid.uuidString
+            }
+            op.contentHash = toContentHash
+            op.wallTs = ts
+            var body: [String: Any] = [
+                "action": action,
+                "kind": kind,
+                "to_is_note": toIsNote,
+                "pair_key": pairKey,
+                "from_item_id": fromId.uuidString,
+            ]
+            if let toItemId { body["to_item_id"] = toItemId }
+            if let toContentHash { body["to_content_hash"] = toContentHash }
+            if let data = try? JSONSerialization.data(withJSONObject: body),
+               let raw = String(data: data, encoding: .utf8) {
+                op.note = raw
+            }
+            self.enqueue(op)
+            self.scheduleDrain(reason: "clip_link")
         }
     }
 
@@ -899,6 +943,15 @@ final class CloudDocsSyncService {
                 wallTs: op.wallTs,
                 source: "sync:\(op.host)"
             )
+        case "clip_link":
+            return database.applySyncClipLinkLocked(
+                opId: op.opId,
+                itemId: uuid,
+                noteJSON: op.note,
+                contentHash: op.contentHash,
+                wallTs: op.wallTs,
+                source: "sync:\(op.host)"
+            )
         case "upsert", "touch":
             guard let hash = op.contentHash, let type = op.type else { return false }
             return database.applySyncUpsertLocked(
@@ -923,7 +976,7 @@ final class CloudDocsSyncService {
     /// Failed pin/archive/reader while the clip is missing must retry.
     private func applyIsIdempotentSuccess(_ op: SyncOp) -> Bool {
         switch op.kind {
-        case "reader_op", "pin", "unpin", "web_archive", "compose":
+        case "reader_op", "pin", "unpin", "web_archive", "compose", "clip_link":
             return false
         default:
             return true
@@ -959,6 +1012,71 @@ final class CloudDocsSyncService {
             }
             if n > 0 {
                 print("[Sync] replayDiskReaderOps applied \(n)")
+            }
+        }
+    }
+
+    /// Re-apply every on-disk `clip_link` (trx/ + leftover ops/). INSERT OR IGNORE all, then fold by pair_key.
+    func replayDiskClipLinks() {
+        queue.async { [weak self] in
+            guard let self, let root = self.syncRootURL() else { return }
+            var files: [URL] = []
+            for hostDir in (try? self.fm.contentsOfDirectory(
+                at: root.appendingPathComponent("trx", isDirectory: true),
+                includingPropertiesForKeys: nil
+            )) ?? [] {
+                files.append(contentsOf: self.listJson(in: hostDir))
+            }
+            for hostDir in (try? self.fm.contentsOfDirectory(
+                at: root.appendingPathComponent("ops", isDirectory: true),
+                includingPropertiesForKeys: nil
+            )) ?? [] {
+                files.append(contentsOf: self.listJson(in: hostDir))
+            }
+            let decoder = JSONDecoder()
+            var n = 0
+            self.database.performSyncWork {
+                var pairKeys = Set<String>()
+                var itemIds = Set<String>()
+                var hashes = Set<String>()
+                for url in files {
+                    guard let data = try? Data(contentsOf: url),
+                          let op = try? decoder.decode(SyncOp.self, from: data),
+                          op.kind == "clip_link" else { continue }
+                    guard let raw = op.note, let noteData = raw.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: noteData) as? [String: Any] else {
+                        continue
+                    }
+                    let pairKey = (obj["pair_key"] as? String) ?? ""
+                    let action = (obj["action"] as? String) ?? ""
+                    let fromId = (obj["from_item_id"] as? String) ?? op.itemId
+                    let toItemId = obj["to_item_id"] as? String
+                    let toHash = (obj["to_content_hash"] as? String) ?? op.contentHash
+                    let toIsNote = DatabaseManager.jsonFlag(obj["to_is_note"])
+                    let kind = (obj["kind"] as? String) ?? "related"
+                    if let key = self.database.ingestClipLinkReplayLocked(
+                        opId: op.opId,
+                        ts: op.wallTs,
+                        action: action,
+                        fromItemId: fromId,
+                        toContentHash: toHash,
+                        toItemId: toItemId,
+                        toIsNote: toIsNote,
+                        kind: kind,
+                        pairKey: pairKey,
+                        source: "replay:\(op.host)"
+                    ) {
+                        n += 1
+                        pairKeys.insert(key)
+                        itemIds.insert(UUID(uuidString: fromId)?.uuidString ?? fromId)
+                        if let toItemId { itemIds.insert(UUID(uuidString: toItemId)?.uuidString ?? toItemId) }
+                        if let toHash { hashes.insert(toHash.lowercased()) }
+                    }
+                }
+                self.database.finishClipLinkReplayLocked(pairKeys: pairKeys, itemIds: itemIds, hashes: hashes)
+            }
+            if n > 0 {
+                print("[Sync] replayDiskClipLinks applied \(n)")
             }
         }
     }

@@ -364,6 +364,17 @@ final class DatabaseManager: ObservableObject {
           ELSE NULL
         END
         """
+    /// Shared list tail so `link_count` stays last. Miss one SELECT → linkCount=0, not a shifted sha.
+    private static let listTailSQL = """
+        COALESCE(copy_count, 1), deleted_at, first_seen_at,
+        user_note, user_stage, user_rating, user_context_updated_at,
+        pinned_at, archive_html_sha, COALESCE(link_count, 0)
+        """
+    private static let listTailSQLAliased = """
+        COALESCE(c.copy_count, 1), c.deleted_at, c.first_seen_at,
+        c.user_note, c.user_stage, c.user_rating, c.user_context_updated_at,
+        c.pinned_at, c.archive_html_sha, COALESCE(c.link_count, 0)
+        """
 
     private func createTables() {
         let createSQL = """
@@ -511,6 +522,41 @@ final class DatabaseManager: ObservableObject {
         );
         """)
         execQuiet("CREATE INDEX IF NOT EXISTS idx_compose_ops_item_ts ON compose_ops(item_id, ts ASC);")
+        // Judgment: clip link ops (true source) + undirected projection. Capture payload unchanged.
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS clip_link_ops (
+            id TEXT PRIMARY KEY,
+            ts REAL NOT NULL,
+            action TEXT NOT NULL,
+            from_item_id TEXT NOT NULL,
+            to_content_hash TEXT,
+            to_item_id TEXT,
+            to_is_note INTEGER NOT NULL DEFAULT 0,
+            kind TEXT NOT NULL DEFAULT 'related',
+            pair_key TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'web'
+        );
+        """)
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_link_ops_from_ts ON clip_link_ops(from_item_id, ts ASC);")
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_link_ops_pair_ts ON clip_link_ops(pair_key, ts DESC);")
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS clip_links (
+            pair_key TEXT PRIMARY KEY,
+            from_item_id TEXT NOT NULL,
+            to_content_hash TEXT,
+            to_item_id TEXT,
+            to_is_note INTEGER NOT NULL DEFAULT 0,
+            kind TEXT NOT NULL DEFAULT 'related',
+            last_op_id TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        """)
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_from ON clip_links(from_item_id);")
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_to_hash ON clip_links(to_content_hash) WHERE to_content_hash IS NOT NULL;")
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_to_item ON clip_links(to_item_id) WHERE to_item_id IS NOT NULL;")
+        if !columnExists("clipboard_items", "link_count") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN link_count INTEGER NOT NULL DEFAULT 0;")
+        }
         // Ensure aux tables exist on upgraded DBs.
         execQuiet("""
         CREATE TABLE IF NOT EXISTS clipboard_events (
@@ -873,6 +919,10 @@ final class DatabaseManager: ObservableObject {
               AND c.archive_html_sha IS NULL
               AND c.reader_state IS NULL
               AND NOT EXISTS (SELECT 1 FROM reader_ops r WHERE r.item_id = c.id)
+              AND NOT EXISTS (SELECT 1 FROM clip_links L
+                              WHERE L.from_item_id = c.id OR L.to_item_id = c.id)
+              AND NOT EXISTS (SELECT 1 FROM clip_link_ops O
+                              WHERE O.from_item_id = c.id OR O.to_item_id = c.id)
               AND EXISTS (
                 SELECT 1 FROM clipboard_items k
                 WHERE k.id != c.id
@@ -1322,6 +1372,7 @@ final class DatabaseManager: ObservableObject {
         // sqlite3_changes: 0 means already gone — still success for idempotent tombstone.
         deleteFTS(id: idStr)
         if let hash { gcBlobIfUnreferenced(hash: hash) }
+        touchLinkCountsForItem(id: idStr, hash: hash)
         return true
     }
 
@@ -1404,6 +1455,17 @@ final class DatabaseManager: ObservableObject {
         }
         sqlite3_finalize(q)
         upsertFTS(id: id, text: t, ocr: o, source: s, html: h)
+        // applySyncUpsertLocked same-id path: target may have arrived after a dangling hash edge.
+        var hash: String?
+        var hStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT content_hash FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
+            bindText(hStmt, 1, id)
+            if sqlite3_step(hStmt) == SQLITE_ROW {
+                hash = sqlite3_column_text(hStmt, 0).map { String(cString: $0) }
+            }
+        }
+        sqlite3_finalize(hStmt)
+        touchLinkCountsForItem(id: id, hash: hash)
         return true
     }
 
@@ -1510,6 +1572,7 @@ final class DatabaseManager: ObservableObject {
             detail: "source=\(item.sourceApp ?? "-")",
             source: "clipboard"
         )
+        touchLinkCountsForItem(id: id, hash: item.contentHash)
         return true
     }
 
@@ -1595,6 +1658,7 @@ final class DatabaseManager: ObservableObject {
             detail: "type=\(item.type.rawValue)",
             source: "clipboard"
         )
+        touchLinkCountsForItem(id: idStr, hash: item.contentHash)
         return true
     }
 
@@ -1734,8 +1798,7 @@ final class DatabaseManager: ObservableObject {
     ) -> [ClipboardItem] {
         var sql = """
         SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, \(Self.listHtmlSQLAliased), c.source_app, c.ocr_text,
-               COALESCE(c.copy_count, 1), c.deleted_at, c.first_seen_at,
-               c.user_note, c.user_stage, c.user_rating, c.user_context_updated_at, c.pinned_at, c.archive_html_sha
+               \(Self.listTailSQLAliased)
         FROM clipboard_fts f
         JOIN clipboard_items c ON c.id = f.id
         WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL
@@ -1777,7 +1840,7 @@ final class DatabaseManager: ObservableObject {
         typeFilter: String? = nil,
         excludeType: String? = nil
     ) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL) FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
@@ -1821,7 +1884,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false, typeFilter: String? = nil, excludeType: String? = nil) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL) FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
@@ -1855,7 +1918,7 @@ final class DatabaseManager: ObservableObject {
 
     private func runPinned(db: OpaquePointer, fetchLimit: Int, typeFilter: String? = nil, excludeType: String? = nil) -> [ClipboardItem] {
         var sql = """
-        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha
+        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL)
         FROM clipboard_items
         WHERE deleted_at IS NULL AND pinned_at IS NOT NULL
         """
@@ -1875,7 +1938,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Columns: id, timestamp, type, content_hash, text, file_urls, url, html, source, ocr,
-    /// copy_count, deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at
+    /// copy_count … archive_html_sha, link_count (col 19; read when colCount >= 20).
     private func rowToItem(stmt: OpaquePointer?) -> ClipboardItem? {
         guard let stmt = stmt,
               let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
@@ -1935,6 +1998,10 @@ final class DatabaseManager: ObservableObject {
         if colCount >= 19, sqlite3_column_type(stmt, 18) != SQLITE_NULL {
             archiveHtmlSha = sqlite3_column_text(stmt, 18).map { String(cString: $0) }
         }
+        var linkCount = 0
+        if colCount >= 20 {
+            linkCount = max(0, Int(sqlite3_column_int(stmt, 19)))
+        }
 
         return ClipboardItem(
             id: uuid,
@@ -1956,7 +2023,8 @@ final class DatabaseManager: ObservableObject {
             userRating: userRating,
             userContextUpdatedAt: userContextUpdatedAt,
             pinnedAt: pinnedAt,
-            archiveHtmlSha: archiveHtmlSha
+            archiveHtmlSha: archiveHtmlSha,
+            linkCount: linkCount
         )
     }
 
@@ -2212,7 +2280,7 @@ final class DatabaseManager: ObservableObject {
         var f: OpaquePointer?
         let fetchSQL = """
         SELECT id, timestamp, type, content_hash, text_content, file_urls, url, html_content, source_app, ocr_text,
-               COALESCE(copy_count, 1), deleted_at, first_seen_at, user_note, user_stage, user_rating, user_context_updated_at, pinned_at, archive_html_sha
+               \(Self.listTailSQL)
         FROM clipboard_items WHERE id = ? LIMIT 1;
         """
         var out: ClipboardItem?
@@ -2395,6 +2463,7 @@ final class DatabaseManager: ObservableObject {
             detail: "keys=\(keys.count)",
             source: source
         )
+        touchLinkCountsForItem(id: id.uuidString, hash: hash)
         guard let out = fetchItemByIdLocked(id.uuidString, on: db) else { throw ComposeError.missing }
         return out
     }
@@ -2493,6 +2562,7 @@ final class DatabaseManager: ObservableObject {
             _ = sqlite3_step(stmt)
         }
         sqlite3_finalize(stmt)
+        touchLinkCountsForItem(id: id.uuidString, hash: contentHash)
         return true
     }
 
@@ -3044,6 +3114,692 @@ final class DatabaseManager: ObservableObject {
         state["updatedAt"] = ts
     }
 
+    // MARK: - Clip link (judgment: append-only ops + fold projection)
+
+    static let clipLinkDegreeCap = 32
+
+    enum ClipLinkError: Error, LocalizedError {
+        case notFound(String)
+        case badRequest(String)
+        case db
+        var errorDescription: String? {
+            switch self {
+            case .notFound(let m), .badRequest(let m): return m
+            case .db: return "无法写入关联"
+            }
+        }
+    }
+
+    struct ClipLinkSubmitResult {
+        let item: ClipboardItem
+        let peerItem: ClipboardItem?
+        let link: [String: Any]?
+        let changed: Bool
+        let opId: String?
+        let action: String?
+        let fromId: UUID
+        let toContentHash: String?
+        let toItemId: String?
+        let toIsNote: Bool
+        let kind: String
+        let pairKey: String
+        let ts: Double
+    }
+
+    private struct ClipLinkTarget {
+        let id: UUID
+        let contentHash: String?
+        let isNote: Bool
+        let type: ClipboardType
+        let item: ClipboardItem
+    }
+
+    static func normalizeHash(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let h = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard h.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { return nil }
+        return h
+    }
+
+    static func jsonFlag(_ value: Any?) -> Bool {
+        if let b = value as? Bool { return b }
+        if let n = value as? NSNumber { return n.intValue != 0 }
+        if let i = value as? Int { return i != 0 }
+        if let s = value as? String {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return t == "1" || t == "true"
+        }
+        return false
+    }
+
+    func makePairKey(from: ClipboardItem, toIsNote: Bool, toId: UUID, toHash: String?) -> String {
+        let fromNote = from.type == .note
+        let toNote = toIsNote
+        let fromId = from.id.uuidString
+        let toIdStr = toId.uuidString
+        if fromNote && toNote {
+            let a = min(fromId, toIdStr)
+            let b = max(fromId, toIdStr)
+            return "nn:\(a):\(b)"
+        }
+        if fromNote != toNote {
+            let noteId = fromNote ? fromId : toIdStr
+            let capHash = (fromNote ? (toHash ?? "") : from.contentHash).lowercased()
+            return "nh:\(noteId):\(capHash)"
+        }
+        let ha = from.contentHash.lowercased()
+        let hb = (toHash ?? "").lowercased()
+        return "hh:\(min(ha, hb)):\(max(ha, hb))"
+    }
+
+    func submitClipLink(
+        fromId: UUID,
+        toId: UUID?,
+        toHash: String?,
+        kind: String?,
+        linked: Bool,
+        source: String = "web",
+        completion: @escaping (Result<ClipLinkSubmitResult, ClipLinkError>) -> Void
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self else {
+                DispatchQueue.main.async { completion(.failure(.db)) }
+                return
+            }
+            let result = self.submitClipLinkLocked(
+                fromId: fromId, toId: toId, toHash: toHash, kind: kind, linked: linked, source: source
+            )
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    func submitClipLinkLocked(
+        fromId: UUID,
+        toId: UUID?,
+        toHash: String?,
+        kind rawKind: String?,
+        linked: Bool,
+        source: String
+    ) -> Result<ClipLinkSubmitResult, ClipLinkError> {
+        let kind = (rawKind?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "related"
+        if kind != "related" {
+            return .failure(.badRequest("暂只支持 related"))
+        }
+        guard let from = fetchItemByIdLocked(fromId.uuidString) else {
+            return .failure(.notFound("找不到卡片"))
+        }
+        if from.deletedAt != nil {
+            return .failure(.badRequest("回收箱里不能关联"))
+        }
+        if from.type == .note {
+            return .failure(.badRequest("笔记侧关联下期开放"))
+        }
+        let to: ClipLinkTarget
+        switch resolvePostTarget(toId: toId, toHash: toHash) {
+        case .failure(let err):
+            return .failure(err)
+        case .success(let target):
+            to = target
+        }
+        if to.id == from.id {
+            return .failure(.badRequest("不能关联自己"))
+        }
+        if !to.isNote, let th = to.contentHash, th == from.contentHash {
+            return .failure(.badRequest("不能关联自己"))
+        }
+        let pairKey = makePairKey(from: from, toIsNote: to.isNote, toId: to.id, toHash: to.contentHash)
+        let current = latestClipLinkAction(pairKey: pairKey)
+        if linked {
+            if current == "link" {
+                let link = clipLinkJSON(pairKey: pairKey, relativeTo: from.id.uuidString)
+                return .success(unchangedSubmit(from: from, to: to.item, link: link, pairKey: pairKey, kind: kind))
+            }
+            if from.linkCount >= Self.clipLinkDegreeCap || to.item.linkCount >= Self.clipLinkDegreeCap {
+                return .failure(.badRequest("最多 32 条关联"))
+            }
+        } else {
+            if current == nil || current == "unlink" {
+                return .success(unchangedSubmit(from: from, to: to.item, link: nil, pairKey: pairKey, kind: kind))
+            }
+        }
+        let opId = UUID().uuidString
+        let ts = Date().timeIntervalSince1970
+        let action = linked ? "link" : "unlink"
+        let toHashStored: String? = to.isNote ? nil : to.contentHash
+        insertClipLinkOpLocked(
+            opId: opId,
+            ts: ts,
+            action: action,
+            fromItemId: from.id.uuidString,
+            toContentHash: toHashStored,
+            toItemId: to.id.uuidString,
+            toIsNote: to.isNote,
+            kind: kind,
+            pairKey: pairKey,
+            source: source
+        )
+        foldPairKeyIntoLinks(pairKey)
+        recomputeLinkCountLocked(id: from.id.uuidString, hash: from.contentHash)
+        recomputeLinkCountLocked(id: to.id.uuidString, hash: to.contentHash)
+        _ = appendOperationLogSync(
+            action: linked ? "clip_link" : "clip_unlink",
+            itemId: from.id.uuidString,
+            contentHash: toHashStored,
+            detail: "pair=\(pairKey) peer=\(to.id.uuidString.prefix(8))",
+            source: source
+        )
+        guard let item = fetchItemByIdLocked(from.id.uuidString) else { return .failure(.db) }
+        let peer = fetchItemByIdLocked(to.id.uuidString)
+        let link = linked ? clipLinkJSON(pairKey: pairKey, relativeTo: from.id.uuidString) : nil
+        return .success(ClipLinkSubmitResult(
+            item: item,
+            peerItem: peer,
+            link: link,
+            changed: true,
+            opId: opId,
+            action: action,
+            fromId: from.id,
+            toContentHash: toHashStored,
+            toItemId: to.id.uuidString,
+            toIsNote: to.isNote,
+            kind: kind,
+            pairKey: pairKey,
+            ts: ts
+        ))
+    }
+
+    private func unchangedSubmit(
+        from: ClipboardItem,
+        to: ClipboardItem,
+        link: [String: Any]?,
+        pairKey: String,
+        kind: String
+    ) -> ClipLinkSubmitResult {
+        ClipLinkSubmitResult(
+            item: from,
+            peerItem: to,
+            link: link,
+            changed: false,
+            opId: nil,
+            action: nil,
+            fromId: from.id,
+            toContentHash: to.type == .note ? nil : to.contentHash,
+            toItemId: to.id.uuidString,
+            toIsNote: to.type == .note,
+            kind: kind,
+            pairKey: pairKey,
+            ts: Date().timeIntervalSince1970
+        )
+    }
+
+    private func resolvePostTarget(toId: UUID?, toHash: String?) -> Result<ClipLinkTarget, ClipLinkError> {
+        if let toId, let row = fetchItemByIdLocked(toId.uuidString) {
+            if row.type == .note {
+                return .success(ClipLinkTarget(id: row.id, contentHash: nil, isNote: true, type: row.type, item: row))
+            }
+            return .success(ClipLinkTarget(id: row.id, contentHash: row.contentHash, isNote: false, type: row.type, item: row))
+        }
+        guard let hash = Self.normalizeHash(toHash) else {
+            if toHash != nil {
+                return .failure(.badRequest("hash 格式不对"))
+            }
+            return .failure(.notFound("找不到要关联的卡片"))
+        }
+        guard let id = findIdByContentHash(hash), let row = fetchItemByIdLocked(id) else {
+            return .failure(.notFound("找不到要关联的卡片"))
+        }
+        if row.type == .note {
+            return .failure(.badRequest("笔记请用条目关联"))
+        }
+        return .success(ClipLinkTarget(id: row.id, contentHash: row.contentHash, isNote: false, type: row.type, item: row))
+    }
+
+    /// Apply remote clip_link. Five-step order is load-bearing: missing from must not INSERT.
+    @discardableResult
+    func applySyncClipLinkLocked(
+        opId: String,
+        itemId: UUID,
+        noteJSON: String?,
+        contentHash: String?,
+        wallTs: Double,
+        source: String
+    ) -> Bool {
+        // 1. parse note JSON
+        guard let noteJSON,
+              let data = noteJSON.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("[Sync] clip_link quarantine malformed note")
+            return true
+        }
+        let pairKey = (obj["pair_key"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let action = (obj["action"] as? String) ?? ""
+        if pairKey.isEmpty || (action != "link" && action != "unlink") {
+            print("[Sync] clip_link quarantine pair_key=\(pairKey) action=\(action)")
+            return true
+        }
+        let fromRaw = (obj["from_item_id"] as? String) ?? itemId.uuidString
+        let fromIdStr = UUID(uuidString: fromRaw)?.uuidString ?? fromRaw
+        // 2. if fetchItemById(from) == nil: return false — 不 INSERT
+        if fetchItemByIdLocked(fromIdStr) == nil {
+            print("[Sync] clip_link apply failed missing from \(fromIdStr.prefix(8))")
+            return false
+        }
+        // 3. INSERT OR IGNORE clip_link_ops (op_id)
+        let toIsNote = Self.jsonFlag(obj["to_is_note"])
+        let toItemRaw = obj["to_item_id"] as? String
+        let toItemId = toItemRaw.flatMap { UUID(uuidString: $0)?.uuidString ?? $0 }
+        let toHash = Self.normalizeHash(obj["to_content_hash"] as? String) ?? Self.normalizeHash(contentHash)
+        let kind = (obj["kind"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "related"
+        insertClipLinkOpLocked(
+            opId: opId,
+            ts: wallTs,
+            action: action,
+            fromItemId: fromIdStr,
+            toContentHash: toIsNote ? nil : toHash,
+            toItemId: toItemId,
+            toIsNote: toIsNote,
+            kind: kind,
+            pairKey: pairKey,
+            source: source
+        )
+        // 4. foldPairKeyIntoLinks; touchLinkCountsForItem
+        foldPairKeyIntoLinks(pairKey)
+        touchLinkCountsForItem(id: fromIdStr, hash: nil)
+        if let toItemId {
+            touchLinkCountsForItem(id: toItemId, hash: toHash)
+        } else if let toHash, let tid = findIdByContentHash(toHash) {
+            touchLinkCountsForItem(id: tid, hash: toHash)
+        }
+        // 5. return true
+        return true
+    }
+
+    func ingestClipLinkReplayLocked(
+        opId: String,
+        ts: Double,
+        action: String,
+        fromItemId: String,
+        toContentHash: String?,
+        toItemId: String?,
+        toIsNote: Bool,
+        kind: String,
+        pairKey: String,
+        source: String
+    ) -> String? {
+        let key = pairKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, action == "link" || action == "unlink" else { return nil }
+        let from = UUID(uuidString: fromItemId)?.uuidString ?? fromItemId
+        insertClipLinkOpLocked(
+            opId: opId,
+            ts: ts,
+            action: action,
+            fromItemId: from,
+            toContentHash: toIsNote ? nil : Self.normalizeHash(toContentHash),
+            toItemId: toItemId.flatMap { UUID(uuidString: $0)?.uuidString ?? $0 },
+            toIsNote: toIsNote,
+            kind: kind.isEmpty ? "related" : kind,
+            pairKey: key,
+            source: source
+        )
+        return key
+    }
+
+    func finishClipLinkReplayLocked(pairKeys: Set<String>, itemIds: Set<String>, hashes: Set<String>) {
+        for key in pairKeys {
+            foldPairKeyIntoLinks(key)
+        }
+        for id in itemIds {
+            recomputeLinkCountLocked(id: id, hash: nil)
+        }
+        for hash in hashes {
+            if let id = findIdByContentHash(hash) {
+                recomputeLinkCountLocked(id: id, hash: hash)
+            }
+        }
+    }
+
+    private func insertClipLinkOpLocked(
+        opId: String,
+        ts: Double,
+        action: String,
+        fromItemId: String,
+        toContentHash: String?,
+        toItemId: String?,
+        toIsNote: Bool,
+        kind: String,
+        pairKey: String,
+        source: String
+    ) {
+        guard let db = db else { return }
+        let sql = """
+        INSERT OR IGNORE INTO clip_link_ops
+        (id, ts, action, from_item_id, to_content_hash, to_item_id, to_is_note, kind, pair_key, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        bindText(stmt, 1, opId)
+        sqlite3_bind_double(stmt, 2, ts)
+        bindText(stmt, 3, action)
+        bindText(stmt, 4, fromItemId)
+        bindText(stmt, 5, toContentHash)
+        bindText(stmt, 6, toItemId)
+        sqlite3_bind_int(stmt, 7, toIsNote ? 1 : 0)
+        bindText(stmt, 8, kind)
+        bindText(stmt, 9, pairKey)
+        bindText(stmt, 10, source)
+        _ = sqlite3_step(stmt)
+        sqlite3_finalize(stmt)
+    }
+
+    func foldPairKeyIntoLinks(_ pairKey: String) {
+        guard let db = db else { return }
+        let sql = """
+        SELECT action, from_item_id, to_content_hash, to_item_id, to_is_note, kind, id, ts
+        FROM clip_link_ops
+        WHERE pair_key = ?
+        ORDER BY ts DESC, id DESC
+        LIMIT 1;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        bindText(stmt, 1, pairKey)
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            sqlite3_finalize(stmt)
+            deleteClipLinkProjection(pairKey)
+            return
+        }
+        let action = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+        let fromId = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+        let toHash = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+        let toItem = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+        let toIsNote = sqlite3_column_int(stmt, 4) != 0
+        let kind = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "related"
+        let opId = sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? ""
+        let ts = sqlite3_column_double(stmt, 7)
+        sqlite3_finalize(stmt)
+        if action != "link" {
+            deleteClipLinkProjection(pairKey)
+            return
+        }
+        let upsert = """
+        INSERT OR REPLACE INTO clip_links
+        (pair_key, from_item_id, to_content_hash, to_item_id, to_is_note, kind, last_op_id, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        var u: OpaquePointer?
+        guard sqlite3_prepare_v2(db, upsert, -1, &u, nil) == SQLITE_OK else { return }
+        bindText(u, 1, pairKey)
+        bindText(u, 2, fromId)
+        bindText(u, 3, toHash)
+        bindText(u, 4, toItem)
+        sqlite3_bind_int(u, 5, toIsNote ? 1 : 0)
+        bindText(u, 6, kind)
+        bindText(u, 7, opId)
+        sqlite3_bind_double(u, 8, ts)
+        _ = sqlite3_step(u)
+        sqlite3_finalize(u)
+    }
+
+    private func deleteClipLinkProjection(_ pairKey: String) {
+        guard let db = db else { return }
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM clip_links WHERE pair_key = ?;", -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, pairKey)
+            _ = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+    }
+
+    private func latestClipLinkAction(pairKey: String) -> String? {
+        guard let db = db else { return nil }
+        var stmt: OpaquePointer?
+        defer { if stmt != nil { sqlite3_finalize(stmt) } }
+        let sql = """
+        SELECT action FROM clip_link_ops
+        WHERE pair_key = ?
+        ORDER BY ts DESC, id DESC
+        LIMIT 1;
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        bindText(stmt, 1, pairKey)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+    }
+
+    func touchLinkCountsForItem(id: String, hash: String?) {
+        let selfHash = hash ?? itemContentHashLocked(id)
+        recomputeLinkCountLocked(id: id, hash: selfHash)
+        guard let db = db else { return }
+        var stmt: OpaquePointer?
+        let sql = """
+        SELECT from_item_id, to_item_id, to_content_hash, to_is_note
+        FROM clip_links
+        WHERE from_item_id = ?
+           OR to_item_id = ?
+           OR (to_is_note = 0 AND to_content_hash = ?);
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        bindText(stmt, 1, id)
+        bindText(stmt, 2, id)
+        bindText(stmt, 3, selfHash)
+        var peerIds = Set<String>()
+        var peerHashes = Set<String>()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let from = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }), from != id {
+                peerIds.insert(from)
+            }
+            if sqlite3_column_type(stmt, 1) != SQLITE_NULL,
+               let toItem = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
+               toItem != id {
+                peerIds.insert(toItem)
+            }
+            if sqlite3_column_int(stmt, 3) == 0,
+               sqlite3_column_type(stmt, 2) != SQLITE_NULL,
+               let h = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) {
+                peerHashes.insert(h)
+            }
+        }
+        sqlite3_finalize(stmt)
+        for peer in peerIds {
+            recomputeLinkCountLocked(id: peer, hash: nil)
+        }
+        for h in peerHashes {
+            if let pid = findIdByContentHash(h), pid != id {
+                recomputeLinkCountLocked(id: pid, hash: h)
+            }
+        }
+    }
+
+    private func recomputeLinkCountLocked(id: String, hash: String?) {
+        guard let db = db else { return }
+        let hash = hash ?? itemContentHashLocked(id) ?? ""
+        var stmt: OpaquePointer?
+        let sql = """
+        SELECT COUNT(*) FROM clip_links
+        WHERE from_item_id = ?
+           OR to_item_id = ?
+           OR (to_is_note = 0 AND to_content_hash = ?);
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        bindText(stmt, 1, id)
+        bindText(stmt, 2, id)
+        bindText(stmt, 3, hash)
+        var n = 0
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            n = Int(sqlite3_column_int(stmt, 0))
+        }
+        sqlite3_finalize(stmt)
+        var u: OpaquePointer?
+        if sqlite3_prepare_v2(db, "UPDATE clipboard_items SET link_count = ? WHERE id = ?;", -1, &u, nil) == SQLITE_OK {
+            sqlite3_bind_int(u, 1, Int32(max(0, n)))
+            bindText(u, 2, id)
+            _ = sqlite3_step(u)
+        }
+        sqlite3_finalize(u)
+    }
+
+    private func itemContentHashLocked(_ id: String) -> String? {
+        guard let db = db else { return nil }
+        var stmt: OpaquePointer?
+        defer { if stmt != nil { sqlite3_finalize(stmt) } }
+        guard sqlite3_prepare_v2(db, "SELECT content_hash FROM clipboard_items WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        bindText(stmt, 1, id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+    }
+
+    func fetchClipLinks(
+        itemId: UUID,
+        limit: Int = 32,
+        completion: @escaping (_ item: ClipboardItem?, _ links: [[String: Any]]) -> Void
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self else {
+                DispatchQueue.main.async { completion(nil, []) }
+                return
+            }
+            let item = self.fetchItemByIdLocked(itemId.uuidString)
+            let links = self.fetchClipLinksLocked(itemId: itemId.uuidString, hash: item?.contentHash, limit: limit)
+            DispatchQueue.main.async { completion(item, links) }
+        }
+    }
+
+    private func fetchClipLinksLocked(itemId: String, hash: String?, limit: Int) -> [[String: Any]] {
+        guard let db = db else { return [] }
+        let cap = max(1, min(limit, Self.clipLinkDegreeCap))
+        let sql = """
+        SELECT pair_key, from_item_id, to_content_hash, to_item_id, to_is_note, kind, last_op_id, updated_at
+        FROM clip_links
+        WHERE from_item_id = ?
+           OR to_item_id = ?
+           OR (to_is_note = 0 AND to_content_hash = ?)
+        ORDER BY updated_at DESC, pair_key DESC
+        LIMIT ?;
+        """
+        var stmt: OpaquePointer?
+        var rows: [[String: Any]] = []
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        bindText(stmt, 1, itemId)
+        bindText(stmt, 2, itemId)
+        bindText(stmt, 3, hash)
+        sqlite3_bind_int(stmt, 4, Int32(cap))
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let pairKey = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+            if let json = clipLinkJSONFromRow(
+                pairKey: pairKey,
+                fromId: sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "",
+                toHash: sqlite3_column_type(stmt, 2) == SQLITE_NULL ? nil : sqlite3_column_text(stmt, 2).map { String(cString: $0) },
+                toItemId: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : sqlite3_column_text(stmt, 3).map { String(cString: $0) },
+                toIsNote: sqlite3_column_int(stmt, 4) != 0,
+                kind: sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "related",
+                opId: sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? "",
+                ts: sqlite3_column_double(stmt, 7),
+                relativeTo: itemId
+            ) {
+                rows.append(json)
+            }
+        }
+        sqlite3_finalize(stmt)
+        return rows
+    }
+
+    private func clipLinkJSON(pairKey: String, relativeTo itemId: String) -> [String: Any]? {
+        guard let db = db else { return nil }
+        var stmt: OpaquePointer?
+        defer { if stmt != nil { sqlite3_finalize(stmt) } }
+        let sql = """
+        SELECT from_item_id, to_content_hash, to_item_id, to_is_note, kind, last_op_id, updated_at
+        FROM clip_links WHERE pair_key = ? LIMIT 1;
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        bindText(stmt, 1, pairKey)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return clipLinkJSONFromRow(
+            pairKey: pairKey,
+            fromId: sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "",
+            toHash: sqlite3_column_type(stmt, 1) == SQLITE_NULL ? nil : sqlite3_column_text(stmt, 1).map { String(cString: $0) },
+            toItemId: sqlite3_column_type(stmt, 2) == SQLITE_NULL ? nil : sqlite3_column_text(stmt, 2).map { String(cString: $0) },
+            toIsNote: sqlite3_column_int(stmt, 3) != 0,
+            kind: sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? "related",
+            opId: sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "",
+            ts: sqlite3_column_double(stmt, 6),
+            relativeTo: itemId
+        )
+    }
+
+    private func clipLinkJSONFromRow(
+        pairKey: String,
+        fromId: String,
+        toHash: String?,
+        toItemId: String?,
+        toIsNote: Bool,
+        kind: String,
+        opId: String,
+        ts: Double,
+        relativeTo itemId: String
+    ) -> [String: Any]? {
+        let fromCanon = UUID(uuidString: fromId)?.uuidString ?? fromId
+        let selfCanon = UUID(uuidString: itemId)?.uuidString ?? itemId
+        let outbound = fromCanon.caseInsensitiveCompare(selfCanon) == .orderedSame
+        let peer = outbound
+            ? resolveLinkTarget(toIsNote: toIsNote, toItemId: toItemId, toHash: toHash)
+            : fetchItemByIdLocked(fromCanon)
+        let direction = outbound ? "out" : "in"
+        var json: [String: Any] = [
+            "opId": opId,
+            "kind": kind,
+            "pairKey": pairKey,
+            "fromId": fromCanon,
+            "toHash": toHash as Any? ?? NSNull(),
+            "toId": toItemId as Any? ?? NSNull(),
+            "toIsNote": toIsNote,
+            "direction": direction,
+            "ts": ts,
+        ]
+        if let peer {
+            json["resolved"] = [
+                "id": peer.id.uuidString,
+                "type": peer.type.rawValue,
+                "preview": String(peer.preview().prefix(80)),
+                "contentHash": peer.contentHash,
+                "missing": false,
+                "inTrash": peer.deletedAt != nil,
+                "isCompose": peer.type == .note,
+            ] as [String: Any]
+        } else {
+            json["resolved"] = [
+                "id": NSNull(),
+                "type": NSNull(),
+                "preview": "（已不在库中）",
+                "contentHash": toHash as Any? ?? NSNull(),
+                "missing": true,
+                "inTrash": false,
+                "isCompose": toIsNote,
+            ] as [String: Any]
+        }
+        return json
+    }
+
+    private func resolveLinkTarget(toIsNote: Bool, toItemId: String?, toHash: String?) -> ClipboardItem? {
+        if toIsNote {
+            guard let toItemId else { return nil }
+            return fetchItemByIdLocked(UUID(uuidString: toItemId)?.uuidString ?? toItemId)
+        }
+        if let toItemId {
+            let canon = UUID(uuidString: toItemId)?.uuidString ?? toItemId
+            if let row = fetchItemByIdLocked(canon),
+               row.deletedAt == nil,
+               let toHash, row.contentHash.lowercased() == toHash.lowercased() {
+                return row
+            }
+        }
+        guard let hash = Self.normalizeHash(toHash), let id = findIdByContentHash(hash) else { return nil }
+        return fetchItemByIdLocked(id)
+    }
+
     // MARK: - Soft delete / recycle bin (TTL 30d)
 
     func deleteItem(_ item: ClipboardItem, completion: ((Bool) -> Void)? = nil) {
@@ -3090,6 +3846,7 @@ final class DatabaseManager: ObservableObject {
                     detail: "ttl_days=30",
                     source: "web"
                 )
+                self.touchLinkCountsForItem(id: idStr, hash: hash)
             }
             DispatchQueue.main.async { completion?(stepRes == SQLITE_DONE && changed) }
         }
@@ -3153,6 +3910,7 @@ final class DatabaseManager: ObservableObject {
                 detail: nil,
                 source: "web"
             )
+            self.touchLinkCountsForItem(id: idStr, hash: hash)
             DispatchQueue.main.async { completion?(true) }
         }
     }
@@ -3196,6 +3954,7 @@ final class DatabaseManager: ObservableObject {
                         detail: "ttl_expired",
                         source: "maintenance"
                     )
+                    touchLinkCountsForItem(id: id, hash: hash)
                 }
             }
             sqlite3_finalize(del)
