@@ -92,10 +92,33 @@
       cursor: pointer;
     }
     .card.active { outline: 2px solid rgba(0,113,227,0.35); }
-    .card .id, .card .meta {
+    .id-row, .session-head {
+      display: flex; align-items: center; gap: 6px; min-width: 0;
+    }
+    .session-head { padding: 0 4px 10px; }
+    .session-head[hidden] { display: none !important; }
+    .card .id, .card .meta, .session-head .sid {
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .card .id { font-family: var(--font-mono); font-size: 12px; }
+    .card .id, .session-head .sid {
+      flex: 1; min-width: 0;
+      font-family: var(--font-mono); font-size: 12px;
+    }
+    .session-head .sid { user-select: all; }
+    .copy-id {
+      flex-shrink: 0;
+      height: 22px; padding: 0 8px; border: 0; border-radius: 980px;
+      background: rgba(120,120,128,0.12);
+      color: var(--muted);
+      font: inherit; font-size: 11px; font-weight: 600;
+      cursor: pointer;
+      transition: background 100ms ease-out, color 100ms ease-out, transform 100ms ease-out;
+    }
+    .copy-id:active { transform: scale(0.97); }
+    .copy-id.ok { background: var(--honey-soft); color: var(--honey); }
+    @media (hover: hover) and (pointer: fine) {
+      .copy-id:hover { background: rgba(120,120,128,0.18); color: var(--ink); }
+    }
     .thread { flex: 1; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
     .row {
       display: flex; width: 100%; margin: 0 0 10px;
@@ -230,6 +253,10 @@
   <main>
     <section class="list" id="sessions"><div class="empty">暂无会话</div></section>
     <section class="detail">
+      <div class="session-head" id="sessionHead" hidden>
+        <span class="sid" id="sessionSid"></span>
+        <button type="button" class="copy-id" id="copySid" title="复制 session id" aria-label="复制 session id">复制</button>
+      </div>
       <div id="events"><div class="empty">选择左侧会话</div></div>
       <div class="jump">
         <button type="button" id="jumpTop" title="滑到顶部">顶</button>
@@ -275,6 +302,64 @@
     const esc = (s) => String(s ?? "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const copyTimers = new WeakMap();
+    const flashCopy = (btn, ok) => {
+      if (!btn) return;
+      const prev = copyTimers.get(btn);
+      if (prev) window.clearTimeout(prev);
+      btn.classList.toggle("ok", ok);
+      btn.textContent = ok ? "已复制" : "失败";
+      const t = window.setTimeout(() => {
+        btn.classList.remove("ok");
+        btn.textContent = "复制";
+        copyTimers.delete(btn);
+      }, 900);
+      copyTimers.set(btn, t);
+    };
+    const copySessionId = async (id, btn) => {
+      const sid = String(id || "").trim();
+      if (!sid) return false;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(sid);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = sid;
+          ta.setAttribute("readonly", "");
+          ta.style.position = "fixed";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        }
+        flashCopy(btn, true);
+        return true;
+      } catch (_) {
+        flashCopy(btn, false);
+        return false;
+      }
+    };
+    const showSessionHead = (sid) => {
+      const head = $("sessionHead");
+      if (!sid) {
+        head.hidden = true;
+        $("sessionSid").textContent = "";
+        return;
+      }
+      head.hidden = false;
+      $("sessionSid").textContent = sid;
+      $("sessionSid").title = sid;
+    };
+    const bindCopyButtons = (root) => {
+      root.querySelectorAll("[data-copy-sid]").forEach((btn) => {
+        btn.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          copySessionId(btn.getAttribute("data-copy-sid") || "", btn);
+        });
+      });
+    };
 
     async function loadHealth() {
       try {
@@ -292,22 +377,28 @@
         return;
       }
       box.innerHTML = data.sessions.map((s) => `
-        <div class="card${s.session_id === current ? " active" : ""}" data-id="${s.session_id || ""}">
-          <div class="id">${s.session_id || "(no session)"}</div>
+        <div class="card${s.session_id === current ? " active" : ""}" data-id="${esc(s.session_id || "")}">
+          <div class="id-row">
+            <div class="id" title="${esc(s.session_id || "")}">${esc(s.session_id || "(no session)")}</div>
+            ${s.session_id ? `<button type="button" class="copy-id" data-copy-sid="${esc(s.session_id)}" title="复制 session id" aria-label="复制 session id">复制</button>` : ""}
+          </div>
           <div class="meta">${s.event_count} 事件 · ${s.last_ts || ""}</div>
-          <div class="meta">${s.cwd || ""}</div>
+          <div class="meta">${esc(s.cwd || "")}</div>
         </div>`).join("");
       box.querySelectorAll(".card").forEach((el) => {
         el.addEventListener("click", () => {
           current = el.getAttribute("data-id") || "";
           lastSig = "";
           markFollow(true);
+          showSessionHead(current);
           loadEvents();
           loadSessions();
         });
       });
+      bindCopyButtons(box);
     }
     async function loadEvents() {
+      showSessionHead(current);
       const q = $("q").value.trim();
       const params = new URLSearchParams({ limit: "200" });
       if (current) params.set("session_id", current);
@@ -375,6 +466,11 @@
     $("jumpBot").addEventListener("click", () => {
       markFollow(true);
       scrollThread("bottom");
+    });
+    $("copySid").addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      copySessionId(current, $("copySid"));
     });
     markFollow(true);
     loadHealth();
