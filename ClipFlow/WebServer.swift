@@ -1723,6 +1723,14 @@ class WebServer {
             }
             return
         }
+        if let hashRaw = items.first(where: { $0.name == "hash" })?.value {
+            database.fetchItemByContentHash(hashRaw) { [weak self] item in
+                guard let self else { return }
+                let arr = item.map { [self.itemToJSON($0, includeArchiveHTML: false)] } ?? []
+                self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
+            }
+            return
+        }
 
         database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType) { [weak self] page in
             guard let self = self else { return }

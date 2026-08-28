@@ -2510,6 +2510,21 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Exact `content_hash` locator. Does **not** fall back to `text_hash`.
+    func fetchItemByContentHash(_ hash: String, completion: @escaping (ClipboardItem?) -> Void) {
+        let h = hash.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        performRead { [weak self] in
+            guard let self = self else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let ok = h.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+            let id = ok ? self.findIdByContentHash(h) : nil
+            let item = id.flatMap { self.fetchItemByIdLocked($0, on: self.readDB ?? self.db) }
+            DispatchQueue.main.async { completion(item) }
+        }
+    }
+
     /// Pin / unpin a card. Projection only — capture payload unchanged.
     func setPinned(id: UUID, pinned: Bool, completion: @escaping (ClipboardItem?) -> Void) {
         dbQueue.async { [weak self] in

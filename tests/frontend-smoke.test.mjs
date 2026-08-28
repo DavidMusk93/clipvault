@@ -230,6 +230,24 @@ test('delete/restore use differential remove (no full rebuild scroll jump)', () 
   assert.match(indexHtml, /behavior:\s*['"]instant['"]/, 'scroll restore uses absolute scrollTo');
 });
 
+test('hash locator jumps after first fetchPage, never reset or disconnected replace', () => {
+  assert.match(indexHtml, /function parseAppHash/, 'parseAppHash');
+  assert.match(indexHtml, /function jumpToLocator/, 'jumpToLocator');
+  assert.match(indexHtml, /function applyAppHash/, 'applyAppHash');
+  assert.match(indexHtml, /m3-card\.is-flash/, 'flash ring');
+  assert.match(indexHtml, /hashchange/, 'hashchange');
+  assert.match(indexHtml, /fetchPage\(\{\s*reset:\s*true\s*\}\)\s*\.then\(\s*\(\)\s*=>\s*applyAppHash\(\)\s*\)/, 'boot hash after first page');
+  const j = indexHtml.indexOf('async function jumpToLocator');
+  assert.ok(j > 0, 'jumpToLocator body');
+  const end = indexHtml.indexOf('async function applyAppHash', j);
+  const chunk = indexHtml.slice(j, end > j ? end : j + 1800);
+  assert.doesNotMatch(chunk, /fetchPage\(\{\s*reset:\s*true/, 'jump must not reset the wall');
+  assert.doesNotMatch(chunk, /replaceCardInPlace/, 'off-page jump must not use replaceCardInPlace as insert');
+  assert.match(chunk, /preserveScroll:\s*true/, 'off-page merge rebuilds with preserveScroll');
+  assert.match(chunk, /\/api\/clips\?hash=/, 'hash fetch');
+  assert.match(chunk, /目标在回收箱/, 'trash toast');
+});
+
 test('SSE clip_deleted must not fetchPage reset (scroll thrash root cause)', () => {
   assert.match(indexHtml, /function applyRemoteClipRemoval/, 'SSE delete path required');
   assert.match(indexHtml, /noteLocalListMutation/, 'local mutation suppress required');

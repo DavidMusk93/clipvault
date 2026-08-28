@@ -442,6 +442,13 @@
       z-index: 1;
     }
     .m3-card.is-compact { padding: 10px 11px; gap: 6px; }
+    @keyframes cv-card-flash {
+      from { box-shadow: 0 0 0 3px var(--accent-soft); }
+      to { box-shadow: var(--elev-1); }
+    }
+    .m3-card.is-flash {
+      animation: cv-card-flash 0.9s ease-out;
+    }
     .card-header {
       display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0;
     }
@@ -2477,6 +2484,90 @@ window.ClipViewMasonry = Masonry;
       document.getElementById('snackbarText').textContent = msg;
       el.classList.add('show');
       setTimeout(() => el.classList.remove('show'), 2400);
+    }
+
+    function normalizeContentHash(h) {
+      const s = String(h || '').trim().toLowerCase();
+      return /^[0-9a-f]{64}$/.test(s) ? s : '';
+    }
+
+    function parseAppHash() {
+      const raw = String(location.hash || '').replace(/^#/, '');
+      if (!raw) return { kind: null };
+      if (raw === 'notes') return { kind: 'notes' };
+      let m = raw.match(/^h=([0-9a-fA-F]{64})$/);
+      if (m) return { kind: 'hash', hash: m[1].toLowerCase() };
+      m = raw.match(/^id=([0-9a-fA-F-]{36})$/i);
+      if (m) return { kind: 'id', id: m[1] };
+      return { kind: null };
+    }
+
+    function flashAndScrollCard(el) {
+      if (!el) return;
+      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
+      el.classList.remove('is-flash');
+      void el.offsetWidth;
+      el.classList.add('is-flash');
+    }
+
+    async function jumpToLocator(loc) {
+      // Wall jump: scroll if mounted; else merge + preserveScroll rebuild.
+      if (!loc || !loc.kind) return;
+      if (loc.kind === 'notes') {
+        await openNotesPanel();
+        return;
+      }
+      let item = null;
+      if (loc.kind === 'id') {
+        const want = String(loc.id || '').toLowerCase();
+        item = clips.find((c) => String(c.id || '').toLowerCase() === want) || null;
+        if (!item) {
+          const r = await fetch(API + '/api/clips?id=' + encodeURIComponent(loc.id));
+          const j = await r.json().catch(() => ({}));
+          item = (j.items && j.items[0]) || null;
+        }
+      } else if (loc.kind === 'hash') {
+        const h = normalizeContentHash(loc.hash);
+        if (!h) {
+          toast('库里没有这份内容');
+          return;
+        }
+        item = clips.find((c) => normalizeContentHash(c.contentHash) === h) || null;
+        if (!item) {
+          const r = await fetch(API + '/api/clips?hash=' + encodeURIComponent(h));
+          const j = await r.json().catch(() => ({}));
+          item = (j.items && j.items[0]) || null;
+        }
+      }
+      if (!item) {
+        toast('库里没有这份内容');
+        return;
+      }
+      if (item.type === 'note') {
+        await openNotesPanel();
+        if (item.id && typeof openNoteInPanel === 'function') await openNoteInPanel(item.id);
+        return;
+      }
+      if (item.inTrash) {
+        toast('目标在回收箱');
+        return;
+      }
+      const mounted = cardCache.get(item.id);
+      if (mounted && mounted.isConnected) {
+        flashAndScrollCard(mounted);
+        return;
+      }
+      if (!clips.some((c) => c.id === item.id)) {
+        clips = sortClipsForFeed(dedupeClipsById([item, ...clips]));
+      }
+      rebuildFromData({ preserveScroll: true });
+      requestAnimationFrame(() => flashAndScrollCard(cardCache.get(item.id)));
+    }
+
+    async function applyAppHash() {
+      const loc = parseAppHash();
+      if (!loc.kind) return;
+      await jumpToLocator(loc);
     }
 
     // —— Evaluation sheet (apple-design): pencil entry, dual-hit stars, history ——
@@ -6111,7 +6202,8 @@ window.ClipViewMasonry = Masonry;
     }, 30000);
     refreshBackupStatus();
 
-    fetchPage({ reset: true });
+    fetchPage({ reset: true }).then(() => applyAppHash());
+    window.addEventListener('hashchange', () => { applyAppHash(); });
     setupSSE();
   </script>
 </body>
