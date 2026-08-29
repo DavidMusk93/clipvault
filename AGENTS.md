@@ -411,6 +411,8 @@ rg -n 'forceFullCopy:\s*true|forceFull\s*=\s*\(dest' ClipFlow/
 | **URL 展示** | `div.url-display` 纯文本，**不是** `<a>` |
 | **打开路径唯一** | `requestOpenExternalUrl(href)`；仅 http(s) |
 | **成人/敏感确认** | `isAdultRiskUrl` 命中 → 强确认文案后再 open；未命中也要 confirm（显式按钮意图） |
+| **检测范围** | 只匹配 **host labels** + **path segments**；**禁止**扫 `search`/`hash`（JWT/`#id_token` 会误中 `xxx`）。`medium.com` 等出版站 allowlist。真源 `web/url-safety.mjs`，与 `index.html` 同步 |
+| **刷新不跟 locator** | 墙跳转（`#h=` / `#id=`）落地后 `consumeWallLocatorHash`；禁止把 hash 留给下一次 F5 再 `jumpToLocator` |
 | **事件兜底** | capture 阶段拦截 `.m3-card a[href]` 误点 |
 
 ### 自检
