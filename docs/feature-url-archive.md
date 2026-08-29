@@ -95,7 +95,8 @@ GET /api/archive/view?id=<uuid>&embed=1
 | 体积 | readable 上限如 2–5MB HTML |
 | 脚本 | 预览 DOMPurify；不执行页面 JS 于卡片内 |
 | 登录墙 | 检测常见登录标题/过短正文 → error: paywall_or_login |
-| 会话 | 归档用 **独立 WKWebView**，**不是**当前浏览器标签（无 Safari cookie）。系统 `scutil --proxy` 经常全关，而浏览器走 v2raya SOCKS `:2080`：直连 Medium 会超时。本机 2080 在听则 WK 走 SOCKS（macOS 14+ `proxyConfigurations`） |
+| 会话 | 归档 WKWebView **不能**读 Safari/Chrome cookie 罐（Apple 进程隔离，没有公开 API）。浏览器能看 ≠ 归档有登录态。公开文不需要 session；会员文要另做「归档窗登录一次」进 app 自己的 `WKWebsiteDataStore`，禁止偷浏览器 Cookie 文件 |
+| View | GET `/api/archive/view` **禁止**同步拉 CDN 图。图后台 SOCKS 内联；否则 miro.medium.com 直连挂起，iframe 空白像「归档为空」 |
 | 规范化 | 去掉 `#id_token` / OAuth query 再抓；否则 Medium 回跳 hash 又大又无用 |
 
 ### 并发

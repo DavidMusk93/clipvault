@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Network
 
 /// Pull remote `<img>` bytes into CAS and rewrite src to `/api/archive/asset?sha=`.
 /// View documents must not hit publisher CDNs.
@@ -138,22 +139,36 @@ enum ArchiveImageInliner {
                 lock.unlock()
             }
         }
-        _ = group.wait(timeout: .now() + 60)
+        _ = group.wait(timeout: .now() + 18)
         return map
     }
 
+    /// Same topology as archive WKWebView: system proxy is often off; miro.medium.com
+    /// only loads through v2raya SOCKS :2080. URLSession.shared would hang View.
+    private static let fetchSession: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.timeoutIntervalForRequest = 8
+        c.timeoutIntervalForResource = 12
+        if #available(macOS 14.0, *), ArchiveProxy.localhostPortOpen(2080) {
+            c.proxyConfigurations = [
+                ProxyConfiguration(socksv5Proxy: NWEndpoint.hostPort(host: "127.0.0.1", port: 2080))
+            ]
+        }
+        return URLSession(configuration: c)
+    }()
+
     private static func fetch(_ url: URL, referer: URL?) -> Data? {
-        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
         if let referer {
             req.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
         }
         req.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
             forHTTPHeaderField: "User-Agent"
         )
         let sem = DispatchSemaphore(value: 0)
         var out: Data?
-        URLSession.shared.dataTask(with: req) { data, resp, _ in
+        fetchSession.dataTask(with: req) { data, resp, _ in
             if let data,
                let http = resp as? HTTPURLResponse,
                (200..<300).contains(http.statusCode),
@@ -166,7 +181,7 @@ enum ArchiveImageInliner {
             }
             sem.signal()
         }.resume()
-        _ = sem.wait(timeout: .now() + 16)
+        _ = sem.wait(timeout: .now() + 9)
         return out
     }
 }

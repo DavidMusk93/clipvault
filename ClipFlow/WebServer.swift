@@ -1299,42 +1299,9 @@ class WebServer {
             }
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
-                var body = self.promoteLazyImages(html)
-                if ArchiveImageInliner.containsRemoteImages(body) {
-                    let local = ArchiveImageInliner.embed(
-                        html: body,
-                        pageURL: URL(string: source),
-                        writeBlob: { hash, data in self.database.writeBlobFile(hash: hash, data: data) }
-                    )
-                    if local != body {
-                        var metaObj: [String: Any] = [:]
-                        if let metaStr, let data = metaStr.data(using: .utf8),
-                           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                            metaObj = parsed
-                        }
-                        metaObj["bytes"] = local.utf8.count
-                        let sha = SHA256.hash(data: Data(local.utf8)).map { String(format: "%02x", $0) }.joined()
-                        let keys = ArchiveBlobClosure.stamp(&metaObj, root: sha, html: local)
-                        let newMeta = ArchiveBlobClosure.encodeMeta(metaObj)
-                        self.database.applyWebArchive(
-                            id: uuid,
-                            html: local,
-                            textSnippet: "",
-                            title: title,
-                            metaJSON: newMeta
-                        ) { ok in
-                            if ok {
-                                CloudDocsSyncService.shared?.recordLocalArchive(
-                                    itemId: uuid,
-                                    htmlSHA: sha,
-                                    metaJSON: newMeta,
-                                    blobKeys: keys
-                                )
-                            }
-                        }
-                    }
-                    body = local
-                }
+                let body = self.promoteLazyImages(html)
+                // Do not block View on CDN fetches. Medium images go through SOCKS;
+                // URLSession.shared (direct) used to hang this GET until the iframe looked empty.
                 let doc = self.buildArchiveViewDocument(
                     title: title,
                     source: source,
@@ -1354,6 +1321,54 @@ class WebServer {
                         ("X-Content-Type-Options", "nosniff"),
                     ]
                 )
+                if ArchiveImageInliner.containsRemoteImages(body) {
+                    self.inlineArchiveImagesInBackground(id: uuid, html: body, source: source, title: title, metaStr: metaStr)
+                }
+            }
+        }
+    }
+
+    /// Fetch publisher images via SOCKS (same as WK archive) and rewrite CAS. Never block View.
+    private func inlineArchiveImagesInBackground(
+        id: UUID,
+        html: String,
+        source: String,
+        title: String,
+        metaStr: String?
+    ) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let local = ArchiveImageInliner.embed(
+                html: html,
+                pageURL: URL(string: source),
+                writeBlob: { hash, data in self.database.writeBlobFile(hash: hash, data: data) }
+            )
+            guard local != html else { return }
+            var metaObj: [String: Any] = [:]
+            if let metaStr, let data = metaStr.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                metaObj = parsed
+            }
+            metaObj["bytes"] = local.utf8.count
+            metaObj["imagesOffline"] = true
+            let sha = SHA256.hash(data: Data(local.utf8)).map { String(format: "%02x", $0) }.joined()
+            let keys = ArchiveBlobClosure.stamp(&metaObj, root: sha, html: local)
+            let newMeta = ArchiveBlobClosure.encodeMeta(metaObj)
+            self.database.applyWebArchive(
+                id: id,
+                html: local,
+                textSnippet: "",
+                title: title,
+                metaJSON: newMeta
+            ) { ok in
+                if ok {
+                    CloudDocsSyncService.shared?.recordLocalArchive(
+                        itemId: id,
+                        htmlSHA: sha,
+                        metaJSON: newMeta,
+                        blobKeys: keys
+                    )
+                }
             }
         }
     }
