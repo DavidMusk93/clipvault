@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { isAdultRiskUrl } from '../web/url-safety.mjs';
+import { canonicalizeArchiveUrl, isAdultRiskUrl } from '../web/url-safety.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const indexHtml = readFileSync(join(root, 'web/index.html'), 'utf8');
@@ -31,6 +31,16 @@ test('known adult hosts still flag; javascript path does not', () => {
   assert.equal(isAdultRiskUrl('https://github.com/foo/javascript'), false);
 });
 
+test('canonicalizeArchiveUrl drops Medium id_token hash', () => {
+  const out = canonicalizeArchiveUrl(mediumJwt);
+  assert.equal(
+    out,
+    'https://medium.com/@madithatisreedhar123/why-s3-file-system-mounts-are-a-game-changer-for-ecs-workloads-460e4da2ac62',
+  );
+  assert.ok(!out.includes('id_token'));
+  assert.ok(!out.includes('#'));
+});
+
 test('index.html gate must not scan query/hash; allowlist medium', () => {
   const start = indexHtml.indexOf('function isAdultRiskUrl');
   assert.ok(start > 0, 'isAdultRiskUrl in index.html');
@@ -39,4 +49,5 @@ test('index.html gate must not scan query/hash; allowlist medium', () => {
   assert.match(chunk, /SAFE_HOST_SUFFIXES|medium\.com/, 'publishing hosts allowlisted');
   assert.match(chunk, /hostname\.split|host labels/, 'label match, not raw includes');
   assert.match(indexHtml, /consumeWallLocatorHash/, 'refresh must consume #h= so F5 does not yank');
+  assert.match(indexHtml, /searchParams\.delete\(k\)/, 'archive POST must strip oauth hash/query');
 });

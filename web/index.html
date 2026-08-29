@@ -4917,6 +4917,10 @@ window.ClipViewMasonry = Masonry;
           toast('仅支持 http(s)');
           return;
         }
+        u.hash = '';
+        for (const k of ['id_token', 'access_token', 'refresh_token', 'code', 'state']) {
+          u.searchParams.delete(k);
+        }
         safe = u.href;
       } catch (_) {
         toast('链接无效');
@@ -4953,8 +4957,8 @@ window.ClipViewMasonry = Masonry;
     }
 
     async function pollArchiveJob(jobId, itemId, btn) {
-      for (let i = 0; i < 40; i++) {
-        await new Promise((r) => setTimeout(r, 700));
+      for (let i = 0; i < 90; i++) {
+        await new Promise((r) => setTimeout(r, 800));
         try {
           const res = await fetch(API + '/api/archive?job=' + encodeURIComponent(jobId));
           const data = await res.json();

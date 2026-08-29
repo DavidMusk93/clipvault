@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import WebKit
 import CryptoKit
+import Network
 
 /// Long-term URL archive plane: **manual**, **browser-engine** (WKWebView / WebKit),
 /// **useful-first** (Mozilla Readability). Not CORS fetch. Not auto-crawl.
@@ -36,8 +37,12 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
     }
 
     static let maxHTMLBytes = 2_500_000
-    static let navigationTimeout: TimeInterval = 22
-    static let settleAfterLoad: TimeInterval = 0.9
+    /// Medium/CF often exceeds 20s on a clean WKWebView (no Safari cookies).
+    static let navigationTimeout: TimeInterval = 48
+    static let requestTimeout: TimeInterval = 45
+    static let settleAfterLoad: TimeInterval = 1.6
+    static let hydratePolls = 16
+    static let hydratePollInterval: TimeInterval = 0.45
 
     private let lock = NSLock()
     private var jobs: [String: Job] = [:]
@@ -51,6 +56,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
     // MARK: - Public
 
     func enqueue(url: URL, itemId: UUID?) -> (Job?, String?) {
+        let url = ArchiveURLPolicy.canonicalize(url)
         if let reason = ArchiveURLPolicy.denyReason(url) {
             return (nil, reason)
         }
@@ -215,6 +221,8 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         var window: NSWindow?
         var timeoutWork: DispatchWorkItem?
         var finished = false
+        var loadAttempt = 0
+        var usingSocksProxy = false
 
         init(owner: WebArchiveService, job: Job, url: URL) {
             self.owner = owner
@@ -223,37 +231,76 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         }
 
         func start() {
-            ClipboardMonitor.shared?.suppressCapture(for: WebArchiveService.navigationTimeout + 4)
+            ClipboardMonitor.shared?.suppressCapture(for: WebArchiveService.navigationTimeout + 8)
+            // System HTTP/SOCKS proxy is often off; the browser still uses v2raya :2080.
+            // Prefer that SOCKS when it is listening so Medium is not a 45s direct timeout.
+            let socks = ArchiveProxy.localhostPortOpen(2080)
+            attachWebView(socksProxy: socks)
+            armTimeout()
+            startLoad()
+        }
+
+        /// Safari can be on v2raya SOCKS while system HTTP/SOCKS proxy is off.
+        /// WKWebView then goes direct and Medium times out. macOS 14+ can attach
+        /// SOCKS to this data store only (not the user's browser).
+        private func attachWebView(socksProxy: Bool) {
+            usingSocksProxy = socksProxy
+            webView?.stopLoading()
+            webView?.navigationDelegate = nil
             let cfg = WKWebViewConfiguration()
-            cfg.websiteDataStore = .nonPersistent()
+            let store = WKWebsiteDataStore.nonPersistent()
+            if socksProxy {
+                if #available(macOS 14.0, *) {
+                    let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: 2080)
+                    store.proxyConfigurations = [ProxyConfiguration(socksv5Proxy: endpoint)]
+                    print("[Archive] WKWebView SOCKS 127.0.0.1:2080")
+                } else {
+                    print("[Archive] SOCKS retry skipped: need macOS 14+ proxyConfigurations")
+                }
+            }
+            cfg.websiteDataStore = store
             cfg.suppressesIncrementalRendering = false
             if #available(macOS 11.0, *) {
                 cfg.defaultWebpagePreferences.allowsContentJavaScript = true
             }
             let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: cfg)
             wv.customUserAgent =
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15 ClipVaultArchive/1.0"
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15"
             wv.navigationDelegate = self
-            let win = NSWindow(
-                contentRect: NSRect(x: -4800, y: -4800, width: 1280, height: 900),
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            win.isReleasedWhenClosed = false
-            win.isOpaque = false
-            win.backgroundColor = .clear
-            win.contentView = wv
-            win.orderBack(nil)
-            self.webView = wv
-            self.window = win
-            wv.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20))
+            if window == nil {
+                let win = NSWindow(
+                    contentRect: NSRect(x: -4800, y: -4800, width: 1280, height: 900),
+                    styleMask: [.borderless],
+                    backing: .buffered,
+                    defer: false
+                )
+                win.isReleasedWhenClosed = false
+                win.isOpaque = false
+                win.backgroundColor = .clear
+                win.orderBack(nil)
+                window = win
+            }
+            window?.contentView = wv
+            webView = wv
+        }
 
+        private func armTimeout() {
+            timeoutWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 self?.fail("归档超时（页面过慢或需登录）")
             }
             timeoutWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + WebArchiveService.navigationTimeout, execute: work)
+        }
+
+        private func startLoad() {
+            loadAttempt += 1
+            let req = URLRequest(
+                url: url,
+                cachePolicy: .reloadIgnoringLocalCacheData,
+                timeoutInterval: WebArchiveService.requestTimeout
+            )
+            webView?.load(req)
         }
 
         func teardown() {
@@ -283,16 +330,69 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            fail("加载失败：\(error.localizedDescription)")
+            handleLoadFailure(error, provisional: false)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            fail("无法打开：\(error.localizedDescription)")
+            handleLoadFailure(error, provisional: true)
+        }
+
+        private func handleLoadFailure(_ error: Error, provisional: Bool) {
+            let ns = error as NSError
+            if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return }
+            let timedOut = ns.domain == NSURLErrorDomain && (
+                ns.code == NSURLErrorTimedOut || ns.code == NSURLErrorCannotConnectToHost
+                    || ns.code == NSURLErrorNetworkConnectionLost
+            )
+            if timedOut && !usingSocksProxy {
+                print("[Archive] direct failed (\(ns.code)); retry via SOCKS 2080 \(url.host ?? "")")
+                attachWebView(socksProxy: true)
+                loadAttempt = 0
+                armTimeout()
+                startLoad()
+                return
+            }
+            if timedOut && usingSocksProxy && loadAttempt < 2 {
+                print("[Archive] SOCKS timeout retry \(url.host ?? "") attempt=\(loadAttempt)")
+                armTimeout()
+                startLoad()
+                return
+            }
+            let prefix = provisional ? "无法打开" : "加载失败"
+            let hint = usingSocksProxy ? "" : "（浏览器能打开、归档不能：系统代理未开，归档走直连）"
+            fail("\(prefix)：\(error.localizedDescription)\(hint)")
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             DispatchQueue.main.asyncAfter(deadline: .now() + WebArchiveService.settleAfterLoad) { [weak self] in
-                self?.extract()
+                self?.waitForArticleThenExtract(attempt: 0)
+            }
+        }
+
+        /// Medium is a JS shell: didFinish fires before story text exists.
+        private func waitForArticleThenExtract(attempt: Int) {
+            guard !finished else { return }
+            guard let webView else {
+                fail("WebView 已释放")
+                return
+            }
+            let probe = """
+            (function(){
+              var root = document.querySelector('article,[data-testid="storyContent"],.postArticle-content,main') || document.body;
+              var t = (root && (root.innerText || root.textContent) || '').replace(/\\s+/g,' ').trim();
+              return t.length;
+            })()
+            """
+            webView.evaluateJavaScript(probe) { [weak self] result, _ in
+                guard let self, !self.finished else { return }
+                let n = (result as? Int) ?? (result as? Double).map { Int($0) } ?? 0
+                if n < 400 && attempt < WebArchiveService.hydratePolls {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + WebArchiveService.hydratePollInterval) {
+                        self.waitForArticleThenExtract(attempt: attempt + 1)
+                    }
+                    return
+                }
+                self.extract()
             }
         }
 
@@ -427,7 +527,43 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
     }
 }
 
+enum ArchiveProxy {
+    /// Fast TCP probe so we do not wait 45s on a black-holed direct path.
+    static func localhostPortOpen(_ port: UInt16) -> Bool {
+        let conn = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        let sem = DispatchSemaphore(value: 0)
+        var ok = false
+        conn.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                ok = true
+                sem.signal()
+            case .failed, .cancelled:
+                sem.signal()
+            default:
+                break
+            }
+        }
+        conn.start(queue: DispatchQueue.global(qos: .userInitiated))
+        _ = sem.wait(timeout: .now() + 0.25)
+        conn.cancel()
+        return ok
+    }
+}
+
 enum ArchiveURLPolicy {
+    /// Drop OAuth/JWT fragments (Medium `#id_token=`) so WKWebView fetches the article, not a login hash.
+    static func canonicalize(_ url: URL) -> URL {
+        var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        c?.fragment = nil
+        let drop = Set(["id_token", "access_token", "refresh_token", "code", "state"])
+        if let items = c?.queryItems, !items.isEmpty {
+            let kept = items.filter { !drop.contains($0.name.lowercased()) }
+            c?.queryItems = kept.isEmpty ? nil : kept
+        }
+        return c?.url ?? url
+    }
+
     static func denyReason(_ url: URL) -> String? {
         let scheme = (url.scheme ?? "").lowercased()
         guard scheme == "http" || scheme == "https" else { return "仅支持 http(s) 网址" }

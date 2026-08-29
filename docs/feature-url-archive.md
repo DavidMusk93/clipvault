@@ -91,10 +91,12 @@ GET /api/archive/view?id=<uuid>&embed=1
 | 项 | 规则 |
 | --- | --- |
 | SSRF | 禁 `file://`、localhost、链路本地、RFC1918（可配置） |
-| 超时 | 导航 + 空闲默认 15–25s |
+| 超时 | 导航 ~48s + 一次超时重试；SPA（Medium）在 didFinish 后轮询正文再抽 |
 | 体积 | readable 上限如 2–5MB HTML |
 | 脚本 | 预览 DOMPurify；不执行页面 JS 于卡片内 |
 | 登录墙 | 检测常见登录标题/过短正文 → error: paywall_or_login |
+| 会话 | 归档用 **独立 WKWebView**，**不是**当前浏览器标签（无 Safari cookie）。系统 `scutil --proxy` 经常全关，而浏览器走 v2raya SOCKS `:2080`：直连 Medium 会超时。本机 2080 在听则 WK 走 SOCKS（macOS 14+ `proxyConfigurations`） |
+| 规范化 | 去掉 `#id_token` / OAuth query 再抓；否则 Medium 回跳 hash 又大又无用 |
 
 ### 并发
 

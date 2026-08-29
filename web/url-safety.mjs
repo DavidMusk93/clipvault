@@ -69,6 +69,18 @@ export function hostIsAllowlisted(hostname) {
   return SAFE_HOST_SUFFIXES.some((s) => h === s || h.endsWith('.' + s));
 }
 
+const OAUTH_QUERY = new Set(['id_token', 'access_token', 'refresh_token', 'code', 'state']);
+
+/** Strip login hash/query so archive fetches the article, not a Google id_token fragment. */
+export function canonicalizeArchiveUrl(href) {
+  const u = new URL(String(href || '').trim());
+  u.hash = '';
+  for (const k of [...u.searchParams.keys()]) {
+    if (OAUTH_QUERY.has(k.toLowerCase())) u.searchParams.delete(k);
+  }
+  return u.href;
+}
+
 export function isAdultRiskUrl(href) {
   try {
     const u = new URL(String(href || '').trim());
