@@ -2,6 +2,24 @@
 
 给 **人类协作者与编码 agent** 的仓库约定。改产品前先读本节；与全局 `~/.grok/AGENTS.md` / nmem 冲突时：**本仓库产品层以本文为准**。
 
+## 0. 硬约束（未做完不算交付）
+
+1. **改动及时提交并推送。** 一个可独立描述的单元验证完 → `git commit` → `git push origin <branch>`（默认 `master`）。禁止攒脏树、禁止只 commit 不 push、禁止用会话结束当「以后再推」。push 失败必须在回复里写明，不得假装已上远程。细则见下方「改动及时提交并推送」。
+2. **nmem 不是流水账。** 写入的是可复用的经验与知识：一句话结论、机制、边界、下次怎么做。禁止把聊天摘要、逐步操作日志、无结构的「今天做了 A 然后 B」塞进 nmem。设计、流程、模块关系用 **ASCII graph** 画清楚，让下一会话不靠散文还原拓扑。
+
+```text
+  [capture] clipboard payload     immutable
+       |
+       v
+  [judgment] pin / eval / clip_link     append-only ops
+       |
+       v
+  [archive]  WKWebView + Readability --> CAS sha
+       |
+       +-- browser tab (cookies, v2raya in-browser)
+       +-- archive WKWebView (own store; SOCKS :2080 if system proxy off)
+```
+
 ---
 
 ## 1. 产品身份
@@ -38,7 +56,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | 落点 | 写什么 | 何时写 |
 | --- | --- | --- |
 | **本仓库** | `AGENTS.md` §2（叙事/体验/工程原则）；可执行 token 进 [`docs/design-taste.md`](docs/design-taste.md) | 用户明确偏好、否决某风格、锁定色/动效/文案气质时 |
-| **nmem** | `preference` / `decision` / `learning`：一句话结论 + 证据（原话/commit）+ 下次该怎么做 | 同上；跨会话、跨机恢复时优先 `memory_search` ClipVault/taste |
+| **nmem** | 结构化知识（见 §0.2）：结论 + ASCII 关系图 + 证据 + 下次动作。不是会话流水账 | 同上；跨会话优先 `memory_search` ClipVault/taste |
 
 | Do | Don't |
 | --- | --- |
@@ -161,21 +179,59 @@ nmem：`clipvault_archive_closure_sync_20260817`（替换 `clipvault_archive_ima
 | 改完更新 README / 本 AGENTS 若触及产品边界 | 架构已 SQLite 却 README 仍 DuckDB |
 | 可独立描述的单元完成后立刻入库并推远程 | 长时间本地脏树 / 只 stash 不提交 / 攒大批再推 |
 
-#### 改动及时提交并推送（硬约束）
+#### 改动及时提交并推送（硬约束 · 与 §0.1 同一条）
+
+任务在 **origin 上可见** 之前不算完成。本机验证、LaunchAgent 部署、口头「已修好」都不能代替 push。
 
 | 规则 | 说明 |
 | --- | --- |
 | **及时 commit** | 完成一个可独立描述的单元（修 UI / 同步 / 单 API / 一批 docs）后 **立即** `git commit`，不要攒大批未提交改动。 |
-| **及时 push** | commit 后 **尽快** `git push origin <branch>`（默认 `master`）。推送失败须在回复里说明，不得假装已推送。 |
+| **及时 push** | commit 后 **立刻** `git push origin <branch>`（默认 `master`），不要等用户问「推了吗」。推送失败须在回复里说明，不得假装已推送。 |
 | **粒度** | 一步一提交；message = short subject + 空行 + 完整句子说明 why。 |
 | **不混装** | 无关重构、无关文件不要塞进同一 commit。 |
 | **禁止** | 用长期 `git stash` 代替提交；同步 remote 前若必须 stash，pull 后应恢复或明确丢弃，**不得**留下「忘记提交的本地 WIP」。 |
+| **回复必带** | 本地 HEAD、是否已 `push`、远程范围（例如 `e6f7a81..1db2470 master`）。 |
 
 推荐节奏：
 
 ```text
 改完一个单元 → 验证 → git status/diff → commit → push → 再开下一单元
 ```
+
+#### nmem：结构化知识，不是流水账（硬约束 · 与 §0.2 同一条）
+
+nmem 是跨会话的 **知识库**，不是日记、不是 git log、不是「本回合做了什么」的副本。
+
+| 写 | 不写 |
+| --- | --- |
+| 可复用的机制、约束、误判根因、拓扑 | 逐步操作（先 grep 再改文件再重启） |
+| 一句话结论 + 证据（commit / 日志 / 命令结果） | 无结论的聊天压缩 |
+| 下次怎么判断、禁止什么 | 已过期的临时端口/一次性 PID |
+| ASCII graph：层、数据流、谁依赖谁 | 只有散文、读完仍画不出图 |
+
+**每条记忆最低结构：**
+
+1. 一句话结论  
+2. ASCII graph（设计 / 流程 / 关系，至少一张）  
+3. 证据（commit、路径、观测）  
+4. 下次：怎么做 / 不要做什么  
+
+```text
+  Safari/Chrome tab
+       |  cookies + (browser SOCKS / extension)
+       v
+  medium.com  OK
+       .
+  ClipVault UI  --POST /api/archive-->  ClipFlowServer
+                                            |
+                                            v
+                                      offscreen WKWebView
+                                            |
+                         system proxy off --+--> direct  ==> timeout
+                         :2080 listening --+--> SOCKS    ==> article
+```
+
+关系用 `evolves_from` / `memory_relation_add` 连已有条目，禁止平行再写一篇同题流水账。密钥、token、完整 JWT **永不**进 nmem。
 
 ---
 
