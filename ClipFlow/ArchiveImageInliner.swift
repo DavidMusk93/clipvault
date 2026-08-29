@@ -53,7 +53,24 @@ enum ArchiveImageInliner {
             cursor = range.location + range.length
         }
         if cursor < ns.length { out += ns.substring(from: cursor) }
-        return out
+        return flattenPictures(out)
+    }
+
+    /// Medium wraps figures in `<picture><source srcset="https://miro…">`.
+    /// Browsers prefer source/srcset over `<img src>`, then CSP `img-src 'self'`
+    /// blocks the CDN and the inlined CAS `src` never paints.
+    static func flattenPictures(_ html: String) -> String {
+        var s = html
+        if let re = try? NSRegularExpression(pattern: #"<source\b[^>]*>"#, options: [.caseInsensitive]) {
+            s = re.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length), withTemplate: "")
+        }
+        if let re = try? NSRegularExpression(pattern: #"</?picture\b[^>]*>"#, options: [.caseInsensitive]) {
+            s = re.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length), withTemplate: "")
+        }
+        if let re = try? NSRegularExpression(pattern: #"(?i)\s+(srcset|sizes)\s*=\s*"[^"]*""#) {
+            s = re.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length), withTemplate: "")
+        }
+        return s
     }
 
     static func mimeType(for data: Data) -> String {

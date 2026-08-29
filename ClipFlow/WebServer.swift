@@ -1299,7 +1299,7 @@ class WebServer {
             }
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
-                let body = self.promoteLazyImages(html)
+                let body = ArchiveImageInliner.flattenPictures(self.promoteLazyImages(html))
                 // Do not block View on CDN fetches. Medium images go through SOCKS;
                 // URLSession.shared (direct) used to hang this GET until the iframe looked empty.
                 let doc = self.buildArchiveViewDocument(

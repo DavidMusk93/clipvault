@@ -77,6 +77,14 @@ test('archive view sizes youtube iframes and adds a watch link', () => {
   assert.match(swift, /youtube\.com\/watch\?v=/);
 });
 
+test('archive view flattens Medium picture/srcset so CSP self images paint', () => {
+  const inliner = readFileSync(join(root, 'ClipFlow/ArchiveImageInliner.swift'), 'utf8');
+  assert.match(inliner, /func flattenPictures/);
+  assert.match(inliner, /<source\\b/);
+  assert.match(inliner, /srcset/);
+  assert.match(swift, /flattenPictures\(self\.promoteLazyImages/);
+});
+
 test('archive view does not disable article links', () => {
   assert.doesNotMatch(swift, /a\{pointer-events:none;color:inherit;text-decoration:none;\}/);
 });
