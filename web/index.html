@@ -1580,6 +1580,8 @@
     .lightbox.open { display: flex; }
     .lightbox-inner {
       position: relative; max-width: min(96vw, 1400px); max-height: 92vh;
+      min-height: 0;
+      overflow: hidden;
       display: flex; flex-direction: column; align-items: center; gap: 14px;
       animation: materialize 0.32s var(--spring) both;
     }
@@ -1589,29 +1591,49 @@
     }
     .lightbox-stage {
       overflow: auto; max-height: 82vh; max-width: min(96vw, 1400px);
-      display: flex; justify-content: center;
+      min-height: 0;
+      display: block;
       border-radius: 14px;
     }
     .lightbox-inner img {
       max-width: 96vw; max-height: 82vh; object-fit: contain; border-radius: 14px;
       box-shadow: var(--elev-3); background: #111; cursor: default;
+      display: block;
     }
-    /* Long screenshots: readable width, vertical scroll. Fitting the
-       whole 14:1 frame into 82vh made a ~50px sliver that looked like a thumb. */
+    /* Long screenshots: pin the shell to the viewport, scroll INSIDE the stage.
+       Flex min-height:auto on the img used to grow the shell past 92vh while
+       body overflow was hidden — only the top of the strip was visible. */
     .lightbox-inner.is-strip {
-      max-width: min(96vw, 740px);
+      width: min(96vw, 720px);
+      height: 92vh;
+      max-width: min(96vw, 720px);
+      max-height: 92vh;
     }
     .lightbox-inner.is-strip .lightbox-stage {
-      max-width: min(96vw, 740px);
-      width: min(96vw, 740px);
-      max-height: 82vh;
+      display: block;
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+      max-width: none;
+      max-height: none;
+      overflow-x: hidden;
+      overflow-y: scroll;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
     }
     .lightbox-inner.is-strip img {
       max-height: none;
       width: 100%;
       height: auto;
-      object-fit: none;
+      object-fit: unset;
       max-width: 100%;
+    }
+    .lightbox-hint {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 550;
+      letter-spacing: -0.01em;
+      color: rgba(255,255,255,.72);
     }
     .lightbox-toolbar {
       display: flex; gap: 10px; align-items: center; color: #eee; font-size: 13px;
@@ -2127,9 +2149,10 @@
       <button type="button" class="lightbox-x" id="lightboxCloseX" aria-label="关闭">
         <span class="material-symbols-outlined">close</span>
       </button>
-      <div class="lightbox-stage">
+      <div class="lightbox-stage" id="lightboxStage">
         <img id="lightboxImg" alt="预览" />
       </div>
+      <p class="lightbox-hint" id="lightboxHint" hidden>滚动查看全文</p>
       <div class="lightbox-toolbar">
         <button type="button" class="lightbox-btn" id="lightboxOpenTab">
           <span class="material-symbols-outlined">open_in_new</span> 原图
@@ -5685,7 +5708,7 @@ window.ClipViewMasonry = Masonry;
       });
       const wrap = card.querySelector('.thumb-wrap');
       if (wrap) {
-        wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview')));
+        wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview'), item));
         const img = wrap.querySelector('img');
         // Thumb box has locked aspect-ratio — successful decode must not reflow masonry.
         // Only broken images collapse the box; patch that column's height, never full rebuild.
@@ -6076,20 +6099,35 @@ window.ClipViewMasonry = Masonry;
 
 
     // --- Lightbox ---
-    function openLightbox(url) {
+    function openLightbox(url, item) {
       if (!url) return;
       fullUrlForLightbox = url;
       const lb = document.getElementById('lightbox');
       const inner = lb.querySelector('.lightbox-inner');
       const img = document.getElementById('lightboxImg');
+      const hint = document.getElementById('lightboxHint');
+      const stage = document.getElementById('lightboxStage');
       inner.classList.remove('is-strip', 'is-wide');
-      img.onload = () => {
+      if (hint) hint.hidden = true;
+      if (stage) stage.scrollTop = 0;
+      const applyShape = () => {
+        if (!img.naturalWidth) return;
         const strip = img.naturalHeight > img.naturalWidth * 2.2;
-        const wide = img.naturalWidth > img.naturalHeight * 2.2;
         inner.classList.toggle('is-strip', strip);
-        inner.classList.toggle('is-wide', wide);
+        inner.classList.toggle('is-wide', img.naturalWidth > img.naturalHeight * 2.2);
+        if (hint) {
+          hint.hidden = !strip;
+          if (strip) {
+            const n = item && item.ocrText
+              ? String(item.ocrText).split('\n').filter(Boolean).length
+              : 0;
+            hint.textContent = n > 1 ? `滚动查看全文 · OCR ${n}行` : '滚动查看全文';
+          }
+        }
       };
+      img.onload = applyShape;
       img.src = url;
+      if (img.complete) applyShape();
       lb.classList.add('open');
       document.body.style.overflow = 'hidden';
     }
@@ -6100,6 +6138,8 @@ window.ClipViewMasonry = Masonry;
       img.onload = null;
       img.removeAttribute('src');
       lb.querySelector('.lightbox-inner')?.classList.remove('is-strip', 'is-wide');
+      const hint = document.getElementById('lightboxHint');
+      if (hint) hint.hidden = true;
       fullUrlForLightbox = null;
       document.body.style.overflow = '';
     }

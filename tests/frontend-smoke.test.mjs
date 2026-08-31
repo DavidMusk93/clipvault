@@ -331,6 +331,10 @@ test('long screenshot lightbox scrolls at readable width', () => {
   assert.match(indexHtml, /lightbox-stage/, 'stage wraps img so toolbar stays put');
   assert.match(indexHtml, /lightbox-inner\.is-strip/, 'strip class for tall shots');
   assert.match(indexHtml, /naturalHeight > img\.naturalWidth \* 2\.2/, 'detect tall aspect on load');
+  assert.match(indexHtml, /\.lightbox-inner\.is-strip \.lightbox-stage[\s\S]{0,280}min-height:\s*0/, 'flex child must shrink so overflow-y can scroll');
+  assert.match(indexHtml, /overflow-y:\s*scroll/, 'strip stage always shows a scrollbar');
+  assert.match(indexHtml, /lightboxHint/, 'hint that the strip is scrollable');
+  assert.match(indexHtml, /img\.complete/, 'cached full image still gets is-strip');
   assert.doesNotMatch(
     indexHtml,
     /\.lightbox-inner\.is-strip img[\s\S]{0,120}max-height:\s*82vh/,
