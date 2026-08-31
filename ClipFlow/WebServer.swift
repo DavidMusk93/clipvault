@@ -1171,7 +1171,7 @@ class WebServer {
         dict["linkCount"] = item.linkCount
         // Thumb URL for image types — client never loads full blob in feed
         if item.type == .image {
-            dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb"
+            dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb&cv=3"
             dict["fullUrl"] = "/api/image?id=\(item.id.uuidString)&size=full"
         }
         if item.type == .note {
@@ -1910,14 +1910,6 @@ class WebServer {
         case thumb   // feed card
         case medium  // optional mid
         case full    // lightbox / download
-
-        var maxPixel: CGFloat {
-            switch self {
-            case .thumb: return 360
-            case .medium: return 1200
-            case .full: return 0 // original
-            }
-        }
     }
 
     private func convertToPNG(_ data: Data) -> Data? {
@@ -1942,40 +1934,28 @@ class WebServer {
         return nil
     }
 
-    /// Downscale with ImageIO thumbnail API (fast, stream-friendly).
+    /// Feed thumbs scale by **short** edge (and crop tall strips to the top 4:3).
+    /// ImageIO `ThumbnailMaxPixelSize` is a long-edge cap and turns scrolling
+    /// shots into a ~25px sliver.
     private func encodeImage(_ data: Data, tier: ImageSizeTier) -> (Data, String)? {
         if tier == .full {
+            let ct = detectImageContentType(data)
+            if ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" {
+                return (data, ct)
+            }
             if let png = convertToPNG(data) { return (png, "image/png") }
-            return (data, detectImageContentType(data))
+            return (data, ct)
         }
 
-        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetCount(src) > 0 else {
-            return convertToPNG(data).map { ($0, "image/png") }
+        let maxShort: CGFloat = tier == .thumb ? 640 : 1200
+        if let preview = ImageStoragePolicy.encodePreview(
+            data,
+            maxShort: maxShort,
+            cropTallToCard: tier == .thumb
+        ) {
+            return preview
         }
-
-        let maxPx = tier.maxPixel
-        let opts: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPx,
-            kCGImageSourceShouldCacheImmediately: true
-        ]
-        guard let cgThumb = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else {
-            return convertToPNG(data).map { ($0, "image/png") }
-        }
-
-        // Feed thumbs: JPEG for size; medium: JPEG too; full: PNG above
-        let out = NSMutableData()
-        let uti = "public.jpeg" as CFString
-        guard let dest = CGImageDestinationCreateWithData(out, uti, 1, nil) else {
-            return nil
-        }
-        let quality: CGFloat = tier == .thumb ? 0.72 : 0.85
-        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
-        CGImageDestinationAddImage(dest, cgThumb, props as CFDictionary)
-        guard CGImageDestinationFinalize(dest) else { return nil }
-        return (out as Data, "image/jpeg")
+        return convertToPNG(data).map { ($0, "image/png") }
     }
 
     private func sendImage(path: String, connection: NWConnection) {

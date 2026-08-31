@@ -9,8 +9,8 @@ import CoreGraphics
 /// 113×1600 JPEG; OCR collapsed to gibberish. Strips must scale by the
 /// **short** edge so body text stays readable.
 enum ImageStoragePolicy {
-    /// Photos / ordinary screenshots: long-edge cap (unchanged default).
-    static let maxLongEdge: CGFloat = 1600
+    /// Photos / ordinary screenshots: long-edge cap.
+    static let maxLongEdge: CGFloat = 2048
     /// Scrolling shots / panoramas: keep the short edge OCR-able.
     static let maxShortEdge: CGFloat = 1600
     /// Treat as a strip at or above this aspect (long/short).
@@ -29,7 +29,7 @@ enum ImageStoragePolicy {
         precondition(abs(scale(width: 1179, height: 16_690) - 1) < 0.001)
         precondition(scale(width: 113, height: 1600) >= 0.999)
         let photo = scale(width: 3024, height: 1964)
-        precondition(abs(photo - 1600 / 3024) < 0.002)
+        precondition(abs(photo - 2048 / 3024) < 0.002)
         precondition(scale(width: 800, height: 600) >= 0.999)
     }()
     #endif
@@ -145,6 +145,65 @@ enum ImageStoragePolicy {
         return (w, h)
     }
 
+    /// Feed card preview. Tall strips: crop the **top** 4:3 at source, then
+    /// scale by width (no long-edge 360 — that made 1179×16690 into a 25px sliver).
+    static func encodePreview(_ data: Data, maxShort: CGFloat, cropTallToCard: Bool) -> (Data, String)? {
+        guard let source = CGImageSourceCreateWithData(
+            data as CFData,
+            [kCGImageSourceShouldCache: false] as CFDictionary
+        ),
+        let image = CGImageSourceCreateImageAtIndex(
+            source, 0,
+            [kCGImageSourceShouldCache: true] as CFDictionary
+        ) else {
+            return nil
+        }
+        let w = CGFloat(image.width)
+        let h = CGFloat(image.height)
+        guard w > 0, h > 0 else { return nil }
+
+        var work = image
+        if cropTallToCard, h / w >= stripAspect {
+            let cropH = Int(min(h, max(1, w * 0.75)).rounded())
+            if let cropped = crop(image, pixelRect: CGRect(x: 0, y: 0, width: w, height: CGFloat(cropH))) {
+                work = cropped
+            }
+        }
+
+        let cw = CGFloat(work.width)
+        let ch = CGFloat(work.height)
+        let short = min(cw, ch)
+        let s = min(1, maxShort / max(short, 1))
+        let tw = max(1, Int((cw * s).rounded()))
+        let th = max(1, Int((ch * s).rounded()))
+        let raster = (s < 0.999 ? (resample(work, width: tw, height: th) ?? work) : work)
+        let quality: CGFloat = cropTallToCard ? 0.86 : 0.88
+        guard let encoded = encode(raster, jpeg: true, quality: quality) else { return nil }
+        return (encoded, "image/jpeg")
+    }
+
+    /// Pixel rects, origin top-left. Long screenshots are split so Vision
+    /// sees normal-aspect pages (a 0.012 line-merge floor on a 16k-tall
+    /// frame otherwise swallows ~200px of lines).
+    static func ocrTiles(width: Int, height: Int) -> [CGRect] {
+        let w = max(1, width)
+        let h = max(1, height)
+        if CGFloat(h) / CGFloat(w) < stripAspect || h <= 1800 {
+            return [CGRect(x: 0, y: 0, width: w, height: h)]
+        }
+        let tileH = min(1400, max(900, Int((Double(w) * 1.4).rounded())))
+        let overlap = 64
+        var y = 0
+        var tiles: [CGRect] = []
+        while y < h {
+            let th = min(tileH, h - y)
+            tiles.append(CGRect(x: 0, y: y, width: w, height: th))
+            if y + th >= h { break }
+            y += max(1, th - overlap)
+        }
+        return tiles
+    }
+
     static func rasterForOCR(_ image: CGImage) -> CGImage {
         let w = CGFloat(image.width)
         let h = CGFloat(image.height)
@@ -178,10 +237,40 @@ enum ImageStoragePolicy {
     private static func shouldJPEG(sourceBytes: Int, outWidth: Int, outHeight: Int, isStrip: Bool) -> Bool {
         let pixels = outWidth * outHeight
         if isStrip {
-            // Text screenshots stay PNG unless the raster is huge.
-            return pixels > 3_000_000 || sourceBytes > 2_000_000
+            // JPEG ringing destroys CJK on UI strips; PNG unless the raster is huge.
+            return pixels > 8_000_000
         }
         return sourceBytes > 400_000 || pixels > 900_000
+    }
+
+    /// Crop in top-left image space (y=0 is the visual top of the bitmap).
+    static func crop(_ image: CGImage, pixelRect: CGRect) -> CGImage? {
+        let r = pixelRect.integral
+        let dw = max(1, Int(r.width))
+        let dh = max(1, Int(r.height))
+        guard dw > 0, dh > 0 else { return nil }
+        if r.minX <= 0.5, r.minY <= 0.5, dw >= image.width, dh >= image.height {
+            return image
+        }
+        guard let ctx = CGContext(
+            data: nil, width: dw, height: dh,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        let imgW = CGFloat(image.width)
+        let imgH = CGFloat(image.height)
+        ctx.draw(
+            image,
+            in: CGRect(
+                x: -r.minX,
+                y: CGFloat(dh) - imgH + r.minY,
+                width: imgW,
+                height: imgH
+            )
+        )
+        return ctx.makeImage()
     }
 
     private static func resample(_ image: CGImage, width: Int, height: Int) -> CGImage? {

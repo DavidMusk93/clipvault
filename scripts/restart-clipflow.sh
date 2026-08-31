@@ -45,6 +45,18 @@ elif [ -x "$REPO_ROOT/.build/release/ClipFlowServer" ]; then
   fi
 fi
 
+# Live LaunchAgent cwd is KEEPSAKE_HOME; it serves THAT web/, not the git tree.
+LIVE_HOME="$(dirname "$LIVE_BIN")"
+LIVE_HOME="$(dirname "$LIVE_HOME")"
+if [ -f "$REPO_ROOT/web/index.html" ]; then
+  echo "Installing web/index.html -> $LIVE_HOME/web/"
+  mkdir -p "$LIVE_HOME/web"
+  cp "$REPO_ROOT/web/index.html" "$LIVE_HOME/web/index.html"
+  if [ -d "$HOME/Documents/ClipFlow/web" ] && [ "$LIVE_HOME/web" != "$HOME/Documents/ClipFlow/web" ]; then
+    cp "$REPO_ROOT/web/index.html" "$HOME/Documents/ClipFlow/web/index.html"
+  fi
+fi
+
 echo "Restarting $LABEL via launchctl (preserves KEEPSAKE_HOME)..."
 launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
 sleep 0.5

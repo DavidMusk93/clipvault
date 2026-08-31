@@ -243,20 +243,32 @@ class ClipboardMonitor: ObservableObject {
         guard let cgImage = makeCGImage(from: imageData) else {
             return nil
         }
-        let raster = ImageStoragePolicy.rasterForOCR(cgImage)
+        let tiles = ImageStoragePolicy.ocrTiles(width: cgImage.width, height: cgImage.height)
+        if tiles.count == 1 {
+            return ocrOneImage(ImageStoragePolicy.rasterForOCR(cgImage))
+        }
+        var parts: [String] = []
+        for rect in tiles {
+            guard let piece = ImageStoragePolicy.crop(cgImage, pixelRect: rect) else { continue }
+            if let text = ocrOneImage(ImageStoragePolicy.rasterForOCR(piece)), !text.isEmpty {
+                parts.append(text)
+            }
+        }
+        let joined = parts.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return joined.isEmpty ? nil : joined
+    }
 
-        let requestHandler = VNImageRequestHandler(cgImage: raster, options: [:])
+    private func ocrOneImage(_ cgImage: CGImage) -> String? {
+        let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        // Language correction can over-edit UI/code screenshots; keep off for completeness.
         request.usesLanguageCorrection = false
         request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
-        // Keep tiny glyphs (status bar, chips, badges)
         request.minimumTextHeight = 0.008
         if #available(macOS 13.0, *) {
             request.automaticallyDetectsLanguage = true
         }
-
         do {
             try requestHandler.perform([request])
             guard let results = request.results, !results.isEmpty else { return nil }
@@ -297,8 +309,9 @@ class ClipboardMonitor: ObservableObject {
         guard !boxes.isEmpty else { return nil }
 
         let avgHeight = boxes.map(\.height).reduce(0, +) / CGFloat(boxes.count)
-        // Boxes whose vertical centers are within this threshold belong to the same line
-        let lineThreshold = max(avgHeight * 0.6, 0.012)
+        // Floor must not exceed ~1 line. A hard 0.012 on a 16k-tall strip is ~200px
+        // and merges many rows into one garbage line.
+        let lineThreshold = max(avgHeight * 0.65, min(0.012, avgHeight * 1.2))
 
         // Global order: top→bottom, then left→right within similar Y
         let sorted = boxes.sorted { a, b in

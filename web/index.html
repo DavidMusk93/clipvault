@@ -1577,9 +1577,31 @@
       from { opacity: 0; transform: scale(0.97); }
       to { opacity: 1; transform: none; }
     }
+    .lightbox-stage {
+      overflow: auto; max-height: 82vh; max-width: min(96vw, 1400px);
+      display: flex; justify-content: center;
+      border-radius: 14px;
+    }
     .lightbox-inner img {
       max-width: 96vw; max-height: 82vh; object-fit: contain; border-radius: 14px;
       box-shadow: var(--elev-3); background: #111; cursor: default;
+    }
+    /* Long screenshots: readable width, vertical scroll. Fitting the
+       whole 14:1 frame into 82vh made a ~50px sliver that looked like a thumb. */
+    .lightbox-inner.is-strip {
+      max-width: min(96vw, 740px);
+    }
+    .lightbox-inner.is-strip .lightbox-stage {
+      max-width: min(96vw, 740px);
+      width: min(96vw, 740px);
+      max-height: 82vh;
+    }
+    .lightbox-inner.is-strip img {
+      max-height: none;
+      width: 100%;
+      height: auto;
+      object-fit: none;
+      max-width: 100%;
     }
     .lightbox-toolbar {
       display: flex; gap: 10px; align-items: center; color: #eee; font-size: 13px;
@@ -2095,7 +2117,9 @@
       <button type="button" class="lightbox-x" id="lightboxCloseX" aria-label="关闭">
         <span class="material-symbols-outlined">close</span>
       </button>
-      <img id="lightboxImg" alt="预览" />
+      <div class="lightbox-stage">
+        <img id="lightboxImg" alt="预览" />
+      </div>
       <div class="lightbox-toolbar">
         <button type="button" class="lightbox-btn" id="lightboxOpenTab">
           <span class="material-symbols-outlined">open_in_new</span> 原图
@@ -3424,7 +3448,7 @@ window.ClipViewMasonry = Masonry;
 
     function thumbSrc(item) {
       if (item.thumbUrl) return item.thumbUrl;
-      return `/api/image?id=${item.id}&size=thumb`;
+      return `/api/image?id=${item.id}&size=thumb&cv=3`;
     }
     function fullSrc(item) {
       if (item.fullUrl) return item.fullUrl;
@@ -6033,7 +6057,15 @@ window.ClipViewMasonry = Masonry;
       if (!url) return;
       fullUrlForLightbox = url;
       const lb = document.getElementById('lightbox');
+      const inner = lb.querySelector('.lightbox-inner');
       const img = document.getElementById('lightboxImg');
+      inner.classList.remove('is-strip', 'is-wide');
+      img.onload = () => {
+        const strip = img.naturalHeight > img.naturalWidth * 2.2;
+        const wide = img.naturalWidth > img.naturalHeight * 2.2;
+        inner.classList.toggle('is-strip', strip);
+        inner.classList.toggle('is-wide', wide);
+      };
       img.src = url;
       lb.classList.add('open');
       document.body.style.overflow = 'hidden';
@@ -6041,7 +6073,10 @@ window.ClipViewMasonry = Masonry;
     function closeLightbox() {
       const lb = document.getElementById('lightbox');
       lb.classList.remove('open');
-      document.getElementById('lightboxImg').removeAttribute('src');
+      const img = document.getElementById('lightboxImg');
+      img.onload = null;
+      img.removeAttribute('src');
+      lb.querySelector('.lightbox-inner')?.classList.remove('is-strip', 'is-wide');
       fullUrlForLightbox = null;
       document.body.style.overflow = '';
     }
