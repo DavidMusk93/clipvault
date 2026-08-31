@@ -142,6 +142,23 @@ test('html/rtf card copy uses plain text (所见即所得), not raw HTML attr', 
   );
 });
 
+test('image card copy writes the image, not OCR text', () => {
+  assert.match(indexHtml, /function copyImageClip/);
+  assert.match(
+    indexHtml,
+    /JSON\.stringify\(\{\s*id:\s*item\.id,\s*type:\s*'image'\s*\}\)/,
+    'image copy posts id + type image',
+  );
+  assert.match(indexHtml, /item\.type === 'image'[\s\S]{0,180}?copyImageClip/);
+  assert.match(indexHtml, /复制图片/);
+  assert.match(indexHtml, /data-ocr-copy/, 'OCR panel has its own copy-text control');
+  assert.match(
+    indexHtml,
+    /item\.type === 'image'[\s\S]{0,80}copyImageClip\(item\)/,
+    'Cmd/C on image card without selection copies the image',
+  );
+});
+
 test('card copy forces plain text only (no text/html re-capture as type=html)', () => {
   assert.match(indexHtml, /function wireForcePlainCopyOnce/);
   assert.match(indexHtml, /clipboardData\.setData\(\s*['"]text\/plain['"]/);

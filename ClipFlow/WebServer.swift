@@ -490,41 +490,82 @@ class WebServer {
     }
 
     private func handlePostClip(data: Data, connection: NWConnection) {
-        // Find body in HTTP request
-        let requestString = String(data: data, encoding: .utf8) ?? ""
-        if let bodyRange = requestString.range(of: "\r\n\r\n") {
-            let bodyString = String(requestString[bodyRange.upperBound...])
-            if let bodyData = bodyString.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
-               let text = json["text"] as? String {
-                // Force PLAIN TEXT only on system pasteboard.
-                // clearContents + declareTypes([.string]) so public.html / RTF cannot linger;
-                // monitor then classifies the capture as type=text (not html).
-                DispatchQueue.main.async {
-                    let pb = NSPasteboard.general
-                    pb.clearContents()
-                    pb.declareTypes([.string], owner: nil)
-                    pb.setString(text, forType: .string)
-                }
-                self.database.appendOperationLog(
-                    action: "copy_ui",
-                    itemId: nil,
-                    contentHash: nil,
-                    detail: "plain_only len=\(text.count)",
-                    source: "web"
-                )
-                let resp = """
-                HTTP/1.1 200 OK
-                Access-Control-Allow-Origin: *
-                Content-Type: application/json
-                
-                {"status":"success"}
-                """
-                sendResponse(resp, connection: connection)
-                return
+        guard let json = jsonBody(from: data) else {
+            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+            return
+        }
+        let type = (json["type"] as? String)?.lowercased()
+        if type == "image",
+           let idStr = json["id"] as? String,
+           let uuid = UUID(uuidString: idStr) {
+            copyStoredImageToPasteboard(id: uuid, connection: connection)
+            return
+        }
+        if let text = json["text"] as? String {
+            // Force PLAIN TEXT only on system pasteboard.
+            // clearContents + declareTypes([.string]) so public.html / RTF cannot linger;
+            // monitor then classifies the capture as type=text (not html).
+            DispatchQueue.main.async {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.declareTypes([.string], owner: nil)
+                pb.setString(text, forType: .string)
             }
+            self.database.appendOperationLog(
+                action: "copy_ui",
+                itemId: nil,
+                contentHash: nil,
+                detail: "plain_only len=\(text.count)",
+                source: "web"
+            )
+            sendJSON(["status": "success", "copied": "text"], connection: connection)
+            return
         }
         sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+    }
+
+    /// Put the stored CAS image on NSPasteboard (not OCR). Do not attach
+    /// `public.utf8-plain-text` — many paste targets prefer text over image.
+    private func copyStoredImageToPasteboard(id: UUID, connection: NWConnection) {
+        database.fetchImageData(id: id) { [weak self] data in
+            guard let self else { return }
+            guard let data, !data.isEmpty else {
+                self.sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+                return
+            }
+            DispatchQueue.main.async {
+                self.writeImageToPasteboard(data)
+            }
+            self.database.appendOperationLog(
+                action: "copy_ui",
+                itemId: id.uuidString,
+                contentHash: nil,
+                detail: "image_bytes=\(data.count)",
+                source: "web"
+            )
+            self.sendJSON(["status": "success", "copied": "image"], connection: connection)
+        }
+    }
+
+    private func writeImageToPasteboard(_ data: Data) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        let type: NSPasteboard.PasteboardType
+        let payload: Data
+        if ImageStoragePolicy.isPNG(data) {
+            type = .png
+            payload = data
+        } else if ImageStoragePolicy.isJPEG(data) {
+            type = NSPasteboard.PasteboardType("public.jpeg")
+            payload = data
+        } else if let png = convertToPNG(data) {
+            type = .png
+            payload = png
+        } else {
+            type = .tiff
+            payload = data
+        }
+        pb.setData(payload, forType: type)
     }
 
     private func handleDeleteClip(path: String, connection: NWConnection) {
