@@ -120,6 +120,33 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             finish(jobId: job.id, error: "无效 URL", title: nil, html: nil, text: nil)
             return
         }
+        // X Articles: Draft.js MARKDOWN/headings are not in the logged-out DOM.
+        // Prefer the article payload over WKWebView+Readability <p> soup.
+        if XArticleHTML.isXURL(job.url) {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                if let fetched = XArticleHTML.fetchArticle(url: job.url),
+                   let html = XArticleHTML.render(article: fetched.article),
+                   html.lowercased().contains("<pre") || html.lowercased().contains("<h2") {
+                    print("[Archive] x-article fast-path \(job.url) bytes=\(html.utf8.count)")
+                    DispatchQueue.main.async {
+                        self.finish(
+                            jobId: job.id,
+                            error: nil,
+                            title: fetched.title.isEmpty ? nil : fetched.title,
+                            html: html,
+                            text: fetched.title
+                        )
+                    }
+                    return
+                }
+                DispatchQueue.main.async {
+                    self.session = Session(owner: self, job: job, url: url)
+                    self.session?.start()
+                }
+            }
+            return
+        }
         session = Session(owner: self, job: job, url: url)
         session?.start()
     }
@@ -175,19 +202,28 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 done()
                 return
             }
+            var articleHTML = html
+            var articleTitle = title
+            var engine = "webkit+readability"
+            if let enriched = XArticleHTML.enrich(url: url, html: html, title: title) {
+                articleHTML = enriched.html
+                articleTitle = enriched.title
+                engine = enriched.engine
+                print("[Archive] x-article enrich \(url) bytes=\(articleHTML.utf8.count)")
+            }
             let localHTML = ArchiveImageInliner.embed(
-                html: html,
+                html: articleHTML,
                 pageURL: URL(string: url),
                 writeBlob: { hash, data in database.writeBlobFile(hash: hash, data: data) }
             )
             let sha = SHA256.hash(data: Data(localHTML.utf8)).map { String(format: "%02x", $0) }.joined()
             var meta: [String: Any] = [
                 "sourceUrl": url,
-                "title": title,
+                "title": articleTitle,
                 "mode": "readable",
                 "archivedAt": ClipTimeFormat.isoLocal(Date()),
                 "bytes": localHTML.utf8.count,
-                "engine": "webkit+readability",
+                "engine": engine,
             ]
             let keys = ArchiveBlobClosure.stamp(&meta, root: sha, html: localHTML)
             let metaStr = ArchiveBlobClosure.encodeMeta(meta)
@@ -195,7 +231,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 id: itemId,
                 html: localHTML,
                 textSnippet: text,
-                title: title,
+                title: articleTitle,
                 metaJSON: metaStr
             ) { ok in
                 if ok {

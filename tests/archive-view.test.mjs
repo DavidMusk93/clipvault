@@ -60,6 +60,16 @@ test('archive view self-hosts JetBrains Mono for code, not a font CDN', () => {
   assert.match(swift, /case "woff2": ctype = "font\/woff2"/);
 });
 
+test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', () => {
+  const src = readFileSync(join(root, 'ClipFlow/XArticleHTML.swift'), 'utf8');
+  const svc = readFileSync(join(root, 'ClipFlow/WebArchiveService.swift'), 'utf8');
+  assert.match(src, /x-article\+draftjs/);
+  assert.match(src, /header-two/);
+  assert.match(src, /MARKDOWN/);
+  assert.match(src, /renderFence/);
+  assert.match(svc, /XArticleHTML\.enrich/);
+});
+
 test('archive extract keeps diagram lists Readability would drop', () => {
   const svc = readFileSync(join(root, 'ClipFlow/WebArchiveService.swift'), 'utf8');
   const rdb = readFileSync(join(root, 'ClipFlow/Resources/Readability.js'), 'utf8');
