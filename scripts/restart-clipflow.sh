@@ -29,6 +29,8 @@ if [ -n "${NEW_BIN:-}" ] && [ -x "$NEW_BIN" ]; then
   mkdir -p "$(dirname "$LIVE_BIN")"
   cp "$NEW_BIN" "$LIVE_BIN"
   chmod +x "$LIVE_BIN"
+  xattr -cr "$LIVE_BIN" 2>/dev/null || true
+  codesign --force --sign - "$LIVE_BIN" >/dev/null 2>&1 || true
   if [ -f "$REPO_ROOT/ClipFlow/Resources/Readability.js" ]; then
     cp "$REPO_ROOT/ClipFlow/Resources/Readability.js" "$(dirname "$LIVE_BIN")/Readability.js"
   fi
@@ -38,6 +40,8 @@ elif [ -x "$REPO_ROOT/.build/release/ClipFlowServer" ]; then
     mkdir -p "$(dirname "$LIVE_BIN")"
     cp "$REPO_ROOT/.build/release/ClipFlowServer" "$LIVE_BIN"
     chmod +x "$LIVE_BIN"
+    xattr -cr "$LIVE_BIN" 2>/dev/null || true
+    codesign --force --sign - "$LIVE_BIN" >/dev/null 2>&1 || true
     if [ -f "$REPO_ROOT/ClipFlow/Resources/Readability.js" ]; then
       cp "$REPO_ROOT/ClipFlow/Resources/Readability.js" "$(dirname "$LIVE_BIN")/Readability.js"
       echo "Installed Readability.js next to binary"
