@@ -1,9 +1,12 @@
 import Foundation
 import AppKit
 import CommonCrypto
-import Vision
 import ImageIO
 import CoreGraphics
+
+extension Notification.Name {
+    static let clipFlowOCRReady = Notification.Name("ClipFlowOCRReady")
+}
 
 class ClipboardMonitor: ObservableObject {
     @Published var lastItem: ClipboardItem?
@@ -19,6 +22,7 @@ class ClipboardMonitor: ObservableObject {
     static weak var shared: ClipboardMonitor?
     
     private let monitorQueue = DispatchQueue(label: "com.clipflow.monitor", qos: .userInitiated)
+    private let ocrQueue = DispatchQueue(label: "com.clipflow.strip-ocr", qos: .utility)
     
     init(database: DatabaseManager? = nil) {
         self.database = database
@@ -48,6 +52,7 @@ class ClipboardMonitor: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.checkPasteboard()
         }
+        scheduleStripOCRBackfill()
     }
     
     func stopMonitoring() {
@@ -83,6 +88,9 @@ class ClipboardMonitor: ObservableObject {
                     name: Notification.Name("ClipFlowItemAdded"),
                     object: item
                 )
+                if case .inserted = result, item.type == .image {
+                    self.scheduleOCR(hash: item.contentHash, persistId: item.id)
+                }
             }
 
             DispatchQueue.main.async {
@@ -126,12 +134,11 @@ class ClipboardMonitor: ObservableObject {
            let rawData = try? Data(contentsOf: first),
            !rawData.isEmpty {
             let imageData = ImageStoragePolicy.compressForStorage(rawData) ?? normalizeToPNG(rawData) ?? rawData
-            let ocrText = performOCR(on: imageData)
             let hash = computeHash(for: imageData)
             return ClipboardItem(
                 timestamp: timestamp, type: .image, contentHash: hash,
                 imageData: imageData, fileURLs: fileURLs,
-                ocrText: ocrText, sourceApp: sourceApp
+                ocrText: nil, sourceApp: sourceApp
             )
         }
 
@@ -146,12 +153,58 @@ class ClipboardMonitor: ObservableObject {
         guard let rawData = getImageData() else { return nil }
         // Strip screenshots scale by short edge (see ImageStoragePolicy).
         let imageData = ImageStoragePolicy.compressForStorage(rawData) ?? normalizeToPNG(rawData) ?? rawData
-        let ocrText = performOCR(on: imageData)
         let hash = computeHash(for: imageData)
         return ClipboardItem(
             timestamp: timestamp, type: .image, contentHash: hash,
-            imageData: imageData, ocrText: ocrText, sourceApp: sourceApp
+            imageData: imageData, ocrText: nil, sourceApp: sourceApp
         )
+    }
+
+    private func scheduleOCR(hash: String, persistId: UUID) {
+        ocrQueue.async { [weak self] in
+            guard let self else { return }
+            let data = self.database?.readBlobFile(hash: hash)
+            guard let data, !data.isEmpty else { return }
+            let t0 = Date()
+            let text = StripOCR.recognize(data: data)
+            let ms = Date().timeIntervalSince(t0) * 1000
+            let n = text?.count ?? 0
+            let pages = ImageStoragePolicy.pixelSize(of: data)
+            print("[OCR] id=\(persistId.uuidString.prefix(8)) \(pages.map { "\($0.0)x\($0.1)" } ?? "?") chars=\(n) \(String(format: "%.0f", ms))ms")
+            if let text {
+                self.database?.updateOCR(id: persistId, text: text)
+                NotificationCenter.default.post(name: .clipFlowOCRReady, object: persistId)
+            }
+        }
+    }
+
+    /// Re-run strip OCR for already-stored tall screenshots (derived field, not capture).
+    private func scheduleStripOCRBackfill() {
+        ocrQueue.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.database?.listImageHashes { refs in
+                guard let self else { return }
+                self.ocrQueue.async {
+                    var n = 0
+                    for ref in refs {
+                        guard let data = self.database?.readBlobFile(hash: ref.hash), !data.isEmpty else { continue }
+                        guard let size = ImageStoragePolicy.pixelSize(of: data) else { continue }
+                        let short = min(size.0, size.1)
+                        let long = max(size.0, size.1)
+                        guard short >= 360, long >= 2400 else { continue }
+                        let t0 = Date()
+                        guard let text = StripOCR.recognize(data: data) else { continue }
+                        let ms = Date().timeIntervalSince(t0) * 1000
+                        print("[OCR] backfill id=\(ref.id.uuidString.prefix(8)) \(size.0)x\(size.1) chars=\(text.count) \(String(format: "%.0f", ms))ms")
+                        self.database?.updateOCR(id: ref.id, text: text)
+                        NotificationCenter.default.post(name: .clipFlowOCRReady, object: ref.id)
+                        n += 1
+                    }
+                    if n > 0 {
+                        print("[OCR] backfill done n=\(n)")
+                    }
+                }
+            }
+        }
     }
 
     private func normalizeToPNG(_ data: Data) -> Data? {
@@ -218,175 +271,6 @@ class ClipboardMonitor: ObservableObject {
             return tiff
         }
         return nil
-    }
-
-    /// Decode clipboard bytes to CGImage with ImageIO first (preserves resolution).
-    private func makeCGImage(from imageData: Data) -> CGImage? {
-        if let source = CGImageSourceCreateWithData(imageData as CFData, nil),
-           CGImageSourceGetCount(source) > 0,
-           let image = CGImageSourceCreateImageAtIndex(
-                source, 0,
-                [kCGImageSourceShouldCache: true] as CFDictionary
-           ) {
-            return image
-        }
-        // Fallback: NSImage → TIFF → bitmap
-        guard let nsImage = NSImage(data: imageData),
-              let tiffData = nsImage.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData) else {
-            return nil
-        }
-        return bitmap.cgImage
-    }
-
-    private func performOCR(on imageData: Data) -> String? {
-        guard let cgImage = makeCGImage(from: imageData) else {
-            return nil
-        }
-        let tiles = ImageStoragePolicy.ocrTiles(width: cgImage.width, height: cgImage.height)
-        if tiles.count == 1 {
-            return ocrOneImage(ImageStoragePolicy.rasterForOCR(cgImage))
-        }
-        var parts: [String] = []
-        for rect in tiles {
-            guard let piece = ImageStoragePolicy.crop(cgImage, pixelRect: rect) else { continue }
-            if let text = ocrOneImage(ImageStoragePolicy.rasterForOCR(piece)), !text.isEmpty {
-                parts.append(text)
-            }
-        }
-        let joined = parts.joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return joined.isEmpty ? nil : joined
-    }
-
-    private func ocrOneImage(_ cgImage: CGImage) -> String? {
-        let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
-        request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
-        request.minimumTextHeight = 0.008
-        if #available(macOS 13.0, *) {
-            request.automaticallyDetectsLanguage = true
-        }
-        do {
-            try requestHandler.perform([request])
-            guard let results = request.results, !results.isEmpty else { return nil }
-            return reconstructOCRText(from: results)
-        } catch {
-            print("[OCR] perform failed: \(error)")
-            return nil
-        }
-    }
-
-    /// Rebuild multi-line / multi-column text from Vision boxes.
-    /// Vision bbox origin is bottom-left; higher midY = higher on screen.
-    private func reconstructOCRText(from observations: [VNRecognizedTextObservation]) -> String? {
-        struct TextBox {
-            let text: String
-            let minX: CGFloat
-            let maxX: CGFloat
-            let midY: CGFloat
-            let height: CGFloat
-        }
-
-        let boxes: [TextBox] = observations.compactMap { obs in
-            // Prefer top candidate; fall back to next if empty after trim
-            let candidates = obs.topCandidates(3)
-            let raw = candidates.lazy
-                .map { $0.string.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .first { !$0.isEmpty }
-            guard let text = raw else { return nil }
-            let b = obs.boundingBox
-            return TextBox(
-                text: text,
-                minX: b.minX,
-                maxX: b.maxX,
-                midY: b.midY,
-                height: max(b.height, 0.001)
-            )
-        }
-        guard !boxes.isEmpty else { return nil }
-
-        let avgHeight = boxes.map(\.height).reduce(0, +) / CGFloat(boxes.count)
-        // Floor must not exceed ~1 line. A hard 0.012 on a 16k-tall strip is ~200px
-        // and merges many rows into one garbage line.
-        let lineThreshold = max(avgHeight * 0.65, min(0.012, avgHeight * 1.2))
-
-        // Global order: top→bottom, then left→right within similar Y
-        let sorted = boxes.sorted { a, b in
-            if abs(a.midY - b.midY) < lineThreshold {
-                return a.minX < b.minX
-            }
-            return a.midY > b.midY
-        }
-
-        // Cluster into reading lines
-        var lines: [[TextBox]] = []
-        for box in sorted {
-            if let lastIndex = lines.indices.last {
-                let lineMid = lines[lastIndex].map(\.midY).reduce(0, +) / CGFloat(lines[lastIndex].count)
-                if abs(lineMid - box.midY) < lineThreshold {
-                    lines[lastIndex].append(box)
-                    continue
-                }
-            }
-            lines.append([box])
-        }
-
-        let lineStrings: [String] = lines.map { line in
-            let ordered = line.sorted { $0.minX < $1.minX }
-            var result = ""
-            for (i, box) in ordered.enumerated() {
-                if i == 0 {
-                    result = box.text
-                    continue
-                }
-                let prev = ordered[i - 1]
-                let gap = box.minX - prev.maxX
-                // Large horizontal gap → column / word separation
-                if gap > 0.015 {
-                    result += " " + box.text
-                } else if shouldInsertSpace(between: prev.text, and: box.text) {
-                    result += " " + box.text
-                } else {
-                    result += box.text
-                }
-            }
-            return result
-        }
-
-        let text = lineStrings.joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
-    }
-
-    /// Insert space between Latin/digit tokens; keep CJK glued.
-    private func shouldInsertSpace(between left: String, and right: String) -> Bool {
-        guard let l = left.last, let r = right.first else { return true }
-        let lCJK = isCJK(l)
-        let rCJK = isCJK(r)
-        if lCJK && rCJK { return false }
-        if l.isWhitespace || r.isWhitespace { return false }
-        // Latin/digit boundaries usually want a space
-        if l.isLetter || l.isNumber || r.isLetter || r.isNumber {
-            return true
-        }
-        return false
-    }
-
-    private func isCJK(_ ch: Character) -> Bool {
-        guard let v = ch.unicodeScalars.first?.value else { return false }
-        switch v {
-        case 0x4E00...0x9FFF,   // CJK Unified
-             0x3400...0x4DBF,   // CJK Ext A
-             0xF900...0xFAFF,   // CJK Compatibility
-             0x3000...0x303F,   // CJK punctuation
-             0xFF00...0xFFEF:   // Fullwidth forms
-            return true
-        default:
-            return false
-        }
     }
 
     private func createURLItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {

@@ -2569,6 +2569,70 @@ final class DatabaseManager: ObservableObject {
     // MARK: - Web archive (manual, useful-first)
 
     /// Persist readable archive onto an existing clip. Capture URL/hash stays immutable.
+    /// Derived field only — capture image bytes stay immutable.
+    func updateOCR(id: UUID, text: String?) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else { return }
+            let sql = "UPDATE clipboard_items SET ocr_text = ? WHERE id = ?;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            if let text {
+                self.bindText(stmt, 1, text)
+            } else {
+                sqlite3_bind_null(stmt, 1)
+            }
+            self.bindText(stmt, 2, id.uuidString)
+            _ = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            var t: String?
+            var s: String?
+            var h: String?
+            var q: OpaquePointer?
+            if sqlite3_prepare_v2(
+                db,
+                "SELECT text_content, source_app, html_content FROM clipboard_items WHERE id = ?;",
+                -1, &q, nil
+            ) == SQLITE_OK {
+                self.bindText(q, 1, id.uuidString)
+                if sqlite3_step(q) == SQLITE_ROW {
+                    t = sqlite3_column_text(q, 0).map { String(cString: $0) }
+                    s = sqlite3_column_text(q, 1).map { String(cString: $0) }
+                    h = sqlite3_column_text(q, 2).map { String(cString: $0) }
+                }
+            }
+            sqlite3_finalize(q)
+            self.upsertFTS(id: id.uuidString, text: t, ocr: text, source: s, html: h)
+        }
+    }
+
+    func listImageHashes(limit: Int = 40, completion: @escaping ([(id: UUID, hash: String)]) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            var out: [(UUID, String)] = []
+            let sql = """
+            SELECT id, content_hash FROM clipboard_items
+            WHERE type = 'image' AND deleted_at IS NULL
+            ORDER BY timestamp DESC LIMIT ?;
+            """
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_int(stmt, 1, Int32(max(1, limit)))
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let idStr = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+                    let hash = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+                    if let idStr, let uuid = UUID(uuidString: idStr), let hash, !hash.isEmpty {
+                        out.append((uuid, hash))
+                    }
+                }
+            }
+            sqlite3_finalize(stmt)
+            DispatchQueue.main.async { completion(out) }
+        }
+    }
+
     func fetchItem(id: UUID, completion: @escaping (ClipboardItem?) -> Void) {
         performRead { [weak self] in
             guard let self = self else {

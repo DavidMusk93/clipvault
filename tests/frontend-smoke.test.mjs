@@ -321,6 +321,12 @@ test('markdown preview uses marked + DOMPurify CDN', () => {
   assert.doesNotMatch(indexHtml, /function fallbackMarkdownToHtml/, 'no DIY markdown parser');
 });
 
+test('strip OCR results can grow and refresh in place', () => {
+  assert.match(indexHtml, /ocr_ready/);
+  assert.match(indexHtml, /ocr-panel\.is-long/);
+  assert.match(indexHtml, /nLines > 16/);
+});
+
 test('long screenshot lightbox scrolls at readable width', () => {
   assert.match(indexHtml, /lightbox-stage/, 'stage wraps img so toolbar stays put');
   assert.match(indexHtml, /lightbox-inner\.is-strip/, 'strip class for tall shots');

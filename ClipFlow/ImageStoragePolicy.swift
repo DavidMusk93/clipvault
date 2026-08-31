@@ -19,10 +19,6 @@ enum ImageStoragePolicy {
     static let maxLongEdgeStrip: CGFloat = 24_000
     static let maxKeepOriginalBytes = 12_000_000
 
-    static let ocrMaxShort: CGFloat = 1400
-    static let ocrMaxLong: CGFloat = 10_000
-    static let ocrMaxPixels: CGFloat = 8_000_000
-
     #if DEBUG
     private static let _checked: Void = {
         // Incident dimensions (inferred from 113×1600 @ long-edge 1600).
@@ -180,50 +176,6 @@ enum ImageStoragePolicy {
         let quality: CGFloat = cropTallToCard ? 0.86 : 0.88
         guard let encoded = encode(raster, jpeg: true, quality: quality) else { return nil }
         return (encoded, "image/jpeg")
-    }
-
-    /// Pixel rects, origin top-left. Long screenshots are split so Vision
-    /// sees normal-aspect pages (a 0.012 line-merge floor on a 16k-tall
-    /// frame otherwise swallows ~200px of lines).
-    static func ocrTiles(width: Int, height: Int) -> [CGRect] {
-        let w = max(1, width)
-        let h = max(1, height)
-        if CGFloat(h) / CGFloat(w) < stripAspect || h <= 1800 {
-            return [CGRect(x: 0, y: 0, width: w, height: h)]
-        }
-        let tileH = min(1400, max(900, Int((Double(w) * 1.4).rounded())))
-        let overlap = 64
-        var y = 0
-        var tiles: [CGRect] = []
-        while y < h {
-            let th = min(tileH, h - y)
-            tiles.append(CGRect(x: 0, y: y, width: w, height: th))
-            if y + th >= h { break }
-            y += max(1, th - overlap)
-        }
-        return tiles
-    }
-
-    static func rasterForOCR(_ image: CGImage) -> CGImage {
-        let w = CGFloat(image.width)
-        let h = CGFloat(image.height)
-        let s = ocrScale(width: w, height: h)
-        if s >= 0.999 { return image }
-        let tw = max(1, Int((w * s).rounded()))
-        let th = max(1, Int((h * s).rounded()))
-        return resample(image, width: tw, height: th) ?? image
-    }
-
-    static func ocrScale(width: CGFloat, height: CGFloat) -> CGFloat {
-        let w = max(1, width)
-        let h = max(1, height)
-        var s: CGFloat = 1
-        s = min(s, ocrMaxShort / min(w, h), ocrMaxLong / max(w, h))
-        let pixels = w * h
-        if pixels * s * s > ocrMaxPixels {
-            s = min(s, (ocrMaxPixels / pixels).squareRoot())
-        }
-        return min(1, s)
     }
 
     static func isPNG(_ data: Data) -> Bool {

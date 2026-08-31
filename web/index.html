@@ -1033,6 +1033,9 @@
       display: flex; flex-direction: column;
       max-height: 180px; overflow: hidden; min-width: 0;
     }
+    .ocr-panel.is-pending { max-height: none; padding: 8px 12px; font-weight: 550; }
+    .ocr-panel.is-long { max-height: min(48vh, 520px); }
+    .ocr-panel.is-long .ocr-body { max-height: min(42vh, 460px); }
     .ocr-panel-header {
       flex-shrink: 0; padding: 8px 12px; font-weight: 600;
       display: flex; align-items: center; gap: 6px;
@@ -5142,11 +5145,15 @@ window.ClipViewMasonry = Masonry;
 
     function replaceCardInPlace(item) {
       const old = cardCache.get(item.id);
+      const before = old ? Masonry.measureHeight(old) : 0;
       const next = buildCard(item);
       cardCache.set(item.id, next);
       highlightCard(next);
       if (old && old.parentNode) {
         old.parentNode.replaceChild(next, old);
+        const after = Masonry.measureHeight(next);
+        const delta = after - before;
+        if (Math.abs(delta) >= 1) patchColHeightForCard(next, delta);
       }
     }
 
@@ -5482,8 +5489,11 @@ window.ClipViewMasonry = Masonry;
           const ocrHit = !!(searchQuery && fieldMatchesQuery(ocrDisp, searchQuery));
           const ocrHtml = ocrHit ? highlightEscaped(ocrDisp, searchQuery) : esc(ocrDisp);
           const badge = ocrHit ? '<span class="search-field-badge">命中 OCR</span>' : '';
-          body += `<div class="ocr-panel${ocrHit ? ' is-search-hit' : ''}">
-            <div class="ocr-panel-header"><span class="material-symbols-outlined" style="font-size:16px">find_in_page</span>OCR 识别结果${badge}<button type="button" class="ocr-copy-btn" data-ocr-copy title="复制识别文字">复制文字</button></div>
+          const nLines = ocrDisp.split('\n').filter(Boolean).length;
+          const longCls = nLines > 16 ? ' is-long' : '';
+          const lineHint = nLines > 1 ? ` · ${nLines}行` : '';
+          body += `<div class="ocr-panel${ocrHit ? ' is-search-hit' : ''}${longCls}">
+            <div class="ocr-panel-header"><span class="material-symbols-outlined" style="font-size:16px">find_in_page</span>OCR 识别结果${lineHint}${badge}<button type="button" class="ocr-copy-btn" data-ocr-copy title="复制识别文字">复制文字</button></div>
             <div class="ocr-body"><span class="ocr-body-inner">${ocrHtml}</span></div>
           </div>`;
         }
@@ -6320,6 +6330,10 @@ window.ClipViewMasonry = Masonry;
           }
           if (d.type === 'clip_deleted' || d.type === 'clip_restored') {
             applyRemoteClipRemoval(d);
+            return;
+          }
+          if (d.type === 'ocr_ready' && d.id) {
+            refreshClipInPlace(d.id);
             return;
           }
           if (d.type === 'archive_ok' && d.id) {

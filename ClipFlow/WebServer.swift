@@ -133,6 +133,14 @@ class WebServer {
             ) { [weak self] _ in
                 self?.broadcastSSE(event: "update")
             }
+            NotificationCenter.default.addObserver(
+                forName: .clipFlowOCRReady,
+                object: nil,
+                queue: nil
+            ) { [weak self] note in
+                let id = (note.object as? UUID)?.uuidString
+                self?.broadcastSSE(event: "ocr_ready", id: id)
+            }
         } catch {
             print("Failed to start server: \(error)")
         }
