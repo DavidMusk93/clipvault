@@ -125,7 +125,7 @@ class ClipboardMonitor: ObservableObject {
            let first = fileURLs.first,
            let rawData = try? Data(contentsOf: first),
            !rawData.isEmpty {
-            let imageData = compressForStorage(rawData) ?? normalizeToPNG(rawData) ?? rawData
+            let imageData = ImageStoragePolicy.compressForStorage(rawData) ?? normalizeToPNG(rawData) ?? rawData
             let ocrText = performOCR(on: imageData)
             let hash = computeHash(for: imageData)
             return ClipboardItem(
@@ -144,54 +144,14 @@ class ClipboardMonitor: ObservableObject {
 
     private func createImageItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
         guard let rawData = getImageData() else { return nil }
-        // Downscale + PNG for storage; blobs live on disk (not SQLite) — keep payloads lean.
-        let imageData = compressForStorage(rawData) ?? normalizeToPNG(rawData) ?? rawData
+        // Strip screenshots scale by short edge (see ImageStoragePolicy).
+        let imageData = ImageStoragePolicy.compressForStorage(rawData) ?? normalizeToPNG(rawData) ?? rawData
         let ocrText = performOCR(on: imageData)
         let hash = computeHash(for: imageData)
         return ClipboardItem(
             timestamp: timestamp, type: .image, contentHash: hash,
             imageData: imageData, ocrText: ocrText, sourceApp: sourceApp
         )
-    }
-
-    /// Max long edge 1600px; prefer JPEG for large photos, PNG for small/UI shots.
-    private func compressForStorage(_ data: Data) -> Data? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-            return normalizeToPNG(data)
-        }
-        let maxEdge: CGFloat = 1600
-        let w = CGFloat(cgImage.width)
-        let h = CGFloat(cgImage.height)
-        let scale = min(1.0, maxEdge / max(w, h))
-        let tw = max(1, Int(w * scale))
-        let th = max(1, Int(h * scale))
-
-        let colorSpace = cgImage.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil, width: tw, height: th,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return normalizeToPNG(data) }
-        ctx.interpolationQuality = .medium
-        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: tw, height: th))
-        guard let scaled = ctx.makeImage() else { return normalizeToPNG(data) }
-
-        let out = NSMutableData()
-        // Screenshots/UI stay sharp as PNG; large photographic frames → JPEG ~0.8
-        let useJPEG = (data.count > 400_000) || (tw * th > 900_000)
-        let uti = useJPEG ? "public.jpeg" as CFString : "public.png" as CFString
-        guard let dest = CGImageDestinationCreateWithData(out, uti, 1, nil) else {
-            return normalizeToPNG(data)
-        }
-        let props: [CFString: Any] = useJPEG
-            ? [kCGImageDestinationLossyCompressionQuality: 0.82]
-            : [:]
-        CGImageDestinationAddImage(dest, scaled, props as CFDictionary)
-        guard CGImageDestinationFinalize(dest) else { return normalizeToPNG(data) }
-        return out as Data
     }
 
     private func normalizeToPNG(_ data: Data) -> Data? {
@@ -218,13 +178,32 @@ class ClipboardMonitor: ObservableObject {
     }
 
     private func getImageData() -> Data? {
-        if let pngData = pasteboard.data(forType: .png), !pngData.isEmpty { return pngData }
-        if let tiffData = pasteboard.data(forType: .tiff), !tiffData.isEmpty { return tiffData }
-        let jpegType = NSPasteboard.PasteboardType("public.jpeg")
-        if let jpegData = pasteboard.data(forType: jpegType), !jpegData.isEmpty { return jpegData }
-        if let image = pasteboard.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage,
-           let tiff = image.tiffRepresentation {
-            return tiff
+        // Prefer the largest pixel payload. Some apps put a PNG preview next to a full TIFF.
+        let types: [NSPasteboard.PasteboardType] = [
+            .png,
+            .tiff,
+            NSPasteboard.PasteboardType("public.jpeg"),
+            NSPasteboard.PasteboardType("public.heic")
+        ]
+        var candidates: [Data] = []
+        if let items = pasteboard.pasteboardItems {
+            for item in items {
+                for type in types {
+                    if let data = item.data(forType: type), !data.isEmpty {
+                        candidates.append(data)
+                    }
+                }
+            }
+        }
+        if candidates.isEmpty {
+            for type in types {
+                if let data = pasteboard.data(forType: type), !data.isEmpty {
+                    candidates.append(data)
+                }
+            }
+        }
+        if let best = ImageStoragePolicy.largestPayload(candidates) {
+            return best
         }
         if let urls = getFileURLs(), let first = urls.first {
             let ext = first.pathExtension.lowercased()
@@ -232,6 +211,11 @@ class ClipboardMonitor: ObservableObject {
                let fileData = try? Data(contentsOf: first) {
                 return fileData
             }
+        }
+        // Last resort: NSImage may rasterize at preview DPI — only if nothing else worked.
+        if let image = pasteboard.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage,
+           let tiff = image.tiffRepresentation {
+            return tiff
         }
         return nil
     }
@@ -259,8 +243,9 @@ class ClipboardMonitor: ObservableObject {
         guard let cgImage = makeCGImage(from: imageData) else {
             return nil
         }
+        let raster = ImageStoragePolicy.rasterForOCR(cgImage)
 
-        let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        let requestHandler = VNImageRequestHandler(cgImage: raster, options: [:])
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         // Language correction can over-edit UI/code screenshots; keep off for completeness.

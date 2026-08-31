@@ -53,7 +53,9 @@ for pid in $(ps aux | awk '/Keepsake\/bin\/ClipFlowServer/ && !/awk/{print $2}')
   kill "$pid" 2>/dev/null || true
 done
 sleep 0.5
-launchctl bootstrap "$GUI" "$PLIST"
+launchctl bootstrap "$GUI" "$PLIST" 2>/dev/null || true
+# bootstrap loads the job but often does not spawn it; kickstart is the reliable start.
+launchctl kickstart -k "$GUI/$LABEL"
 sleep 1.2
 
 # Post-condition
