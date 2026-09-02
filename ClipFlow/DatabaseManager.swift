@@ -71,6 +71,8 @@ final class DatabaseManager: ObservableObject {
 
     /// Active FTS tokenizer: "trigram" (fuzzy substring) or "unicode61".
     private var ftsTokenizer: String = "unicode61"
+    /// Extra FTS column `judgment_text`. Bump to DROP+rebuild clipboard_fts.
+    private static let ftsSchemaVersion = "judgment_v1"
 
     init() {
         appDir = Self.resolveDataRoot()
@@ -485,6 +487,10 @@ final class DatabaseManager: ObservableObject {
         if !columnExists("clipboard_items", "reader_state") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN reader_state TEXT;")
         }
+        // Searchable user-authored text (eval notes + View comments/quotes). Not capture payload.
+        if !columnExists("clipboard_items", "judgment_text") {
+            execQuiet("ALTER TABLE clipboard_items ADD COLUMN judgment_text TEXT;")
+        }
         execQuiet("""
         CREATE TABLE IF NOT EXISTS reader_ops (
             id TEXT PRIMARY KEY,
@@ -777,13 +783,18 @@ final class DatabaseManager: ObservableObject {
         let wantTrigram = probeTrigramSupport()
         let target = wantTrigram ? "trigram" : "unicode61"
         let stored = metaGet("fts_tokenizer")
+        let storedSchema = metaGet("fts_schema")
         let ftsExists = tableExists("clipboard_fts")
+        if metaGet("judgment_backfill") != "1" {
+            backfillJudgmentText()
+            metaSet("judgment_backfill", "1")
+        }
 
-        let needRebuild = !ftsExists || stored != target
+        let needRebuild = !ftsExists || stored != target || storedSchema != Self.ftsSchemaVersion
         if needRebuild {
             if ftsExists {
                 execQuiet("DROP TABLE IF EXISTS clipboard_fts;")
-                print("[DatabaseManager] Rebuilding FTS with tokenizer=\(target)")
+                print("[DatabaseManager] Rebuilding FTS tokenizer=\(target) schema=\(Self.ftsSchemaVersion)")
             }
             let tokClause = target == "trigram"
                 ? "tokenize = 'trigram'"
@@ -795,11 +806,13 @@ final class DatabaseManager: ObservableObject {
                 ocr_text,
                 source_app,
                 html_content,
+                judgment_text,
                 \(tokClause)
             );
             """
             if execQuiet(ftsSQL) {
                 metaSet("fts_tokenizer", target)
+                metaSet("fts_schema", Self.ftsSchemaVersion)
                 ftsTokenizer = target
                 backfillFTS()
             }
@@ -821,12 +834,13 @@ final class DatabaseManager: ObservableObject {
 
     private func backfillFTS() {
         let backfill = """
-        INSERT INTO clipboard_fts(id, text_content, ocr_text, source_app, html_content)
+        INSERT INTO clipboard_fts(id, text_content, ocr_text, source_app, html_content, judgment_text)
         SELECT id,
                IFNULL(text_content,''),
                IFNULL(ocr_text,''),
                IFNULL(source_app,''),
-               IFNULL(html_content,'')
+               IFNULL(html_content,''),
+               IFNULL(judgment_text,'')
         FROM clipboard_items;
         """
         if execQuiet(backfill) {
@@ -1102,9 +1116,10 @@ final class DatabaseManager: ObservableObject {
         }
         sqlite3_finalize(del)
 
+        let judgment = fetchJudgmentTextColumn(id) ?? ""
         let sql = """
-        INSERT INTO clipboard_fts(id, text_content, ocr_text, source_app, html_content)
-        VALUES (?, ?, ?, ?, ?);
+        INSERT INTO clipboard_fts(id, text_content, ocr_text, source_app, html_content, judgment_text)
+        VALUES (?, ?, ?, ?, ?, ?);
         """
         var ins: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &ins, nil) == SQLITE_OK {
@@ -1113,9 +1128,154 @@ final class DatabaseManager: ObservableObject {
             bindText(ins, 3, ocr ?? "")
             bindText(ins, 4, source ?? "")
             bindText(ins, 5, html ?? "")
+            bindText(ins, 6, judgment)
             _ = sqlite3_step(ins)
         }
         sqlite3_finalize(ins)
+    }
+
+    private func fetchJudgmentTextColumn(_ id: String) -> String? {
+        guard let db = db else { return nil }
+        var stmt: OpaquePointer?
+        defer { if stmt != nil { sqlite3_finalize(stmt) } }
+        guard sqlite3_prepare_v2(db, "SELECT judgment_text FROM clipboard_items WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        bindText(stmt, 1, id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+    }
+
+    @discardableResult
+    private func refreshJudgmentTextLocked(_ id: String) -> String {
+        let text = assembleJudgmentTextLocked(id)
+        guard let db = db else { return text }
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "UPDATE clipboard_items SET judgment_text = ? WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, text.isEmpty ? nil : text)
+            bindText(stmt, 2, id)
+            _ = sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+        return text
+    }
+
+    private func assembleJudgmentTextLocked(_ id: String) -> String {
+        guard let db = db else { return "" }
+        var parts: [String] = []
+        var noteStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT user_note FROM clipboard_items WHERE id = ?;", -1, &noteStmt, nil) == SQLITE_OK {
+            bindText(noteStmt, 1, id)
+            if sqlite3_step(noteStmt) == SQLITE_ROW,
+               let note = sqlite3_column_text(noteStmt, 0).map({ String(cString: $0) }) {
+                parts.append(note)
+            }
+        }
+        sqlite3_finalize(noteStmt)
+        var evalStmt: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db,
+            "SELECT note FROM user_evaluations WHERE item_id = ? AND note IS NOT NULL AND length(note) > 0 ORDER BY ts ASC;",
+            -1, &evalStmt, nil
+        ) == SQLITE_OK {
+            bindText(evalStmt, 1, id)
+            while sqlite3_step(evalStmt) == SQLITE_ROW {
+                if let note = sqlite3_column_text(evalStmt, 0).map({ String(cString: $0) }) {
+                    parts.append(note)
+                }
+            }
+        }
+        sqlite3_finalize(evalStmt)
+        var state: [String: Any] = [:]
+        var opStmt: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db,
+            "SELECT kind, payload, ts FROM reader_ops WHERE item_id = ? ORDER BY ts ASC;",
+            -1, &opStmt, nil
+        ) == SQLITE_OK {
+            bindText(opStmt, 1, id)
+            while sqlite3_step(opStmt) == SQLITE_ROW {
+                let kind = sqlite3_column_text(opStmt, 0).map { String(cString: $0) } ?? ""
+                let ts = sqlite3_column_double(opStmt, 2)
+                var payload: [String: Any] = [:]
+                if let raw = sqlite3_column_text(opStmt, 1).map({ String(cString: $0) }),
+                   let data = raw.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    payload = obj
+                }
+                applyReaderOp(&state, kind: kind, payload: payload, ts: ts)
+            }
+        }
+        sqlite3_finalize(opStmt)
+        if let highlights = state["highlights"] as? [[String: Any]] {
+            for h in highlights {
+                for key in ["comment", "quote", "text"] {
+                    if let s = h[key] as? String { parts.append(s) }
+                }
+            }
+        }
+        var seen = Set<String>()
+        var out: [String] = []
+        var bytes = 0
+        for raw in parts {
+            let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty || seen.contains(t) { continue }
+            seen.insert(t)
+            let add = t.utf8.count + (out.isEmpty ? 0 : 1)
+            if bytes + add > 32_000 { break }
+            out.append(t)
+            bytes += add
+        }
+        return out.joined(separator: "\n")
+    }
+
+    private func backfillJudgmentText() {
+        guard let db = db else { return }
+        var ids: [String] = []
+        let sql = """
+        SELECT id FROM clipboard_items
+        WHERE IFNULL(user_note,'') != ''
+           OR (reader_state IS NOT NULL AND length(reader_state) > 2)
+           OR EXISTS (SELECT 1 FROM user_evaluations e WHERE e.item_id = clipboard_items.id AND e.note IS NOT NULL AND length(e.note) > 0)
+           OR EXISTS (SELECT 1 FROM reader_ops r WHERE r.item_id = clipboard_items.id AND r.kind IN ('comment','highlight_add','highlight_update'))
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) {
+                    ids.append(id)
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+        for id in ids { _ = refreshJudgmentTextLocked(id) }
+        if !ids.isEmpty {
+            print("[DatabaseManager] judgment_text backfill n=\(ids.count)")
+        }
+    }
+
+    private func reindexFTSRowLocked(_ id: String) {
+        guard let db = db else { return }
+        var t: String?
+        var o: String?
+        var s: String?
+        var h: String?
+        var q: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db,
+            "SELECT text_content, ocr_text, source_app, html_content FROM clipboard_items WHERE id = ?;",
+            -1, &q, nil
+        ) == SQLITE_OK {
+            bindText(q, 1, id)
+            if sqlite3_step(q) == SQLITE_ROW {
+                t = sqlite3_column_text(q, 0).map { String(cString: $0) }
+                o = sqlite3_column_text(q, 1).map { String(cString: $0) }
+                s = sqlite3_column_text(q, 2).map { String(cString: $0) }
+                h = sqlite3_column_text(q, 3).map { String(cString: $0) }
+            }
+        }
+        sqlite3_finalize(q)
+        upsertFTS(id: id, text: t, ocr: o, source: s, html: h)
     }
 
     private func deleteFTS(id: String) {
@@ -1847,11 +2007,11 @@ final class DatabaseManager: ObservableObject {
             sql += "deleted_at IS NULL"
         }
         sql += Self.typePredicateSQL(typeFilter: typeFilter, excludeType: excludeType)
-        // skill §5/§7: no unindexed LIKE on html_content. FTS covers text/ocr/html.
+        // skill §5/§7: no unindexed LIKE on html_content. FTS covers text/ocr/html/judgment.
         if narrowFields {
-            sql += " AND (IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
+            sql += " AND (IFNULL(judgment_text,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
         } else {
-            sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
+            sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ? OR IFNULL(judgment_text,'') LIKE ?)"
         }
         if cursor != nil {
             sql += " AND " + Self.keysetSQL
@@ -1868,7 +2028,7 @@ final class DatabaseManager: ObservableObject {
         var bind = 1
         bindTypePredicate(stmt, bind: &bind, typeFilter: typeFilter, excludeType: excludeType)
         let like = "%\(q)%"
-        let likeSlots = narrowFields ? 3 : 6
+        let likeSlots = narrowFields ? 3 : 7
         for _ in 0..<likeSlots {
             bindText(stmt, Int32(bind), like); bind += 1
         }
@@ -2253,6 +2413,8 @@ final class DatabaseManager: ObservableObject {
             )
         }
 
+        refreshJudgmentTextLocked(idStr)
+        reindexFTSRowLocked(idStr)
         guard let item = fetchItemByIdLocked(idStr) else { throw UserContextError.db }
         return (item, eid)
     }
@@ -3019,6 +3181,10 @@ final class DatabaseManager: ObservableObject {
             _ = sqlite3_step(uStmt)
         }
         sqlite3_finalize(uStmt)
+        if kind != "scroll_checkpoint" {
+            refreshJudgmentTextLocked(idStr)
+            reindexFTSRowLocked(idStr)
+        }
         if kind != "scroll_checkpoint" && !source.hasPrefix("sync:") {
             _ = appendOperationLogSync(
                 action: "reader.\(kind)",
