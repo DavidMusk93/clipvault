@@ -65,7 +65,23 @@ class WebServer {
     private let backup: CloudDocsBackupService?
     private let sync: CloudDocsSyncService?
     private let archive: WebArchiveService?
-    private var sseConnections: [NWConnection] = []
+    /// Control-plane SSE: one EventSource, comment+data heartbeat, bounded
+    /// per-client buffer. Overflow coalesces to `resync_required` (never silent drop).
+    private final class SSESession {
+        let connection: NWConnection
+        var queue: [Data] = []
+        var inflight = false
+        var resyncRequired = false
+        var dead = false
+        init(_ connection: NWConnection) { self.connection = connection }
+    }
+    private let sseQueue = DispatchQueue(label: "clipvault.sse")
+    private var sseSessions: [ObjectIdentifier: SSESession] = [:]
+    private var sseHeartbeat: DispatchSourceTimer?
+    private static let sseMaxBuffered = 32
+    private static let sseHeartbeatSeconds: Int = 15
+    private static let sseResyncFrame = Data("data: {\"type\":\"resync_required\"}\n\n".utf8)
+    private static let ssePingFrame = Data(": ping\n\ndata: {\"type\":\"ping\"}\n\n".utf8)
     
     var isRunning: Bool {
         listener != nil
@@ -149,6 +165,9 @@ class WebServer {
     func stop() {
         listener?.cancel()
         listener = nil
+        sseQueue.async { [weak self] in
+            self?.teardownSSELocked()
+        }
     }
     
     private func handleStateUpdate(_ state: NWListener.State) {
@@ -468,16 +487,9 @@ class WebServer {
     }
 
     private func handleSSEEvents(connection: NWConnection) {
-        let headers: [(String, String)] = [
-            ("Content-Type", "text/event-stream"),
-            ("Cache-Control", "no-cache"),
-            ("Connection", "keep-alive"),
-            ("Access-Control-Allow-Origin", "*")
-        ]
-        var payload = httpHeader(status: 200, reason: "OK", headers: headers)
-        payload.append(contentsOf: Data("data: {\"type\":\"connected\"}\n\n".utf8))
-        connection.send(content: payload, completion: .idempotent)
-        sseConnections.append(connection)
+        sseQueue.async { [weak self] in
+            self?.attachSSELocked(connection)
+        }
     }
 
     func broadcastSSE(event: String, id: String? = nil) {
@@ -485,16 +497,159 @@ class WebServer {
         if let id = id, !id.isEmpty { obj["id"] = id }
         guard let json = try? JSONSerialization.data(withJSONObject: obj),
               let jsonStr = String(data: json, encoding: .utf8) else { return }
-        let payload = "data: \(jsonStr)\n\n"
-        guard let data = payload.data(using: .utf8) else { return }
-
-        sseConnections.removeAll { conn in
-            if conn.state == .cancelled || conn.state == .failed(NWError.posix(.ECANCELED)) {
-                return true
-            }
-            conn.send(content: data, completion: .contentProcessed { _ in })
-            return false
+        let payload = Data("data: \(jsonStr)\n\n".utf8)
+        sseQueue.async { [weak self] in
+            self?.publishSSELocked(payload)
         }
+    }
+
+    private func attachSSELocked(_ connection: NWConnection) {
+        pruneDeadSSELocked()
+        let session = SSESession(connection)
+        sseSessions[ObjectIdentifier(connection)] = session
+        let id = ObjectIdentifier(connection)
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .failed(_), .cancelled:
+                self?.sseQueue.async {
+                    guard let session = self?.sseSessions[id] else { return }
+                    self?.dropSSELocked(session)
+                }
+            default:
+                break
+            }
+        }
+        let headers: [(String, String)] = [
+            ("Content-Type", "text/event-stream; charset=utf-8"),
+            ("Cache-Control", "no-cache, no-transform"),
+            ("Connection", "keep-alive"),
+            ("X-Accel-Buffering", "no"),
+            ("Access-Control-Allow-Origin", "*")
+        ]
+        var hello = httpHeader(status: 200, reason: "OK", headers: headers)
+        hello.append(contentsOf: Data("retry: 3000\n\n: connected\n\ndata: {\"type\":\"connected\"}\n\n".utf8))
+        session.queue.append(hello)
+        flushSSELocked(session)
+        watchSSEDisconnect(session)
+        ensureSSEHeartbeatLocked()
+    }
+
+    private func watchSSEDisconnect(_ session: SSESession) {
+        let id = ObjectIdentifier(session.connection)
+        session.connection.receive(minimumIncompleteLength: 1, maximumLength: 4) { [weak self] _, _, isComplete, error in
+            guard let self else { return }
+            if isComplete || error != nil {
+                self.sseQueue.async {
+                    guard let session = self.sseSessions[id] else { return }
+                    self.dropSSELocked(session)
+                }
+                return
+            }
+            self.sseQueue.async {
+                guard let session = self.sseSessions[id] else { return }
+                self.watchSSEDisconnect(session)
+            }
+        }
+    }
+
+    private func publishSSELocked(_ payload: Data) {
+        pruneDeadSSELocked()
+        for session in sseSessions.values {
+            enqueueSSELocked(session, payload)
+        }
+    }
+
+    private func enqueueSSELocked(_ session: SSESession, _ payload: Data) {
+        if session.dead { return }
+        if session.resyncRequired { return }
+        if session.queue.count >= Self.sseMaxBuffered {
+            session.queue.removeAll(keepingCapacity: true)
+            session.resyncRequired = true
+            session.queue.append(Self.sseResyncFrame)
+            flushSSELocked(session)
+            return
+        }
+        session.queue.append(payload)
+        flushSSELocked(session)
+    }
+
+    private func flushSSELocked(_ session: SSESession) {
+        guard !session.inflight, !session.dead else { return }
+        guard let next = session.queue.first else { return }
+        session.queue.removeFirst()
+        session.inflight = true
+        session.connection.send(content: next, completion: .contentProcessed { [weak self, weak session] error in
+            guard let self, let session else { return }
+            self.sseQueue.async {
+                session.inflight = false
+                if error != nil {
+                    self.dropSSELocked(session)
+                    return
+                }
+                if session.resyncRequired && session.queue.isEmpty {
+                    session.resyncRequired = false
+                }
+                self.flushSSELocked(session)
+            }
+        })
+    }
+
+    private func ensureSSEHeartbeatLocked() {
+        if sseHeartbeat != nil { return }
+        let timer = DispatchSource.makeTimerSource(queue: sseQueue)
+        let interval = Self.sseHeartbeatSeconds
+        timer.schedule(deadline: .now() + .seconds(interval), repeating: .seconds(interval))
+        timer.setEventHandler { [weak self] in
+            self?.sseHeartbeatTickLocked()
+        }
+        timer.resume()
+        sseHeartbeat = timer
+    }
+
+    private func sseHeartbeatTickLocked() {
+        pruneDeadSSELocked()
+        if sseSessions.isEmpty {
+            sseHeartbeat?.cancel()
+            sseHeartbeat = nil
+            return
+        }
+        for session in sseSessions.values {
+            if session.resyncRequired { continue }
+            if session.queue.count >= Self.sseMaxBuffered { continue }
+            session.queue.append(Self.ssePingFrame)
+            flushSSELocked(session)
+        }
+    }
+
+    private func pruneDeadSSELocked() {
+        let stale = sseSessions.values.filter { session in
+            if session.dead { return true }
+            switch session.connection.state {
+            case .cancelled, .failed(_): return true
+            default: return false
+            }
+        }
+        stale.forEach { dropSSELocked($0) }
+    }
+
+    private func dropSSELocked(_ session: SSESession) {
+        session.dead = true
+        session.queue.removeAll()
+        sseSessions.removeValue(forKey: ObjectIdentifier(session.connection))
+        if sseSessions.isEmpty {
+            sseHeartbeat?.cancel()
+            sseHeartbeat = nil
+        }
+    }
+
+    private func teardownSSELocked() {
+        sseHeartbeat?.cancel()
+        sseHeartbeat = nil
+        for session in sseSessions.values {
+            session.dead = true
+            session.connection.cancel()
+        }
+        sseSessions.removeAll()
     }
 
     private func handlePostClip(data: Data, connection: NWConnection) {

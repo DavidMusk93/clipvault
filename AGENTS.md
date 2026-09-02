@@ -101,6 +101,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **归档抽取**：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」的列表。部署时 `Readability.js` 必须拷到二进制同目录 | 技术文 `ul>li>文案+图+figcaption` 会被当成图库删掉（Swap needs either 两条） |
 | **阅读选区菜单**：macOS 浅玻璃小条（28px），黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**；评论 header 单行 28px（评论/摘录与取消/提交同一 strut）；底部「记录」= `reader_ops` | 评论卡里放大号「删除划线」；菜单压在高亮上；header 左右不共线 |
 | 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
+| **SSE 控制面**：15s heartbeat（`: ping` + `{"type":"ping"}`）；每连接 bounded 32；满则 coalesce `resync_required`，禁止静默踢客户端；`retry: 3000`；前端 `onopen` / `visibilitychange` / `online` → `scheduleResync`→`mergeHead`。禁止 `onerror` 里 `close()+setTimeout` 当唯一重连 | 空闲被 Cloudflare/后台标签掐流后不补数；连接活着但永远收不到事件 |
 
 ### 2.3 工程（always SOTA / 终局）
 

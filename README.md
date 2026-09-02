@@ -27,7 +27,7 @@ ClipVault 是面向个人 Mac 的剪贴板历史产品：本机守护进程静�
 - **浏览**：Material 3 风格瀑布流；类型筛选；服务端搜索  
 - **图片**：列表缩略图（`size=thumb`）；点击 lightbox 看原图（`size=full`）  
 - **OCR**：中英识别，限高可滚动展示，写入可检索字段  
-- **实时**：SSE 推送新条目，增量合并而非整表重刷  
+- **实时**：SSE 控制面推送；15s heartbeat；慢客户端 `resync_required`；切回标签 `mergeHead` 补快照（非整表重刷）  
 - **规模**：游标分页 + 列表不拉 BLOB + `content-visibility`  
 - **备份（灾备平面）**：CloudDocs · **按机器** `hosts/{hostId}/` · `sqlite3_backup` · 互不覆盖  
 - **多机同步**：每机事务 + 云盘运输 · 最终一致 · 附件 `live/attach/` · **禁止整库覆盖当同步**  

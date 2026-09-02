@@ -6358,14 +6358,56 @@ window.ClipViewMasonry = Masonry;
 
     window.addEventListener('resize', () => scheduleRebalance());
 
-    // SSE incremental — never full-list reset on delete (that zeros scroll).
+    // SSE control stream: native EventSource retry + snapshot resync.
+    // Heartbeat `ping` is silent. Overflow/reconnect → mergeHead (not fetchPage reset).
+    let liveSSE = null;
+    let sseLastEventAt = 0;
+    let sseReconnectTimer = 0;
+    let resyncTimer = 0;
+    let resyncing = false;
+    let resyncQueued = false;
+    const SSE_STALE_MS = 25000;
+
+    function noteSSEEvent() { sseLastEventAt = Date.now(); }
+
+    function scheduleResync() {
+      if (resyncing) { resyncQueued = true; return; }
+      if (resyncTimer) return;
+      resyncTimer = setTimeout(async () => {
+        resyncTimer = 0;
+        resyncing = true;
+        try { await mergeHead(); }
+        finally {
+          resyncing = false;
+          if (resyncQueued) { resyncQueued = false; scheduleResync(); }
+        }
+      }, 40);
+    }
+
+    function sseIsFresh() {
+      return liveSSE
+        && liveSSE.readyState === EventSource.OPEN
+        && (Date.now() - sseLastEventAt) <= SSE_STALE_MS;
+    }
+
     function setupSSE() {
+      if (sseIsFresh()) return;
+      if (liveSSE) {
+        try { liveSSE.close(); } catch (_) {}
+        liveSSE = null;
+      }
       const es = new EventSource(API + '/api/events');
+      liveSSE = es;
+      es.onopen = () => { noteSSEEvent(); scheduleResync(); };
       es.onmessage = e => {
+        noteSSEEvent();
         try {
           const d = JSON.parse(e.data);
-          if (d.type === 'update') {
-            mergeHead();
+          if (d.type === 'ping') return;
+          if (d.type === 'connected' || d.type === 'resync_required'
+              || d.type === 'control.resync_required' || d.type === 'sync.resync_required'
+              || d.type === 'update') {
+            scheduleResync();
             return;
           }
           if (d.type === 'clip_deleted' || d.type === 'clip_restored') {
@@ -6389,8 +6431,24 @@ window.ClipViewMasonry = Masonry;
           }
         } catch (_) {}
       };
-      es.onerror = () => { es.close(); setTimeout(setupSSE, 3000); };
+      es.onerror = () => {
+        // Native EventSource reconnects via `retry:`. Only reopen if the browser gave up.
+        if (es.readyState !== EventSource.CLOSED) return;
+        if (liveSSE === es) liveSSE = null;
+        try { es.close(); } catch (_) {}
+        clearTimeout(sseReconnectTimer);
+        sseReconnectTimer = setTimeout(setupSSE, 3000);
+      };
     }
+
+    function onFeedVisible() {
+      if (document.visibilityState === 'hidden') return;
+      if (!sseIsFresh()) setupSSE();
+      scheduleResync();
+    }
+    document.addEventListener('visibilitychange', onFeedVisible);
+    window.addEventListener('pageshow', (ev) => { if (ev.persisted) onFeedVisible(); });
+    window.addEventListener('online', onFeedVisible);
 
     /**
      * Remote/local-echo delete·restore via SSE.
