@@ -93,7 +93,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **URL 归档（save useful）**：手动「归档网页」→ WKWebView+Readability；预览消毒不可点 | 前端 CORS fetch 当归档；自动爬每一个链接 |
 | **View**：弹层 iframe `src=/api/archive/view?embed=1`（真文档，浏览器引擎排版）；可再开新标签 | srcdoc / Turndown 自绘；毛玻璃+transform 包 iframe；只弹出孤立 tab |
 | **归档后同一按钮变「查看」**（同槽同尺寸）；已归档禁止再点「归档网页」 | 另塞一颗小「查看」；归档按钮归档后仍可点 |
-| **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶；**跨机必须走 op-log `pin`/`unpin`** | 改 timestamp 冒充置顶；钉子混进下一页重复出现；只写本机列不同步 |
+| **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶；**跨机必须走 op-log `pin`/`unpin`**。取消置顶必须立刻清 `pinnedAt`、丢卡片缓存、移出 pin rail；JSON 未置顶发 `pinnedAt: null`；SSE `clip_pinned`。禁止 `{...old, ...item}` 留下旧 `pinnedAt` | 改 timestamp 冒充置顶；钉子混进下一页重复出现；只写本机列不同步；取消置顶要刷新才消失 |
 | **关联 clip_link**：判断层；append-only `clip_link_ops` + 投影 `clip_links`/`link_count`；跨机必须 `recordLocalClipLink`；捕获目标 exact `content_hash`，笔记目标 UUID；禁止改 capture 正文、禁止跳转 `fetchPage(reset)` | 把 hash 当行 PK；只写本机表不同步；用 `text_hash` 当 locator |
 | **归档 / 阅读态跨机**：`web_archive` 的 `blob_keys` = HTML **闭包**（root + 文内 `/api/archive/asset` CAS）+ `reader_op` | 只传 html sha；图只躺在对端 `hosts/*/blobs` 灾备里 |
 | **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |

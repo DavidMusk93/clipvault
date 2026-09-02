@@ -406,6 +406,15 @@ test('cards can be pinned and stay at the top of the feed', () => {
   assert.match(indexHtml, /id="pinRail"/, 'pinned rail');
   assert.match(indexHtml, /feed-split/, 'divider under pins');
   assert.match(indexHtml, /pin-on/, 'filled keep when pinned');
+  assert.match(indexHtml, /function applyLocalPin/, 'optimistic pin/unpin');
+  assert.match(indexHtml, /item\.pinned === false/, 'unpin must not keep stale pinnedAt');
+  assert.match(indexHtml, /cardCache\.delete\(id\)/, 'drop cached chrome so pin chip leaves');
+  assert.match(indexHtml, /clip_pinned/, 'SSE pin for other tabs');
+  assert.doesNotMatch(
+    indexHtml.slice(indexHtml.indexOf('async function togglePin'), indexHtml.indexOf('async function deleteClip')),
+    /clips\[idx\] = \{ \.\.\.clips\[idx\], \.\.\.data\.item \}/,
+    'must not spread server item over leftover pinnedAt',
+  );
 });
 
 test('feed JSON must not embed archive HTML into masonry items', () => {

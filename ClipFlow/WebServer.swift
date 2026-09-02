@@ -492,9 +492,10 @@ class WebServer {
         }
     }
 
-    func broadcastSSE(event: String, id: String? = nil) {
+    func broadcastSSE(event: String, id: String? = nil, extra: [String: Any] = [:]) {
         var obj: [String: Any] = ["type": event]
         if let id = id, !id.isEmpty { obj["id"] = id }
+        for (k, v) in extra { obj[k] = v }
         guard let json = try? JSONSerialization.data(withJSONObject: obj),
               let jsonStr = String(data: json, encoding: .utf8) else { return }
         let payload = Data("data: \(jsonStr)\n\n".utf8)
@@ -1371,6 +1372,7 @@ class WebServer {
             dict["pinnedAt"] = pin.timeIntervalSince1970
         } else {
             dict["pinned"] = false
+            dict["pinnedAt"] = NSNull()
         }
         dict["linkCount"] = item.linkCount
         // Thumb URL for image types — client never loads full blob in feed
@@ -1863,6 +1865,9 @@ class WebServer {
                         pinned: pinned,
                         pinnedAt: item.pinnedAt
                     )
+                    self.broadcastSSE(event: "clip_pinned", id: uuid.uuidString, extra: [
+                        "pinned": pinned
+                    ])
                     self.sendJSON(["ok": true, "item": self.itemToJSON(item)], connection: connection)
                 } else {
                     self.sendJSON(["ok": false, "message": "置顶失败"], connection: connection)

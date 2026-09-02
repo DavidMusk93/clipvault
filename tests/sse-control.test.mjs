@@ -23,6 +23,14 @@ test('this file is in the deploy frontend gate', () => {
   assert.match(check, /sse-control\.test\.mjs/);
 });
 
+test('unpin JSON nulls pinnedAt and SSE clip_pinned', () => {
+  const json = sliceFrom(web, 'dict["pinned"] = true', 400);
+  assert.match(json, /pinnedAt"\] = NSNull\(\)/);
+  const pin = sliceFrom(web, 'func handleClipPin', 1800);
+  assert.match(pin, /broadcastSSE\(event: "clip_pinned"/);
+  assert.match(indexHtml, /d\.type === 'clip_pinned'/);
+});
+
 test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
   const attach = sliceFrom(web, 'func attachSSELocked', 4000);
   assert.match(attach, /retry: 3000/);

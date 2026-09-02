@@ -3397,7 +3397,35 @@ window.ClipViewMasonry = Masonry;
     }
 
     function itemIsPinned(item) {
-      return !!(item && (item.pinned || item.pinnedAt));
+      if (!item) return false;
+      if (item.pinned === false) return false;
+      return !!(item.pinned || item.pinnedAt);
+    }
+
+    function pinFieldsFrom(src) {
+      const pinned = !!(src && src.pinned === true);
+      return {
+        pinned,
+        pinnedAt: pinned ? (Number(src.pinnedAt) || Date.now() / 1000) : null,
+      };
+    }
+
+    function applyLocalPin(id, pinned, pinnedAt) {
+      const fields = pinFieldsFrom({
+        pinned: !!pinned,
+        pinnedAt: pinned ? (pinnedAt || Date.now() / 1000) : null,
+      });
+      let found = false;
+      clips = clips.map((c) => {
+        if (c.id !== id) return c;
+        found = true;
+        return { ...c, ...fields };
+      });
+      if (!found) return;
+      clips = sortClipsForFeed(dedupeClipsById(clips));
+      cardCache.delete(id);
+      colHeights = null;
+      rebuildFromData({ preserveScroll: true });
     }
 
     function sortClipsForFeed(list) {
@@ -3442,17 +3470,18 @@ window.ClipViewMasonry = Masonry;
         clips = clips.map((c) => {
           const n = byId.get(c.id);
           if (!n) return c;
+          const pf = pinFieldsFrom(n);
           const next = {
             ...c,
             archived: n.archived,
             archive: n.archive,
             textContent: n.textContent || c.textContent,
-            pinned: n.pinned,
-            pinnedAt: n.pinnedAt,
+            pinned: pf.pinned,
+            pinnedAt: pf.pinnedAt,
             linkCount: n.linkCount != null ? n.linkCount : c.linkCount,
           };
-          if (!!c.pinned !== !!n.pinned) pinChanged = true;
-          if (!!c.archived !== !!n.archived || !!c.pinned !== !!n.pinned) flagDirty.push(next);
+          if (itemIsPinned(c) !== pf.pinned) pinChanged = true;
+          if (!!c.archived !== !!n.archived || itemIsPinned(c) !== pf.pinned) flagDirty.push(next);
           if ((Number(c.linkCount) || 0) !== (Number(next.linkCount) || 0)) {
             patchCardLinkState(c.id, { linkCount: next.linkCount || 0 });
           }
@@ -5491,6 +5520,7 @@ window.ClipViewMasonry = Masonry;
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
       card.dataset.id = item.id;
       card.dataset.type = item.type;
+      card.dataset.pinned = itemIsPinned(item) ? '1' : '0';
       const timeStr = formatItemTime(item);
 
       let body = '';
@@ -5762,12 +5792,13 @@ window.ClipViewMasonry = Masonry;
 
     function ensureCard(item) {
       let c = cardCache.get(item.id);
-      if (!c) {
-        c = buildCard(item);
-        cardCache.set(item.id, c);
-        highlightCard(c);
-      }
-      return c;
+      const pinBit = itemIsPinned(item) ? '1' : '0';
+      if (c && c.dataset.pinned === pinBit) return c;
+      const next = buildCard(item);
+      if (c && c.parentNode) c.parentNode.replaceChild(next, c);
+      cardCache.set(item.id, next);
+      highlightCard(next);
+      return next;
     }
 
     /**
@@ -6248,27 +6279,29 @@ window.ClipViewMasonry = Masonry;
     wireForcePlainCopyOnce();
 
     async function togglePin(item) {
-      if (!item || !item.id) return;
-      const next = !itemIsPinned(item);
+      const id = item && item.id ? item.id : item;
+      if (!id) return;
+      const current = clips.find((c) => c.id === id) || item;
+      const next = !itemIsPinned(current);
+      applyLocalPin(id, next);
       try {
         const res = await fetch(API + '/api/clips/pin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: item.id, pinned: next }),
+          body: JSON.stringify({ id, pinned: next }),
         });
         const data = await res.json();
         if (!data.ok || !data.item) {
+          applyLocalPin(id, !next);
           toast('置顶失败');
           return;
         }
-        const idx = clips.findIndex((c) => c.id === item.id);
-        if (idx >= 0) clips[idx] = { ...clips[idx], ...data.item };
-        else clips.unshift(data.item);
-        clips = sortClipsForFeed(dedupeClipsById(clips));
-        colHeights = null;
-        rebuildFromData({ preserveScroll: true });
+        const f = pinFieldsFrom(data.item);
+        const cur = clips.find((c) => c.id === id);
+        if (cur && itemIsPinned(cur) !== f.pinned) applyLocalPin(id, f.pinned, f.pinnedAt);
         toast(next ? '已置顶' : '已取消置顶');
       } catch (_) {
+        applyLocalPin(id, !next);
         toast('置顶失败');
       }
     }
@@ -6412,6 +6445,11 @@ window.ClipViewMasonry = Masonry;
           }
           if (d.type === 'clip_deleted' || d.type === 'clip_restored') {
             applyRemoteClipRemoval(d);
+            return;
+          }
+          if (d.type === 'clip_pinned' && d.id) {
+            if (clips.some((c) => c.id === d.id)) applyLocalPin(d.id, !!d.pinned, d.pinnedAt);
+            else if (d.pinned) scheduleResync();
             return;
           }
           if (d.type === 'ocr_ready' && d.id) {
