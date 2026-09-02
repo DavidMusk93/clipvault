@@ -67,7 +67,11 @@ test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', ()
   assert.match(src, /header-two/);
   assert.match(src, /MARKDOWN/);
   assert.match(src, /renderFence/);
+  assert.match(src, /headingLike/);
+  assert.match(src, /isUsableArticleHTML/);
   assert.match(svc, /XArticleHTML\.enrich/);
+  assert.match(svc, /XArticleHTML\.isUsableArticleHTML/);
+  assert.doesNotMatch(svc, /contains\("<pre"\) \|\| html\.lowercased\(\)\.contains\("<h2"\)/);
 });
 
 test('archive extract keeps diagram lists Readability would drop', () => {

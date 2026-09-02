@@ -2,8 +2,9 @@ import Foundation
 import Network
 
 /// X Articles (x.com/i/article) store headings / lists / fenced code as Draft.js
-/// `header-two` / `MARKDOWN` entities. WKWebView+Readability only sees the
-/// tweet dump: a stream of `<p>`, with atomic code blocks collapsed to spaces.
+/// `header-two` / `unordered-list-item` / `MARKDOWN` entities. Many articles never
+/// use header-two: section titles stay unstyled 「一、…」. WKWebView+Readability
+/// only sees the tweet dump: a stream of `<p>`, lists and atomic code gone.
 enum XArticleHTML {
     static func isXURL(_ raw: String) -> Bool {
         guard let host = URL(string: raw)?.host?.lowercased() else { return false }
@@ -22,22 +23,47 @@ enum XArticleHTML {
         return nil
     }
 
-    /// Readability dump of an X Article: lots of `<p>`, no `<pre>` / `<h2>`.
+    /// Readability dump of an X Article: lots of `<p>`, no headings / code / lists.
     static func looksFlattened(_ html: String) -> Bool {
+        !looksStructured(html)
+    }
+
+    /// Draft.js rebuilt HTML is usable even without `<pre>` / `<h2>`.
+    /// Many X Articles are title + lists + unstyled 一、 sections, no code.
+    static func looksStructured(_ html: String) -> Bool {
         let lower = html.lowercased()
-        let hasCode = lower.contains("<pre") || lower.contains("<code")
-        let hasHead = lower.contains("<h1") || lower.contains("<h2") || lower.contains("<h3")
-        return !hasCode && !hasHead
+        for needle in ["<pre", "<code", "<h1", "<h2", "<h3", "<ul", "<ol", "<blockquote", "<figure"] {
+            if lower.contains(needle) { return true }
+        }
+        return false
+    }
+
+    /// Authors often type 「一、标题」 as unstyled instead of header-two.
+    static func headingLike(_ raw: String) -> Bool {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 2, t.count <= 48 else { return false }
+        let ns = t as NSString
+        let patterns = [
+            "^[一二三四五六七八九十百零〇两]+[、.．]",
+            "^第[一二三四五六七八九十百零〇两0-9]+[章节部分篇]",
+            "^[0-9]{1,2}[\\.、．]\\s*\\S",
+        ]
+        for p in patterns {
+            let r = ns.range(of: p, options: .regularExpression)
+            if r.location == 0, r.length > 0 { return true }
+        }
+        return false
+    }
+
+    static func isUsableArticleHTML(_ html: String) -> Bool {
+        html.utf8.count > 80 && html.contains("cv-x-article")
     }
 
     static func enrich(url: String, html: String, title: String) -> (html: String, title: String, engine: String)? {
         guard isXURL(url), looksFlattened(html) else { return nil }
         guard let fetched = fetchArticle(url: url) else { return nil }
         let rendered = render(article: fetched.article)
-        guard let rendered, rendered.utf8.count > 80 else { return nil }
-        if !rendered.lowercased().contains("<pre"), !rendered.lowercased().contains("<h2") {
-            return nil
-        }
+        guard let rendered, isUsableArticleHTML(rendered) else { return nil }
         let t = fetched.title.isEmpty ? title : fetched.title
         return (rendered, t, "x-article+draftjs")
     }
@@ -100,7 +126,11 @@ enum XArticleHTML {
                 }
             default:
                 let inner = styledText(block)
-                if !inner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let plain = ((block["text"] as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if headingLike(plain) {
+                    out += "<h2>\(inner)</h2>\n"
+                } else if !inner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     out += "<p>\(inner)</p>\n"
                 }
             }
@@ -252,14 +282,26 @@ enum XArticleHTML {
     }
 
     /// After wrapping some UTF-16 slices in tags, escape remaining plain text.
+    /// Tag inners were already escaped; copy the whole element so `&gt;` stays `&gt;`.
     private static func escapeOutsideTags(_ s: String) -> String {
         var out = ""
         var i = s.startIndex
         while i < s.endIndex {
             if s[i] == "<" {
                 if let close = s[i...].firstIndex(of: ">") {
-                    out += s[i...close]
+                    let tag = String(s[i...close])
+                    out += tag
                     i = s.index(after: close)
+                    if !tag.hasPrefix("</"), !tag.hasSuffix("/>") {
+                        let name = tag.dropFirst().prefix(while: { $0.isLetter || $0.isNumber })
+                        if !name.isEmpty {
+                            let closer = "</\(name)>"
+                            if let end = s[i...].range(of: closer) {
+                                out += s[i..<end.upperBound]
+                                i = end.upperBound
+                            }
+                        }
+                    }
                     continue
                 }
             }

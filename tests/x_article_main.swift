@@ -26,6 +26,12 @@ enum XArticleHTMLTests {
         ok("is-x", XArticleHTML.isXURL("https://x.com/i/article/1"))
         ok("flattened", XArticleHTML.looksFlattened("<div><p>hello</p><p>world</p></div>"))
         ok("not-flat-pre", !XArticleHTML.looksFlattened("<pre><code>x</code></pre>"))
+        ok("not-flat-ul", !XArticleHTML.looksFlattened("<div><ul><li>a</li></ul></div>"))
+        ok("heading-cn", XArticleHTML.headingLike("一、维他命与补剂：先验血，再补缺口"))
+        ok("heading-five", XArticleHTML.headingLike("五、最核心、投入产出比最高的5 条行动"))
+        ok("heading-num", XArticleHTML.headingLike("1. Zone 2"))
+        ok("not-heading-body", !XArticleHTML.headingLike("当下欧美精英阶层的健康方式已经高度趋同：把健康当成可量化、可审计的资产。"))
+        ok("not-heading-fact", !XArticleHTML.headingLike("Fact：曼哈顿私人诊所的常规是每年检测ApoB。"))
 
         let fence = XArticleHTML.renderFence("```ts\nconst g = prog()\n```")
         ok("fence-pre", fence.contains("<pre><code class=\"language-ts\">"))
@@ -66,6 +72,43 @@ enum XArticleHTMLTests {
         ]
         let full = XArticleHTML.render(article: article) ?? ""
         ok("wrap", full.contains("cv-x-article") && full.contains("<h1>异步续延与 Effect 架构的第一性原理</h1>"))
+        ok("usable", XArticleHTML.isUsableArticleHTML(full))
+
+        // Kenny-style: title + unstyled 一、 + ul/ol, no header-two / MARKDOWN.
+        // Old gate required <pre>|<h2> and dropped this onto Readability <p> soup.
+        let kennyBlocks: [[String: Any]] = [
+            ["type": "unstyled", "text": "把健康当成可量化资产。", "inlineStyleRanges": [["offset": 5, "length": 3, "style": "Bold"]]],
+            ["type": "unstyled", "text": "一、维他命与补剂：先验血，再补缺口"],
+            ["type": "unordered-list-item", "text": "Omega-3", "inlineStyleRanges": [["offset": 0, "length": 7, "style": "Bold"]]],
+            ["type": "unordered-list-item", "text": "维生素 D3 + K2"],
+            ["type": "unstyled", "text": "五、最核心、投入产出比最高的5 条行动"],
+            ["type": "ordered-list-item", "text": "每周锁定 180 分钟 Zone 2"],
+            ["type": "ordered-list-item", "text": "固定 7-7.5 小时睡眠窗口"],
+        ]
+        let kennyArticle: [String: Any] = [
+            "title": "欧美精英阶层极简健康管理架构",
+            "cover_media": [
+                "media_info": ["original_img_url": "https://pbs.twimg.com/media/HHjlxaAWAAcqAIn.jpg"],
+            ],
+            "content": ["blocks": kennyBlocks, "entityMap": [] as [Any]],
+        ]
+        let kenny = XArticleHTML.render(article: kennyArticle) ?? ""
+        ok("kenny-usable", XArticleHTML.isUsableArticleHTML(kenny))
+        ok("kenny-h1", kenny.contains("<h1>欧美精英阶层极简健康管理架构</h1>"))
+        ok("kenny-cover", kenny.contains("HHjlxaAWAAcqAIn.jpg"))
+        ok("kenny-h2", kenny.contains("<h2>一、维他命与补剂：先验血，再补缺口</h2>"))
+        ok("kenny-h2-five", kenny.contains("<h2>五、最核心、投入产出比最高的5 条行动</h2>"))
+        ok("kenny-ul", kenny.contains("<ul>") && kenny.contains("<li><strong>Omega-3</strong></li>"))
+        ok("kenny-ol", kenny.contains("<ol>") && kenny.contains("<li>每周锁定 180 分钟 Zone 2</li>"))
+        ok("kenny-no-pre-ok", !kenny.lowercased().contains("<pre"))
+        ok("kenny-bold-body", kenny.contains("<strong>可量化</strong>"))
+
+        let gtBlock: [[String: Any]] = [
+            ["type": "unstyled", "text": "核心是 数据 > 意志力", "inlineStyleRanges": [["offset": 4, "length": 8, "style": "Bold"]]],
+        ]
+        let gtHTML = XArticleHTML.renderBlocks(gtBlock, entityMap: nil)
+        ok("bold-gt", gtHTML.contains("<strong>数据 &gt; 意志力</strong>"))
+        ok("bold-gt-once", !gtHTML.contains("&amp;gt;"))
 
         if fails > 0 {
             FileHandle.standardError.write(Data("x-article-html: \(fails) failed\n".utf8))

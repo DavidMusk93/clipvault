@@ -127,7 +127,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 guard let self else { return }
                 if let fetched = XArticleHTML.fetchArticle(url: job.url),
                    let html = XArticleHTML.render(article: fetched.article),
-                   html.lowercased().contains("<pre") || html.lowercased().contains("<h2") {
+                   XArticleHTML.isUsableArticleHTML(html) {
                     print("[Archive] x-article fast-path \(job.url) bytes=\(html.utf8.count)")
                     DispatchQueue.main.async {
                         self.finish(
