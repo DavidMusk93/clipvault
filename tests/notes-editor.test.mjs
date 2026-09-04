@@ -29,6 +29,15 @@ test('notes editor is CodeMirror 6, not Crepe/Vditor', () => {
   assert.match(restart, /web\//);
 });
 
+test('notes preview code is Apple light, not a charcoal well', () => {
+  assert.match(css, /\.notes-code[\s\S]{0,180}#f5f5f7/);
+  assert.doesNotMatch(css, /\.notes-preview-inner pre[\s\S]{0,120}background:\s*#1d1d1f/);
+  assert.match(css, /Xcode Light/);
+  assert.match(entry, /appleLight/);
+  assert.match(entry, /enhancePreview/);
+  assert.match(html, /#f2f2f7/);
+});
+
 test('panel is source + preview split', () => {
   assert.match(html, /id="notesEditor"/);
   assert.match(html, /data-mode="source"/);

@@ -1,4 +1,4 @@
-/* ClipVault notes editor — CodeMirror 6 source + marked preview. */
+/* ClipVault notes editor — Apple Notes paper + Xcode Light code. */
 
 @font-face {
   font-family: "JetBrains Mono";
@@ -34,15 +34,19 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: #fbfbfd;
   border-right: 0.5px solid rgba(60, 60, 67, 0.12);
 }
-.notes-work[data-mode="source"] .notes-source { border-right: 0; }
+.notes-work[data-mode="source"] .notes-source {
+  border-right: 0;
+  background: #fff;
+}
 .notes-source .cm-editor { height: 100%; }
 .notes-source .cm-scroller { overflow: auto; }
 
 .notes-splitter {
   cursor: col-resize;
-  background: transparent;
+  background: rgba(60, 60, 67, 0.08);
   position: relative;
   z-index: 1;
 }
@@ -64,88 +68,166 @@
   background: #fff;
 }
 .notes-preview-inner {
-  max-width: 42em;
+  max-width: 38rem;
   margin: 0 auto;
-  padding: 16px 28px 64px;
-  font: 17px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  padding: 22px 36px 72px;
+  font: 17px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Segoe UI", system-ui, sans-serif;
   letter-spacing: -0.011em;
   color: #1d1d1f;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   word-wrap: break-word;
 }
 .notes-preview-inner > :first-child { margin-top: 0; }
+
 .notes-preview-inner h1,
 .notes-preview-inner h2,
 .notes-preview-inner h3,
 .notes-preview-inner h4 {
   font-weight: 650;
   letter-spacing: -0.022em;
-  line-height: 1.25;
+  line-height: 1.22;
   color: #1d1d1f;
 }
-.notes-preview-inner h1 { font-size: 1.55rem; margin: 0.2rem 0 0.85rem; }
-.notes-preview-inner h2 { font-size: 1.22rem; margin: 1.8rem 0 0.65rem; }
-.notes-preview-inner h3 { font-size: 1.05rem; margin: 1.35rem 0 0.45rem; }
-.notes-preview-inner h4 { font-size: 0.98rem; margin: 1.1rem 0 0.4rem; }
-.notes-preview-inner p { margin: 0.72rem 0; }
+.notes-preview-inner h1 { font-size: 1.65rem; margin: 0.15rem 0 0.9rem; letter-spacing: -0.028em; }
+.notes-preview-inner h2 { font-size: 1.22rem; margin: 1.85rem 0 0.55rem; }
+.notes-preview-inner h3 { font-size: 1.05rem; margin: 1.4rem 0 0.4rem; }
+.notes-preview-inner h4 { font-size: 0.95rem; margin: 1.15rem 0 0.35rem; color: #3a3a3c; }
+.notes-preview-inner p { margin: 0.78rem 0; }
 .notes-preview-inner ul,
-.notes-preview-inner ol { margin: 0.55rem 0; padding-left: 1.3rem; }
-.notes-preview-inner li { margin: 0.22rem 0; }
-.notes-preview-inner blockquote {
-  margin: 0.8rem 0;
-  padding: 0.15rem 0 0.15rem 0.9rem;
-  border-left: 3px solid rgba(196, 122, 44, 0.55);
-  color: #3a3a3c;
+.notes-preview-inner ol {
+  margin: 0.55rem 0 0.7rem;
+  padding-left: 1.35rem;
 }
+.notes-preview-inner li { margin: 0.28rem 0; }
+.notes-preview-inner li::marker { color: #86868b; }
+.notes-preview-inner ul ul,
+.notes-preview-inner ol ol,
+.notes-preview-inner ul ol,
+.notes-preview-inner ol ul { margin: 0.15rem 0; }
+.notes-preview-inner blockquote {
+  margin: 1rem 0;
+  padding: 0.05rem 0 0.05rem 0.95rem;
+  border-left: 3px solid #d2d2d7;
+  color: #6e6e73;
+}
+.notes-preview-inner blockquote p { margin: 0.4rem 0; }
 .notes-preview-inner hr {
   border: 0;
-  border-top: 0.5px solid rgba(60, 60, 67, 0.18);
-  margin: 1.4rem 0;
+  border-top: 0.5px solid rgba(60, 60, 67, 0.16);
+  margin: 1.7rem 0;
 }
-.notes-preview-inner a { color: #0071e3; text-decoration: none; }
+.notes-preview-inner a {
+  color: #0071e3;
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
 .notes-preview-inner a:hover { text-decoration: underline; }
-.notes-preview-inner code {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.86em;
+.notes-preview-inner strong { font-weight: 650; }
+.notes-preview-inner em { font-style: italic; }
+
+.notes-preview-inner :not(pre) > code {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.84em;
+  font-variant-ligatures: none;
+  background: rgba(120, 120, 128, 0.12);
+  color: #1d1d1f;
+  padding: 0.12em 0.38em;
+  border-radius: 5px;
+}
+
+.notes-code {
+  margin: 1.05rem 0;
   background: #f5f5f7;
-  padding: 0.12em 0.35em;
-  border-radius: 4px;
-}
-.notes-preview-inner pre {
-  margin: 1rem 0;
-  padding: 12px 14px;
-  background: #1d1d1f;
-  color: #f5f5f7;
+  border: 0.5px solid rgba(60, 60, 67, 0.1);
   border-radius: 10px;
-  overflow: auto;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.5;
+  overflow: hidden;
 }
-.notes-preview-inner pre code {
+.notes-code-lang {
+  height: 28px;
+  padding: 0 12px;
+  font: 500 11px/28px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  color: #6e6e73;
+  border-bottom: 0.5px solid rgba(60, 60, 67, 0.08);
+}
+.notes-preview-inner pre,
+.notes-code pre {
+  margin: 0;
+  padding: 12px 14px 14px;
+  background: transparent;
+  color: #1d1d1f;
+  overflow: auto;
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  font-variant-ligatures: none;
+  white-space: pre;
+}
+.notes-preview-inner pre code,
+.notes-code pre code {
   background: transparent;
   color: inherit;
   padding: 0;
   font-size: inherit;
+  border-radius: 0;
 }
+
+/* Xcode Light, scoped so wall hljs github theme does not leak in. */
+.notes-preview .hljs { background: transparent; color: #1d1d1f; }
+.notes-preview .hljs-keyword,
+.notes-preview .hljs-selector-tag,
+.notes-preview .hljs-literal { color: #9b2393; }
+.notes-preview .hljs-string,
+.notes-preview .hljs-addition { color: #c41a16; }
+.notes-preview .hljs-comment,
+.notes-preview .hljs-quote { color: #6e6e73; font-style: italic; }
+.notes-preview .hljs-number,
+.notes-preview .hljs-regexp { color: #1c00cf; }
+.notes-preview .hljs-title,
+.notes-preview .hljs-section,
+.notes-preview .hljs-type,
+.notes-preview .hljs-built_in,
+.notes-preview .hljs-class .hljs-title { color: #0b84d2; }
+.notes-preview .hljs-attr,
+.notes-preview .hljs-attribute,
+.notes-preview .hljs-variable { color: #3f6e3b; }
+.notes-preview .hljs-meta,
+.notes-preview .hljs-punctuation { color: #6e6e73; }
+.notes-preview .hljs-function .hljs-title { color: #0b84d2; }
+
 .notes-preview-inner img {
   max-width: 100%;
   height: auto;
   border-radius: 10px;
   display: block;
-  margin: 0.8rem 0;
+  margin: 1rem 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 .notes-preview-inner table {
+  width: 100%;
   border-collapse: collapse;
-  margin: 0.9rem 0;
+  margin: 1rem 0;
   font-size: 15px;
+  line-height: 1.45;
 }
 .notes-preview-inner th,
 .notes-preview-inner td {
-  border: 0.5px solid rgba(60, 60, 67, 0.18);
-  padding: 6px 10px;
+  border-bottom: 0.5px solid rgba(60, 60, 67, 0.14);
+  padding: 8px 12px;
+  text-align: left;
 }
-.notes-preview-inner th { background: #f5f5f7; font-weight: 600; }
+.notes-preview-inner th {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #6e6e73;
+  background: transparent;
+}
+.notes-preview-inner tr:last-child td { border-bottom: 0; }
 
 @media (max-width: 820px) {
-  .notes-preview-inner { padding: 12px 18px 48px; }
+  .notes-preview-inner { padding: 16px 20px 56px; }
 }

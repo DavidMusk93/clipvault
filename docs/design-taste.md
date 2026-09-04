@@ -132,13 +132,14 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 | Token | 值 | 用途 |
 | --- | --- | --- |
 | 霜 | `rgba(245,245,247,.42)` blur 28 | 只糊墙一次 |
-| 列表 | Cream `rgba(248,241,231,.94)` | 重材质，和纸面分开 |
+| 列表 | Apple 侧栏 `#F2F2F7` | 和纸面分开；选中 `rgba(0,0,0,.06)` 不是蜂蜜底 |
 | 纸 | `#fff` 实心 | 阅读/预览面。禁止再叠 blur |
+| 源码栏 | `#FBFBFD` | 比预览略灰，像 macOS 分栏 |
 | 标题 | 28px / 700 / -0.03em / 高 52 | 高度锁死 |
-| 工具条 | 36px · 12px 字 · 28px 钮 | 与评论 header 同密度 |
-| 源码 | JetBrains Mono 14.5 / 1.6 | `web/assets/fonts/`，禁止 CDN |
-| 预览正文 | SF / PingFang 17 / 1.6 · 最大 42em | 中文技术笔记 |
-| 预览代码 | 炭黑 `#1D1D1F` + JetBrains Mono 13 | 与 View 代码板同一套 |
+| 工具条 | 36px · 12px 字 · 28px 钮 · `#F6F6F8` | 与评论 header 同密度 |
+| 源码 | JetBrains Mono 14.5 / 1.62 · Xcode Light token | `web/assets/fonts/`，禁止 CDN |
+| 预览正文 | SF / PingFang 17 / 1.65 · 最大 38rem | Apple Notes 纸面 |
+| 预览代码 | 浅板 `#F5F5F7` + 11px 语言条 + Xcode Light | **不是** View 的炭黑井 |
 | 模式 | 源码 / 分栏 / 预览；桌面默认分栏 | 窄屏默认源码 |
 | 状态点 | 6px idle/dirty/saved/error | 不要用「…」撑高 meta |
 

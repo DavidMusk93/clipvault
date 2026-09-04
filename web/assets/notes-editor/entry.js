@@ -2,7 +2,8 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLi
 import { EditorState, Prec } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, indentOnInput } from '@codemirror/language'
+import { HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput } from '@codemirror/language'
+import { tags as t } from '@lezer/highlight'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { renderMarkdownBlocks } from '../../markdown-render.mjs'
@@ -20,24 +21,51 @@ const notesTheme = EditorView.theme({
   },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': {
-    fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-    lineHeight: '1.6',
+    fontFamily: '"JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace',
+    lineHeight: '1.62',
     fontVariantLigatures: 'none',
     overflow: 'auto',
   },
   '.cm-content': {
-    padding: '12px 18px 56px 8px',
+    padding: '16px 20px 56px 8px',
     caretColor: '#1d1d1f',
   },
   '.cm-gutters': {
     background: 'transparent',
     border: 'none',
-    color: 'rgba(60,60,67,0.36)',
+    color: 'rgba(60,60,67,0.28)',
   },
-  '.cm-activeLine': { backgroundColor: 'rgba(196,122,44,0.07)' },
+  '.cm-activeLine': { backgroundColor: 'rgba(0,0,0,0.035)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },
-  '.cm-lineNumbers .cm-gutterElement': { minWidth: '2.2em', padding: '0 8px 0 4px' },
+  '.cm-lineNumbers .cm-gutterElement': { minWidth: '2.2em', padding: '0 10px 0 6px' },
+  '.cm-selectionBackground': { background: 'rgba(0, 113, 227, 0.16)' },
+  '&.cm-focused .cm-selectionBackground': { background: 'rgba(0, 113, 227, 0.2)' },
+  '.cm-cursor': { borderLeftColor: '#1d1d1f' },
 })
+
+/* Xcode Light — headings stay ink, code tokens stay quiet. */
+const appleLight = HighlightStyle.define([
+  { tag: t.heading, color: '#1d1d1f', fontWeight: '650' },
+  { tag: t.strong, fontWeight: '650' },
+  { tag: t.emphasis, fontStyle: 'italic' },
+  { tag: t.strikethrough, textDecoration: 'line-through', color: '#86868b' },
+  { tag: t.link, color: '#0071e3' },
+  { tag: t.url, color: '#6e6e73' },
+  { tag: t.comment, color: '#6e6e73', fontStyle: 'italic' },
+  { tag: t.keyword, color: '#9b2393' },
+  { tag: t.string, color: '#c41a16' },
+  { tag: t.number, color: '#1c00cf' },
+  { tag: t.bool, color: '#1c00cf' },
+  { tag: t.typeName, color: '#0b84d2' },
+  { tag: t.className, color: '#0b84d2' },
+  { tag: t.atom, color: '#0b84d2' },
+  { tag: t.meta, color: '#6e6e73' },
+  { tag: t.processingInstruction, color: '#86868b' },
+  { tag: t.punctuation, color: '#86868b' },
+  { tag: t.operator, color: '#4a4a4a' },
+  { tag: t.contentSeparator, color: '#d2d2d7' },
+  { tag: t.monospace, color: '#1d1d1f' },
+])
 
 function loadMode() {
   try {
@@ -135,6 +163,36 @@ async function mount(root, opts) {
     if (mode !== 'preview') view.requestMeasure()
   }
 
+  function enhancePreview(root) {
+    root.querySelectorAll('pre').forEach((pre) => {
+      if (pre.parentElement && pre.parentElement.classList.contains('notes-code')) return
+      const code = pre.querySelector('code') || pre
+      const cls = code.className || ''
+      const lang = (cls.match(/language-([\w+-]+)/) || cls.match(/lang-([\w+-]+)/) || [])[1] || ''
+      const hljs = globalThis.hljs
+      if (hljs && code.textContent) {
+        try {
+          if (lang && typeof hljs.getLanguage === 'function' && hljs.getLanguage(lang)) {
+            code.innerHTML = hljs.highlight(code.textContent, { language: lang, ignoreIllegals: true }).value
+            code.classList.add('hljs')
+          } else if (typeof hljs.highlightElement === 'function') {
+            hljs.highlightElement(code)
+          }
+        } catch (_) {}
+      }
+      const wrap = document.createElement('div')
+      wrap.className = 'notes-code'
+      pre.parentNode.insertBefore(wrap, pre)
+      if (lang) {
+        const lab = document.createElement('div')
+        lab.className = 'notes-code-lang'
+        lab.textContent = lang
+        wrap.appendChild(lab)
+      }
+      wrap.appendChild(pre)
+    })
+  }
+
   function renderPreview(md) {
     const text = String(md || '')
     if (text === lastHash) return
@@ -142,6 +200,7 @@ async function mount(root, opts) {
     const t = performance.now()
     const r = renderMarkdownBlocks(text, { marked, purify: DOMPurify })
     previewInner.innerHTML = r.ok ? r.html : ''
+    enhancePreview(previewInner)
     const dur = performance.now() - t
     metric('notes_preview_ms', { dur_ms: dur, payload: { chars: text.length } })
     if (dur > 16) metric('notes_input_to_preview', { dur_ms: dur })
@@ -201,7 +260,7 @@ async function mount(root, opts) {
       indentOnInput(),
       bracketMatching(),
       markdown(),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      syntaxHighlighting(appleLight, { fallback: true }),
       EditorView.lineWrapping,
       notesTheme,
       pasteDrop,

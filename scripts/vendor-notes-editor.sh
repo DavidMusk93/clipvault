@@ -22,6 +22,7 @@ npm install --no-fund --no-audit \
   @codemirror/commands@6 \
   @codemirror/language@6 \
   @codemirror/lang-markdown@6 \
+  @lezer/highlight@1 \
   marked@9.1.6 \
   dompurify@3.1.6 \
   esbuild
