@@ -53,6 +53,67 @@ export function renderMarkdownToHtml(src, engines = {}) {
   return { html: safe, engine: 'marked+dompurify', ok: true };
 }
 
+const PURIFY_OPTS = {
+  USE_PROFILES: { html: true },
+  FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
+  FORBID_ATTR: ['style'],
+  ALLOW_DATA_ATTR: false,
+  ADD_ATTR: ['data-source-line', 'target', 'rel'],
+};
+
+/**
+ * Notes preview: GFM HTML with data-source-line on block roots. Links stay navigable.
+ * @param {string} src
+ * @param {{ marked?: any, purify?: any }} engines
+ * @returns {{ html: string, ok: boolean, engine: string }}
+ */
+export function renderMarkdownBlocks(src, engines = {}) {
+  const text = String(src ?? '').replace(/\r\n/g, '\n');
+  const marked = engines.marked ?? (typeof globalThis !== 'undefined' ? globalThis.marked : null);
+  const purify = engines.purify ?? (typeof globalThis !== 'undefined' ? globalThis.DOMPurify : null);
+  if (!marked || (typeof marked.lexer !== 'function' && typeof marked.parse !== 'function')) {
+    return { html: '', ok: false, engine: '' };
+  }
+  if (!purify || typeof purify.sanitize !== 'function') {
+    return { html: '', ok: false, engine: 'marked-no-purify' };
+  }
+  try {
+    if (typeof marked.setOptions === 'function') {
+      marked.setOptions({ gfm: true, breaks: true });
+    }
+    const lexer = typeof marked.lexer === 'function' ? marked.lexer.bind(marked) : null;
+    const parser = typeof marked.parser === 'function' ? marked.parser.bind(marked) : null;
+    if (!lexer || !parser) {
+      const raw = typeof marked.parse === 'function'
+        ? marked.parse(text, { async: false, gfm: true, breaks: true })
+        : marked(text);
+      const safe = purify.sanitize(String(raw || ''), PURIFY_OPTS);
+      return { html: safe, ok: true, engine: 'marked+dompurify' };
+    }
+    const tokens = lexer(text);
+    let pos = 0;
+    const parts = [];
+    for (const t of tokens) {
+      const raw = String(t.raw || '');
+      const i = raw ? text.indexOf(raw, pos) : pos;
+      const at = i >= 0 ? i : pos;
+      const line = text.slice(0, at).split('\n').length;
+      pos = at + raw.length;
+      let html = parser([t]);
+      html = purify.sanitize(String(html || ''), PURIFY_OPTS);
+      html = html.replace(
+        /^\s*<([a-zA-Z][a-zA-Z0-9]*)/,
+        `<$1 data-source-line="${line}"`,
+      );
+      html = html.replace(/<a\b/gi, '<a target="_blank" rel="noopener noreferrer"');
+      parts.push(html);
+    }
+    return { html: parts.join(''), ok: true, engine: 'marked+dompurify' };
+  } catch (_) {
+    return { html: '', ok: false, engine: 'marked-error' };
+  }
+}
+
 /** AGENTS §8: display only — no navigable links in card. */
 export function neutralizeAnchorsHtml(html) {
   if (typeof DOMParser === 'undefined') {

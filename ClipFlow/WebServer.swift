@@ -319,6 +319,8 @@ class WebServer {
             handleComposeSave(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/compose/image" {
             handleComposeImage(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/ui-metrics" {
+            handleUiMetricsIngest(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/pin" {
             handleClipPin(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/link" {
@@ -455,6 +457,8 @@ class WebServer {
             sendImage(path: path, connection: connection)
         } else if pathOnly == "/api/events" {
             handleSSEEvents(connection: connection)
+        } else if pathOnly == "/api/ui-metrics/summary" {
+            handleUiMetricsSummary(path: path, connection: connection)
         } else if pathOnly == "/api/backup/status" {
             sendBackupStatus(connection: connection)
         } else if pathOnly == "/api/backup/snapshots" {
@@ -1389,6 +1393,32 @@ class WebServer {
         return dict
     }
 
+    /// POST /api/ui-metrics  { events:[{name, ts?, dur_ms?, ok?, payload?}], session? }
+    /// Local diagnostics only. Never synced. Payload must not contain note content.
+    private func handleUiMetricsIngest(data: Data, connection: NWConnection) {
+        guard let obj = jsonBody(from: data),
+              let events = obj["events"] as? [[String: Any]] else {
+            sendJSON(["ok": false, "message": "expected {events:[]}"], connection: connection)
+            return
+        }
+        let session = (obj["session"] as? String) ?? "anon"
+        let r = UiMetrics.shared.ingest(events: events, defaultSession: session)
+        if !r.ok {
+            sendJSON(["ok": false, "message": r.message ?? "rejected"], connection: connection)
+            return
+        }
+        sendJSON(["ok": true, "accepted": r.accepted], connection: connection)
+    }
+
+    /// GET /api/ui-metrics/summary?from=&to=  unix ms. Default last 24h.
+    private func handleUiMetricsSummary(path: String, connection: NWConnection) {
+        func ms(_ name: String) -> Int64? {
+            guard let s = Self.formQueryValue(path: path, name: name), let n = Int64(s) else { return nil }
+            return n
+        }
+        sendJSON(UiMetrics.shared.summary(fromMs: ms("from"), toMs: ms("to")), connection: connection)
+    }
+
     /// POST /api/compose  { id?, title?, body, refId? }
     private func handleComposeSave(data: Data, connection: NWConnection) {
         guard let obj = jsonBody(from: data) else {
@@ -1406,7 +1436,7 @@ class WebServer {
                 return
             }
             CloudDocsSyncService.shared?.recordLocalCompose(item: item)
-            self.broadcastSSE(event: "update")
+            self.broadcastSSE(event: "compose_saved", id: item.id.uuidString)
             self.sendJSON(["ok": true, "item": self.itemToJSON(item)], connection: connection)
         }
     }

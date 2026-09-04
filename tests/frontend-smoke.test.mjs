@@ -78,8 +78,11 @@ test('notes are a panel on the same page', () => {
   assert.match(indexHtml, /class="notes-frost"/);
   assert.match(indexHtml, /exclude.*note/);
   assert.match(indexHtml, /body\.notes-open \.top-bar/);
+  assert.match(indexHtml, /data-mode="split"/);
   assert.doesNotMatch(indexHtml, /id="composeSheet"/);
   assert.doesNotMatch(indexHtml, /想到的写下/);
+  assert.doesNotMatch(indexHtml, /vditor/i);
+  assert.doesNotMatch(indexHtml, /milkdown-top-bar/);
 });
 
 test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {

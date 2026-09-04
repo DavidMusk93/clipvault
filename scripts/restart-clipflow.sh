@@ -53,11 +53,11 @@ fi
 LIVE_HOME="$(dirname "$LIVE_BIN")"
 LIVE_HOME="$(dirname "$LIVE_HOME")"
 if [ -f "$REPO_ROOT/web/index.html" ]; then
-  echo "Installing web/index.html -> $LIVE_HOME/web/"
+  echo "Installing web/ -> $LIVE_HOME/web/"
   mkdir -p "$LIVE_HOME/web"
-  cp "$REPO_ROOT/web/index.html" "$LIVE_HOME/web/index.html"
+  rsync -a --exclude '.DS_Store' "$REPO_ROOT/web/" "$LIVE_HOME/web/"
   if [ -d "$HOME/Documents/ClipFlow/web" ] && [ "$LIVE_HOME/web" != "$HOME/Documents/ClipFlow/web" ]; then
-    cp "$REPO_ROOT/web/index.html" "$HOME/Documents/ClipFlow/web/index.html"
+    rsync -a --exclude '.DS_Store' "$REPO_ROOT/web/" "$HOME/Documents/ClipFlow/web/"
   fi
 fi
 

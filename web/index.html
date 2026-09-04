@@ -19,6 +19,7 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css" />
   <script src="/assets/notes-editor/notes-editor.js"></script>
+  <script src="/assets/notes-metrics.js"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -169,9 +170,9 @@
     }
     body.notes-open .top-bar,
     body.notes-open .chips {
-      transform: translateY(-120%);
       opacity: 0;
       pointer-events: none;
+      visibility: hidden;
     }
     body.notes-open .notes-fab { display: none !important; }
     .chips::-webkit-scrollbar { display: none; }
@@ -1697,25 +1698,26 @@
       background: var(--ink); color: #fff; border-color: transparent;
     }
 
-    /* Notes: same page, panel from the 笔记 control. No second document. */
+    /* Notes: same page, panel from the 笔记 control. No second document.
+       Frost once. Paper is solid. Source | preview live in notes-editor.css. */
     .notes-panel {
       position: fixed; inset: 0; z-index: 200;
       pointer-events: none;
       opacity: 0;
-      transform: translateY(18px) scale(0.985);
-      transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
+      transition: opacity 0.2s cubic-bezier(0.23, 1, 0.32, 1);
     }
     .notes-panel.open {
       pointer-events: auto;
       opacity: 1;
-      transform: none;
     }
+    .notes-panel.open .notes-frost { will-change: opacity; }
+    .notes-panel.open.is-settled .notes-frost { will-change: auto; }
     .notes-frost {
       position: absolute; inset: 0;
       pointer-events: none;
-      background: rgba(245, 245, 247, 0.32);
-      -webkit-backdrop-filter: blur(40px) saturate(180%);
-      backdrop-filter: blur(40px) saturate(180%);
+      background: rgba(245, 245, 247, 0.42);
+      -webkit-backdrop-filter: blur(28px) saturate(140%);
+      backdrop-filter: blur(28px) saturate(140%);
     }
     .notes-shell {
       position: relative; z-index: 1;
@@ -1727,14 +1729,14 @@
     .notes-rail, .notes-paper {
       position: relative; z-index: 1;
       min-width: 0; min-height: 0;
-      background: rgba(255,255,255,0.38);
-      border: 0.5px solid rgba(255,255,255,0.55);
       box-shadow: 0 8px 40px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.04);
     }
     .notes-rail {
       border-radius: 18px;
       display: flex; flex-direction: column;
       overflow: hidden;
+      background: rgba(248, 241, 231, 0.94);
+      border: 0.5px solid rgba(60, 60, 67, 0.12);
     }
     .notes-rail-top {
       display: flex; align-items: center; gap: 8px;
@@ -1773,60 +1775,67 @@
       font-variant-numeric: tabular-nums;
     }
     .notes-paper {
+      position: relative;
       border-radius: 20px;
       display: flex; flex-direction: column;
       overflow: hidden;
+      background: #fff;
+      border: 0.5px solid rgba(60, 60, 67, 0.12);
     }
     .notes-title {
       flex: none; border: 0; outline: none; background: transparent;
-      padding: 18px 22px 6px;
+      height: 52px;
+      padding: 14px 56px 4px 22px;
       font: 700 28px/1.15 var(--font-ui);
       letter-spacing: -0.03em; color: var(--ink);
     }
     .notes-title::placeholder { color: rgba(60,60,67,0.28); font-weight: 650; }
-    .notes-meta {
-      flex: none; padding: 0 22px 8px;
-      font-size: 12px; color: var(--muted); min-height: 16px;
+    .notes-chrome {
+      flex: none; height: 36px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 14px 0 16px;
+      border-bottom: 0.5px solid rgba(60, 60, 67, 0.12);
+      background: #fafafa;
     }
-    #notesEditor {
-      flex: 1; min-height: 0;
-      overflow: auto;
+    .notes-modes {
+      display: inline-flex; height: 26px;
+      border-radius: 8px; background: rgba(60, 60, 67, 0.08); padding: 2px;
     }
-    #notesEditor .milkdown {
-      --crepe-color-background: transparent;
-      --crepe-color-surface: rgba(255,255,255,0.48);
-      --crepe-color-surface-low: rgba(255,255,255,0.32);
-      --crepe-color-on-background: #1d1d1f;
-      --crepe-color-on-surface: #1d1d1f;
-      --crepe-color-on-surface-variant: #6e6e73;
-      --crepe-color-outline: rgba(60,60,67,0.28);
-      --crepe-color-primary: #1d1d1f;
-      --crepe-color-inline-code: #c62828;
-      --crepe-font-title: var(--font-ui);
-      --crepe-font-default: var(--font-ui);
-      --crepe-font-code: var(--font-mono);
-      --crepe-base-font-size: 17px;
-      background: transparent;
-      min-height: 100%;
+    .notes-modes button {
+      border: 0; background: transparent; color: var(--muted);
+      font: 600 12px/22px var(--font-ui); letter-spacing: -0.01em;
+      padding: 0 9px; border-radius: 6px; cursor: pointer;
     }
-    #notesEditor .milkdown .milkdown-top-bar {
-      background: rgba(255,255,255,0.46);
-      -webkit-backdrop-filter: blur(16px) saturate(160%);
-      backdrop-filter: blur(16px) saturate(160%);
-      border-bottom: 0.5px solid rgba(60,60,67,0.14);
+    .notes-modes button.is-on { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .notes-modes button:active { transform: scale(0.97); }
+    .notes-tools {
+      display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0;
+      overflow: hidden;
     }
-    #notesEditor .milkdown .ProseMirror {
-      outline: none;
-      padding: 8px 22px 40px;
+    .notes-tools button {
+      width: 28px; height: 26px; border: 0; border-radius: 6px;
+      background: transparent; color: var(--ink); cursor: pointer;
+      font: 650 12px/26px var(--font-ui);
+      display: inline-flex; align-items: center; justify-content: center;
     }
+    .notes-tools button:hover { background: rgba(60, 60, 67, 0.08); }
+    .notes-tools button:active { transform: scale(0.96); }
+    .notes-tools button .material-symbols-outlined { font-size: 16px; }
+    .notes-status {
+      width: 6px; height: 6px; border-radius: 980px; flex: none;
+      background: rgba(60, 60, 67, 0.22);
+    }
+    .notes-status[data-state="dirty"] { background: #C47A2C; }
+    .notes-status[data-state="saved"] { background: #34C759; }
+    .notes-status[data-state="error"] { background: #D70015; }
+    #notesEditor { flex: 1; min-height: 0; overflow: hidden; }
     .notes-close {
-      position: absolute; top: 18px; right: 20px; z-index: 2;
+      position: absolute; top: 14px; right: 16px; z-index: 2;
       width: 32px; height: 32px; border: 0; border-radius: 980px;
       background: var(--fill); color: var(--ink); cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center;
     }
     .notes-close:active { transform: scale(0.94); }
-    .notes-paper { position: relative; }
     @media (max-width: 820px) {
       .notes-shell { grid-template-columns: 1fr; padding: 8px; }
       .notes-panel.is-writing .notes-rail { display: none; }
@@ -1838,9 +1847,7 @@
     @media (prefers-reduced-transparency: reduce) {
       .notes-panel { background: #f5f5f7; }
       .notes-frost { display: none; }
-      .notes-rail, .notes-paper, #notesEditor .milkdown .milkdown-top-bar {
-        background: #fff !important; backdrop-filter: none; -webkit-backdrop-filter: none;
-      }
+      .notes-rail, .notes-paper { background: #fff !important; backdrop-filter: none; -webkit-backdrop-filter: none; }
     }
 
     /* —— Backup / Sync sheet —— */
@@ -2099,6 +2106,14 @@
         <button type="button" id="syRunNow">立即同步</button>
         <button type="button" class="secondary" id="syRefresh">刷新同步状态</button>
       </div>
+
+      <h3 style="font-size:14px;font-weight:600;margin-top:20px">笔记性能</h3>
+      <p class="backup-label" style="margin:4px 0 8px">本机 24 小时；不含正文。库文件 ui-metrics.db，不同步。</p>
+      <div class="backup-row"><span class="backup-label">事件</span><span class="backup-value" id="nmTotal">—</span></div>
+      <ul class="snap-list" id="nmList"></ul>
+      <div class="backup-actions">
+        <button type="button" class="secondary" id="nmRefresh">刷新指标</button>
+      </div>
     </div>
   </aside>
 
@@ -2250,8 +2265,28 @@
         <span class="material-symbols-outlined">close</span>
       </button>
       <input id="notesTitle" class="notes-title" maxlength="120" placeholder="标题" />
-      <div class="notes-meta" id="notesMeta"></div>
-      <div id="notesEditor"></div>
+      <div class="notes-chrome">
+        <div class="notes-modes" id="notesModes" role="tablist" aria-label="编辑模式">
+          <button type="button" data-mode="source">源码</button>
+          <button type="button" data-mode="split">分栏</button>
+          <button type="button" data-mode="preview">预览</button>
+        </div>
+        <div class="notes-tools" id="notesTools">
+          <button type="button" data-cmd="h1" title="标题">H1</button>
+          <button type="button" data-cmd="h2" title="二级标题">H2</button>
+          <button type="button" data-cmd="bold" title="粗体"><span class="material-symbols-outlined">format_bold</span></button>
+          <button type="button" data-cmd="italic" title="斜体"><span class="material-symbols-outlined">format_italic</span></button>
+          <button type="button" data-cmd="ul" title="列表"><span class="material-symbols-outlined">format_list_bulleted</span></button>
+          <button type="button" data-cmd="ol" title="编号"><span class="material-symbols-outlined">format_list_numbered</span></button>
+          <button type="button" data-cmd="quote" title="引用"><span class="material-symbols-outlined">format_quote</span></button>
+          <button type="button" data-cmd="code" title="行内代码"><span class="material-symbols-outlined">code</span></button>
+          <button type="button" data-cmd="codeblock" title="代码块"><span class="material-symbols-outlined">terminal</span></button>
+          <button type="button" data-cmd="link" title="链接"><span class="material-symbols-outlined">link</span></button>
+          <button type="button" data-cmd="table" title="表格"><span class="material-symbols-outlined">table</span></button>
+        </div>
+        <span class="notes-status" id="notesStatus" data-state="idle" title="保存状态"></span>
+      </div>
+      <div id="notesEditor" class="notes-work"></div>
     </section>
     </div>
   </div>
@@ -3073,7 +3108,7 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0 };
 
     function noteExcerpt(md) {
       return (md || '').replace(/^#+\s+/gm, '').replace(/!\[[^\]]*]\([^)]+\)/g, '')
@@ -3111,11 +3146,15 @@ window.ClipViewMasonry = Masonry;
         m = document.createElement('div'); m.className = 'nm';
         btn.replaceChildren(t, x, m);
       }
-      t.textContent = noteTitleOf(n) || '未命名';
-      x.textContent = noteExcerpt(n.textContent || '');
-      m.textContent = formatItemTime(n);
+      const title = noteTitleOf(n) || '未命名';
+      const excerpt = noteExcerpt(n.textContent || '');
+      const when = formatItemTime(n);
+      if (t.textContent !== title) t.textContent = title;
+      if (x.textContent !== excerpt) x.textContent = excerpt;
+      if (m.textContent !== when) m.textContent = when;
     }
     function paintNotesList() {
+      const t0 = performance.now();
       const q = (document.getElementById('notesSearch')?.value || '').trim().toLowerCase();
       const root = document.getElementById('notesList');
       if (!root) return;
@@ -3137,6 +3176,8 @@ window.ClipViewMasonry = Masonry;
         }
         fillNoteRow(btn, n);
       });
+      const M = globalThis.ClipNotesMetrics;
+      if (M) M.emit('notes_paint_list', { dur_ms: performance.now() - t0, payload: { n: rows.length } });
     }
 
     async function loadNotesList() {
@@ -3162,36 +3203,53 @@ window.ClipViewMasonry = Masonry;
       return j.url;
     }
 
-    function notesHint(text) {
-      const el = document.getElementById('notesMeta');
-      if (el) el.textContent = text || '';
+    function notesStatus(state) {
+      const el = document.getElementById('notesStatus');
+      if (el) el.dataset.state = state || 'idle';
+    }
+    function paintNotesModes() {
+      const mode = notesState.editor?.getMode?.() || 'split';
+      document.querySelectorAll('#notesModes [data-mode]').forEach((b) => {
+        b.classList.toggle('is-on', b.dataset.mode === mode);
+      });
+    }
+    function nm(name, extra) {
+      const M = globalThis.ClipNotesMetrics;
+      if (M) M.emit(name, extra || {});
     }
 
     async function ensureNotesEditor(markdown) {
       const host = document.getElementById('notesEditor');
       if (!host || typeof ClipNotesEditor === 'undefined') return;
       const text = decodeNoteBody(markdown);
+      notesState.gen += 1;
+      const g = notesState.gen;
+      notesState.applying = true;
       if (notesState.editor) {
-        notesState.applying = true;
         notesState.editor.setMarkdown(text || '');
-        queueMicrotask(() => { notesState.applying = false; });
+        const clear = () => { if (notesState.gen === g) notesState.applying = false; };
+        queueMicrotask(clear);
+        requestAnimationFrame(clear);
+        paintNotesModes();
         return;
       }
-      notesState.applying = true;
       notesState.editor = await ClipNotesEditor.mount(host, {
         markdown: text || '',
         uploadImage: uploadNoteImage,
         onUpdate() {
           if (notesState.applying) return;
+          globalThis.ClipNotesMetrics?.noteInput?.();
           scheduleNoteSave();
         },
+        onMetric(name, extra) { nm(name, extra); },
       });
-      notesState.applying = false;
+      if (notesState.gen === g) notesState.applying = false;
+      paintNotesModes();
     }
 
     function scheduleNoteSave() {
       notesState.dirty = true;
-      notesHint('…');
+      notesStatus('dirty');
       clearTimeout(notesState.timer);
       notesState.timer = setTimeout(() => saveNoteNow(), 800);
     }
@@ -3203,6 +3261,7 @@ window.ClipViewMasonry = Masonry;
       if (!title && !String(body || '').trim()) return;
       const payload = { body, title: title || null };
       if (notesState.id) payload.id = notesState.id;
+      const t0 = performance.now();
       try {
         const res = await fetch(API + '/api/compose', {
           method: 'POST',
@@ -3210,16 +3269,23 @@ window.ClipViewMasonry = Masonry;
           body: JSON.stringify(payload),
         });
         const j = await res.json();
-        if (!res.ok || j.ok === false) { notesHint(j.message || ''); return; }
+        const dur = performance.now() - t0;
+        if (!res.ok || j.ok === false) {
+          notesStatus('error');
+          nm('note_save', { dur_ms: dur, ok: false, payload: { bytes: body.length } });
+          return;
+        }
         notesState.id = j.item.id;
         const idx = notesState.items.findIndex(n => n.id === notesState.id);
         if (idx >= 0) notesState.items[idx] = j.item;
         else notesState.items.unshift(j.item);
         notesState.dirty = false;
-        notesHint('');
+        notesStatus('saved');
+        nm('note_save', { dur_ms: dur, ok: true, payload: { bytes: body.length } });
         paintNotesList();
       } catch (e) {
-        notesHint('');
+        notesStatus('error');
+        nm('note_save', { dur_ms: performance.now() - t0, ok: false, payload: { bytes: body.length } });
       }
     }
 
@@ -3227,6 +3293,7 @@ window.ClipViewMasonry = Masonry;
       if (notesState.dirty) await saveNoteNow();
       const item = notesState.items.find(n => n.id === id);
       if (!item) return;
+      const switching = notesState.id && notesState.id !== id;
       notesState.id = id;
       const t = noteTitleOf(item);
       const titleEl = document.getElementById('notesTitle');
@@ -3234,6 +3301,7 @@ window.ClipViewMasonry = Masonry;
       ensureNotesEditor(noteStripTitle(item.textContent || '', t));
       document.getElementById('notesPanel')?.classList.add('is-writing');
       paintNotesList();
+      if (switching) nm('note_switch');
     }
 
     async function newNoteInPanel() {
@@ -3241,20 +3309,31 @@ window.ClipViewMasonry = Masonry;
       notesState.id = null;
       const titleEl = document.getElementById('notesTitle');
       if (titleEl) titleEl.value = '';
-      notesHint('');
+      notesStatus('idle');
       ensureNotesEditor('');
       document.getElementById('notesPanel')?.classList.add('is-writing');
       paintNotesList();
       titleEl?.focus();
+      nm('note_new');
     }
 
     async function openNotesPanel() {
       const panel = document.getElementById('notesPanel');
       if (!panel) return;
       panel.classList.add('open');
+      panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       document.body.classList.add('notes-open');
       document.getElementById('notesOpenBtn')?.classList.add('is-on');
+      notesState.openedAt = Date.now();
+      clearTimeout(notesState.settleTimer);
+      notesState.settleTimer = setTimeout(() => panel.classList.add('is-settled'), 240);
+      const M = globalThis.ClipNotesMetrics;
+      if (M) {
+        M.setOpen(true);
+        M.startObservers(panel);
+      }
+      nm('notes_open');
       if (!notesState.loaded) {
         try { await loadNotesList(); } catch (e) { notesState.items = []; }
       }
@@ -3266,10 +3345,18 @@ window.ClipViewMasonry = Masonry;
     async function closeNotesPanel() {
       if (notesState.dirty) await saveNoteNow();
       const panel = document.getElementById('notesPanel');
-      panel?.classList.remove('open', 'is-writing');
+      panel?.classList.remove('open', 'is-writing', 'is-settled');
       panel?.setAttribute('aria-hidden', 'true');
       document.body.classList.remove('notes-open');
       document.getElementById('notesOpenBtn')?.classList.remove('is-on');
+      const M = globalThis.ClipNotesMetrics;
+      if (M) {
+        M.setOpen(false);
+        M.stopObservers();
+        M.flush();
+      }
+      const held = notesState.openedAt ? Date.now() - notesState.openedAt : 0;
+      nm('notes_close', { dur_ms: held });
       if (location.hash === '#notes') history.replaceState(null, '', location.pathname + location.search);
     }
 
@@ -3284,10 +3371,35 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('notesClose')?.addEventListener('click', closeNotesPanel);
     document.getElementById('notesNew')?.addEventListener('click', newNoteInPanel);
     document.getElementById('notesTitle')?.addEventListener('input', scheduleNoteSave);
-    document.getElementById('notesSearch')?.addEventListener('input', paintNotesList);
+    document.getElementById('notesSearch')?.addEventListener('input', () => {
+      paintNotesList();
+    });
+    document.getElementById('notesModes')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-mode]');
+      if (!btn || !notesState.editor) return;
+      notesState.editor.setMode(btn.dataset.mode);
+      paintNotesModes();
+    });
+    document.getElementById('notesTools')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-cmd]');
+      if (!btn || !notesState.editor) return;
+      notesState.editor.command(btn.dataset.cmd);
+    });
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && document.getElementById('notesPanel')?.classList.contains('open')) {
+      const open = document.getElementById('notesPanel')?.classList.contains('open');
+      if (!open) return;
+      if (e.key === 'Escape') {
         closeNotesPanel();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        saveNoteNow();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault();
+        notesState.editor?.cycleMode?.();
+        paintNotesModes();
       }
     });
     if (location.hash === '#notes') {
@@ -6437,6 +6549,12 @@ window.ClipViewMasonry = Masonry;
         try {
           const d = JSON.parse(e.data);
           if (d.type === 'ping') return;
+          if (d.type === 'compose_saved') {
+            if (d.id && d.id !== notesState.id && notesState.loaded) {
+              loadNotesList().catch(() => {});
+            }
+            return;
+          }
           if (d.type === 'connected' || d.type === 'resync_required'
               || d.type === 'control.resync_required' || d.type === 'sync.resync_required'
               || d.type === 'update') {
@@ -6831,6 +6949,35 @@ window.ClipViewMasonry = Masonry;
       refreshBackupStatus();
     });
     document.getElementById('bkRefresh')?.addEventListener('click', refreshBackupStatus);
+
+    async function refreshNotesMetrics() {
+      const totalEl = document.getElementById('nmTotal');
+      const listEl = document.getElementById('nmList');
+      if (!totalEl || !listEl) return;
+      try {
+        const r = await fetch(API + '/api/ui-metrics/summary');
+        const j = await r.json();
+        if (!j.ok) { totalEl.textContent = '—'; return; }
+        totalEl.textContent = String(j.total || 0);
+        const names = Array.isArray(j.names) ? j.names : [];
+        listEl.innerHTML = names.length
+          ? names.map((row) => {
+              const avg = row.avg_ms != null ? `${Math.round(row.avg_ms)}ms` : '—';
+              return `<li class="snap-meta">${esc(row.name)} · ${row.n} · avg ${avg}</li>`;
+            }).join('')
+          : '<li class="snap-meta">暂无打点</li>';
+      } catch (_) {
+        totalEl.textContent = '—';
+      }
+    }
+    document.getElementById('nmRefresh')?.addEventListener('click', refreshNotesMetrics);
+    const backupDrawerEl = document.getElementById('backupDrawer');
+    if (backupDrawerEl) {
+      const mo = new MutationObserver(() => {
+        if (backupDrawerEl.classList.contains('open')) refreshNotesMetrics();
+      });
+      mo.observe(backupDrawerEl, { attributes: true, attributeFilter: ['class'] });
+    }
 
     // poll badge lightly
     setInterval(() => {

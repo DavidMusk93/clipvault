@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { renderMarkdownToHtml, neutralizeAnchorsHtml } from '../web/markdown-render.mjs';
+import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks } from '../web/markdown-render.mjs';
 import { formatTextForDisplay } from '../web/text-format.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,11 @@ test('without libs, render refuses DIY and returns ok:false', () => {
 test('formatTextForDisplay still detects markdown kind', () => {
   const f = formatTextForDisplay('# Title\n\n- item one\n- item two\n\n```js\nok\n```');
   assert.equal(f.kind, 'markdown');
+});
+
+test('renderMarkdownBlocks refuses without engines', () => {
+  const r = renderMarkdownBlocks('# Hi\n\npara\n', {});
+  assert.equal(r.ok, false);
 });
 
 test('neutralizeAnchorsHtml strips navigable anchors', () => {

@@ -45,16 +45,17 @@ test('notes are a same-page panel, not clip-card chrome', () => {
   assert.match(html, /\/api\/clips\?type=note/);
   assert.match(web, /excludeType/);
   assert.match(html, /class="notes-frost"/);
-  assert.match(html, /milkdown-top-bar/);
+  assert.match(html, /data-mode="split"/);
 });
 
-test('notes editor is a local Milkdown Crepe bundle', () => {
+test('notes editor is a local CodeMirror 6 bundle', () => {
   const js = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.js'), 'utf8');
   const css = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.css'), 'utf8');
   const entry = readFileSync(join(root, 'web/assets/notes-editor/entry.js'), 'utf8');
-  assert.match(js, /ClipNotesEditor|milkdown/i);
-  assert.match(css, /milkdown-top-bar/);
-  assert.match(entry, /from '@milkdown\/crepe'/);
+  assert.match(js, /ClipNotesEditor/);
+  assert.match(css, /notes-preview/);
+  assert.match(entry, /from '@codemirror\/view'/);
+  assert.doesNotMatch(entry, /@milkdown\/crepe/);
   assert.match(html, /\/assets\/notes-editor\/notes-editor\.js/);
 });
 

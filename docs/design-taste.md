@@ -125,6 +125,25 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 
 规则：只在 View 运行时包 `.cv-code` / `.cv-figure` / `.cv-table`。禁止为了高亮去改 `archive_html`。
 
+## Compose 纸面（笔记编辑器）
+
+独立 `#notesPanel`。列表在左，纸面在右。Markdown **源码和预览分开**，不要 WYSIWYG 揉在同一块 DOM。
+
+| Token | 值 | 用途 |
+| --- | --- | --- |
+| 霜 | `rgba(245,245,247,.42)` blur 28 | 只糊墙一次 |
+| 列表 | Cream `rgba(248,241,231,.94)` | 重材质，和纸面分开 |
+| 纸 | `#fff` 实心 | 阅读/预览面。禁止再叠 blur |
+| 标题 | 28px / 700 / -0.03em / 高 52 | 高度锁死 |
+| 工具条 | 36px · 12px 字 · 28px 钮 | 与评论 header 同密度 |
+| 源码 | JetBrains Mono 14.5 / 1.6 | `web/assets/fonts/`，禁止 CDN |
+| 预览正文 | SF / PingFang 17 / 1.6 · 最大 42em | 中文技术笔记 |
+| 预览代码 | 炭黑 `#1D1D1F` + JetBrains Mono 13 | 与 View 代码板同一套 |
+| 模式 | 源码 / 分栏 / 预览；桌面默认分栏 | 窄屏默认源码 |
+| 状态点 | 6px idle/dirty/saved/error | 不要用「…」撑高 meta |
+
+规则：工具条向源码插入 Markdown，不改预览 DOM。预览只读。自动保存不得回写编辑器、不得 `mergeHead` 墙。
+
 ## 品味禁区
 
 | Don't | 为什么 |
