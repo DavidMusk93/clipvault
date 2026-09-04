@@ -17,9 +17,9 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n3" />
-  <script src="/assets/notes-editor/notes-editor.js?v=n3"></script>
-  <script src="/assets/notes-metrics.js?v=n3"></script>
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n4" />
+  <script src="/assets/notes-editor/notes-editor.js?v=n4"></script>
+  <script src="/assets/notes-metrics.js?v=n4"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -1774,14 +1774,29 @@
       margin-top: 5px; font-size: 11px; color: var(--muted);
       font-variant-numeric: tabular-nums;
     }
+    /* Apple Notes: #tag is gold ink in the title, not a chip under it. */
     .notes-tag {
-      display: inline-flex; align-items: center;
-      height: 22px; padding: 0 8px; border: 0;
-      border-radius: 980px; background: #ffe566; color: #6b4f00;
-      font: 600 12px/22px var(--font-ui); letter-spacing: -0.01em;
-      cursor: pointer; user-select: none;
+      display: inline;
+      padding: 0;
+      margin: 0;
+      border: 0;
+      background: none;
+      color: #f5a400;
+      font: inherit;
+      font-weight: inherit;
+      letter-spacing: inherit;
+      cursor: pointer;
+      user-select: none;
+      border-radius: 0;
     }
-    .notes-tag:active { transform: scale(0.97); }
+    .notes-tag-filter {
+      height: 26px; padding: 0 9px; border: 0; border-radius: 980px;
+      background: rgba(245, 164, 0, 0.16); color: #c47a00;
+      font: 600 12px/26px var(--font-ui); letter-spacing: -0.01em;
+      cursor: pointer; flex: none;
+    }
+    .notes-tag-filter[hidden] { display: none; }
+    .notes-tag-filter:active { transform: scale(0.97); }
     .notes-paper {
       position: relative;
       border-radius: 20px;
@@ -1790,29 +1805,32 @@
       background: #fff;
       border: 0.5px solid rgba(60, 60, 67, 0.12);
     }
-    .notes-title {
-      flex: none; border: 0; outline: none; background: transparent;
+    .notes-title-wrap {
+      position: relative;
+      flex: none;
       height: 52px;
+    }
+    .notes-title-view,
+    .notes-title {
+      position: absolute; inset: 0;
+      border: 0; outline: none; background: transparent;
       padding: 14px 56px 4px 22px;
       font: 700 28px/1.15 var(--font-ui);
       letter-spacing: -0.03em; color: var(--ink);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    .notes-title-view { pointer-events: none; }
+    .notes-title-view .notes-tag { color: #f5a400; cursor: default; }
+    .notes-title-wrap.has-value:not(.is-editing) .notes-title {
+      color: transparent;
+      caret-color: var(--ink);
+    }
+    .notes-title-wrap.has-value:not(.is-editing) .notes-title::placeholder {
+      color: transparent;
+    }
+    .notes-title-wrap.is-editing .notes-title-view { visibility: hidden; }
     .notes-title::placeholder { color: rgba(60,60,67,0.28); font-weight: 650; }
-    .notes-tagbar {
-      flex: none;
-      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-      padding: 0 22px 8px;
-      min-height: 0;
-    }
-    .notes-tagbar[hidden] { display: none; }
-    .notes-tagbar .notes-tag { height: 22px; font-size: 12px; line-height: 22px; }
-    .notes-tagbar .notes-tag.is-on { box-shadow: 0 0 0 2px #1d1d1f; }
-    .note-row .ntags {
-      display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
-    }
-    .note-row .ntags .notes-tag {
-      height: 18px; font-size: 11px; line-height: 18px; padding: 0 6px;
-    }
+    .note-row .nt .notes-tag { color: #f5a400; font-weight: 650; }
     .notes-chrome {
       flex: none; height: 36px;
       display: flex; align-items: center; gap: 8px;
@@ -2279,6 +2297,7 @@
     <aside class="notes-rail">
       <div class="notes-rail-top">
         <input id="notesSearch" type="search" placeholder="搜索" autocomplete="off" />
+        <button type="button" class="notes-tag-filter" id="notesTagBar" hidden></button>
         <button type="button" class="notes-new" id="notesNew">新一篇</button>
       </div>
       <div class="notes-list" id="notesList"></div>
@@ -2287,8 +2306,10 @@
       <button type="button" class="notes-close" id="notesClose" title="关闭" aria-label="关闭">
         <span class="material-symbols-outlined">close</span>
       </button>
-      <input id="notesTitle" class="notes-title" maxlength="120" placeholder="标题" />
-      <div class="notes-tagbar" id="notesTagBar" hidden></div>
+      <div class="notes-title-wrap" id="notesTitleWrap">
+        <div class="notes-title-view" id="notesTitleView" aria-hidden="true"></div>
+        <input id="notesTitle" class="notes-title" maxlength="120" placeholder="标题" />
+      </div>
       <div class="notes-chrome">
         <div class="notes-modes" id="notesModes" role="tablist" aria-label="编辑模式">
           <button type="button" data-mode="source">源码</button>
@@ -3185,6 +3206,28 @@ window.ClipViewMasonry = Masonry;
       if (loc.kind === 'notes' && loc.noteId) return loc.noteId;
       try { return localStorage.getItem(NOTE_ID_KEY) || null; } catch (_) { return null; }
     }
+    function formatTaggedHtml(s) {
+      const raw = String(s || '');
+      const re = /(^|[^\w#])#([\p{L}\p{N}_/-]{1,32})/gu;
+      let out = '';
+      let last = 0;
+      let m;
+      while ((m = re.exec(raw))) {
+        const hashAt = m.index + m[1].length;
+        out += esc(raw.slice(last, hashAt));
+        out += '<span class="notes-tag" data-tag="' + escAttr(m[2]) + '">#' + esc(m[2]) + '</span>';
+        last = hashAt + m[2].length + 1;
+      }
+      out += esc(raw.slice(last));
+      return out;
+    }
+    function paintNotesTitleView() {
+      const view = document.getElementById('notesTitleView');
+      const input = document.getElementById('notesTitle');
+      if (!view || !input) return;
+      view.innerHTML = input.value ? formatTaggedHtml(input.value) : '';
+      document.getElementById('notesTitleWrap')?.classList.toggle('has-value', !!input.value);
+    }
     function setNotesTagFilter(tag) {
       const next = tag ? String(tag).replace(/^#/, '') : null;
       notesState.tagFilter = notesState.tagFilter && next
@@ -3195,26 +3238,13 @@ window.ClipViewMasonry = Masonry;
     function paintNotesTagBar() {
       const bar = document.getElementById('notesTagBar');
       if (!bar) return;
-      const md = notesState.editor ? notesState.editor.getMarkdown() : '';
-      const title = document.getElementById('notesTitle')?.value || '';
-      const tags = extractNoteTags(title + '\n' + md);
-      if (!tags.length && !notesState.tagFilter) {
+      if (!notesState.tagFilter) {
         bar.hidden = true;
-        bar.replaceChildren();
+        bar.textContent = '';
         return;
       }
       bar.hidden = false;
-      bar.replaceChildren();
-      const show = tags.length ? tags : (notesState.tagFilter ? [notesState.tagFilter] : []);
-      show.forEach((t) => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'notes-tag';
-        if (notesState.tagFilter && notesState.tagFilter.toLowerCase() === t.toLowerCase()) b.classList.add('is-on');
-        b.textContent = '#' + t;
-        b.addEventListener('click', () => setNotesTagFilter(t));
-        bar.appendChild(b);
-      });
+      bar.textContent = '#' + notesState.tagFilter;
     }
     function noteStripTitle(md, title) {
       const t = (title || '').trim();
@@ -3228,35 +3258,28 @@ window.ClipViewMasonry = Masonry;
       btn.classList.toggle('is-on', n.id === notesState.id);
       let t = btn.querySelector('.nt');
       let x = btn.querySelector('.nx');
-      let tagsEl = btn.querySelector('.ntags');
       let m = btn.querySelector('.nm');
       if (!t) {
         t = document.createElement('div'); t.className = 'nt';
         x = document.createElement('div'); x.className = 'nx';
-        tagsEl = document.createElement('div'); tagsEl.className = 'ntags';
         m = document.createElement('div'); m.className = 'nm';
-        btn.replaceChildren(t, x, tagsEl, m);
+        btn.replaceChildren(t, x, m);
+        t.addEventListener('click', (e) => {
+          const tag = e.target.closest && e.target.closest('.notes-tag');
+          if (!tag) return;
+          e.stopPropagation();
+          setNotesTagFilter(tag.dataset.tag || tag.textContent.replace(/^#/, ''));
+        });
       }
       const title = noteTitleOf(n) || '未命名';
       const excerpt = noteExcerpt(n.textContent || '');
       const when = formatItemTime(n);
-      if (t.textContent !== title) t.textContent = title;
+      if (t.dataset.raw !== title) {
+        t.dataset.raw = title;
+        t.innerHTML = formatTaggedHtml(title);
+      }
       if (x.textContent !== excerpt) x.textContent = excerpt;
       if (m.textContent !== when) m.textContent = when;
-      const tags = extractNoteTags(n.textContent || '');
-      const sig = tags.join(',');
-      if (tagsEl && tagsEl.dataset.sig !== sig) {
-        tagsEl.dataset.sig = sig;
-        tagsEl.replaceChildren();
-        tags.forEach((tg) => {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.className = 'notes-tag';
-          b.textContent = '#' + tg;
-          b.addEventListener('click', (e) => { e.stopPropagation(); setNotesTagFilter(tg); });
-          tagsEl.appendChild(b);
-        });
-      }
     }
     function paintNotesList() {
       const t0 = performance.now();
@@ -3415,6 +3438,7 @@ window.ClipViewMasonry = Masonry;
       const t = noteTitleOf(item);
       const titleEl = document.getElementById('notesTitle');
       if (titleEl) titleEl.value = t;
+      paintNotesTitleView();
       ensureNotesEditor(noteStripTitle(item.textContent || '', t));
       document.getElementById('notesPanel')?.classList.add('is-writing');
       paintNotesList();
@@ -3427,6 +3451,7 @@ window.ClipViewMasonry = Masonry;
       notesState.id = null;
       const titleEl = document.getElementById('notesTitle');
       if (titleEl) titleEl.value = '';
+      paintNotesTitleView();
       notesStatus('idle');
       ensureNotesEditor('');
       document.getElementById('notesPanel')?.classList.add('is-writing');
@@ -3494,7 +3519,18 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('notesFab')?.addEventListener('click', toggleNotesPanel);
     document.getElementById('notesClose')?.addEventListener('click', closeNotesPanel);
     document.getElementById('notesNew')?.addEventListener('click', newNoteInPanel);
-    document.getElementById('notesTitle')?.addEventListener('input', scheduleNoteSave);
+    document.getElementById('notesTitle')?.addEventListener('input', () => {
+      scheduleNoteSave();
+      paintNotesTitleView();
+    });
+    document.getElementById('notesTitle')?.addEventListener('focus', () => {
+      document.getElementById('notesTitleWrap')?.classList.add('is-editing');
+    });
+    document.getElementById('notesTitle')?.addEventListener('blur', () => {
+      document.getElementById('notesTitleWrap')?.classList.remove('is-editing');
+      paintNotesTitleView();
+    });
+    document.getElementById('notesTagBar')?.addEventListener('click', () => setNotesTagFilter(null));
     document.getElementById('notesSearch')?.addEventListener('input', () => {
       paintNotesList();
     });

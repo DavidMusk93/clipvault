@@ -142,7 +142,7 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 | 预览代码 | 浅板 `#F5F5F7` + 11px 语言条 + Xcode Light | **不是** View 的炭黑井 |
 | 模式 | 源码 / 分栏 / 预览；桌面默认分栏 | 窄屏默认源码 |
 | 状态点 | 6px idle/dirty/saved/error | 不要用「…」撑高 meta |
-| Tag | `#ffe566` 胶囊 / `#6b4f00` 字 | Apple Notes `#tag`；标题 `# 标题` 不算 tag |
+| Tag | 标题内金色 `#F5A400` 同字号，不是黄胶囊 | `#auto gateway…`；`# 标题` 不算 tag；筛选时侧栏一颗可关的滤镜钮 |
 
 规则：工具条向源码插入 Markdown，不改预览 DOM。预览只读。自动保存不得回写编辑器、不得 `mergeHead` 墙。
 

@@ -46,8 +46,11 @@ test('notes remember the open note and support Apple tags', () => {
   assert.match(html, /kind === 'notes'/);
   assert.match(html, /extractNoteTags/);
   assert.match(html, /id="notesTagBar"/);
-  assert.match(html, /className = 'notes-tag'/);
-  assert.match(css, /\.notes-tag \{/);
+  assert.match(html, /id="notesTitleView"/);
+  assert.match(html, /formatTaggedHtml/);
+  assert.match(html, /#f5a400/);
+  assert.match(css, /\.notes-preview \.notes-tag/);
+  assert.doesNotMatch(css, /background:\s*#ffe566/);
   assert.match(entry, /tagifyPreview/);
   assert.match(swift, /max-age=60/);
 });
