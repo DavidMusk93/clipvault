@@ -191,6 +191,42 @@ async function mount(root, opts) {
       }
       wrap.appendChild(pre)
     })
+    tagifyPreview(root)
+  }
+
+  function tagifyPreview(root) {
+    const re = /(^|[^\w#])#([\p{L}\p{N}_/-]{1,32})/gu
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        const p = n.parentElement
+        if (!p || p.closest('pre, code, a, .notes-tag')) return NodeFilter.FILTER_REJECT
+        if (!n.nodeValue || n.nodeValue.indexOf('#') < 0) return NodeFilter.FILTER_REJECT
+        return NodeFilter.FILTER_ACCEPT
+      },
+    })
+    const nodes = []
+    while (walker.nextNode()) nodes.push(walker.currentNode)
+    for (const node of nodes) {
+      const s = node.nodeValue
+      re.lastIndex = 0
+      if (!re.test(s)) continue
+      re.lastIndex = 0
+      const frag = document.createDocumentFragment()
+      let last = 0
+      let m
+      while ((m = re.exec(s))) {
+        const hashAt = m.index + m[1].length
+        if (hashAt > last) frag.append(s.slice(last, hashAt))
+        const span = document.createElement('span')
+        span.className = 'notes-tag'
+        span.dataset.tag = m[2]
+        span.textContent = '#' + m[2]
+        frag.append(span)
+        last = hashAt + m[2].length + 1
+      }
+      if (last < s.length) frag.append(s.slice(last))
+      node.parentNode.replaceChild(frag, node)
+    }
   }
 
   function renderPreview(md) {
@@ -304,6 +340,12 @@ async function mount(root, opts) {
     previewEl.scrollTop = Math.max(0, top)
     requestAnimationFrame(() => { syncing = false })
   }
+
+  previewEl.addEventListener('click', (e) => {
+    const tag = e.target.closest && e.target.closest('.notes-tag')
+    if (!tag || typeof opts.onTag !== 'function') return
+    opts.onTag(tag.dataset.tag || tag.textContent.replace(/^#/, ''))
+  })
 
   splitEl.addEventListener('pointerdown', (e) => {
     if (mode !== 'split') return

@@ -31,11 +31,25 @@ test('notes editor is CodeMirror 6, not Crepe/Vditor', () => {
 
 test('notes preview code is Apple light, not a charcoal well', () => {
   assert.match(css, /\.notes-code[\s\S]{0,180}#f5f5f7/);
-  assert.doesNotMatch(css, /\.notes-preview-inner pre[\s\S]{0,120}background:\s*#1d1d1f/);
+  assert.match(css, /background:\s*#f5f5f7\s*!important/);
+  assert.doesNotMatch(css, /\.notes-preview-inner pre[\s\S]{0,80}background:\s*#1d1d1f/);
   assert.match(css, /Xcode Light/);
   assert.match(entry, /appleLight/);
   assert.match(entry, /enhancePreview/);
   assert.match(html, /#f2f2f7/);
+  assert.match(html, /notes-editor\.css\?v=/);
+});
+
+test('notes remember the open note and support Apple tags', () => {
+  assert.match(html, /clipvault\.notes\.id/);
+  assert.match(html, /notes\/\$\{|notes\/' \+|notes\//);
+  assert.match(html, /kind === 'notes'/);
+  assert.match(html, /extractNoteTags/);
+  assert.match(html, /id="notesTagBar"/);
+  assert.match(html, /className = 'notes-tag'/);
+  assert.match(css, /\.notes-tag \{/);
+  assert.match(entry, /tagifyPreview/);
+  assert.match(swift, /max-age=60/);
 });
 
 test('panel is source + preview split', () => {

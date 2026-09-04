@@ -956,13 +956,16 @@ class WebServer {
         case "ttf": ctype = "font/ttf"
         default: ctype = "application/octet-stream"
         }
+        let cache = (ext == "css" || ext == "js" || ext == "mjs")
+            ? "public, max-age=60, must-revalidate"
+            : "public, max-age=86400"
         sendBinary(
             status: 200,
             reason: "OK",
             contentType: ctype,
             body: data,
             connection: connection,
-            extraHeaders: [("Cache-Control", "public, max-age=86400")]
+            extraHeaders: [("Cache-Control", cache)]
         )
     }
 

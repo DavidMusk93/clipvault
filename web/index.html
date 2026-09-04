@@ -17,9 +17,9 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css" />
-  <script src="/assets/notes-editor/notes-editor.js"></script>
-  <script src="/assets/notes-metrics.js"></script>
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n3" />
+  <script src="/assets/notes-editor/notes-editor.js?v=n3"></script>
+  <script src="/assets/notes-metrics.js?v=n3"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -1774,6 +1774,14 @@
       margin-top: 5px; font-size: 11px; color: var(--muted);
       font-variant-numeric: tabular-nums;
     }
+    .notes-tag {
+      display: inline-flex; align-items: center;
+      height: 22px; padding: 0 8px; border: 0;
+      border-radius: 980px; background: #ffe566; color: #6b4f00;
+      font: 600 12px/22px var(--font-ui); letter-spacing: -0.01em;
+      cursor: pointer; user-select: none;
+    }
+    .notes-tag:active { transform: scale(0.97); }
     .notes-paper {
       position: relative;
       border-radius: 20px;
@@ -1790,6 +1798,21 @@
       letter-spacing: -0.03em; color: var(--ink);
     }
     .notes-title::placeholder { color: rgba(60,60,67,0.28); font-weight: 650; }
+    .notes-tagbar {
+      flex: none;
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      padding: 0 22px 8px;
+      min-height: 0;
+    }
+    .notes-tagbar[hidden] { display: none; }
+    .notes-tagbar .notes-tag { height: 22px; font-size: 12px; line-height: 22px; }
+    .notes-tagbar .notes-tag.is-on { box-shadow: 0 0 0 2px #1d1d1f; }
+    .note-row .ntags {
+      display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+    }
+    .note-row .ntags .notes-tag {
+      height: 18px; font-size: 11px; line-height: 18px; padding: 0 6px;
+    }
     .notes-chrome {
       flex: none; height: 36px;
       display: flex; align-items: center; gap: 8px;
@@ -2265,6 +2288,7 @@
         <span class="material-symbols-outlined">close</span>
       </button>
       <input id="notesTitle" class="notes-title" maxlength="120" placeholder="标题" />
+      <div class="notes-tagbar" id="notesTagBar" hidden></div>
       <div class="notes-chrome">
         <div class="notes-modes" id="notesModes" role="tablist" aria-label="编辑模式">
           <button type="button" data-mode="source">源码</button>
@@ -2669,7 +2693,8 @@ window.ClipViewMasonry = Masonry;
     function parseAppHash() {
       const raw = String(location.hash || '').replace(/^#/, '');
       if (!raw) return { kind: null };
-      if (raw === 'notes') return { kind: 'notes' };
+      let nm = raw.match(/^notes(?:\/([0-9a-fA-F-]{36}))?$/i);
+      if (nm) return { kind: 'notes', noteId: nm[1] || null };
       let m = raw.match(/^h=([0-9a-fA-F]{64})$/);
       if (m) return { kind: 'hash', hash: m[1].toLowerCase() };
       m = raw.match(/^id=([0-9a-fA-F-]{36})$/i);
@@ -2732,7 +2757,7 @@ window.ClipViewMasonry = Masonry;
       // Wall jump: scroll if mounted; else merge + preserveScroll rebuild.
       if (!loc || !loc.kind) return;
       if (loc.kind === 'notes') {
-        await openNotesPanel();
+        await openNotesPanel(loc.noteId);
         return;
       }
       let item = null;
@@ -2762,9 +2787,7 @@ window.ClipViewMasonry = Masonry;
         return;
       }
       if (item.type === 'note' || item.isCompose) {
-        await openNotesPanel();
-        if (item.id && typeof openNoteInPanel === 'function') await openNoteInPanel(item.id);
-        try { history.replaceState(null, '', '#id=' + item.id); } catch (_) {}
+        await openNotesPanel(item.id);
         return;
       }
       if (item.inTrash) {
@@ -2813,7 +2836,7 @@ window.ClipViewMasonry = Masonry;
       const loc = parseAppHash();
       if (!loc.kind) return;
       await jumpToLocator(loc);
-      consumeWallLocatorHash();
+      if (loc.kind !== 'notes') consumeWallLocatorHash();
     }
 
     // —— Evaluation sheet (apple-design): pencil entry, dual-hit stars, history ——
@@ -3108,7 +3131,8 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0 };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null };
+    const NOTE_ID_KEY = 'clipvault.notes.id';
 
     function noteExcerpt(md) {
       return (md || '').replace(/^#+\s+/gm, '').replace(/!\[[^\]]*]\([^)]+\)/g, '')
@@ -3127,6 +3151,71 @@ window.ClipViewMasonry = Masonry;
       if (t.includes('\\t') && !t.includes('\t')) t = t.replace(/\\t/g, '\t');
       return t;
     }
+    function extractNoteTags(md) {
+      const text = decodeNoteBody(md || '');
+      const tags = [];
+      const seen = new Set();
+      let fence = false;
+      for (const line of text.split('\n')) {
+        if (/^\s{0,3}```/.test(line)) { fence = !fence; continue; }
+        if (fence) continue;
+        if (/^\s{0,3}#{1,6}\s/.test(line)) continue;
+        const re = /(^|[^\w#])#([\p{L}\p{N}_/-]{1,32})/gu;
+        let m;
+        while ((m = re.exec(line))) {
+          const k = m[2].toLowerCase();
+          if (seen.has(k)) continue;
+          seen.add(k);
+          tags.push(m[2]);
+        }
+      }
+      return tags;
+    }
+    function persistNotesId(id) {
+      if (id) {
+        try { localStorage.setItem(NOTE_ID_KEY, id); } catch (_) {}
+      }
+      const want = id ? '#notes/' + id : '#notes';
+      if (location.hash !== want) {
+        try { history.replaceState(null, '', want); } catch (_) {}
+      }
+    }
+    function lastNotesId() {
+      const loc = parseAppHash();
+      if (loc.kind === 'notes' && loc.noteId) return loc.noteId;
+      try { return localStorage.getItem(NOTE_ID_KEY) || null; } catch (_) { return null; }
+    }
+    function setNotesTagFilter(tag) {
+      const next = tag ? String(tag).replace(/^#/, '') : null;
+      notesState.tagFilter = notesState.tagFilter && next
+        && notesState.tagFilter.toLowerCase() === next.toLowerCase() ? null : next;
+      paintNotesTagBar();
+      paintNotesList();
+    }
+    function paintNotesTagBar() {
+      const bar = document.getElementById('notesTagBar');
+      if (!bar) return;
+      const md = notesState.editor ? notesState.editor.getMarkdown() : '';
+      const title = document.getElementById('notesTitle')?.value || '';
+      const tags = extractNoteTags(title + '\n' + md);
+      if (!tags.length && !notesState.tagFilter) {
+        bar.hidden = true;
+        bar.replaceChildren();
+        return;
+      }
+      bar.hidden = false;
+      bar.replaceChildren();
+      const show = tags.length ? tags : (notesState.tagFilter ? [notesState.tagFilter] : []);
+      show.forEach((t) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'notes-tag';
+        if (notesState.tagFilter && notesState.tagFilter.toLowerCase() === t.toLowerCase()) b.classList.add('is-on');
+        b.textContent = '#' + t;
+        b.addEventListener('click', () => setNotesTagFilter(t));
+        bar.appendChild(b);
+      });
+    }
     function noteStripTitle(md, title) {
       const t = (title || '').trim();
       const raw = decodeNoteBody(md);
@@ -3139,12 +3228,14 @@ window.ClipViewMasonry = Masonry;
       btn.classList.toggle('is-on', n.id === notesState.id);
       let t = btn.querySelector('.nt');
       let x = btn.querySelector('.nx');
+      let tagsEl = btn.querySelector('.ntags');
       let m = btn.querySelector('.nm');
       if (!t) {
         t = document.createElement('div'); t.className = 'nt';
         x = document.createElement('div'); x.className = 'nx';
+        tagsEl = document.createElement('div'); tagsEl.className = 'ntags';
         m = document.createElement('div'); m.className = 'nm';
-        btn.replaceChildren(t, x, m);
+        btn.replaceChildren(t, x, tagsEl, m);
       }
       const title = noteTitleOf(n) || '未命名';
       const excerpt = noteExcerpt(n.textContent || '');
@@ -3152,13 +3243,35 @@ window.ClipViewMasonry = Masonry;
       if (t.textContent !== title) t.textContent = title;
       if (x.textContent !== excerpt) x.textContent = excerpt;
       if (m.textContent !== when) m.textContent = when;
+      const tags = extractNoteTags(n.textContent || '');
+      const sig = tags.join(',');
+      if (tagsEl && tagsEl.dataset.sig !== sig) {
+        tagsEl.dataset.sig = sig;
+        tagsEl.replaceChildren();
+        tags.forEach((tg) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'notes-tag';
+          b.textContent = '#' + tg;
+          b.addEventListener('click', (e) => { e.stopPropagation(); setNotesTagFilter(tg); });
+          tagsEl.appendChild(b);
+        });
+      }
     }
     function paintNotesList() {
       const t0 = performance.now();
       const q = (document.getElementById('notesSearch')?.value || '').trim().toLowerCase();
       const root = document.getElementById('notesList');
       if (!root) return;
-      const rows = notesState.items.filter(n => !q || (n.textContent || '').toLowerCase().includes(q));
+      const wantTag = notesState.tagFilter ? notesState.tagFilter.toLowerCase() : '';
+      const rows = notesState.items.filter(n => {
+        if (q && !(n.textContent || '').toLowerCase().includes(q)) return false;
+        if (wantTag) {
+          const tags = extractNoteTags(n.textContent || '');
+          if (!tags.some((t) => t.toLowerCase() === wantTag)) return false;
+        }
+        return true;
+      });
       const keep = new Set(rows.map(n => n.id));
       [...root.children].forEach(el => {
         if (!keep.has(el.dataset.noteId)) el.remove();
@@ -3240,7 +3353,9 @@ window.ClipViewMasonry = Masonry;
           if (notesState.applying) return;
           globalThis.ClipNotesMetrics?.noteInput?.();
           scheduleNoteSave();
+          paintNotesTagBar();
         },
+        onTag(tag) { setNotesTagFilter(tag); },
         onMetric(name, extra) { nm(name, extra); },
       });
       if (notesState.gen === g) notesState.applying = false;
@@ -3276,6 +3391,7 @@ window.ClipViewMasonry = Masonry;
           return;
         }
         notesState.id = j.item.id;
+        persistNotesId(notesState.id);
         const idx = notesState.items.findIndex(n => n.id === notesState.id);
         if (idx >= 0) notesState.items[idx] = j.item;
         else notesState.items.unshift(j.item);
@@ -3295,12 +3411,14 @@ window.ClipViewMasonry = Masonry;
       if (!item) return;
       const switching = notesState.id && notesState.id !== id;
       notesState.id = id;
+      persistNotesId(id);
       const t = noteTitleOf(item);
       const titleEl = document.getElementById('notesTitle');
       if (titleEl) titleEl.value = t;
       ensureNotesEditor(noteStripTitle(item.textContent || '', t));
       document.getElementById('notesPanel')?.classList.add('is-writing');
       paintNotesList();
+      paintNotesTagBar();
       if (switching) nm('note_switch');
     }
 
@@ -3312,12 +3430,14 @@ window.ClipViewMasonry = Masonry;
       notesStatus('idle');
       ensureNotesEditor('');
       document.getElementById('notesPanel')?.classList.add('is-writing');
+      try { history.replaceState(null, '', '#notes'); } catch (_) {}
       paintNotesList();
+      paintNotesTagBar();
       titleEl?.focus();
       nm('note_new');
     }
 
-    async function openNotesPanel() {
+    async function openNotesPanel(preferredId) {
       const panel = document.getElementById('notesPanel');
       if (!panel) return;
       panel.classList.add('open');
@@ -3337,9 +3457,11 @@ window.ClipViewMasonry = Masonry;
       if (!notesState.loaded) {
         try { await loadNotesList(); } catch (e) { notesState.items = []; }
       }
-      if (!notesState.id && notesState.items[0]) await openNoteInPanel(notesState.items[0].id);
+      const want = preferredId || lastNotesId();
+      if (want && notesState.items.some(n => n.id === want)) await openNoteInPanel(want);
+      else if (!notesState.id && notesState.items[0]) await openNoteInPanel(notesState.items[0].id);
       else if (!notesState.editor) await newNoteInPanel();
-      if (location.hash !== '#notes') history.replaceState(null, '', '#notes');
+      persistNotesId(notesState.id);
     }
 
     async function closeNotesPanel() {
@@ -3357,7 +3479,9 @@ window.ClipViewMasonry = Masonry;
       }
       const held = notesState.openedAt ? Date.now() - notesState.openedAt : 0;
       nm('notes_close', { dur_ms: held });
-      if (location.hash === '#notes') history.replaceState(null, '', location.pathname + location.search);
+      if (parseAppHash().kind === 'notes') {
+        try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+      }
     }
 
     function toggleNotesPanel() {
@@ -3402,7 +3526,7 @@ window.ClipViewMasonry = Masonry;
         paintNotesModes();
       }
     });
-    if (location.hash === '#notes') {
+    if (parseAppHash().kind === 'notes') {
       requestAnimationFrame(() => openNotesPanel());
     }
     document.getElementById('evalNote')?.addEventListener('input', paintEvalStars);
