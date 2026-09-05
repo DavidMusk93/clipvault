@@ -1783,11 +1783,20 @@
     .notes-list { flex: 1; overflow: auto; padding: 4px 8px 12px; }
     .note-row {
       width: 100%; text-align: left; border: 0; background: transparent;
-      border-radius: 12px; padding: 10px 10px 11px; cursor: pointer;
-      display: block; color: inherit;
+      border-radius: 12px; padding: 10px 36px 11px 10px; cursor: pointer;
+      display: block; color: inherit; position: relative;
     }
     .note-row:active { transform: scale(0.99); }
     .note-row.is-on { background: rgba(0, 0, 0, 0.06); }
+    .note-pin {
+      position: absolute; top: 8px; right: 6px;
+      width: 28px; height: 28px; border: 0; border-radius: 8px;
+      background: transparent; color: var(--muted); cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .note-pin .material-symbols-outlined { font-size: 16px; }
+    .note-row.is-pinned .note-pin { color: var(--accent); }
+    .note-pin:active { transform: scale(0.94); }
     .note-row .nt {
       font-size: 15px; font-weight: 620; letter-spacing: -0.02em;
       line-height: 1.25;
@@ -2187,6 +2196,9 @@
       <p class="backup-label" style="margin:4px 0 8px">本机 24 小时；不含正文。库文件 ui-metrics.db，不同步。</p>
       <div class="backup-row"><span class="backup-label">事件</span><span class="backup-value" id="nmTotal">—</span></div>
       <ul class="snap-list" id="nmList"></ul>
+      <h3 style="font-size:14px;font-weight:600;margin-top:20px">同步实效</h3>
+      <p class="backup-label" style="margin:4px 0 8px">本机 cycle / push / pull / blob wait；采满再谈优化。不同步。</p>
+      <ul class="snap-list" id="syMetricList"></ul>
       <div class="backup-actions">
         <button type="button" class="secondary" id="nmRefresh">刷新指标</button>
       </div>
@@ -3293,24 +3305,69 @@ window.ClipViewMasonry = Masonry;
       return raw.replace(new RegExp('^#\\s+' + t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\n?'), '');
     }
 
+    function noteIsPinned(n) {
+      return !!(n && (n.pinned === true || n.pinnedAt));
+    }
+    function applyNotePin(id, pinned, pinnedAt) {
+      const n = notesState.items.find((x) => x.id === id);
+      if (!n) return;
+      n.pinned = !!pinned;
+      n.pinnedAt = pinned ? (Number(pinnedAt) || Date.now() / 1000) : null;
+    }
+    async function toggleNotePin(id) {
+      const n = notesState.items.find((x) => x.id === id);
+      const next = !noteIsPinned(n);
+      const prevAt = n ? n.pinnedAt : null;
+      applyNotePin(id, next, next ? Date.now() / 1000 : null);
+      paintNotesList();
+      try {
+        const res = await fetch(API + '/api/clips/pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, pinned: next }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error('pin');
+        const item = data.item || {};
+        applyNotePin(id, !!item.pinned, item.pinnedAt);
+        paintNotesList();
+      } catch (_) {
+        applyNotePin(id, !next, prevAt);
+        paintNotesList();
+      }
+    }
     function fillNoteRow(btn, n) {
       btn.dataset.noteId = n.id;
       btn.classList.toggle('is-on', n.id === notesState.id);
+      btn.classList.toggle('is-pinned', noteIsPinned(n));
       let t = btn.querySelector('.nt');
       let x = btn.querySelector('.nx');
       let m = btn.querySelector('.nm');
+      let pin = btn.querySelector('.note-pin');
       if (!t) {
         t = document.createElement('div'); t.className = 'nt';
         x = document.createElement('div'); x.className = 'nx';
         m = document.createElement('div'); m.className = 'nm';
-        btn.replaceChildren(t, x, m);
+        pin = document.createElement('span');
+        pin.className = 'note-pin';
+        pin.setAttribute('role', 'button');
+        pin.innerHTML = '<span class="material-symbols-outlined">keep</span>';
+        btn.replaceChildren(t, x, m, pin);
         t.addEventListener('click', (e) => {
           const tag = e.target.closest && e.target.closest('.notes-tag');
           if (!tag) return;
           e.stopPropagation();
           setNotesTagFilter(tag.dataset.tag || tag.textContent.replace(/^#/, ''));
         });
+        pin.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const id = btn.dataset.noteId;
+          if (id) toggleNotePin(id);
+        });
       }
+      pin?.setAttribute('title', noteIsPinned(n) ? '取消置顶' : '置顶');
+      pin?.setAttribute('aria-label', noteIsPinned(n) ? '取消置顶' : '置顶');
       const title = noteTitleOf(n) || '未命名';
       const excerpt = noteExcerpt(n.textContent || '');
       const when = formatItemTime(n);
@@ -3334,6 +3391,12 @@ window.ClipViewMasonry = Masonry;
           if (!tags.some((t) => t.toLowerCase() === wantTag)) return false;
         }
         return true;
+      }).sort((a, b) => {
+        const ap = noteIsPinned(a);
+        const bp = noteIsPinned(b);
+        if (ap !== bp) return ap ? -1 : 1;
+        if (ap && bp) return (Number(b.pinnedAt) || 0) - (Number(a.pinnedAt) || 0);
+        return (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0);
       });
       const keep = new Set(rows.map(n => n.id));
       [...root.children].forEach(el => {
@@ -6830,7 +6893,12 @@ window.ClipViewMasonry = Masonry;
           }
           if (d.type === 'clip_pinned' && d.id) {
             if (clips.some((c) => c.id === d.id)) applyLocalPin(d.id, !!d.pinned, d.pinnedAt);
-            else if (d.pinned) scheduleResync();
+            if (notesState.items.some((n) => n.id === d.id)) {
+              applyNotePin(d.id, !!d.pinned, d.pinnedAt);
+              paintNotesList();
+            } else if (d.pinned && !clips.some((c) => c.id === d.id)) {
+              scheduleResync();
+            }
             return;
           }
           if (d.type === 'ocr_ready' && d.id) {
@@ -7223,12 +7291,21 @@ window.ClipViewMasonry = Masonry;
         if (!j.ok) { totalEl.textContent = '—'; return; }
         totalEl.textContent = String(j.total || 0);
         const names = Array.isArray(j.names) ? j.names : [];
-        listEl.innerHTML = names.length
-          ? names.map((row) => {
-              const avg = row.avg_ms != null ? `${Math.round(row.avg_ms)}ms` : '—';
-              return `<li class="snap-meta">${esc(row.name)} · ${row.n} · avg ${avg}</li>`;
-            }).join('')
+        const line = (row) => {
+          const avg = row.avg_ms != null ? `${Math.round(row.avg_ms)}ms` : '—';
+          return `<li class="snap-meta">${esc(row.name)} · ${row.n} · avg ${avg}</li>`;
+        };
+        const notes = names.filter((row) => !String(row.name || '').startsWith('sync_'));
+        const syncs = names.filter((row) => String(row.name || '').startsWith('sync_'));
+        listEl.innerHTML = notes.length
+          ? notes.map(line).join('')
           : '<li class="snap-meta">暂无打点</li>';
+        const syList = document.getElementById('syMetricList');
+        if (syList) {
+          syList.innerHTML = syncs.length
+            ? syncs.map(line).join('')
+            : '<li class="snap-meta">暂无同步打点</li>';
+        }
       } catch (_) {
         totalEl.textContent = '—';
       }

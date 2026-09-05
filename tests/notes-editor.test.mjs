@@ -105,6 +105,15 @@ test('notes panel open does not translate the chrome', () => {
   assert.doesNotMatch(html, /\.notes-panel \{[\s\S]{0,200}translateY\(18px\)/);
 });
 
+test('notes pin reuses clip pin API and sorts pinned first', () => {
+  assert.match(html, /function toggleNotePin/);
+  assert.match(html, /function noteIsPinned/);
+  assert.match(html, /\/api\/clips\/pin/);
+  assert.match(html, /note-pin/);
+  assert.match(html, /pinnedAt DESC|Number\(b\.pinnedAt\)/);
+  assert.doesNotMatch(html, /note_pin/);
+});
+
 test('split panes sync source and preview scroll', () => {
   assert.match(entry, /mapLineToScrollTop/);
   assert.match(entry, /mapScrollTopToLine/);
