@@ -81,12 +81,12 @@ enum XArticleHTML {
         if let cover = coverImageURL(article) {
             html += "<figure><img src=\"\(escape(cover))\" alt=\"\"></figure>\n"
         }
-        html += renderBlocks(blocks, entityMap: entityMap)
+        html += renderBlocks(blocks, entityMap: entityMap, media: mediaIndex(article))
         let out = html.trimmingCharacters(in: .whitespacesAndNewlines)
         return out.isEmpty ? nil : "<div class=\"cv-x-article\">\(out)</div>"
     }
 
-    static func renderBlocks(_ blocks: [[String: Any]], entityMap: Any?) -> String {
+    static func renderBlocks(_ blocks: [[String: Any]], entityMap: Any?, media: [String: String] = [:]) -> String {
         var out = ""
         var listTag: String?
         func flushList() {
@@ -120,7 +120,7 @@ enum XArticleHTML {
             case "code-block":
                 out += "<pre><code>\(escape((block["text"] as? String) ?? ""))</code></pre>\n"
             case "atomic":
-                if let piece = renderAtomic(block, entityMap: entityMap) {
+                if let piece = renderAtomic(block, entityMap: entityMap, media: media) {
                     out += piece
                     if !piece.hasSuffix("\n") { out += "\n" }
                 }
@@ -173,6 +173,27 @@ enum XArticleHTML {
         return nil
     }
 
+    /// fxtwitter: atomic MEDIA has mediaId only; bytes live on article.media_entities.
+    static func mediaIndex(_ article: [String: Any]) -> [String: String] {
+        var out: [String: String] = [:]
+        func add(_ d: [String: Any]) {
+            let id = stringVal(d["media_id"]) ?? stringVal(d["mediaId"])
+            let info = d["media_info"] as? [String: Any]
+            guard let url = (info?["original_img_url"] as? String) ?? (d["original_img_url"] as? String),
+                  url.hasPrefix("http") else { return }
+            if let id { out[id] = url }
+        }
+        if let arr = article["media_entities"] as? [[String: Any]] {
+            arr.forEach(add)
+        } else if let dict = article["media_entities"] as? [String: Any] {
+            for (_, v) in dict {
+                if let d = v as? [String: Any] { add(d) }
+            }
+        }
+        if let cover = article["cover_media"] as? [String: Any] { add(cover) }
+        return out
+    }
+
     private static func styledText(_ block: [String: Any]) -> String {
         let raw = (block["text"] as? String) ?? ""
         let ns = raw as NSString
@@ -207,7 +228,7 @@ enum XArticleHTML {
         return escapeOutsideTags(body)
     }
 
-    private static func renderAtomic(_ block: [String: Any], entityMap: Any?) -> String? {
+    private static func renderAtomic(_ block: [String: Any], entityMap: Any?, media: [String: String]) -> String? {
         let ranges = block["entityRanges"] as? [[String: Any]] ?? []
         guard let first = ranges.first else { return nil }
         let key = intVal(first["key"])
@@ -217,10 +238,32 @@ enum XArticleHTML {
             return renderFence(md)
         }
         if type == "IMAGE" || type == "MEDIA" {
-            if let src = dictString(ent["data"], "src") ?? dictString(ent["data"], "url"),
-               src.hasPrefix("http") {
+            if let src = imageURL(from: ent["data"], media: media) {
                 return "<figure><img src=\"\(escape(src))\" alt=\"\"></figure>"
             }
+        }
+        return nil
+    }
+
+    private static func imageURL(from data: Any?, media: [String: String]) -> String? {
+        if let src = dictString(data, "src") ?? dictString(data, "url"), src.hasPrefix("http") {
+            return src
+        }
+        guard let d = data as? [String: Any] else { return nil }
+        if let info = d["media_info"] as? [String: Any],
+           let u = info["original_img_url"] as? String, u.hasPrefix("http") {
+            return u
+        }
+        let items = d["mediaItems"] as? [[String: Any]] ?? []
+        for item in items {
+            if let id = stringVal(item["mediaId"]) ?? stringVal(item["media_id"]),
+               let u = media[id] {
+                return u
+            }
+        }
+        if let id = stringVal(d["mediaId"]) ?? stringVal(d["media_id"]),
+           let u = media[id] {
+            return u
         }
         return nil
     }
@@ -272,6 +315,16 @@ enum XArticleHTML {
         if let n = raw as? NSNumber { return n.intValue }
         if let s = raw as? String, let i = Int(s) { return i }
         return 0
+    }
+
+    private static func stringVal(_ raw: Any?) -> String? {
+        if let s = raw as? String {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.isEmpty ? nil : t
+        }
+        if let i = raw as? Int { return String(i) }
+        if let n = raw as? NSNumber { return n.stringValue }
+        return nil
     }
 
     static func escape(_ s: String) -> String {

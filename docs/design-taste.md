@@ -125,6 +125,8 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 
 规则：只在 View 运行时包 `.cv-code` / `.cv-figure` / `.cv-table`。禁止为了高亮去改 `archive_html`。
 
+X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic `MEDIA`，entity 只有 `mediaId`，真 URL 在 `article.media_entities[].media_info.original_img_url`。重建必须按 id 拼 `<figure><img>`。禁止只认 entity `src`/`url`（会只剩封面、正文图全丢）。
+
 ## Compose 纸面（笔记编辑器）
 
 独立 `#notesPanel`。列表在左，纸面在右。Markdown **源码和预览分开**，不要 WYSIWYG 揉在同一块 DOM。

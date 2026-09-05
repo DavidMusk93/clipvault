@@ -110,6 +110,73 @@ enum XArticleHTMLTests {
         ok("bold-gt", gtHTML.contains("<strong>数据 &gt; 意志力</strong>"))
         ok("bold-gt-once", !gtHTML.contains("&amp;gt;"))
 
+        // JoshXie-style: atomic MEDIA has mediaId only; URL is on article.media_entities.
+        let joshBlocks: [[String: Any]] = [
+            ["type": "unstyled", "text": "最终我做了图右的小程序"],
+            [
+                "type": "atomic",
+                "text": " ",
+                "entityRanges": [["key": 0, "length": 1, "offset": 0]],
+            ],
+            ["type": "unstyled", "text": "市面上大部分回复助手都是图左"],
+            [
+                "type": "atomic",
+                "text": " ",
+                "entityRanges": [["key": 1, "length": 1, "offset": 0]],
+            ],
+        ]
+        let joshMap: [[String: Any]] = [
+            [
+                "key": "0",
+                "value": [
+                    "type": "MEDIA",
+                    "data": [
+                        "mediaItems": [[
+                            "localMediaId": "14",
+                            "mediaCategory": "DraftTweetImage",
+                            "mediaId": "2057506819006976001",
+                        ]],
+                    ],
+                ],
+            ],
+            [
+                "key": 1,
+                "value": [
+                    "type": "MEDIA",
+                    "data": [
+                        "mediaItems": [[
+                            "mediaId": "2057495103355383808",
+                        ]],
+                    ],
+                ],
+            ],
+        ]
+        let joshArticle: [String: Any] = [
+            "title": "不会代码，投入0元，AI帮我成立了公司",
+            "cover_media": [
+                "media_id": "2057503306176692225",
+                "media_info": ["original_img_url": "https://pbs.twimg.com/media/HI24WxjagAEI9UL.jpg"],
+            ],
+            "media_entities": [
+                [
+                    "media_id": "2057506819006976001",
+                    "media_info": ["original_img_url": "https://pbs.twimg.com/media/HI27jP3a0AEnOgM.jpg"],
+                ],
+                [
+                    "media_id": "2057495103355383808",
+                    "media_info": ["original_img_url": "https://pbs.twimg.com/media/HI2w5TqacAAKNje.jpg"],
+                ],
+            ] as [[String: Any]],
+            "content": ["blocks": joshBlocks, "entityMap": joshMap],
+        ]
+        let josh = XArticleHTML.render(article: joshArticle) ?? ""
+        ok("josh-cover", josh.contains("HI24WxjagAEI9UL.jpg"))
+        ok("josh-body-1", josh.contains("HI27jP3a0AEnOgM.jpg"))
+        ok("josh-body-2", josh.contains("HI2w5TqacAAKNje.jpg"))
+        ok("josh-img-count", josh.components(separatedBy: "<img ").count - 1 == 3)
+        let noMedia = XArticleHTML.renderBlocks(joshBlocks, entityMap: joshMap)
+        ok("josh-no-index-drops", !noMedia.contains("<img"))
+
         if fails > 0 {
             FileHandle.standardError.write(Data("x-article-html: \(fails) failed\n".utf8))
             exit(1)
