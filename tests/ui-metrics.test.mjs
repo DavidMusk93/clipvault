@@ -21,7 +21,10 @@ test('metrics API and db are local-only', () => {
   assert.match(web, /handleUiMetricsSummary/);
   assert.match(swift, /ui-metrics\.db/);
   assert.match(swift, /maxEventsPerRequest = 100/);
-  assert.doesNotMatch(sync, /ui-metrics|UiMetrics|ui_events/);
+  assert.match(sync, /UiMetrics\.shared\.emit/);
+  assert.match(sync, /sync_cycle/);
+  assert.match(sync, /sync_blob_wait/);
+  assert.doesNotMatch(sync, /ui-metrics\.db/);
   assert.doesNotMatch(backup, /ui-metrics\.db/);
   assert.match(backup, /clipflow\.db/);
 });
@@ -31,6 +34,9 @@ test('payload forbids note content keys', () => {
   assert.match(swift, /"body"/);
   assert.match(swift, /"title"/);
   assert.match(swift, /"markdown"/);
+  assert.match(swift, /"kind"/);
+  assert.match(swift, /"reason"/);
+  assert.match(swift, /"lag"/);
   assert.match(metricsJs, /FORBIDDEN/);
   assert.match(metricsJs, /body\|title\|markdown/);
   assert.doesNotMatch(metricsJs, /textContent|getMarkdown\(\)/);

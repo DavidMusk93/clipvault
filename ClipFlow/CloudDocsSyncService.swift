@@ -496,23 +496,38 @@ final class CloudDocsSyncService {
         lastPhase = "cycle:\(reason)"
         lastError = nil
         publishStatus()
+        let t0 = Date().timeIntervalSince1970
 
         var messages: [String] = []
         var okAll = true
 
         // 1) Push local outbox (+ CAS)
         lastPhase = "push"
+        let tPush = Date().timeIntervalSince1970
         let pushed = pushOutbox()
         messages.append(pushed.message)
         okAll = okAll && pushed.ok
         if pushed.ok { lastPushUnix = Date().timeIntervalSince1970 }
+        UiMetrics.shared.emit(
+            "sync_push",
+            durMs: (Date().timeIntervalSince1970 - tPush) * 1000,
+            ok: pushed.ok,
+            payload: ["n": pushed.n, "reason": reason]
+        )
 
         // 2) Pull remote ops
         lastPhase = "pull"
+        let tPull = Date().timeIntervalSince1970
         let pulled = pullRemote()
         messages.append(pulled.message)
         okAll = okAll && pulled.ok
         if pulled.ok { lastPullUnix = Date().timeIntervalSince1970 }
+        UiMetrics.shared.emit(
+            "sync_pull",
+            durMs: (Date().timeIntervalSince1970 - tPull) * 1000,
+            ok: pulled.ok,
+            payload: ["n": pulled.n, "reason": reason]
+        )
 
         lastPhase = okAll ? "ok" : "partial"
         if !okAll, lastError == nil {
@@ -520,6 +535,24 @@ final class CloudDocsSyncService {
         }
         inProgress = false
         publishStatus()
+        UiMetrics.shared.emit(
+            "sync_cycle",
+            durMs: (Date().timeIntervalSince1970 - t0) * 1000,
+            ok: okAll,
+            payload: ["n": pushed.n + pulled.n, "reason": reason]
+        )
+        let st = buildStatus()
+        for p in st.peers {
+            UiMetrics.shared.emit(
+                "sync_peer_lag",
+                ok: p.lag == 0,
+                payload: [
+                    "lag": p.lag,
+                    "n": 1,
+                    "host": String(p.host.prefix(8)),
+                ]
+            )
+        }
         completion?(okAll, messages.joined(separator: " · "))
     }
 
@@ -600,6 +633,7 @@ final class CloudDocsSyncService {
     private struct StepResult {
         var ok: Bool
         var message: String
+        var n: Int = 0
     }
 
 
@@ -710,7 +744,7 @@ final class CloudDocsSyncService {
         if files.isEmpty {
             // Still refresh head so peers see liveness.
             writeHead(seq: max(0, nextSeq - 1), lastOpId: nil, root: syncRoot)
-            return StepResult(ok: true, message: "push:idle")
+            return StepResult(ok: true, message: "push:idle", n: 0)
         }
 
         var published = 0
@@ -746,7 +780,7 @@ final class CloudDocsSyncService {
         } else {
             writeHead(seq: max(0, nextSeq - 1), lastOpId: nil, root: syncRoot)
         }
-        return StepResult(ok: true, message: "push:\(published)")
+        return StepResult(ok: true, message: "push:\(published)", n: published)
     }
 
     private func publishBlob(key: String, to casRoot: URL) -> Bool {
@@ -784,6 +818,8 @@ final class CloudDocsSyncService {
         )) ?? []).filter { $0.pathExtension == "json" }
 
         var appliedTotal = 0
+        var applyByKind: [String: (ok: Int, fail: Int)] = [:]
+        var blobWaits = 0
         var peerNotes: [String] = []
 
         for headFile in headFiles {
@@ -831,10 +867,12 @@ final class CloudDocsSyncService {
                         }
                         if !imported && needsBlob(op: op, key: key) {
                             lastPhase = "pull:blob_wait \(key)"
+                            blobWaits += 1
                             break
                         }
                     }
                     if keys.contains(where: { database.readBlobFile(hash: $0) == nil && needsBlob(op: op, key: $0) }) {
+                        blobWaits += 1
                         break
                     }
                 }
@@ -851,6 +889,9 @@ final class CloudDocsSyncService {
                     sem.signal()
                 }
                 sem.wait()
+                var kindStat = applyByKind[op.kind] ?? (ok: 0, fail: 0)
+                if appliedOk { kindStat.ok += 1 } else { kindStat.fail += 1 }
+                applyByKind[op.kind] = kindStat
                 if !appliedOk {
                     lastPhase = "pull:retry \(op.kind) \(op.itemId.prefix(8))"
                     break
@@ -872,7 +913,17 @@ final class CloudDocsSyncService {
             peerNotes.append("\(head.host)+\(applied)/@\(cursor)")
         }
 
-        return StepResult(ok: true, message: "pull:\(appliedTotal) [\(peerNotes.joined(separator: ","))]")
+        if blobWaits > 0 {
+            UiMetrics.shared.emit("sync_blob_wait", ok: false, payload: ["n": blobWaits])
+        }
+        for (kind, stat) in applyByKind {
+            UiMetrics.shared.emit(
+                "sync_apply",
+                ok: stat.fail == 0,
+                payload: ["kind": kind, "n": stat.ok]
+            )
+        }
+        return StepResult(ok: true, message: "pull:\(appliedTotal) [\(peerNotes.joined(separator: ","))]", n: appliedTotal)
     }
 
     private func needsBlob(op: SyncOp, key: String) -> Bool {

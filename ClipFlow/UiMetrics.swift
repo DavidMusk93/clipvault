@@ -17,6 +17,7 @@ final class UiMetrics {
     ])
     private static let allowedPayload = Set([
         "mode", "ratio", "chars", "bytes", "n", "value", "interaction", "q_len",
+        "kind", "phase", "reason", "lag", "host",
     ])
 
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")
@@ -50,6 +51,18 @@ final class UiMetrics {
         """)
         exec("CREATE INDEX IF NOT EXISTS ui_events_ts ON ui_events(ts);")
         exec("CREATE INDEX IF NOT EXISTS ui_events_name_ts ON ui_events(name, ts);")
+    }
+
+    /// Server-side emit (sync cycles). Same sanitizer as HTTP ingest. Never synced.
+    func emit(_ name: String, durMs: Double? = nil, ok: Bool? = nil, payload: [String: Any]? = nil) {
+        var ev: [String: Any] = [
+            "name": name,
+            "ts": Int64(Date().timeIntervalSince1970 * 1000),
+        ]
+        if let durMs { ev["dur_ms"] = durMs }
+        if let ok { ev["ok"] = ok }
+        if let payload { ev["payload"] = payload }
+        _ = ingest(events: [ev], defaultSession: "sync")
     }
 
     /// Returns accepted count and drop reason if the whole request is rejected.
