@@ -30,6 +30,7 @@ npm install --no-fund --no-audit \
 mkdir -p "$WORKDIR/web/assets/notes-editor"
 cp "$OUT/entry.js" "$WORKDIR/web/assets/notes-editor/entry.js"
 cp "$ROOT/web/markdown-render.mjs" "$WORKDIR/web/markdown-render.mjs"
+cp "$ROOT/web/notes-calc.mjs" "$WORKDIR/web/notes-calc.mjs"
 
 ./node_modules/.bin/esbuild \
   web/assets/notes-editor/entry.js \

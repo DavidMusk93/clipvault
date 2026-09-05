@@ -124,7 +124,7 @@ test('split panes sync source and preview scroll', () => {
   assert.match(entry, /previewEl\.addEventListener\('scroll'/);
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n9/);
+  assert.match(html, /notes-editor\.js\?v=n10/);
 });
 
 test('open notes lock the wall so chips and format toolbar cannot drag', () => {

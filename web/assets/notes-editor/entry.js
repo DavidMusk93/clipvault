@@ -1,5 +1,5 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view'
-import { EditorState, Prec } from '@codemirror/state'
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, Decoration, WidgetType } from '@codemirror/view'
+import { EditorState, Prec, StateField, StateEffect } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput } from '@codemirror/language'
@@ -7,6 +7,7 @@ import { tags as t } from '@lezer/highlight'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { renderMarkdownBlocks, mapLineToScrollTop, mapScrollTopToLine } from '../../markdown-render.mjs'
+import { extractCalcExpr, formatCheckpoint, hrStampBlock, inFence, isHrLine, isStampLine, tryEval } from '../../notes-calc.mjs'
 
 const MODE_KEY = 'clipvault.notes.mode'
 const SPLIT_KEY = 'clipvault.notes.split'
@@ -41,6 +42,11 @@ const notesTheme = EditorView.theme({
   '.cm-selectionBackground': { background: 'rgba(0, 113, 227, 0.16)' },
   '&.cm-focused .cm-selectionBackground': { background: 'rgba(0, 113, 227, 0.2)' },
   '.cm-cursor': { borderLeftColor: '#1d1d1f' },
+  '.cm-calc-ghost': {
+    color: '#86868b',
+    fontStyle: 'italic',
+    pointerEvents: 'none',
+  },
 })
 
 /* Xcode Light — headings stay ink, code tokens stay quiet. */
@@ -236,6 +242,128 @@ function continueList(view) {
   view.dispatch({
     changes: { from: head, to: line.to, insert },
     selection: { anchor: caret },
+    userEvent: 'input',
+  })
+  return true
+}
+
+function prevLines(state, lineNum) {
+  const out = []
+  for (let n = 1; n < lineNum; n++) out.push(state.doc.line(n).text)
+  return out
+}
+
+const setCalc = StateEffect.define()
+const clearCalc = StateEffect.define()
+
+class CalcGhost extends WidgetType {
+  constructor(text) {
+    super()
+    this.text = text
+  }
+  eq(other) { return other instanceof CalcGhost && other.text === this.text }
+  toDOM() {
+    const el = document.createElement('span')
+    el.className = 'cm-calc-ghost'
+    el.textContent = this.text
+    return el
+  }
+  ignoreEvent() { return true }
+}
+
+const calcField = StateField.define({
+  create() { return null },
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setCalc)) return e.value
+      if (e.is(clearCalc)) return null
+    }
+    if (!value) return null
+    if (tr.docChanged) return null
+    const sel = tr.selection || tr.state.selection
+    if (!sel.main.empty || sel.main.head !== value.pos) return null
+    return value
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => {
+    if (!v) return Decoration.none
+    return Decoration.set([
+      Decoration.widget({ widget: new CalcGhost('\u00a0' + v.result), side: 1 }).range(v.pos),
+    ])
+  }),
+})
+
+function acceptCalc(view) {
+  const v = view.state.field(calcField, false)
+  if (!v) return false
+  const insert = ' ' + v.result
+  view.dispatch({
+    changes: { from: v.pos, insert },
+    selection: { anchor: v.pos + insert.length },
+    effects: clearCalc.of(null),
+    userEvent: 'input.calc',
+  })
+  return true
+}
+
+function dismissCalc(view) {
+  if (!view.state.field(calcField, false)) return false
+  view.dispatch({ effects: clearCalc.of(null) })
+  return true
+}
+
+function stampHrCheckpoint(view) {
+  const sel = view.state.selection.main
+  if (!sel.empty) return false
+  const line = view.state.doc.lineAt(sel.head)
+  if (!isHrLine(line.text)) return false
+  if (inFence(prevLines(view.state, line.number))) return false
+  if (line.number < view.state.doc.lines && isStampLine(view.state.doc.line(line.number + 1).text)) {
+    return false
+  }
+  const stamp = formatCheckpoint()
+  const insert = `\n${stamp}\n\n`
+  view.dispatch({
+    changes: { from: line.to, insert },
+    selection: { anchor: line.to + insert.length },
+    userEvent: 'input.checkpoint',
+  })
+  return true
+}
+
+function notesInput(view, from, to, text) {
+  if (from !== to) return false
+  if (text !== '-' && text !== '=' && text !== '＝') return false
+  const sel = view.state.selection.main
+  if (!sel.empty || sel.head !== from) return false
+  const line = view.state.doc.lineAt(from)
+  const fenced = inFence(prevLines(view.state, line.number))
+
+  if (text === '-') {
+    if (fenced) return false
+    const nextLine = line.text.slice(0, from - line.from) + '-' + line.text.slice(to - line.from)
+    if (!isHrLine(nextLine)) return false
+    if (line.number < view.state.doc.lines && isStampLine(view.state.doc.line(line.number + 1).text)) {
+      return false
+    }
+    const stamp = formatCheckpoint()
+    const insert = `-\n${stamp}\n\n`
+    view.dispatch({
+      changes: { from, to, insert },
+      selection: { anchor: from + insert.length },
+      userEvent: 'input.checkpoint',
+    })
+    return true
+  }
+
+  if (fenced) return false
+  const lineAfter = line.text.slice(0, from - line.from) + '=' + line.text.slice(to - line.from)
+  const expr = extractCalcExpr(lineAfter, from - line.from + 1)
+  const result = expr ? tryEval(expr) : null
+  if (!result) return false
+  view.dispatch({
+    changes: { from, to, insert: '=' },
+    selection: { anchor: from + 1 },
+    effects: setCalc.of({ pos: from + 1, result }),
     userEvent: 'input',
   })
   return true
@@ -442,9 +570,14 @@ async function mount(root, opts) {
       EditorView.lineWrapping,
       notesTheme,
       pasteDrop,
+      calcField,
+      EditorView.inputHandler.of(notesInput),
       Prec.highest(keymap.of([
+        { key: 'Tab', run: acceptCalc },
         { key: 'Tab', run: (v) => indentList(v, 1) },
         { key: 'Shift-Tab', run: (v) => indentList(v, -1) },
+        { key: 'Escape', run: dismissCalc },
+        { key: 'Enter', run: stampHrCheckpoint },
         { key: 'Enter', run: continueList },
         { key: 'Shift-Enter', run: continueList },
         { key: 'Mod-b', run: (v) => { wrapSelection(v, '**'); return true } },
@@ -611,7 +744,7 @@ async function mount(root, opts) {
         case 'ol': prefixLines(view, '1. '); break
         case 'quote': prefixLines(view, '> '); break
         case 'link': wrapSelection(view, '[', '](url)'); break
-        case 'hr': insertBlock(view, '\n---\n'); break
+        case 'hr': insertBlock(view, '\n' + hrStampBlock()); break
         case 'table': insertBlock(view, '\n| 列 | 列 |\n| --- | --- |\n|  |  |\n'); break
         case 'codeblock': insertBlock(view, '\n```\n\n```\n'); break
         default: break

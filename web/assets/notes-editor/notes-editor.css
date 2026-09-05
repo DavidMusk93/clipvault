@@ -43,6 +43,11 @@
 }
 .notes-source .cm-editor { height: 100%; }
 .notes-source .cm-scroller { overflow: auto; }
+.notes-source .cm-calc-ghost {
+  color: #86868b;
+  font-style: italic;
+  pointer-events: none;
+}
 
 .notes-splitter {
   cursor: col-resize;
