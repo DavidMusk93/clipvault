@@ -141,8 +141,10 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 | 预览正文 | SF / PingFang 17 / 1.65 · 最大 38rem | Apple Notes 纸面 |
 | 预览代码 | 浅板 `#F5F5F7` + 11px 语言条 + Xcode Light | **不是** View 的炭黑井 |
 | 模式 | 源码 / 分栏 / 预览；桌面默认分栏 | 窄屏默认源码 |
-| 状态点 | 6px idle/dirty/saved/error | 不要用「…」撑高 meta |
+| 保存态 | 11px 文案 + 6px 点：未保存 / 保存中 / 已保存 / 保存失败将重试 | 禁止只留圆点；失败指数退避 + `online` 重放 |
 | Tag | 标题内金色 `#F5A400` 同字号，不是黄胶囊 | `#auto gateway…`；`# 标题` 不算 tag；筛选时侧栏一颗可关的滤镜钮 |
+| 嵌套列表 | 预览 `1. / a. / i.`（decimal → lower-alpha → lower-roman） | Tab 缩进源码仍是 GFM `1.`；禁止源码写成 `5.1`（marked 解析不成列表） |
+| 新一篇 | 32×32 细线 +，无黑底「新一篇」文案 | 新建必须清空预览，禁止留上一篇 HTML |
 
 规则：工具条向源码插入 Markdown，不改预览 DOM。预览只读。自动保存不得回写编辑器、不得 `mergeHead` 墙。
 
