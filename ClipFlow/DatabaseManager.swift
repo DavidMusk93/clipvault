@@ -560,6 +560,21 @@ final class DatabaseManager: ObservableObject {
         execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_from ON clip_links(from_item_id);")
         execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_to_hash ON clip_links(to_content_hash) WHERE to_content_hash IS NOT NULL;")
         execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_to_item ON clip_links(to_item_id) WHERE to_item_id IS NOT NULL;")
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS share_links (
+            token TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            revoked_at REAL,
+            snapshot_title TEXT,
+            snapshot_body TEXT,
+            snapshot_type TEXT,
+            archive_sha TEXT,
+            blob_keys TEXT
+        );
+        """)
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_share_links_item ON share_links(item_id, revoked_at);")
         if !columnExists("clipboard_items", "link_count") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN link_count INTEGER NOT NULL DEFAULT 0;")
         }
@@ -2857,6 +2872,215 @@ final class DatabaseManager: ObservableObject {
             let item = self.fetchItemByIdLocked(idStr)
             DispatchQueue.main.async { completion(item) }
         }
+    }
+
+    func lookupShare(token: String) -> ShareLinks.Record? {
+        var rec: ShareLinks.Record?
+        performReadSync {
+            rec = self.lookupShareLocked(token: token)
+        }
+        return rec
+    }
+
+    func createOrGetShare(item: ClipboardItem, completion: @escaping (ShareLinks.Record?) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let idStr = item.id.uuidString
+            if let existing = self.lookupActiveShareLocked(itemId: idStr) {
+                DispatchQueue.main.async { completion(existing) }
+                return
+            }
+            let built = self.buildShareSnapshotLocked(item: item)
+            let token = ShareLinks.newToken()
+            let now = Date().timeIntervalSince1970
+            let keysJSON: String
+            if let data = try? JSONSerialization.data(withJSONObject: built.keys),
+               let s = String(data: data, encoding: .utf8) {
+                keysJSON = s
+            } else {
+                keysJSON = "[]"
+            }
+            let sql = """
+            INSERT INTO share_links(token, item_id, kind, created_at, snapshot_title, snapshot_body, snapshot_type, archive_sha, blob_keys)
+            VALUES(?,?,?,?,?,?,?,?,?);
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            self.bindText(stmt, 1, token)
+            self.bindText(stmt, 2, idStr)
+            self.bindText(stmt, 3, built.kind)
+            sqlite3_bind_double(stmt, 4, now)
+            self.bindText(stmt, 5, built.title)
+            self.bindText(stmt, 6, built.body)
+            self.bindText(stmt, 7, item.type.rawValue)
+            if let sha = built.archiveSha { self.bindText(stmt, 8, sha) } else { sqlite3_bind_null(stmt, 8) }
+            self.bindText(stmt, 9, keysJSON)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            _ = self.appendOperationLogSync(
+                action: "share",
+                itemId: idStr,
+                contentHash: nil,
+                detail: built.kind,
+                source: "web"
+            )
+            let rec = ShareLinks.Record(
+                token: token,
+                itemId: idStr,
+                kind: built.kind,
+                createdAt: now,
+                snapshotTitle: built.title,
+                snapshotBody: built.body,
+                snapshotType: item.type.rawValue,
+                archiveSha: built.archiveSha,
+                blobKeys: built.keys
+            )
+            DispatchQueue.main.async { completion(rec) }
+        }
+    }
+
+    func revokeShares(itemId: UUID, completion: @escaping (Int) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion(0) }
+                return
+            }
+            let sql = "UPDATE share_links SET revoked_at = ? WHERE item_id = ? AND revoked_at IS NULL;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion(0) }
+                return
+            }
+            sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
+            self.bindText(stmt, 2, itemId.uuidString)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            let n = Int(sqlite3_changes(db))
+            if n > 0 {
+                _ = self.appendOperationLogSync(
+                    action: "share_revoke",
+                    itemId: itemId.uuidString,
+                    contentHash: nil,
+                    detail: String(n),
+                    source: "web"
+                )
+            }
+            DispatchQueue.main.async { completion(n) }
+        }
+    }
+
+    private func lookupShareLocked(token: String) -> ShareLinks.Record? {
+        guard let db = readDB ?? db else { return nil }
+        let sql = """
+        SELECT token, item_id, kind, created_at, snapshot_title, snapshot_body, snapshot_type, archive_sha, blob_keys
+        FROM share_links WHERE token = ? AND revoked_at IS NULL LIMIT 1;
+        """
+        var stmt: OpaquePointer?
+        var rec: ShareLinks.Record?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, token)
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                rec = shareRow(stmt)
+            }
+        }
+        sqlite3_finalize(stmt)
+        return rec
+    }
+
+    private func lookupActiveShareLocked(itemId: String) -> ShareLinks.Record? {
+        guard let db = db else { return nil }
+        let sql = """
+        SELECT token, item_id, kind, created_at, snapshot_title, snapshot_body, snapshot_type, archive_sha, blob_keys
+        FROM share_links WHERE item_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1;
+        """
+        var stmt: OpaquePointer?
+        var rec: ShareLinks.Record?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            bindText(stmt, 1, itemId)
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                rec = shareRow(stmt)
+            }
+        }
+        sqlite3_finalize(stmt)
+        return rec
+    }
+
+    private func shareRow(_ stmt: OpaquePointer?) -> ShareLinks.Record? {
+        guard let stmt else { return nil }
+        func col(_ i: Int32) -> String {
+            sqlite3_column_text(stmt, i).map { String(cString: $0) } ?? ""
+        }
+        let keysRaw = col(8)
+        var keys: [String] = []
+        if let data = keysRaw.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [String] {
+            keys = arr
+        }
+        let sha = col(7)
+        return ShareLinks.Record(
+            token: col(0),
+            itemId: col(1),
+            kind: col(2),
+            createdAt: sqlite3_column_double(stmt, 3),
+            snapshotTitle: col(4),
+            snapshotBody: col(5),
+            snapshotType: col(6),
+            archiveSha: sha.isEmpty ? nil : sha,
+            blobKeys: keys
+        )
+    }
+
+    private func buildShareSnapshotLocked(item: ClipboardItem) -> (kind: String, title: String, body: String, archiveSha: String?, keys: [String]) {
+        let title: String
+        if item.type == .note {
+            let raw = item.textContent ?? ""
+            title = raw.split(whereSeparator: \.isNewline).first.map { line in
+                var s = String(line)
+                if s.hasPrefix("# ") { s = String(s.dropFirst(2)) }
+                return s.trimmingCharacters(in: .whitespaces)
+            } ?? "笔记"
+            let keys = ComposeNotes.blobKeys(in: raw)
+            return ("note", title.isEmpty ? "笔记" : title, raw, nil, keys)
+        }
+        var archiveSha: String?
+        var archiveHTML: String?
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db,
+            "SELECT archive_html_sha, archive_html FROM clipboard_items WHERE id = ?;",
+            -1, &stmt, nil
+        ) == SQLITE_OK {
+            bindText(stmt, 1, item.id.uuidString)
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                archiveSha = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+                archiveHTML = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+            }
+        }
+        sqlite3_finalize(stmt)
+        var html: String?
+        if let sha = archiveSha, !sha.isEmpty, let data = readBlobFile(hash: sha) {
+            html = String(data: data, encoding: .utf8)
+        }
+        if html == nil || (html?.count ?? 0) < 40 { html = archiveHTML }
+        if let html, html.count > 40 {
+            var keys = ArchiveBlobClosure.refs(inHTML: html)
+            if let sha = archiveSha, !sha.isEmpty, !keys.contains(sha) { keys.insert(sha, at: 0) }
+            let t = (item.textContent ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return ("archive", t.isEmpty ? "归档" : String(t.prefix(80)), html, archiveSha, keys)
+        }
+        let body = item.textContent ?? item.ocrText ?? ""
+        let t = body.split(whereSeparator: \.isNewline).first.map(String.init) ?? "卡片"
+        return ("clip", String(t.prefix(80)), body, nil, [])
     }
 
     func applyWebArchive(

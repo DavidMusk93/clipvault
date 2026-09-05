@@ -124,6 +124,7 @@ test('public tunnel hosts require TOTP session, Access JWT, or optional origin t
   assert.match(swift, /ClipVaultAuth\.shared\.isSessionAuthorized/);
   assert.match(swift, /pathOnly == "\/login"/);
   assert.match(swift, /login\/setup/);
+  assert.match(swift, /pathOnly.hasPrefix\("\/s\/"\)/);
   assert.doesNotMatch(swift, /WWW-Authenticate/);
   assert.match(auth, /otpauth:\/\/totp/);
   assert.match(auth, /clipvault_sess/);

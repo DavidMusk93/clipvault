@@ -91,6 +91,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **列表变更差分渲染 + 保持 scroll/cursor**（删/恢复卡片） | 删一条就 `innerHTML=''` 全量 rebuild 回顶 |
 | **滚动丝滑**：图框锁高；禁止 `img.onload → rebuildFromData`；append 离屏量高 | 滑动中瀑布流全量 rebalance（社交流不会这么做） |
 | **URL 归档（save useful）**：手动「归档网页」→ WKWebView+Readability；预览消毒不可点 | 前端 CORS fetch 当归档；自动爬每一个链接 |
+| **分享链接**：owner 点分享得到 `/s/<token>`，路人只读这一份；可取消。公网放行仅 `/s/` + `/api/share/asset?t=`。笔记快照当时正文。token 不进 trx | 把 TOTP 当分享；`/api/clips` 免登录；活读可改笔记 |
 | **View**：弹层 iframe `src=/api/archive/view?embed=1`（真文档，浏览器引擎排版）；可再开新标签 | srcdoc / Turndown 自绘；毛玻璃+transform 包 iframe；只弹出孤立 tab |
 | **归档后同一按钮变「查看」**（同槽同尺寸）；已归档禁止再点「归档网页」 | 另塞一颗小「查看」；归档按钮归档后仍可点 |
 | **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶；**跨机必须走 op-log `pin`/`unpin`**。取消置顶必须立刻清 `pinnedAt`、丢卡片缓存、移出 pin rail；JSON 未置顶发 `pinnedAt: null`；SSE `clip_pinned`。禁止 `{...old, ...item}` 留下旧 `pinnedAt` | 改 timestamp 冒充置顶；钉子混进下一页重复出现；只写本机列不同步；取消置顶要刷新才消失 |

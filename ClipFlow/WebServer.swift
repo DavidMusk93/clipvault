@@ -284,6 +284,21 @@ class WebServer {
             return
         }
 
+        if method == "GET" || method == "HEAD" {
+            if pathOnly.hasPrefix("/s/") {
+                handleSharePage(pathOnly: pathOnly, connection: connection)
+                return
+            }
+            if pathOnly == "/api/share/asset" {
+                handleShareAsset(path: path, connection: connection)
+                return
+            }
+            if pathOnly.hasPrefix("/assets/") {
+                sendStaticAsset(pathOnly: pathOnly, connection: connection)
+                return
+            }
+        }
+
         if !loopback, !Self.publicRequestAuthorized(headers) {
             sendUnauthorized(connection: connection, path: pathOnly)
             return
@@ -323,6 +338,10 @@ class WebServer {
             handleUiMetricsIngest(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/pin" {
             handleClipPin(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/share" {
+            handleShareCreate(data: data, headers: headers, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/share/revoke" {
+            handleShareRevoke(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/clips/link" {
             handleClipLink(data: data, connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/archive") {
@@ -1875,6 +1894,113 @@ class WebServer {
                 "linkCount": item?.linkCount ?? links.count,
                 "links": links,
             ], connection: connection)
+        }
+    }
+
+    private func sharePublicURL(headers: [String: String], token: String) -> String {
+        let rawHost = headers["x-forwarded-host"] ?? headers["host"] ?? "127.0.0.1:8080"
+        let host = rawHost.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.first ?? "127.0.0.1:8080"
+        let xf = (headers["x-forwarded-proto"] ?? "").lowercased()
+        let proto: String
+        if xf.contains("https") {
+            proto = "https"
+        } else if host.contains("<tunnel-domain>") || host.contains("<deployment-domain>") {
+            proto = "https"
+        } else {
+            proto = "http"
+        }
+        let local = host.hasPrefix("127.0.0.1") || host.hasPrefix("localhost") || host.hasPrefix("[::1]")
+        let prefix = local ? "" : Self.publicPathPrefix
+        return "\(proto)://\(host)\(prefix)/s/\(token)"
+    }
+
+    private func handleSharePage(pathOnly: String, connection: NWConnection) {
+        let token = String(pathOnly.dropFirst(3))
+        guard ShareLinks.isToken(token), let rec = database.lookupShare(token: token) else {
+            sendBinary(
+                status: 404,
+                reason: "Not Found",
+                contentType: "text/html; charset=utf-8",
+                body: Data(ShareLinks.goneHTML().utf8),
+                connection: connection,
+                extraHeaders: [("Cache-Control", "no-store")]
+            )
+            return
+        }
+        let html = ShareLinks.pageHTML(rec, archiveHTML: rec.kind == "archive" ? rec.snapshotBody : nil)
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: "text/html; charset=utf-8",
+            body: Data(html.utf8),
+            connection: connection,
+            extraHeaders: [("Cache-Control", "private, no-store"), ("X-Robots-Tag", "noindex")]
+        )
+    }
+
+    private func handleShareAsset(path: String, connection: NWConnection) {
+        guard let comps = URLComponents(string: "http://localhost\(path)"),
+              let token = comps.queryItems?.first(where: { $0.name == "t" })?.value,
+              ShareLinks.isToken(token),
+              let rec = database.lookupShare(token: token) else {
+            sendErrorResponse(connection: connection, status: 404, message: "not found")
+            return
+        }
+        if let sha = comps.queryItems?.first(where: { $0.name == "sha" })?.value?.lowercased(),
+           ArchiveImageInliner.isAssetSHA(sha) {
+            guard ShareLinks.allowsAsset(rec, sha: sha) else {
+                sendErrorResponse(connection: connection, status: 404, message: "not found")
+                return
+            }
+            sendArchiveAsset(path: "/api/archive/asset?sha=\(sha)", connection: connection)
+            return
+        }
+        if rec.kind == "clip", rec.snapshotType == "image",
+           let uuid = UUID(uuidString: rec.itemId) {
+            sendImage(path: "/api/image?id=\(uuid.uuidString)&size=full", connection: connection)
+            return
+        }
+        sendErrorResponse(connection: connection, status: 404, message: "not found")
+    }
+
+    private func handleShareCreate(data: Data, headers: [String: String], connection: NWConnection) {
+        guard let obj = jsonBody(from: data),
+              let idStr = obj["id"] as? String,
+              let uuid = UUID(uuidString: idStr) else {
+            sendJSON(["ok": false, "message": "expected {id}"], connection: connection)
+            return
+        }
+        database.fetchItem(id: uuid) { [weak self] item in
+            guard let self else { return }
+            guard let item else {
+                self.sendJSON(["ok": false, "message": "条目不存在"], connection: connection)
+                return
+            }
+            self.database.createOrGetShare(item: item) { rec in
+                guard let rec else {
+                    self.sendJSON(["ok": false, "message": "无法分享"], connection: connection)
+                    return
+                }
+                let url = self.sharePublicURL(headers: headers, token: rec.token)
+                self.sendJSON([
+                    "ok": true,
+                    "url": url,
+                    "token": rec.token,
+                    "kind": rec.kind,
+                ], connection: connection)
+            }
+        }
+    }
+
+    private func handleShareRevoke(data: Data, connection: NWConnection) {
+        guard let obj = jsonBody(from: data),
+              let idStr = obj["id"] as? String,
+              let uuid = UUID(uuidString: idStr) else {
+            sendJSON(["ok": false, "message": "expected {id}"], connection: connection)
+            return
+        }
+        database.revokeShares(itemId: uuid) { n in
+            self.sendJSON(["ok": true, "revoked": n], connection: connection)
         }
     }
 
