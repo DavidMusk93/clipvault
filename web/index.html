@@ -5423,7 +5423,9 @@ window.ClipViewMasonry = Masonry;
           const data = await res.json();
           const job = data.job || {};
           if (job.status === 'ok') {
-            toast(job.title ? ('已归档 · ' + job.title) : '归档完成');
+            const warns = Array.isArray(job.warnings) ? job.warnings.filter(Boolean) : [];
+            const head = job.title ? ('已归档 · ' + job.title) : '归档完成';
+            toast(warns.length ? (head + ' · ' + warns.join('，')) : head);
             if (itemId) {
               const idx = clips.findIndex((c) => c.id === itemId);
               if (idx >= 0) {

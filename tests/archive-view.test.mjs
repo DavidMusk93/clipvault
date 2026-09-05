@@ -21,7 +21,7 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20260827f/);
+  assert.match(swift, /archive-view\.css\?v=20260905a/);
   assert.match(swift, /style-src 'self' 'unsafe-inline'/);
   assert.match(viewCss, /background: #1d1d1f/);
   assert.match(viewCss, /\.cv-code/);
@@ -72,6 +72,11 @@ test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', ()
   assert.match(src, /media_entities/);
   assert.match(src, /mediaItems/);
   assert.match(src, /mediaIndex/);
+  assert.match(src, /cv-x-dropped/);
+  assert.match(src, /mediaExpected/);
+  assert.match(src, /struct Coverage/);
+  assert.match(svc, /coverageJSON/);
+  assert.match(svc, /renderDocument/);
   assert.match(svc, /XArticleHTML\.enrich/);
   assert.match(svc, /XArticleHTML\.isUsableArticleHTML/);
   assert.doesNotMatch(svc, /contains\("<pre"\) \|\| html\.lowercased\(\)\.contains\("<h2"\)/);

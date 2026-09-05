@@ -98,7 +98,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | **归档 / 阅读态跨机**：`web_archive` 的 `blob_keys` = HTML **闭包**（root + 文内 `/api/archive/asset` CAS）+ `reader_op` | 只传 html sha；图只躺在对端 `hosts/*/blobs` 灾备里 |
 | **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |
 | **View 技术介质**：白纸正文；代码炭黑表面 + JetBrains Mono（自托管 OFL）+ 语言/复制 + View 时重高亮；图/流程图默认浅纸画板 + 题注 + 点击放大；嵌套 `<article>` 还原为 info 标注框。只有整体偏暗的不透明图才用墨井。CSS 在 `archive-view.css`。不改 CAS | Pico 灰底；黑井吞掉深色箭头/标注；正文用等宽体排中文；CDN 拉字体；把高亮写回 archive HTML |
-| **归档抽取**：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」的列表。部署时 `Readability.js` 必须拷到二进制同目录 | 技术文 `ul>li>文案+图+figcaption` 会被当成图库删掉（Swap needs either 两条） |
+| **归档抽取**：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」的列表。部署时 `Readability.js` 必须拷到二进制同目录。X Article 完整性 = `media_entities` / atomic 覆盖率，未解析必须 `cv-x-dropped` 占位；禁止只凭 `cv-x-article` 当成功 | 技术文 `ul>li>文案+图+figcaption` 会被当成图库删掉（Swap needs either 两条）；atomic `return nil` 静默丢图 |
 | **阅读选区菜单**：macOS 浅玻璃小条（28px），黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**；评论 header 单行 28px（评论/摘录与取消/提交同一 strut）；底部「记录」= `reader_ops` | 评论卡里放大号「删除划线」；菜单压在高亮上；header 左右不共线 |
 | 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
 | **SSE 控制面**：15s heartbeat（`: ping` + `{"type":"ping"}`）；每连接 bounded 32；满则 coalesce `resync_required`，禁止静默踢客户端；`retry: 3000`；前端 `onopen` / `visibilitychange` / `online` → `scheduleResync`→`mergeHead`。禁止 `onerror` 里 `close()+setTimeout` 当唯一重连 | 空闲被 Cloudflare/后台标签掐流后不补数；连接活着但永远收不到事件 |

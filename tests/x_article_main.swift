@@ -169,13 +169,39 @@ enum XArticleHTMLTests {
             ] as [[String: Any]],
             "content": ["blocks": joshBlocks, "entityMap": joshMap],
         ]
-        let josh = XArticleHTML.render(article: joshArticle) ?? ""
+        let joshDoc = XArticleHTML.renderDocument(article: joshArticle)!
+        let josh = joshDoc.html
         ok("josh-cover", josh.contains("HI24WxjagAEI9UL.jpg"))
         ok("josh-body-1", josh.contains("HI27jP3a0AEnOgM.jpg"))
         ok("josh-body-2", josh.contains("HI2w5TqacAAKNje.jpg"))
         ok("josh-img-count", josh.components(separatedBy: "<img ").count - 1 == 3)
+        ok("josh-cov-media", joshDoc.coverage.mediaExpected == 3 && joshDoc.coverage.mediaRendered == 3)
+        ok("josh-cov-atomic", joshDoc.coverage.atomicExpected == 2 && joshDoc.coverage.atomicDropped == 0)
+        ok("josh-cov-warn-empty", joshDoc.coverage.warnings.isEmpty)
         let noMedia = XArticleHTML.renderBlocks(joshBlocks, entityMap: joshMap)
-        ok("josh-no-index-drops", !noMedia.contains("<img"))
+        ok("josh-no-index-drops", !noMedia.contains("<img") && noMedia.contains("cv-x-dropped"))
+        ok("josh-dropped-caption", noMedia.contains("mediaId=2057506819006976001"))
+
+        var missingEntities = joshArticle
+        missingEntities["media_entities"] = [] as [Any]
+        let missing = XArticleHTML.renderDocument(article: missingEntities)!
+        ok("missing-cover", missing.html.contains("HI24WxjagAEI9UL.jpg"))
+        ok("missing-dropped", missing.html.contains("cv-x-dropped"))
+        ok("missing-no-body-url", !missing.html.contains("HI27jP3a0AEnOgM.jpg"))
+        ok("missing-atomic-dropped", missing.coverage.atomicDropped == 2)
+        ok("missing-warnings", !missing.coverage.warnings.isEmpty)
+
+        let unknownBlocks: [[String: Any]] = [[
+            "type": "atomic",
+            "text": " ",
+            "entityRanges": [["key": 0, "length": 1, "offset": 0]],
+        ]]
+        let unknownMap: [[String: Any]] = [[
+            "key": 0,
+            "value": ["type": "TWITTER_CARD", "data": [:] as [String: Any]],
+        ]]
+        let unknown = XArticleHTML.renderBlocks(unknownBlocks, entityMap: unknownMap)
+        ok("unknown-dropped", unknown.contains("cv-x-dropped") && unknown.contains("data-entity=\"TWITTER_CARD\""))
 
         if fails > 0 {
             FileHandle.standardError.write(Data("x-article-html: \(fails) failed\n".utf8))

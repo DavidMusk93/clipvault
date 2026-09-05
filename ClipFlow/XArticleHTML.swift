@@ -59,20 +59,70 @@ enum XArticleHTML {
         html.utf8.count > 80 && html.contains("cv-x-article")
     }
 
-    static func enrich(url: String, html: String, title: String) -> (html: String, title: String, engine: String)? {
+    struct Coverage {
+        var mediaExpected = 0
+        var mediaRendered = 0
+        var atomicExpected = 0
+        var atomicRendered = 0
+        var atomicDropped = 0
+        var markdownExpected = 0
+        var markdownRendered = 0
+        var warnings: [String] = []
+
+        var json: [String: Any] {
+            [
+                "mediaExpected": mediaExpected,
+                "mediaRendered": mediaRendered,
+                "atomicExpected": atomicExpected,
+                "atomicRendered": atomicRendered,
+                "atomicDropped": atomicDropped,
+                "markdownExpected": markdownExpected,
+                "markdownRendered": markdownRendered,
+                "warnings": warnings,
+            ]
+        }
+
+        mutating func finalize() {
+            warnings = []
+            if mediaRendered < mediaExpected {
+                warnings.append("\(mediaExpected - mediaRendered) 张图未解析")
+            }
+            if atomicDropped > 0 {
+                warnings.append("\(atomicDropped) 处介质未解析")
+            }
+            if markdownRendered < markdownExpected {
+                warnings.append("代码块 \(markdownRendered)/\(markdownExpected)")
+            }
+        }
+    }
+
+    struct Rendered {
+        var html: String
+        var coverage: Coverage
+    }
+
+    static func enrich(url: String, html: String, title: String) -> (html: String, title: String, engine: String, coverage: Coverage)? {
         guard isXURL(url), looksFlattened(html) else { return nil }
         guard let fetched = fetchArticle(url: url) else { return nil }
-        let rendered = render(article: fetched.article)
-        guard let rendered, isUsableArticleHTML(rendered) else { return nil }
+        guard let rendered = renderDocument(article: fetched.article),
+              isUsableArticleHTML(rendered.html) else { return nil }
         let t = fetched.title.isEmpty ? title : fetched.title
-        return (rendered, t, "x-article+draftjs")
+        return (rendered.html, t, "x-article+draftjs", rendered.coverage)
     }
 
     static func render(article: [String: Any]) -> String? {
+        renderDocument(article: article)?.html
+    }
+
+    static func renderDocument(article: [String: Any]) -> Rendered? {
         let content = article["content"] as? [String: Any] ?? article
         let blocks = content["blocks"] as? [[String: Any]] ?? []
         guard !blocks.isEmpty else { return nil }
         let entityMap = content["entityMap"]
+        let media = mediaIndex(article)
+        var cov = Coverage()
+        cov.mediaExpected = media.count
+        cov.markdownExpected = markdownEntityCount(entityMap)
         var html = ""
         if let title = (article["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty {
@@ -81,12 +131,26 @@ enum XArticleHTML {
         if let cover = coverImageURL(article) {
             html += "<figure><img src=\"\(escape(cover))\" alt=\"\"></figure>\n"
         }
-        html += renderBlocks(blocks, entityMap: entityMap, media: mediaIndex(article))
+        html += renderBlocks(blocks, entityMap: entityMap, media: media, coverage: &cov)
         let out = html.trimmingCharacters(in: .whitespacesAndNewlines)
-        return out.isEmpty ? nil : "<div class=\"cv-x-article\">\(out)</div>"
+        guard !out.isEmpty else { return nil }
+        let wrapped = "<div class=\"cv-x-article\">\(out)</div>"
+        cov.mediaRendered = wrapped.components(separatedBy: "<img ").count - 1
+        cov.finalize()
+        return Rendered(html: wrapped, coverage: cov)
     }
 
     static func renderBlocks(_ blocks: [[String: Any]], entityMap: Any?, media: [String: String] = [:]) -> String {
+        var cov = Coverage()
+        return renderBlocks(blocks, entityMap: entityMap, media: media, coverage: &cov)
+    }
+
+    static func renderBlocks(
+        _ blocks: [[String: Any]],
+        entityMap: Any?,
+        media: [String: String] = [:],
+        coverage: inout Coverage
+    ) -> String {
         var out = ""
         var listTag: String?
         func flushList() {
@@ -120,10 +184,10 @@ enum XArticleHTML {
             case "code-block":
                 out += "<pre><code>\(escape((block["text"] as? String) ?? ""))</code></pre>\n"
             case "atomic":
-                if let piece = renderAtomic(block, entityMap: entityMap, media: media) {
-                    out += piece
-                    if !piece.hasSuffix("\n") { out += "\n" }
-                }
+                coverage.atomicExpected += 1
+                let piece = renderAtomic(block, entityMap: entityMap, media: media, coverage: &coverage)
+                out += piece
+                if !piece.hasSuffix("\n") { out += "\n" }
             default:
                 let inner = styledText(block)
                 let plain = ((block["text"] as? String) ?? "")
@@ -228,21 +292,87 @@ enum XArticleHTML {
         return escapeOutsideTags(body)
     }
 
-    private static func renderAtomic(_ block: [String: Any], entityMap: Any?, media: [String: String]) -> String? {
+    private static func renderAtomic(
+        _ block: [String: Any],
+        entityMap: Any?,
+        media: [String: String],
+        coverage: inout Coverage
+    ) -> String {
         let ranges = block["entityRanges"] as? [[String: Any]] ?? []
-        guard let first = ranges.first else { return nil }
+        guard let first = ranges.first else {
+            return droppedFigure(entity: "atomic", detail: nil, coverage: &coverage)
+        }
         let key = intVal(first["key"])
-        guard let ent = lookupEntity(entityMap, key: key) else { return nil }
+        guard let ent = lookupEntity(entityMap, key: key) else {
+            return droppedFigure(entity: "atomic", detail: "key=\(key)", coverage: &coverage)
+        }
         let type = (ent["type"] as? String ?? "").uppercased()
         if type == "MARKDOWN", let md = dictString(ent["data"], "markdown") {
-            return renderFence(md)
+            coverage.atomicRendered += 1
+            coverage.markdownRendered += 1
+            let fence = renderFence(md)
+            return fence.hasSuffix("\n") ? fence : fence + "\n"
         }
         if type == "IMAGE" || type == "MEDIA" {
             if let src = imageURL(from: ent["data"], media: media) {
-                return "<figure><img src=\"\(escape(src))\" alt=\"\"></figure>"
+                coverage.atomicRendered += 1
+                return "<figure><img src=\"\(escape(src))\" alt=\"\"></figure>\n"
+            }
+            let ids = mediaIds(from: ent["data"])
+            let detail = ids.isEmpty ? type.lowercased() : "mediaId=\(ids.joined(separator: ","))"
+            return droppedFigure(entity: type, detail: detail, coverage: &coverage)
+        }
+        return droppedFigure(entity: type.isEmpty ? "atomic" : type, detail: nil, coverage: &coverage)
+    }
+
+    private static func droppedFigure(entity: String, detail: String?, coverage: inout Coverage) -> String {
+        coverage.atomicDropped += 1
+        let cap: String
+        if let detail, !detail.isEmpty {
+            cap = "未归档的插图（\(escape(detail))）"
+        } else {
+            cap = "未归档的介质（\(escape(entity))）"
+        }
+        return "<figure class=\"cv-x-dropped\" data-entity=\"\(escape(entity))\"><figcaption>\(cap)</figcaption></figure>\n"
+    }
+
+    private static func mediaIds(from data: Any?) -> [String] {
+        guard let d = data as? [String: Any] else { return [] }
+        var ids: [String] = []
+        if let items = d["mediaItems"] as? [[String: Any]] {
+            for item in items {
+                if let id = stringVal(item["mediaId"]) ?? stringVal(item["media_id"]) {
+                    ids.append(id)
+                }
             }
         }
-        return nil
+        if let id = stringVal(d["mediaId"]) ?? stringVal(d["media_id"]) {
+            ids.append(id)
+        }
+        return ids
+    }
+
+    private static func markdownEntityCount(_ map: Any?) -> Int {
+        var n = 0
+        eachEntity(map) { ent in
+            if ((ent["type"] as? String) ?? "").uppercased() == "MARKDOWN" { n += 1 }
+        }
+        return n
+    }
+
+    private static func eachEntity(_ map: Any?, _ fn: ([String: Any]) -> Void) {
+        if let arr = map as? [[String: Any]] {
+            for e in arr { fn((e["value"] as? [String: Any]) ?? e) }
+            return
+        }
+        guard let dict = map as? [String: Any] else { return }
+        if dict["type"] != nil {
+            fn((dict["value"] as? [String: Any]) ?? dict)
+            return
+        }
+        for (_, v) in dict {
+            if let d = v as? [String: Any] { fn((d["value"] as? [String: Any]) ?? d) }
+        }
     }
 
     private static func imageURL(from data: Any?, media: [String: String]) -> String? {

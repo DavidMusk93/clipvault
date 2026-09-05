@@ -19,6 +19,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         var bytes: Int?
         var createdAt: TimeInterval
         var updatedAt: TimeInterval
+        var coverage: [String: Any]? = nil
 
         func json() -> [String: Any] {
             var d: [String: Any] = [
@@ -32,6 +33,10 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             if let title { d["title"] = title }
             if let error { d["error"] = error }
             if let bytes { d["bytes"] = bytes }
+            if let coverage { d["coverage"] = coverage }
+            if let warnings = coverage?["warnings"] as? [String], !warnings.isEmpty {
+                d["warnings"] = warnings
+            }
             return d
         }
     }
@@ -126,16 +131,17 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
                 if let fetched = XArticleHTML.fetchArticle(url: job.url),
-                   let html = XArticleHTML.render(article: fetched.article),
-                   XArticleHTML.isUsableArticleHTML(html) {
-                    print("[Archive] x-article fast-path \(job.url) bytes=\(html.utf8.count)")
+                   let rendered = XArticleHTML.renderDocument(article: fetched.article),
+                   XArticleHTML.isUsableArticleHTML(rendered.html) {
+                    print("[Archive] x-article fast-path \(job.url) bytes=\(rendered.html.utf8.count) dropped=\(rendered.coverage.atomicDropped)")
                     DispatchQueue.main.async {
                         self.finish(
                             jobId: job.id,
                             error: nil,
                             title: fetched.title.isEmpty ? nil : fetched.title,
-                            html: html,
-                            text: fetched.title
+                            html: rendered.html,
+                            text: fetched.title,
+                            coverage: rendered.coverage
                         )
                     }
                     return
@@ -151,7 +157,14 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         session?.start()
     }
 
-    fileprivate func finish(jobId: String, error: String?, title: String?, html: String?, text: String?) {
+    fileprivate func finish(
+        jobId: String,
+        error: String?,
+        title: String?,
+        html: String?,
+        text: String?,
+        coverage: XArticleHTML.Coverage? = nil
+    ) {
         session?.teardown()
         session = nil
 
@@ -166,6 +179,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             job?.title = title
             job?.bytes = html?.utf8.count
             job?.error = nil
+            if let coverage { job?.coverage = coverage.json }
         }
         if let job { jobs[jobId] = job }
         let itemId = job?.itemId
@@ -175,7 +189,14 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
 
         print("[Archive] done \(jobId) status=\(error == nil ? "ok" : "error") \(error ?? "")")
         if error == nil, let html, let itemId, let uuid = UUID(uuidString: itemId) {
-            persist(itemId: uuid, url: urlStr, title: title ?? "", html: html, text: text ?? "") { [weak self] in
+            persist(
+                itemId: uuid,
+                url: urlStr,
+                title: title ?? "",
+                html: html,
+                text: text ?? "",
+                coverage: coverage
+            ) { [weak self] in
                 self?.onFinished?(itemId, jobId, error)
                 self?.kick()
             }
@@ -191,6 +212,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         title: String,
         html: String,
         text: String,
+        coverage: XArticleHTML.Coverage? = nil,
         done: @escaping () -> Void
     ) {
         guard database != nil else {
@@ -205,10 +227,12 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             var articleHTML = html
             var articleTitle = title
             var engine = "webkit+readability"
+            var coverageJSON = coverage?.json
             if let enriched = XArticleHTML.enrich(url: url, html: html, title: title) {
                 articleHTML = enriched.html
                 articleTitle = enriched.title
                 engine = enriched.engine
+                coverageJSON = enriched.coverage.json
                 print("[Archive] x-article enrich \(url) bytes=\(articleHTML.utf8.count)")
             }
             let localHTML = ArchiveImageInliner.embed(
@@ -225,6 +249,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 "bytes": localHTML.utf8.count,
                 "engine": engine,
             ]
+            if let coverageJSON { meta["coverage"] = coverageJSON }
             let keys = ArchiveBlobClosure.stamp(&meta, root: sha, html: localHTML)
             let metaStr = ArchiveBlobClosure.encodeMeta(meta)
             database.applyWebArchive(

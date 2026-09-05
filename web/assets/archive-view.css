@@ -263,6 +263,12 @@ main.cv-article {
   background: #f5f5f7;
   cursor: zoom-in;
 }
+.cv-article figure.cv-x-dropped {
+  min-height: 72px;
+  border-style: dashed;
+  cursor: default;
+}
+.cv-article figure.cv-x-dropped img { cursor: default; }
 .cv-figure figcaption, .cv-article figcaption {
   display: block;
   margin: 0;
