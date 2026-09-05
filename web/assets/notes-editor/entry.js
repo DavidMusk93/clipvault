@@ -149,6 +149,25 @@ function nextOlMarker(marker, indentCols) {
   return `${(Number.isFinite(n) ? n : 0) + 1}.`
 }
 
+function listDepth(indent) {
+  return Math.min(6, Math.floor(indent.replace(/\t/g, '    ').length / 4))
+}
+
+function lastSiblingOlMarker(doc, beforeLineNum, targetDepth) {
+  for (let n = beforeLineNum; n >= 1; n--) {
+    const text = doc.line(n).text
+    if (!text.trim()) continue
+    const p = LIST_ITEM.exec(text)
+    if (!p) return null
+    const d = listDepth(p[1])
+    if (d > targetDepth) continue
+    if (d < targetDepth) return null
+    if (/^[-*+]$/.test(p[2])) return null
+    return p[2]
+  }
+  return null
+}
+
 function indentList(view, dir) {
   const sel = view.state.selection.main
   const fromLine = view.state.doc.lineAt(sel.from)
@@ -160,17 +179,26 @@ function indentList(view, dir) {
     if (m) rows.push({ line, m })
   }
   if (!rows.length) return false
-  let olIndex = 0
+  let olNext = null
   const changes = []
   for (const { line, m } of rows) {
-    const indentCols = m[1].replace(/\t/g, '    ').length
-    const depth = Math.min(6, Math.floor(indentCols / 4))
+    const depth = listDepth(m[1])
     const next = Math.max(0, Math.min(6, depth + dir))
     const rest = m[4]
     const isUl = /^[-*+]$/.test(m[2])
     const spaces = '    '.repeat(next)
-    const marker = isUl ? m[2] : olMarker(next, olIndex++)
-    if (isUl) olIndex = 0
+    let marker
+    if (isUl) {
+      marker = m[2]
+      olNext = null
+    } else {
+      if (olNext == null) {
+        const prev = lastSiblingOlMarker(view.state.doc, fromLine.number - 1, next)
+        olNext = prev ? nextOlMarker(prev, next * 4) : olMarker(next, 0)
+      }
+      marker = olNext
+      olNext = nextOlMarker(marker, next * 4)
+    }
     changes.push({
       from: line.from,
       to: line.to,
