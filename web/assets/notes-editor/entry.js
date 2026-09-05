@@ -136,16 +136,17 @@ function olMarker(depth, index) {
   return `${toRoman(index + 1)}.`
 }
 
-function nextOlMarker(marker) {
-  const punct = '.'
-  const body = marker.slice(0, -1)
-  if (/^\d+$/.test(body)) return `${Number(body) + 1}${punct}`
-  if (/^[a-z]$/.test(body)) {
-    const c = body.charCodeAt(0) + 1
-    return c > 122 ? `a${punct}` : `${String.fromCharCode(c)}${punct}`
+function nextOlMarker(marker, indentCols) {
+  const body = marker.replace(/[.)]$/, '')
+  const depth = Math.floor((indentCols || 0) / 4)
+  const d = ((depth % 3) + 3) % 3
+  if (d === 1 || (/^[a-z]$/i.test(body) && d !== 2)) {
+    const c = body.toLowerCase().charCodeAt(0) + 1
+    return c > 122 ? 'a.' : `${String.fromCharCode(c)}.`
   }
-  if (/^[ivxlcdm]+$/i.test(body)) return `${toRoman(fromRoman(body) + 1)}${punct}`
-  return `1${punct}`
+  if (d === 2 || /^[ivxlcdm]+$/i.test(body)) return `${toRoman(fromRoman(body) + 1)}.`
+  const n = Number(body)
+  return `${(Number.isFinite(n) ? n : 0) + 1}.`
 }
 
 function indentList(view, dir) {
@@ -181,14 +182,17 @@ function indentList(view, dir) {
 }
 
 function continueList(view) {
-  const head = view.state.selection.main.head
+  const sel = view.state.selection.main
+  if (!sel.empty) return false
+  const head = sel.head
   const line = view.state.doc.lineAt(head)
-  if (head !== line.to) return false
   const m = LIST_ITEM.exec(line.text)
   if (!m) return false
-  const rest = m[4]
-  if (!rest.trim()) {
-    const indentCols = m[1].replace(/\t/g, '    ').length
+  const markerEnd = line.from + m[1].length + m[2].length + m[3].length
+  if (head < markerEnd) return false
+  const after = view.state.sliceDoc(head, line.to)
+  const indentCols = m[1].replace(/\t/g, '    ').length
+  if (!m[4].trim() && !after.trim()) {
     const depth = Math.floor(indentCols / 4)
     if (depth > 0) return indentList(view, -1)
     view.dispatch({
@@ -198,10 +202,12 @@ function continueList(view) {
     return true
   }
   const isUl = /^[-*+]$/.test(m[2])
-  const marker = isUl ? m[2] : nextOlMarker(m[2])
+  const marker = isUl ? m[2] : nextOlMarker(m[2], indentCols)
+  const insert = `\n${m[1]}${marker} ${after}`
+  const caret = head + 1 + m[1].length + marker.length + 1
   view.dispatch({
-    changes: { from: line.to, insert: `\n${m[1]}${marker} ` },
-    selection: { anchor: line.to + 1 + m[1].length + marker.length + 1 },
+    changes: { from: head, to: line.to, insert },
+    selection: { anchor: caret },
     userEvent: 'input',
   })
   return true
@@ -406,10 +412,11 @@ async function mount(root, opts) {
       EditorView.lineWrapping,
       notesTheme,
       pasteDrop,
-      Prec.high(keymap.of([
+      Prec.highest(keymap.of([
         { key: 'Tab', run: (v) => indentList(v, 1) },
         { key: 'Shift-Tab', run: (v) => indentList(v, -1) },
-        { key: 'Enter', run: (v) => continueList(v) },
+        { key: 'Enter', run: continueList },
+        { key: 'Shift-Enter', run: continueList },
         { key: 'Mod-b', run: (v) => { wrapSelection(v, '**'); return true } },
         { key: 'Mod-i', run: (v) => { wrapSelection(v, '*'); return true } },
         { key: 'Mod-e', run: (v) => { wrapSelection(v, '`'); return true } },
