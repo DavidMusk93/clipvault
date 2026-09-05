@@ -57,8 +57,10 @@ test('notes remember the open note and support Apple tags', () => {
 
 test('nested lists indent in source and restyle in preview', () => {
   assert.match(entry, /function indentList/);
+  assert.match(entry, /olMarker/);
   assert.match(entry, /key: 'Tab'/);
   assert.match(entry, /key: 'Shift-Tab'/);
+  assert.match(entry, /continueList/);
   assert.match(css, /ol ol \{ list-style-type: lower-alpha/);
   assert.match(entry, /renderPreview\(next, true\)/);
 });

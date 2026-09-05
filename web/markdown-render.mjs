@@ -67,8 +67,28 @@ const PURIFY_OPTS = {
  * @param {{ marked?: any, purify?: any }} engines
  * @returns {{ html: string, ok: boolean, engine: string }}
  */
+/**
+ * Notes source may use Word-style nested markers (`a.` / `i.`) which GFM
+ * does not parse. Map them to indented `1.` so marked builds nested <ol>.
+ * Only indented lines (2+ spaces) so a column-0 "a.m." / "i.e." stays prose.
+ */
+export function toGfmNestedLists(src) {
+  const lines = String(src ?? '').replace(/\r\n/g, '\n').split('\n');
+  let fence = false;
+  return lines.map((line) => {
+    if (/^\s{0,3}```/.test(line)) {
+      fence = !fence;
+      return line;
+    }
+    if (fence) return line;
+    const m = /^([ \t]{2,})([a-z]|[ivxlcdm]+)[.)]([ \t]+)(.*)$/i.exec(line);
+    if (!m) return line;
+    return `${m[1]}1. ${m[4]}`;
+  }).join('\n');
+}
+
 export function renderMarkdownBlocks(src, engines = {}) {
-  const text = String(src ?? '').replace(/\r\n/g, '\n');
+  const text = toGfmNestedLists(String(src ?? '').replace(/\r\n/g, '\n'));
   const marked = engines.marked ?? (typeof globalThis !== 'undefined' ? globalThis.marked : null);
   const purify = engines.purify ?? (typeof globalThis !== 'undefined' ? globalThis.DOMPurify : null);
   if (!marked || (typeof marked.lexer !== 'function' && typeof marked.parse !== 'function')) {

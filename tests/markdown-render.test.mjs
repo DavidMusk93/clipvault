@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks } from '../web/markdown-render.mjs';
+import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, toGfmNestedLists } from '../web/markdown-render.mjs';
 import { formatTextForDisplay } from '../web/text-format.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,16 @@ test('without libs, render refuses DIY and returns ok:false', () => {
 test('formatTextForDisplay still detects markdown kind', () => {
   const f = formatTextForDisplay('# Title\n\n- item one\n- item two\n\n```js\nok\n```');
   assert.equal(f.kind, 'markdown');
+});
+
+test('toGfmNestedLists maps indented a./i. to 1. and leaves column-0 prose', () => {
+  const src = '1. foo\n    a. bar\n    b. baz\n        i. nest\ni.e. not a list\n';
+  const out = toGfmNestedLists(src);
+  assert.match(out, /    1\. bar/);
+  assert.match(out, /    1\. baz/);
+  assert.match(out, /        1\. nest/);
+  assert.match(out, /i\.e\. not a list/);
+  assert.doesNotMatch(out, /^\s*a\./m);
 });
 
 test('renderMarkdownBlocks refuses without engines', () => {

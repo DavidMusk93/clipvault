@@ -105,36 +105,105 @@ function prefixLines(view, prefix) {
   view.focus()
 }
 
-/** GFM nested list: indent 2 spaces. Ordered source stays `1.` so marked nests;
- *  preview CSS shows 1 / a / i (Google Docs / Word classic). */
-const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])(\s+)(.*)$/
+/** Nested ordered: 1. / a. / i. (Google Docs). 4 spaces per level so GFM nests. */
+const LIST_ITEM = /^(\s*)([-*+]|\d+[.)]|[a-z][.)]|[ivxlcdm]+[.)])(\s+)(.*)$/i
+
+function toRoman(n) {
+  const map = [[10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']]
+  let s = ''
+  for (const [v, sym] of map) {
+    while (n >= v) { s += sym; n -= v }
+  }
+  return s || 'i'
+}
+
+function fromRoman(raw) {
+  const map = { i: 1, v: 5, x: 10, l: 50, c: 100 }
+  let n = 0
+  let prev = 0
+  for (const ch of String(raw).toLowerCase().split('').reverse()) {
+    const v = map[ch] || 0
+    n += v < prev ? -v : v
+    prev = v
+  }
+  return n
+}
+
+function olMarker(depth, index) {
+  const d = ((depth % 3) + 3) % 3
+  if (d === 0) return `${index + 1}.`
+  if (d === 1) return `${String.fromCharCode(97 + (index % 26))}.`
+  return `${toRoman(index + 1)}.`
+}
+
+function nextOlMarker(marker) {
+  const punct = '.'
+  const body = marker.slice(0, -1)
+  if (/^\d+$/.test(body)) return `${Number(body) + 1}${punct}`
+  if (/^[a-z]$/.test(body)) {
+    const c = body.charCodeAt(0) + 1
+    return c > 122 ? `a${punct}` : `${String.fromCharCode(c)}${punct}`
+  }
+  if (/^[ivxlcdm]+$/i.test(body)) return `${toRoman(fromRoman(body) + 1)}${punct}`
+  return `1${punct}`
+}
 
 function indentList(view, dir) {
   const sel = view.state.selection.main
   const fromLine = view.state.doc.lineAt(sel.from)
   const toLine = view.state.doc.lineAt(sel.to)
-  const changes = []
+  const rows = []
   for (let n = fromLine.number; n <= toLine.number; n++) {
     const line = view.state.doc.line(n)
     const m = LIST_ITEM.exec(line.text)
-    if (!m) continue
-    const indent = m[1].replace(/\t/g, '  ')
-    const marker = m[2]
+    if (m) rows.push({ line, m })
+  }
+  if (!rows.length) return false
+  let olIndex = 0
+  const changes = []
+  for (const { line, m } of rows) {
+    const indentCols = m[1].replace(/\t/g, '    ').length
+    const depth = Math.min(6, Math.floor(indentCols / 4))
+    const next = Math.max(0, Math.min(6, depth + dir))
     const rest = m[4]
-    const depth = Math.min(6, Math.floor(indent.length / 2))
-    const next = Math.max(0, depth + dir)
-    if (next === depth) continue
-    const isOl = /^\d+[.)]$/.test(marker)
-    const punct = marker.endsWith(')') ? ')' : '.'
-    const newMarker = isOl ? `1${punct}` : marker
+    const isUl = /^[-*+]$/.test(m[2])
+    const spaces = '    '.repeat(next)
+    const marker = isUl ? m[2] : olMarker(next, olIndex++)
+    if (isUl) olIndex = 0
     changes.push({
       from: line.from,
       to: line.to,
-      insert: `${'  '.repeat(next)}${newMarker} ${rest}`,
+      insert: `${spaces}${marker} ${rest}`,
     })
   }
-  if (!changes.length) return false
   view.dispatch({ changes, userEvent: dir > 0 ? 'indent' : 'dedent' })
+  return true
+}
+
+function continueList(view) {
+  const head = view.state.selection.main.head
+  const line = view.state.doc.lineAt(head)
+  if (head !== line.to) return false
+  const m = LIST_ITEM.exec(line.text)
+  if (!m) return false
+  const rest = m[4]
+  if (!rest.trim()) {
+    const indentCols = m[1].replace(/\t/g, '    ').length
+    const depth = Math.floor(indentCols / 4)
+    if (depth > 0) return indentList(view, -1)
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: '' },
+      userEvent: 'delete.list',
+    })
+    return true
+  }
+  const isUl = /^[-*+]$/.test(m[2])
+  const marker = isUl ? m[2] : nextOlMarker(m[2])
+  view.dispatch({
+    changes: { from: line.to, insert: `\n${m[1]}${marker} ` },
+    selection: { anchor: line.to + 1 + m[1].length + marker.length + 1 },
+    userEvent: 'input',
+  })
   return true
 }
 
@@ -340,6 +409,7 @@ async function mount(root, opts) {
       Prec.high(keymap.of([
         { key: 'Tab', run: (v) => indentList(v, 1) },
         { key: 'Shift-Tab', run: (v) => indentList(v, -1) },
+        { key: 'Enter', run: (v) => continueList(v) },
         { key: 'Mod-b', run: (v) => { wrapSelection(v, '**'); return true } },
         { key: 'Mod-i', run: (v) => { wrapSelection(v, '*'); return true } },
         { key: 'Mod-e', run: (v) => { wrapSelection(v, '`'); return true } },
