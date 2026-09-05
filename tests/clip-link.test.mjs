@@ -82,6 +82,7 @@ test('schema + listTailSQL + five SELECT sites keep link_count last', () => {
   assert.match(db, /static let listTailSQL/);
   assert.match(db, /COALESCE\(c\.link_count, 0\)/);
   assert.match(db, /colCount >= 20/);
+  assert.match(db, /colCount >= 21/);
   for (const name of ['runSearchFTS', 'runSearchLike', 'runList', 'runPinned', 'fetchItemByIdLocked']) {
     const body = functionBody(db, name);
     assert.match(body, /listTailSQL/, `${name} must use listTailSQL / listTailSQLAliased`);

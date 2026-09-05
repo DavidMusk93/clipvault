@@ -366,16 +366,19 @@ final class DatabaseManager: ObservableObject {
           ELSE NULL
         END
         """
-    /// Shared list tail so `link_count` stays last. Miss one SELECT → linkCount=0, not a shifted sha.
+    /// Shared list tail: `link_count` then `shared`. Never insert columns in the middle
+    /// (a missed SELECT would shift archive sha).
     private static let listTailSQL = """
         COALESCE(copy_count, 1), deleted_at, first_seen_at,
         user_note, user_stage, user_rating, user_context_updated_at,
-        pinned_at, archive_html_sha, COALESCE(link_count, 0)
+        pinned_at, archive_html_sha, COALESCE(link_count, 0),
+        EXISTS(SELECT 1 FROM share_links sl WHERE sl.item_id = id AND sl.revoked_at IS NULL)
         """
     private static let listTailSQLAliased = """
         COALESCE(c.copy_count, 1), c.deleted_at, c.first_seen_at,
         c.user_note, c.user_stage, c.user_rating, c.user_context_updated_at,
-        c.pinned_at, c.archive_html_sha, COALESCE(c.link_count, 0)
+        c.pinned_at, c.archive_html_sha, COALESCE(c.link_count, 0),
+        EXISTS(SELECT 1 FROM share_links sl WHERE sl.item_id = c.id AND sl.revoked_at IS NULL)
         """
 
     private func createTables() {
@@ -2113,7 +2116,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Columns: id, timestamp, type, content_hash, text, file_urls, url, html, source, ocr,
-    /// copy_count … archive_html_sha, link_count (col 19; read when colCount >= 20).
+    /// copy_count … archive_html_sha, link_count (col 19; >=20), shared EXISTS (col 20; >=21).
     private func rowToItem(stmt: OpaquePointer?) -> ClipboardItem? {
         guard let stmt = stmt,
               let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
@@ -2177,6 +2180,10 @@ final class DatabaseManager: ObservableObject {
         if colCount >= 20 {
             linkCount = max(0, Int(sqlite3_column_int(stmt, 19)))
         }
+        var shared = false
+        if colCount >= 21 {
+            shared = sqlite3_column_int(stmt, 20) != 0
+        }
 
         return ClipboardItem(
             id: uuid,
@@ -2199,7 +2206,8 @@ final class DatabaseManager: ObservableObject {
             userContextUpdatedAt: userContextUpdatedAt,
             pinnedAt: pinnedAt,
             archiveHtmlSha: archiveHtmlSha,
-            linkCount: linkCount
+            linkCount: linkCount,
+            shared: shared
         )
     }
 

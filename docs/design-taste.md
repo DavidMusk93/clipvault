@@ -125,6 +125,10 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 
 规则：只在 View 运行时包 `.cv-code` / `.cv-figure` / `.cv-table`。禁止为了高亮去改 `archive_html`。
 
+## 分享控件
+
+卡片工具条与笔记栏：**一颗按钮、同一槽**。未分享 `ios_share`「分享」；已分享 `link_off`「取消分享」（可 `.is-shared` Accent）。禁止并排「分享 + 取消分享」。
+
 X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic `MEDIA`，entity 只有 `mediaId`，真 URL 在 `article.media_entities[].media_info.original_img_url`。重建必须按 id 拼 `<figure><img>`。禁止只认 entity `src`/`url`（会只剩封面、正文图全丢）。解析不到的 atomic 必须留下 `.cv-x-dropped` 占位，禁止省略。
 
 ## Compose 纸面（笔记编辑器）

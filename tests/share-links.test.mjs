@@ -47,10 +47,11 @@ test('share page rewrites archive assets onto the token', () => {
 test('owner UI can copy and revoke a share link', () => {
   assert.match(html, /function copyShareLink/);
   assert.match(html, /function revokeShareLink/);
+  assert.match(html, /function toggleShareLink/);
   assert.match(html, /data-share-id/);
-  assert.match(html, /data-share-revoke/);
+  assert.doesNotMatch(html, /data-share-revoke/);
   assert.match(html, /id="notesShare"/);
-  assert.match(html, /id="notesUnshare"/);
+  assert.doesNotMatch(html, /id="notesUnshare"/);
 });
 
 test('this file is in the deploy frontend gate', () => {

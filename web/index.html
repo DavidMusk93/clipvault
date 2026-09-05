@@ -762,6 +762,10 @@
       background: var(--accent-soft); color: var(--accent); border-color: transparent;
     }
     .format-toolbar .fmt-btn.is-primary:hover { background: rgba(0, 113, 227, 0.18); }
+    .format-toolbar .fmt-btn.is-shared {
+      color: var(--accent);
+      background: rgba(0, 113, 227, 0.10);
+    }
     .format-toolbar .fmt-btn.is-active {
       background: var(--ink); color: #fff; border-color: transparent;
     }
@@ -1903,6 +1907,7 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .notes-share:hover { background: rgba(60, 60, 67, 0.08); }
+    .notes-share.is-shared { color: var(--accent, #0071E3); }
     .notes-share .material-symbols-outlined { font-size: 16px; }
     .notes-status {
       display: inline-flex; align-items: center; gap: 6px; flex: none;
@@ -2387,9 +2392,6 @@
         </div>
         <button type="button" class="notes-share" id="notesShare" title="复制分享链接" aria-label="分享">
           <span class="material-symbols-outlined">ios_share</span>
-        </button>
-        <button type="button" class="notes-share" id="notesUnshare" title="取消分享" aria-label="取消分享">
-          <span class="material-symbols-outlined">link_off</span>
         </button>
         <span class="notes-status" id="notesStatus" data-state="idle" title="保存状态">
           <i class="notes-status-dot" aria-hidden="true"></i>
@@ -3327,8 +3329,41 @@ window.ClipViewMasonry = Masonry;
       n.pinned = !!pinned;
       n.pinnedAt = pinned ? (Number(pinnedAt) || Date.now() / 1000) : null;
     }
+    function itemIsShared(id) {
+      const c = clips.find((x) => x.id === id);
+      if (c && c.shared) return true;
+      const n = notesState.items.find((x) => x.id === id);
+      return !!(n && n.shared);
+    }
+    function setItemShared(id, on) {
+      const c = clips.find((x) => x.id === id);
+      if (c) c.shared = !!on;
+      const n = notesState.items.find((x) => x.id === id);
+      if (n) n.shared = !!on;
+    }
+    function paintShareButton(btn, shared) {
+      if (!btn) return;
+      const on = !!shared;
+      btn.dataset.shared = on ? '1' : '0';
+      btn.classList.toggle('is-shared', on);
+      const icon = on ? 'link_off' : 'ios_share';
+      const label = on ? '取消分享' : '分享';
+      btn.title = on ? '取消后链接立即失效' : '复制分享链接，持有链接的人可看';
+      btn.setAttribute('aria-label', label);
+      if (btn.classList.contains('fmt-btn')) {
+        btn.innerHTML = `<span class="material-symbols-outlined">${icon}</span>${label}`;
+        return;
+      }
+      const ico = btn.querySelector('.material-symbols-outlined');
+      if (ico) ico.textContent = icon;
+    }
+    function paintShareControls(id) {
+      const on = itemIsShared(id);
+      document.querySelectorAll('[data-share-id="' + CSS.escape(id) + '"]').forEach((b) => paintShareButton(b, on));
+      if (notesState.id === id) paintShareButton(document.getElementById('notesShare'), on);
+    }
     async function copyShareLink(id) {
-      if (!id) return;
+      if (!id) return false;
       try {
         const res = await fetch(API + '/api/share', {
           method: 'POST',
@@ -3338,17 +3373,21 @@ window.ClipViewMasonry = Masonry;
         const j = await res.json();
         if (!j.ok || !j.url) {
           toast(j.message || '无法分享');
-          return;
+          return false;
         }
         const ok = await copyClip(j.url);
         toast(ok ? '已复制分享链接' : j.url);
+        setItemShared(id, true);
+        paintShareControls(id);
+        return true;
       } catch (_) {
         toast('分享失败');
+        return false;
       }
     }
     async function revokeShareLink(id) {
-      if (!id) return;
-      if (!window.confirm('取消后，持有链接的人将无法再打开。')) return;
+      if (!id) return false;
+      if (!window.confirm('取消后，持有链接的人将无法再打开。')) return false;
       try {
         const res = await fetch(API + '/api/share/revoke', {
           method: 'POST',
@@ -3357,9 +3396,20 @@ window.ClipViewMasonry = Masonry;
         });
         const j = await res.json();
         toast(j.ok ? (j.revoked ? '已取消分享' : '没有有效分享') : (j.message || '取消失败'));
+        if (j.ok) {
+          setItemShared(id, false);
+          paintShareControls(id);
+        }
+        return !!(j.ok && j.revoked);
       } catch (_) {
         toast('取消分享失败');
+        return false;
       }
+    }
+    async function toggleShareLink(id) {
+      if (!id) return;
+      if (itemIsShared(id)) await revokeShareLink(id);
+      else await copyShareLink(id);
     }
     async function toggleNotePin(id) {
       const n = notesState.items.find((x) => x.id === id);
@@ -3624,6 +3674,7 @@ window.ClipViewMasonry = Masonry;
       document.getElementById('notesPanel')?.classList.add('is-writing');
       paintNotesList();
       paintNotesTagBar();
+      paintShareControls(id);
       if (switching) nm('note_switch');
     }
 
@@ -3639,6 +3690,7 @@ window.ClipViewMasonry = Masonry;
       try { history.replaceState(null, '', '#notes'); } catch (_) {}
       paintNotesList();
       paintNotesTagBar();
+      paintShareButton(document.getElementById('notesShare'), false);
       titleEl?.focus();
       nm('note_new');
     }
@@ -3721,10 +3773,7 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('notesFab')?.addEventListener('click', toggleNotesPanel);
     document.getElementById('notesClose')?.addEventListener('click', closeNotesPanel);
     document.getElementById('notesShare')?.addEventListener('click', () => {
-      if (notesState.id) copyShareLink(notesState.id);
-    });
-    document.getElementById('notesUnshare')?.addEventListener('click', () => {
-      if (notesState.id) revokeShareLink(notesState.id);
+      if (notesState.id) toggleShareLink(notesState.id);
     });
     {
       const opts = { capture: true, passive: false };
@@ -5819,11 +5868,9 @@ window.ClipViewMasonry = Masonry;
         }
       }
       if (itemId) {
+        const shared = itemIsShared(itemId);
         bits.push(
-          `<button type="button" class="fmt-btn" data-share-id="${escAttr(itemId)}" title="复制分享链接，持有链接的人可看"><span class="material-symbols-outlined">ios_share</span>分享</button>`
-        );
-        bits.push(
-          `<button type="button" class="fmt-btn" data-share-revoke="${escAttr(itemId)}" title="取消后链接立即失效"><span class="material-symbols-outlined">link_off</span>取消分享</button>`
+          `<button type="button" class="fmt-btn${shared ? ' is-shared' : ''}" data-share-id="${escAttr(itemId)}" data-shared="${shared ? '1' : '0'}" title="${shared ? '取消后链接立即失效' : '复制分享链接，持有链接的人可看'}"><span class="material-symbols-outlined">${shared ? 'link_off' : 'ios_share'}</span>${shared ? '取消分享' : '分享'}</button>`
         );
       }
       if (showRawToggle && fmt.kind && fmt.kind !== 'plain') {
@@ -5919,17 +5966,10 @@ window.ClipViewMasonry = Masonry;
           const viewBtn = e.target.closest && e.target.closest('[data-view-archive]');
           const clearBtn = e.target.closest && e.target.closest('[data-clear-archive]');
           const shareBtn = e.target.closest && e.target.closest('[data-share-id]');
-          const unshareBtn = e.target.closest && e.target.closest('[data-share-revoke]');
           if (shareBtn) {
             e.preventDefault();
             e.stopPropagation();
-            copyShareLink(shareBtn.getAttribute('data-share-id'));
-            return;
-          }
-          if (unshareBtn) {
-            e.preventDefault();
-            e.stopPropagation();
-            revokeShareLink(unshareBtn.getAttribute('data-share-revoke'));
+            toggleShareLink(shareBtn.getAttribute('data-share-id'));
             return;
           }
           if (!rawBtn && !prettyBtn && !openBtn && !copyBtn && !archBtn && !viewBtn && !clearBtn) return;

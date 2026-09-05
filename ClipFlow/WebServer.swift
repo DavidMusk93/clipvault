@@ -1401,6 +1401,7 @@ class WebServer {
             dict["pinnedAt"] = NSNull()
         }
         dict["linkCount"] = item.linkCount
+        dict["shared"] = item.shared
         // Thumb URL for image types — client never loads full blob in feed
         if item.type == .image {
             dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb&cv=3"

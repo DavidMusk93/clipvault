@@ -56,6 +56,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let archiveHtmlSha: String?
     /// Undirected related-edge degree (projection of `clip_links`). Judgment, not capture.
     let linkCount: Int
+    /// Active public share_links row exists. Judgment overlay, not capture.
+    let shared: Bool
     
     init(id: UUID = UUID(),
          timestamp: Date = Date(),
@@ -80,7 +82,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
          userContextUpdatedAt: Date? = nil,
          pinnedAt: Date? = nil,
          archiveHtmlSha: String? = nil,
-         linkCount: Int = 0) {
+         linkCount: Int = 0,
+         shared: Bool = false) {
         self.id = id
         self.timestamp = timestamp
         self.type = type
@@ -105,6 +108,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.pinnedAt = pinnedAt
         self.archiveHtmlSha = archiveHtmlSha
         self.linkCount = max(0, linkCount)
+        self.shared = shared
     }
 
     /// Visible-text identity for latest-alive. RTF/HTML wrappers must not mint a new row.
