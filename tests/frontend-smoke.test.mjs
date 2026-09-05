@@ -78,6 +78,7 @@ test('notes are a panel on the same page', () => {
   assert.match(indexHtml, /class="notes-frost"/);
   assert.match(indexHtml, /exclude.*note/);
   assert.match(indexHtml, /body\.notes-open \.top-bar/);
+  assert.match(indexHtml, /body\.notes-open main/);
   assert.match(indexHtml, /data-mode="split"/);
   assert.doesNotMatch(indexHtml, /id="composeSheet"/);
   assert.doesNotMatch(indexHtml, /想到的写下/);

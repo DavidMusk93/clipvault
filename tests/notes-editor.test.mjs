@@ -104,3 +104,17 @@ test('notes panel open does not translate the chrome', () => {
   assert.match(html, /\.notes-panel \{[\s\S]{0,280}opacity: 0;/);
   assert.doesNotMatch(html, /\.notes-panel \{[\s\S]{0,200}translateY\(18px\)/);
 });
+
+test('open notes lock the wall so chips and format toolbar cannot drag', () => {
+  assert.match(html, /html\.notes-open/);
+  assert.match(html, /body\.notes-open[\s\S]{0,80}overflow:\s*hidden/);
+  assert.match(html, /body\.notes-open \.chips,\s*body\.notes-open main/);
+  assert.match(html, /setNotesWallLocked/);
+  assert.match(html, /setAttribute\('inert'/);
+  assert.match(html, /notesBackdropEvent/);
+  assert.match(html, /\.notes-panel\.open \.notes-frost[\s\S]{0,80}pointer-events:\s*auto/);
+  assert.match(
+    html,
+    /\n    \.notes-frost \{\n      position: absolute; inset: 0;\n      pointer-events: none;/,
+  );
+});

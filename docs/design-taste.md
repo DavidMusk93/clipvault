@@ -131,7 +131,7 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 
 | Token | 值 | 用途 |
 | --- | --- | --- |
-| 霜 | `rgba(245,245,247,.42)` blur 28 | 只糊墙一次 |
+| 霜 | `rgba(245,245,247,.42)` blur 28 | 只糊墙一次。打开时必须挡住墙：chips / format-toolbar / masonry 不可点、不可滚 |
 | 列表 | Apple 侧栏 `#F2F2F7` | 和纸面分开；选中 `rgba(0,0,0,.06)` 不是蜂蜜底 |
 | 纸 | `#fff` 实心 | 阅读/预览面。禁止再叠 blur |
 | 源码栏 | `#FBFBFD` | 比预览略灰，像 macOS 分栏 |
@@ -146,7 +146,7 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 | 嵌套列表 | Tab 后源码 `a. b. c.`，再一层 `i. ii.`；预览同样 | 每层 4 空格；预览把 `a.`/`i.` 映成 GFM `1.` 再渲染。禁止 `5.1` |
 | 新一篇 | 32×32 细线 +，无黑底「新一篇」文案 | 新建必须清空预览，禁止留上一篇 HTML |
 
-规则：工具条向源码插入 Markdown，不改预览 DOM。预览只读。自动保存不得回写编辑器、不得 `mergeHead` 墙。
+规则：工具条向源码插入 Markdown，不改预览 DOM。预览只读。自动保存不得回写编辑器、不得 `mergeHead` 墙。霜层默认 `pointer-events: none`（关掉才能点墙），`.notes-panel.open` 才 `auto`；`main`/`chips`/`top-bar` 同时 `inert`。禁止霜层一直 `none` 把拖动手势漏到控制条。
 
 ## 品味禁区
 

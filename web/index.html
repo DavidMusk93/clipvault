@@ -168,8 +168,14 @@
       scrollbar-width: none;
       transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
     }
+    html.notes-open,
+    body.notes-open {
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
     body.notes-open .top-bar,
-    body.notes-open .chips {
+    body.notes-open .chips,
+    body.notes-open main {
       opacity: 0;
       pointer-events: none;
       visibility: hidden;
@@ -1701,20 +1707,26 @@
     /* Notes: same page, panel from the 笔记 control. No second document.
        Frost once. Paper is solid. Source | preview live in notes-editor.css. */
     .notes-panel {
-      position: fixed; inset: 0; z-index: 200;
+      position: fixed; inset: 0; z-index: 2100;
       pointer-events: none;
       opacity: 0;
+      isolation: isolate;
+      overscroll-behavior: none;
       transition: opacity 0.2s cubic-bezier(0.23, 1, 0.32, 1);
     }
     .notes-panel.open {
       pointer-events: auto;
       opacity: 1;
     }
-    .notes-panel.open .notes-frost { will-change: opacity; }
+    .notes-panel.open .notes-frost {
+      pointer-events: auto;
+      will-change: opacity;
+    }
     .notes-panel.open.is-settled .notes-frost { will-change: auto; }
     .notes-frost {
       position: absolute; inset: 0;
       pointer-events: none;
+      touch-action: none;
       background: rgba(245, 245, 247, 0.42);
       -webkit-backdrop-filter: blur(28px) saturate(140%);
       backdrop-filter: blur(28px) saturate(140%);
@@ -3521,13 +3533,34 @@ window.ClipViewMasonry = Masonry;
       nm('note_new');
     }
 
+    function setNotesWallLocked(on) {
+      document.documentElement.classList.toggle('notes-open', on);
+      document.body.classList.toggle('notes-open', on);
+      for (const sel of ['.top-bar', '.chips', 'main']) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        if (on) el.setAttribute('inert', '');
+        else el.removeAttribute('inert');
+      }
+    }
+
+    function notesBackdropEvent(e) {
+      if (!document.body.classList.contains('notes-open')) return;
+      const t = e.target;
+      if (!(t && t.closest)) return;
+      if (t.closest('.notes-rail, .notes-paper')) return;
+      if (t.closest('.event-toast.open, .archive-reader.open, .eval-sheet.open, .backup-drawer, .lightbox.open')) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
     async function openNotesPanel(preferredId) {
       const panel = document.getElementById('notesPanel');
       if (!panel) return;
       panel.classList.add('open');
       panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('notes-open');
+      setNotesWallLocked(true);
       document.getElementById('notesOpenBtn')?.classList.add('is-on');
       notesState.openedAt = Date.now();
       clearTimeout(notesState.settleTimer);
@@ -3553,7 +3586,7 @@ window.ClipViewMasonry = Masonry;
       const panel = document.getElementById('notesPanel');
       panel?.classList.remove('open', 'is-writing', 'is-settled');
       panel?.setAttribute('aria-hidden', 'true');
-      document.body.classList.remove('notes-open');
+      setNotesWallLocked(false);
       document.getElementById('notesOpenBtn')?.classList.remove('is-on');
       const M = globalThis.ClipNotesMetrics;
       if (M) {
@@ -3577,6 +3610,12 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('notesOpenBtn')?.addEventListener('click', toggleNotesPanel);
     document.getElementById('notesFab')?.addEventListener('click', toggleNotesPanel);
     document.getElementById('notesClose')?.addEventListener('click', closeNotesPanel);
+    {
+      const opts = { capture: true, passive: false };
+      document.addEventListener('wheel', notesBackdropEvent, opts);
+      document.addEventListener('touchmove', notesBackdropEvent, opts);
+      document.addEventListener('pointerdown', notesBackdropEvent, opts);
+    }
     document.getElementById('notesNew')?.addEventListener('click', newNoteInPanel);
     window.addEventListener('online', () => {
       if (notesState.saveAttempts || notesState.dirty) saveNoteNow();
