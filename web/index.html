@@ -17,9 +17,9 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n4" />
-  <script src="/assets/notes-editor/notes-editor.js?v=n4"></script>
-  <script src="/assets/notes-metrics.js?v=n4"></script>
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n5" />
+  <script src="/assets/notes-editor/notes-editor.js?v=n5"></script>
+  <script src="/assets/notes-metrics.js?v=n5"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -1748,12 +1748,26 @@
       font: inherit; font-size: 13px; color: var(--ink); outline: none;
     }
     .notes-new {
-      height: 32px; padding: 0 11px; border: 0; border-radius: 10px;
-      background: var(--ink); color: #fff;
-      font: inherit; font-size: 13px; font-weight: 600; letter-spacing: -0.02em;
-      cursor: pointer;
+      width: 32px; height: 32px; padding: 0; border: 0; border-radius: 10px;
+      background: transparent; color: var(--ink);
+      display: inline-flex; align-items: center; justify-content: center;
+      cursor: pointer; flex: none;
     }
-    .notes-new:active { transform: scale(0.97); }
+    .notes-new:hover { background: rgba(0, 0, 0, 0.06); }
+    .notes-new:active { transform: scale(0.96); }
+    .notes-new-plus {
+      position: relative; width: 13px; height: 13px; display: block;
+    }
+    .notes-new-plus::before,
+    .notes-new-plus::after {
+      content: ""; position: absolute; background: currentColor; border-radius: 1px;
+    }
+    .notes-new-plus::before {
+      left: 0; right: 0; height: 1.5px; top: 50%; transform: translateY(-50%);
+    }
+    .notes-new-plus::after {
+      top: 0; bottom: 0; width: 1.5px; left: 50%; transform: translateX(-50%);
+    }
     .notes-list { flex: 1; overflow: auto; padding: 4px 8px 12px; }
     .note-row {
       width: 100%; text-align: left; border: 0; background: transparent;
@@ -1863,12 +1877,21 @@
     .notes-tools button:active { transform: scale(0.96); }
     .notes-tools button .material-symbols-outlined { font-size: 16px; }
     .notes-status {
+      display: inline-flex; align-items: center; gap: 6px; flex: none;
+      min-width: 4.2em; justify-content: flex-end;
+      font: 500 11px/1 var(--font-ui); letter-spacing: -0.01em; color: var(--muted);
+    }
+    .notes-status-dot {
       width: 6px; height: 6px; border-radius: 980px; flex: none;
       background: rgba(60, 60, 67, 0.22);
     }
-    .notes-status[data-state="dirty"] { background: #C47A2C; }
-    .notes-status[data-state="saved"] { background: #34C759; }
-    .notes-status[data-state="error"] { background: #D70015; }
+    .notes-status[data-state="dirty"] .notes-status-dot { background: #C47A2C; }
+    .notes-status[data-state="saving"] .notes-status-dot { background: #0071E3; }
+    .notes-status[data-state="saved"] .notes-status-dot { background: #34C759; }
+    .notes-status[data-state="error"] .notes-status-dot,
+    .notes-status[data-state="error"] .notes-status-label { color: #D70015; }
+    .notes-status[data-state="error"] .notes-status-dot { background: #D70015; }
+    .notes-status-label { white-space: nowrap; }
     #notesEditor { flex: 1; min-height: 0; overflow: hidden; }
     .notes-close {
       position: absolute; top: 14px; right: 16px; z-index: 2;
@@ -2298,7 +2321,9 @@
       <div class="notes-rail-top">
         <input id="notesSearch" type="search" placeholder="搜索" autocomplete="off" />
         <button type="button" class="notes-tag-filter" id="notesTagBar" hidden></button>
-        <button type="button" class="notes-new" id="notesNew">新一篇</button>
+        <button type="button" class="notes-new" id="notesNew" title="新一篇" aria-label="新一篇">
+          <span class="notes-new-plus" aria-hidden="true"></span>
+        </button>
       </div>
       <div class="notes-list" id="notesList"></div>
     </aside>
@@ -2329,7 +2354,10 @@
           <button type="button" data-cmd="link" title="链接"><span class="material-symbols-outlined">link</span></button>
           <button type="button" data-cmd="table" title="表格"><span class="material-symbols-outlined">table</span></button>
         </div>
-        <span class="notes-status" id="notesStatus" data-state="idle" title="保存状态"></span>
+        <span class="notes-status" id="notesStatus" data-state="idle" title="保存状态">
+          <i class="notes-status-dot" aria-hidden="true"></i>
+          <span class="notes-status-label" id="notesStatusLabel"></span>
+        </span>
       </div>
       <div id="notesEditor" class="notes-work"></div>
     </section>
@@ -3152,7 +3180,7 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0 };
     const NOTE_ID_KEY = 'clipvault.notes.id';
 
     function noteExcerpt(md) {
@@ -3339,9 +3367,19 @@ window.ClipViewMasonry = Masonry;
       return j.url;
     }
 
-    function notesStatus(state) {
+    function notesStatus(state, detail) {
       const el = document.getElementById('notesStatus');
+      const label = document.getElementById('notesStatusLabel');
       if (el) el.dataset.state = state || 'idle';
+      const text = {
+        idle: '',
+        dirty: '未保存',
+        saving: '保存中',
+        saved: '已保存',
+        error: detail || '保存失败，将重试',
+      }[state || 'idle'];
+      if (label) label.textContent = text || '';
+      if (el) el.title = text || '保存状态';
     }
     function paintNotesModes() {
       const mode = notesState.editor?.getMode?.() || 'split';
@@ -3392,13 +3430,29 @@ window.ClipViewMasonry = Masonry;
       notesState.timer = setTimeout(() => saveNoteNow(), 800);
     }
 
+    function scheduleNoteRetry() {
+      notesState.saveAttempts = Math.min(6, (notesState.saveAttempts || 0) + 1);
+      const delay = Math.min(30000, 1000 * Math.pow(2, notesState.saveAttempts - 1));
+      notesStatus('error', `保存失败，${Math.round(delay / 1000)}s 后重试`);
+      nm('note_save_retry', { payload: { n: notesState.saveAttempts } });
+      clearTimeout(notesState.timer);
+      notesState.timer = setTimeout(() => saveNoteNow(), delay);
+    }
+
     async function saveNoteNow() {
-      if (!notesState.editor) return;
+      if (!notesState.editor || notesState.saving) return;
       const title = (document.getElementById('notesTitle')?.value || '').trim();
       const body = notesState.editor.getMarkdown();
-      if (!title && !String(body || '').trim()) return;
+      if (!title && !String(body || '').trim()) {
+        notesState.dirty = false;
+        notesStatus('idle');
+        return;
+      }
       const payload = { body, title: title || null };
       if (notesState.id) payload.id = notesState.id;
+      notesState.saving = true;
+      notesState.dirty = false;
+      notesStatus('saving');
       const t0 = performance.now();
       try {
         const res = await fetch(API + '/api/compose', {
@@ -3409,8 +3463,9 @@ window.ClipViewMasonry = Masonry;
         const j = await res.json();
         const dur = performance.now() - t0;
         if (!res.ok || j.ok === false) {
-          notesStatus('error');
+          notesState.dirty = true;
           nm('note_save', { dur_ms: dur, ok: false, payload: { bytes: body.length } });
+          scheduleNoteRetry();
           return;
         }
         notesState.id = j.item.id;
@@ -3418,13 +3473,17 @@ window.ClipViewMasonry = Masonry;
         const idx = notesState.items.findIndex(n => n.id === notesState.id);
         if (idx >= 0) notesState.items[idx] = j.item;
         else notesState.items.unshift(j.item);
-        notesState.dirty = false;
+        notesState.saveAttempts = 0;
         notesStatus('saved');
         nm('note_save', { dur_ms: dur, ok: true, payload: { bytes: body.length } });
         paintNotesList();
+        if (notesState.dirty) scheduleNoteSave();
       } catch (e) {
-        notesStatus('error');
+        notesState.dirty = true;
         nm('note_save', { dur_ms: performance.now() - t0, ok: false, payload: { bytes: body.length } });
+        scheduleNoteRetry();
+      } finally {
+        notesState.saving = false;
       }
     }
 
@@ -3519,6 +3578,9 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('notesFab')?.addEventListener('click', toggleNotesPanel);
     document.getElementById('notesClose')?.addEventListener('click', closeNotesPanel);
     document.getElementById('notesNew')?.addEventListener('click', newNoteInPanel);
+    window.addEventListener('online', () => {
+      if (notesState.saveAttempts || notesState.dirty) saveNoteNow();
+    });
     document.getElementById('notesTitle')?.addEventListener('input', () => {
       scheduleNoteSave();
       paintNotesTitleView();

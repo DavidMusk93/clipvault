@@ -105,6 +105,39 @@ function prefixLines(view, prefix) {
   view.focus()
 }
 
+/** GFM nested list: indent 2 spaces. Ordered source stays `1.` so marked nests;
+ *  preview CSS shows 1 / a / i (Google Docs / Word classic). */
+const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])(\s+)(.*)$/
+
+function indentList(view, dir) {
+  const sel = view.state.selection.main
+  const fromLine = view.state.doc.lineAt(sel.from)
+  const toLine = view.state.doc.lineAt(sel.to)
+  const changes = []
+  for (let n = fromLine.number; n <= toLine.number; n++) {
+    const line = view.state.doc.line(n)
+    const m = LIST_ITEM.exec(line.text)
+    if (!m) continue
+    const indent = m[1].replace(/\t/g, '  ')
+    const marker = m[2]
+    const rest = m[4]
+    const depth = Math.min(6, Math.floor(indent.length / 2))
+    const next = Math.max(0, depth + dir)
+    if (next === depth) continue
+    const isOl = /^\d+[.)]$/.test(marker)
+    const punct = marker.endsWith(')') ? ')' : '.'
+    const newMarker = isOl ? `1${punct}` : marker
+    changes.push({
+      from: line.from,
+      to: line.to,
+      insert: `${'  '.repeat(next)}${newMarker} ${rest}`,
+    })
+  }
+  if (!changes.length) return false
+  view.dispatch({ changes, userEvent: dir > 0 ? 'indent' : 'dedent' })
+  return true
+}
+
 function insertBlock(view, text) {
   const sel = view.state.selection.main
   const line = view.state.doc.lineAt(sel.from)
@@ -229,11 +262,15 @@ async function mount(root, opts) {
     }
   }
 
-  function renderPreview(md) {
+  function renderPreview(md, force) {
     const text = String(md || '')
-    if (text === lastHash) return
+    if (!force && text === lastHash) return
     lastHash = text
     const t = performance.now()
+    if (!text.trim()) {
+      previewInner.innerHTML = ''
+      return
+    }
     const r = renderMarkdownBlocks(text, { marked, purify: DOMPurify })
     previewInner.innerHTML = r.ok ? r.html : ''
     enhancePreview(previewInner)
@@ -301,6 +338,8 @@ async function mount(root, opts) {
       notesTheme,
       pasteDrop,
       Prec.high(keymap.of([
+        { key: 'Tab', run: (v) => indentList(v, 1) },
+        { key: 'Shift-Tab', run: (v) => indentList(v, -1) },
         { key: 'Mod-b', run: (v) => { wrapSelection(v, '**'); return true } },
         { key: 'Mod-i', run: (v) => { wrapSelection(v, '*'); return true } },
         { key: 'Mod-e', run: (v) => { wrapSelection(v, '`'); return true } },
@@ -382,8 +421,7 @@ async function mount(root, opts) {
         changes: { from: 0, to: view.state.doc.length, insert: next },
       })
       lastMd = next
-      lastHash = ''
-      schedulePreview(next)
+      renderPreview(next, true)
       const clear = () => { if (g === gen) applying = false }
       queueMicrotask(clear)
       requestAnimationFrame(clear)

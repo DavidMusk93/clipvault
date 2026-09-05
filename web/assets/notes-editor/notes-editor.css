@@ -98,10 +98,16 @@
 .notes-preview-inner ul,
 .notes-preview-inner ol {
   margin: 0.55rem 0 0.7rem;
-  padding-left: 1.35rem;
+  padding-left: 1.45rem;
 }
 .notes-preview-inner li { margin: 0.28rem 0; }
 .notes-preview-inner li::marker { color: #86868b; }
+.notes-preview-inner ul { list-style-type: disc; }
+.notes-preview-inner ul ul { list-style-type: circle; }
+.notes-preview-inner ul ul ul { list-style-type: square; }
+.notes-preview-inner ol { list-style-type: decimal; }
+.notes-preview-inner ol ol { list-style-type: lower-alpha; }
+.notes-preview-inner ol ol ol { list-style-type: lower-roman; }
 .notes-preview-inner ul ul,
 .notes-preview-inner ol ol,
 .notes-preview-inner ul ol,

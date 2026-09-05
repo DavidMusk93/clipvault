@@ -55,6 +55,22 @@ test('notes remember the open note and support Apple tags', () => {
   assert.match(swift, /max-age=60/);
 });
 
+test('nested lists indent in source and restyle in preview', () => {
+  assert.match(entry, /function indentList/);
+  assert.match(entry, /key: 'Tab'/);
+  assert.match(entry, /key: 'Shift-Tab'/);
+  assert.match(css, /ol ol \{ list-style-type: lower-alpha/);
+  assert.match(entry, /renderPreview\(next, true\)/);
+});
+
+test('save status is labeled and retries on failure', () => {
+  assert.match(html, /id="notesStatusLabel"/);
+  assert.match(html, /scheduleNoteRetry/);
+  assert.match(html, /保存失败/);
+  assert.match(html, /notes-new-plus/);
+  assert.doesNotMatch(html, />新一篇</);
+});
+
 test('panel is source + preview split', () => {
   assert.match(html, /id="notesEditor"/);
   assert.match(html, /data-mode="source"/);
