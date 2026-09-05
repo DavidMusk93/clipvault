@@ -6,7 +6,7 @@ import { HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput } fr
 import { tags as t } from '@lezer/highlight'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { renderMarkdownBlocks } from '../../markdown-render.mjs'
+import { renderMarkdownBlocks, mapLineToScrollTop, mapScrollTopToLine } from '../../markdown-render.mjs'
 
 const MODE_KEY = 'clipvault.notes.mode'
 const SPLIT_KEY = 'clipvault.notes.split'
@@ -297,6 +297,7 @@ async function mount(root, opts) {
     }
     try { localStorage.setItem(MODE_KEY, mode) } catch (_) {}
     if (mode !== 'preview') view.requestMeasure()
+    if (mode === 'split') queueSyncFromSource()
   }
 
   function enhancePreview(root) {
@@ -380,6 +381,7 @@ async function mount(root, opts) {
     const dur = performance.now() - t
     metric('notes_preview_ms', { dur_ms: dur, payload: { chars: text.length } })
     if (dur > 16) metric('notes_input_to_preview', { dur_ms: dur })
+    if (mode === 'split') queueSyncFromSource()
   }
 
   function schedulePreview(md) {
@@ -461,29 +463,77 @@ async function mount(root, opts) {
   })
 
   const view = new EditorView({ state, parent: sourceEl })
-  view.scrollDOM.addEventListener('scroll', () => {
-    if (mode !== 'split' || syncing) return
-    syncPreviewToSource(view)
-  }, { passive: true })
-
-  function syncPreviewToSource(v) {
-    const box = v.scrollDOM.getBoundingClientRect()
-    const pos = v.posAtCoords({ x: box.left + 24, y: box.top + 12 })
-    if (pos == null) return
-    const line = v.state.doc.lineAt(pos).number
-    const nodes = previewInner.querySelectorAll('[data-source-line]')
-    let best = null
-    for (const n of nodes) {
-      const ln = Number(n.getAttribute('data-source-line'))
-      if (ln <= line) best = n
-      else break
-    }
-    if (!best) return
+  let unlockTimer = 0
+  function lockSync() {
     syncing = true
-    const top = best.offsetTop - 12
-    previewEl.scrollTop = Math.max(0, top)
-    requestAnimationFrame(() => { syncing = false })
+    clearTimeout(unlockTimer)
+    unlockTimer = setTimeout(() => { syncing = false }, 80)
   }
+  function yInScroller(el, scroller) {
+    const a = el.getBoundingClientRect()
+    const b = scroller.getBoundingClientRect()
+    return a.top - b.top + scroller.scrollTop
+  }
+  function previewAnchors() {
+    const out = []
+    for (const n of previewInner.querySelectorAll('[data-source-line]')) {
+      const line = Number(n.getAttribute('data-source-line'))
+      if (!Number.isFinite(line) || line < 1) continue
+      out.push({ line, y: yInScroller(n, previewEl) })
+    }
+    return out
+  }
+  function sourceLineAtTop(v) {
+    try {
+      if (v.viewport && Number.isFinite(v.viewport.from)) {
+        return v.state.doc.lineAt(v.viewport.from).number
+      }
+    } catch (_) {}
+    const src = v.scrollDOM
+    const maxSrc = Math.max(1, src.scrollHeight - src.clientHeight)
+    return 1 + (src.scrollTop / maxSrc) * Math.max(0, v.state.doc.lines - 1)
+  }
+  function syncPreviewToSource(v) {
+    if (mode !== 'split' || syncing) return
+    const src = v.scrollDOM
+    const maxSrc = Math.max(0, src.scrollHeight - src.clientHeight)
+    const maxPr = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
+    if (maxPr <= 0) return
+    const r = maxSrc > 0 ? src.scrollTop / maxSrc : 0
+    const top = r <= 0 ? 0 : r >= 1
+      ? maxPr
+      : mapLineToScrollTop(sourceLineAtTop(v), previewAnchors(), v.state.doc.lines, maxPr)
+    if (Math.abs(previewEl.scrollTop - top) < 1) return
+    lockSync()
+    previewEl.scrollTop = top
+  }
+  function syncSourceToPreview() {
+    if (mode !== 'split' || syncing) return
+    const maxPr = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
+    const maxSrc = Math.max(0, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight)
+    if (maxSrc <= 0) return
+    const r = maxPr > 0 ? previewEl.scrollTop / maxPr : 0
+    let next
+    if (r <= 0) next = 0
+    else if (r >= 1) next = maxSrc
+    else {
+      const line = mapScrollTopToLine(previewEl.scrollTop, previewAnchors(), view.state.doc.lines, maxPr)
+      const n = Math.max(1, Math.min(view.state.doc.lines, Math.round(line)))
+      next = view.lineBlockAt(view.state.doc.line(n).from).top
+    }
+    next = Math.max(0, Math.min(maxSrc, next))
+    if (Math.abs(view.scrollDOM.scrollTop - next) < 2) return
+    lockSync()
+    view.scrollDOM.scrollTop = next
+  }
+  function queueSyncFromSource() {
+    requestAnimationFrame(() => syncPreviewToSource(view))
+  }
+  view.scrollDOM.addEventListener('scroll', () => syncPreviewToSource(view), { passive: true })
+  previewEl.addEventListener('scroll', syncSourceToPreview, { passive: true })
+  previewEl.addEventListener('load', (e) => {
+    if (e.target && e.target.tagName === 'IMG' && mode === 'split') queueSyncFromSource()
+  }, true)
 
   previewEl.addEventListener('click', (e) => {
     const tag = e.target.closest && e.target.closest('.notes-tag')
@@ -533,6 +583,7 @@ async function mount(root, opts) {
     },
     destroy() {
       clearTimeout(previewTimer)
+      clearTimeout(unlockTimer)
       view.destroy()
       root.replaceChildren()
     },

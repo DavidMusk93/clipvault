@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, toGfmNestedLists } from '../web/markdown-render.mjs';
+import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, toGfmNestedLists, mapLineToScrollTop, mapScrollTopToLine } from '../web/markdown-render.mjs';
 import { formatTextForDisplay } from '../web/text-format.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,6 +60,26 @@ test('toGfmNestedLists maps indented a./i. to 1. and leaves column-0 prose', () 
 test('renderMarkdownBlocks refuses without engines', () => {
   const r = renderMarkdownBlocks('# Hi\n\npara\n', {});
   assert.equal(r.ok, false);
+});
+
+test('mapLineToScrollTop interpolates anchors and falls back proportionally', () => {
+  assert.equal(mapLineToScrollTop(1, [], 10, 100), 0);
+  assert.equal(mapLineToScrollTop(10, [], 10, 100), 100);
+  assert.equal(mapLineToScrollTop(6, [], 11, 100), 50);
+  const anchors = [{ line: 5, y: 20 }, { line: 15, y: 80 }];
+  assert.equal(mapLineToScrollTop(5, anchors, 20, 100), 20);
+  assert.equal(mapLineToScrollTop(10, anchors, 20, 100), 50);
+  assert.equal(mapLineToScrollTop(20, anchors, 20, 100), 100);
+  assert.equal(mapLineToScrollTop(1, anchors, 20, 0), 0);
+});
+
+test('mapScrollTopToLine is the inverse of mapLineToScrollTop', () => {
+  const anchors = [{ line: 5, y: 20 }, { line: 15, y: 80 }];
+  const y = mapLineToScrollTop(10, anchors, 20, 100);
+  const back = mapScrollTopToLine(y, anchors, 20, 100);
+  assert.ok(Math.abs(back - 10) < 1e-6, back);
+  assert.equal(mapScrollTopToLine(0, [], 10, 100), 1);
+  assert.equal(mapScrollTopToLine(100, [], 10, 100), 10);
 });
 
 test('neutralizeAnchorsHtml strips navigable anchors', () => {

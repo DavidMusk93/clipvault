@@ -105,6 +105,19 @@ test('notes panel open does not translate the chrome', () => {
   assert.doesNotMatch(html, /\.notes-panel \{[\s\S]{0,200}translateY\(18px\)/);
 });
 
+test('split panes sync source and preview scroll', () => {
+  assert.match(entry, /mapLineToScrollTop/);
+  assert.match(entry, /mapScrollTopToLine/);
+  assert.match(entry, /syncPreviewToSource/);
+  assert.match(entry, /syncSourceToPreview/);
+  assert.match(entry, /viewport\.from/);
+  assert.match(entry, /yInScroller/);
+  assert.match(entry, /previewEl\.addEventListener\('scroll'/);
+  assert.doesNotMatch(entry, /best\.offsetTop/);
+  assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
+  assert.match(html, /notes-editor\.js\?v=n9/);
+});
+
 test('open notes lock the wall so chips and format toolbar cannot drag', () => {
   assert.match(html, /html\.notes-open/);
   assert.match(html, /body\.notes-open[\s\S]{0,80}overflow:\s*hidden/);

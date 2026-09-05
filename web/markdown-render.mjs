@@ -134,6 +134,68 @@ export function renderMarkdownBlocks(src, engines = {}) {
   }
 }
 
+function clampNum(n, lo, hi) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function anchorPoints(anchors, lastLine, maxY) {
+  const pts = [{ line: 1, y: 0 }];
+  for (const a of anchors || []) {
+    const line = Number(a && a.line);
+    const y = Number(a && a.y);
+    if (!Number.isFinite(line) || !Number.isFinite(y)) continue;
+    pts.push({
+      line: clampNum(line, 1, lastLine),
+      y: clampNum(y, 0, maxY),
+    });
+  }
+  pts.push({ line: lastLine, y: maxY });
+  return pts;
+}
+
+/**
+ * Source line → preview scrollTop. Anchors are `{line, y}` in scroller content.
+ * Missing anchors fall back to proportional mapping so split panes still move.
+ */
+export function mapLineToScrollTop(line, anchors, docLines, maxY) {
+  const max = Math.max(0, Number(maxY) || 0);
+  if (max <= 0) return 0;
+  const lastLine = Math.max(1, Number(docLines) || 1);
+  const n = clampNum(Number(line) || 1, 1, lastLine);
+  const pts = anchorPoints(anchors, lastLine, max);
+  pts.sort((a, b) => a.line - b.line || a.y - b.y);
+  if (n <= pts[0].line) return pts[0].y;
+  for (let i = 1; i < pts.length; i++) {
+    if (n <= pts[i].line) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      if (b.line === a.line) return b.y;
+      return a.y + ((n - a.line) / (b.line - a.line)) * (b.y - a.y);
+    }
+  }
+  return max;
+}
+
+/** Preview scrollTop → source line (inverse of mapLineToScrollTop). */
+export function mapScrollTopToLine(y, anchors, docLines, maxY) {
+  const max = Math.max(0, Number(maxY) || 0);
+  const lastLine = Math.max(1, Number(docLines) || 1);
+  if (max <= 0) return 1;
+  const top = clampNum(Number(y) || 0, 0, max);
+  const pts = anchorPoints(anchors, lastLine, max);
+  pts.sort((a, b) => a.y - b.y || a.line - b.line);
+  if (top <= pts[0].y) return pts[0].line;
+  for (let i = 1; i < pts.length; i++) {
+    if (top <= pts[i].y) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      if (b.y === a.y) return b.line;
+      return a.line + ((top - a.y) / (b.y - a.y)) * (b.line - a.line);
+    }
+  }
+  return lastLine;
+}
+
 /** AGENTS §8: display only — no navigable links in card. */
 export function neutralizeAnchorsHtml(html) {
   if (typeof DOMParser === 'undefined') {

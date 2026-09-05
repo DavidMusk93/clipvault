@@ -68,6 +68,7 @@
   background: #fff;
 }
 .notes-preview-inner {
+  position: relative;
   max-width: 38rem;
   margin: 0 auto;
   padding: 22px 36px 72px;
