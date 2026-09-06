@@ -408,9 +408,11 @@ async function mount(root, opts) {
   let lastMd = String(opts.markdown || '')
   let lastHash = ''
   let previewTimer = 0
+  let paintUnlock = 0
   let mode = loadMode()
   let split = loadSplit()
   let syncing = false
+  let paintingPreview = false
 
   function metric(name, extra) {
     if (onMetric) onMetric(name, extra || {})
@@ -494,22 +496,40 @@ async function mount(root, opts) {
     }
   }
 
-  function renderPreview(md, force) {
+  function renderPreview(md, force, opts) {
     const text = String(md || '')
     if (!force && text === lastHash) return
     lastHash = text
     const t = performance.now()
+    const preserveScroll = !(opts && opts.preserveScroll === false)
+    paintingPreview = true
+    const keepTop = preserveScroll ? previewEl.scrollTop : 0
+    const maxBefore = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
+    const stickBottom = preserveScroll && maxBefore > 0 && (maxBefore - keepTop) < 48
+    const keepH = previewInner.offsetHeight
+    if (keepH > 0) previewInner.style.minHeight = `${keepH}px`
     if (!text.trim()) {
       previewInner.innerHTML = ''
-      return
+    } else {
+      const r = renderMarkdownBlocks(text, { marked, purify: DOMPurify })
+      previewInner.innerHTML = r.ok ? r.html : ''
+      enhancePreview(previewInner)
     }
-    const r = renderMarkdownBlocks(text, { marked, purify: DOMPurify })
-    previewInner.innerHTML = r.ok ? r.html : ''
-    enhancePreview(previewInner)
+    previewEl.scrollTop = stickBottom ? previewEl.scrollHeight : keepTop
     const dur = performance.now() - t
     metric('notes_preview_ms', { dur_ms: dur, payload: { chars: text.length } })
     if (dur > 16) metric('notes_input_to_preview', { dur_ms: dur })
-    if (mode === 'split') queueSyncFromSource()
+    cancelAnimationFrame(paintUnlock)
+    const finish = () => {
+      previewInner.style.minHeight = ''
+      if (!preserveScroll) previewEl.scrollTop = 0
+      else if (stickBottom) previewEl.scrollTop = previewEl.scrollHeight
+      else previewEl.scrollTop = keepTop
+      paintingPreview = false
+    }
+    paintUnlock = requestAnimationFrame(() => {
+      paintUnlock = requestAnimationFrame(finish)
+    })
   }
 
   function schedulePreview(md) {
@@ -641,7 +661,7 @@ async function mount(root, opts) {
     previewEl.scrollTop = top
   }
   function syncSourceToPreview() {
-    if (mode !== 'split' || syncing) return
+    if (mode !== 'split' || syncing || paintingPreview) return
     const maxPr = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
     const maxSrc = Math.max(0, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight)
     if (maxSrc <= 0) return
@@ -709,7 +729,7 @@ async function mount(root, opts) {
         changes: { from: 0, to: view.state.doc.length, insert: next },
       })
       lastMd = next
-      renderPreview(next, true)
+      renderPreview(next, true, { preserveScroll: false })
       const clear = () => { if (g === gen) applying = false }
       queueMicrotask(clear)
       requestAnimationFrame(clear)
@@ -717,6 +737,7 @@ async function mount(root, opts) {
     destroy() {
       clearTimeout(previewTimer)
       clearTimeout(unlockTimer)
+      cancelAnimationFrame(paintUnlock)
       view.destroy()
       root.replaceChildren()
     },

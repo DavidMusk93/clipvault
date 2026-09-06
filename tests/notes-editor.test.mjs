@@ -65,7 +65,7 @@ test('nested lists indent in source and restyle in preview', () => {
   assert.match(entry, /nextOlMarker/);
   assert.doesNotMatch(entry, /head !== line\.to/);
   assert.match(css, /ol ol \{ list-style-type: lower-alpha/);
-  assert.match(entry, /renderPreview\(next, true\)/);
+  assert.match(entry, /renderPreview\(next, true, \{ preserveScroll: false \}\)/);
 });
 
 test('save status is labeled and retries on failure', () => {
@@ -124,7 +124,21 @@ test('split panes sync source and preview scroll', () => {
   assert.match(entry, /previewEl\.addEventListener\('scroll'/);
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n10/);
+  assert.match(html, /notes-editor\.js\?v=n11/);
+});
+
+test('preview re-render keeps scroll on long notes', () => {
+  assert.match(entry, /paintingPreview/);
+  assert.match(entry, /keepTop/);
+  assert.match(entry, /stickBottom/);
+  assert.match(entry, /previewInner\.style\.minHeight/);
+  assert.match(entry, /paintingPreview\) return/);
+  assert.match(entry, /preserveScroll: false/);
+  assert.match(entry, /requestAnimationFrame\(\(\) => \{\s*paintUnlock = requestAnimationFrame\(finish\)/);
+  assert.doesNotMatch(
+    entry.slice(entry.indexOf('function renderPreview'), entry.indexOf('function schedulePreview')),
+    /syncPreviewToSource/,
+  );
 });
 
 test('open notes lock the wall so chips and format toolbar cannot drag', () => {
