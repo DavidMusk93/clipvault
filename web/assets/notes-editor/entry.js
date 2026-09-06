@@ -522,9 +522,20 @@ async function mount(root, opts) {
     cancelAnimationFrame(paintUnlock)
     const finish = () => {
       previewInner.style.minHeight = ''
-      if (!preserveScroll) previewEl.scrollTop = 0
-      else if (stickBottom) previewEl.scrollTop = previewEl.scrollHeight
-      else previewEl.scrollTop = keepTop
+      if (mode === 'split') {
+        const srcTop = view.scrollDOM.scrollTop
+        const anchors = previewAnchors()
+        const laidOut = srcTop <= 0 || anchors.some((a) => a.y > 1)
+        if (laidOut) syncPreviewToSource(view, { force: true })
+        else if (preserveScroll) previewEl.scrollTop = stickBottom ? previewEl.scrollHeight : keepTop
+        else previewEl.scrollTop = 0
+      } else if (!preserveScroll) {
+        previewEl.scrollTop = 0
+      } else if (stickBottom) {
+        previewEl.scrollTop = previewEl.scrollHeight
+      } else {
+        previewEl.scrollTop = keepTop
+      }
       paintingPreview = false
     }
     paintUnlock = requestAnimationFrame(() => {
@@ -646,8 +657,9 @@ async function mount(root, opts) {
     const maxSrc = Math.max(1, src.scrollHeight - src.clientHeight)
     return 1 + (src.scrollTop / maxSrc) * Math.max(0, v.state.doc.lines - 1)
   }
-  function syncPreviewToSource(v) {
-    if (mode !== 'split' || syncing) return
+  function syncPreviewToSource(v, opts) {
+    const force = !!(opts && opts.force)
+    if (mode !== 'split' || (!force && (syncing || paintingPreview))) return
     const src = v.scrollDOM
     const maxSrc = Math.max(0, src.scrollHeight - src.clientHeight)
     const maxPr = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
@@ -657,7 +669,7 @@ async function mount(root, opts) {
       ? maxPr
       : mapLineToScrollTop(sourceLineAtTop(v), previewAnchors(), v.state.doc.lines, maxPr)
     if (Math.abs(previewEl.scrollTop - top) < 1) return
-    lockSync()
+    if (!force) lockSync()
     previewEl.scrollTop = top
   }
   function syncSourceToPreview() {

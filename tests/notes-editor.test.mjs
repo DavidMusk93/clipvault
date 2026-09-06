@@ -124,7 +124,7 @@ test('split panes sync source and preview scroll', () => {
   assert.match(entry, /previewEl\.addEventListener\('scroll'/);
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n11/);
+  assert.match(html, /notes-editor\.js\?v=n12/);
 });
 
 test('preview re-render keeps scroll on long notes', () => {
@@ -134,11 +134,9 @@ test('preview re-render keeps scroll on long notes', () => {
   assert.match(entry, /previewInner\.style\.minHeight/);
   assert.match(entry, /paintingPreview\) return/);
   assert.match(entry, /preserveScroll: false/);
+  assert.match(entry, /syncPreviewToSource\(view, \{ force: true \}\)/);
+  assert.match(entry, /laidOut/);
   assert.match(entry, /requestAnimationFrame\(\(\) => \{\s*paintUnlock = requestAnimationFrame\(finish\)/);
-  assert.doesNotMatch(
-    entry.slice(entry.indexOf('function renderPreview'), entry.indexOf('function schedulePreview')),
-    /syncPreviewToSource/,
-  );
 });
 
 test('open notes lock the wall so chips and format toolbar cannot drag', () => {
