@@ -58,7 +58,7 @@ const PURIFY_OPTS = {
   FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button'],
   FORBID_ATTR: ['style'],
   ALLOW_DATA_ATTR: false,
-  ADD_ATTR: ['data-source-line', 'target', 'rel'],
+  ADD_ATTR: ['data-source-line', 'data-source-end-line', 'target', 'rel'],
 };
 
 /**
@@ -119,11 +119,12 @@ export function renderMarkdownBlocks(src, engines = {}) {
       const at = i >= 0 ? i : pos;
       const line = text.slice(0, at).split('\n').length;
       pos = at + raw.length;
+      const lineTo = tokenLineSpan(raw, line);
       let html = parser([t]);
       html = purify.sanitize(String(html || ''), PURIFY_OPTS);
       html = html.replace(
         /^\s*<([a-zA-Z][a-zA-Z0-9]*)/,
-        `<$1 data-source-line="${line}"`,
+        `<$1 data-source-line="${line}" data-source-end-line="${lineTo}"`,
       );
       html = html.replace(/<a\b/gi, '<a target="_blank" rel="noopener noreferrer"');
       parts.push(html);
@@ -136,6 +137,139 @@ export function renderMarkdownBlocks(src, engines = {}) {
 
 function clampNum(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
+}
+
+/** Inclusive source line of the last row in a marked token. */
+export function tokenLineSpan(raw, lineFrom) {
+  const from = Math.max(1, Number(lineFrom) || 1);
+  const text = String(raw || '');
+  if (!text) return from;
+  const nl = (text.match(/\n/g) || []).length;
+  const extra = text.endsWith('\n') ? Math.max(0, nl - 1) : nl;
+  return from + extra;
+}
+
+/**
+ * @typedef {{ lineFrom: number, lineTo: number, y: number, height: number }} PreviewBlock
+ */
+
+function previewBlocks(blocks) {
+  const list = [];
+  for (const b of blocks || []) {
+    const lineFrom = Number(b && (b.lineFrom ?? b.line));
+    const y = Number(b && b.y);
+    const height = Number(b && b.height);
+    if (!Number.isFinite(lineFrom) || !Number.isFinite(y)) continue;
+    const lineTo = Number(b && b.lineTo);
+    list.push({
+      lineFrom,
+      lineTo: Math.max(lineFrom, Number.isFinite(lineTo) ? lineTo : lineFrom),
+      y,
+      height: Math.max(0, Number.isFinite(height) ? height : 0),
+    });
+  }
+  list.sort((a, b) => a.lineFrom - b.lineFrom || a.y - b.y);
+  return list;
+}
+
+/**
+ * Fractional source line → preview scrollTop (VS Code / MarkEdit).
+ * line 1 = first source line; 7.5 = halfway through line 7.
+ * atEnd pins to maxY so source-at-bottom is preview-at-bottom.
+ */
+export function mapSourceToPreviewScroll(line, blocks, maxY, opts = {}) {
+  const max = Math.max(0, Number(maxY) || 0);
+  if (max <= 0) return 0;
+  if (opts && opts.atEnd) return max;
+  const x = Number(line);
+  if (!Number.isFinite(x) || x <= 1) return 0;
+
+  const list = previewBlocks(blocks);
+  const lastLine = Math.max(1, Number(opts.lastLine) || 1);
+  if (!list.length) {
+    if (lastLine <= 1) return 0;
+    return clampNum(((x - 1) / (lastLine - 1)) * max, 0, max);
+  }
+
+  let prev = null;
+  let next = null;
+  for (const b of list) {
+    if (b.lineFrom <= x + 1e-9) prev = b;
+    else {
+      next = b;
+      break;
+    }
+  }
+
+  if (!prev) {
+    const first = list[0];
+    const span = first.lineFrom - 1;
+    const p = span > 0 ? (x - 1) / span : 0;
+    return clampNum(first.y * p, 0, max);
+  }
+
+  if (prev.lineTo > prev.lineFrom && x < prev.lineTo) {
+    const p = (x - prev.lineFrom) / (prev.lineTo - prev.lineFrom);
+    return clampNum(prev.y + prev.height * p, 0, max);
+  }
+
+  if (next && next.lineFrom !== prev.lineFrom) {
+    const fromLine = Math.max(prev.lineTo, prev.lineFrom);
+    const span = next.lineFrom - fromLine;
+    const between = span > 0 ? (x - fromLine) / span : 0;
+    const prevBottom = prev.y + prev.height;
+    return clampNum(prevBottom + between * (next.y - prevBottom), 0, max);
+  }
+
+  if (!next && x >= lastLine) return max;
+  const span = Math.max(1e-9, lastLine - prev.lineFrom);
+  const p = clampNum((x - prev.lineFrom) / span, 0, 1);
+  return clampNum(prev.y + prev.height * p, 0, max);
+}
+
+/** Preview scrollTop → fractional source line (inverse of mapSourceToPreviewScroll). */
+export function mapPreviewToSourceLine(y, blocks, maxY, lastLine, opts = {}) {
+  const last = Math.max(1, Number(lastLine) || 1);
+  if (opts && opts.atEnd) return last;
+  const max = Math.max(0, Number(maxY) || 0);
+  const top = clampNum(Number(y) || 0, 0, max);
+  if (top <= 0) return 1;
+
+  const list = previewBlocks(blocks);
+  if (!list.length) {
+    if (max <= 0) return 1;
+    return 1 + (top / max) * (last - 1);
+  }
+
+  let prev = null;
+  let next = null;
+  for (const b of list) {
+    if (b.y <= top + 1e-9) prev = b;
+    else {
+      next = b;
+      break;
+    }
+  }
+  if (!prev) return 1;
+
+  const prevBottom = prev.y + prev.height;
+  if (top + 1e-9 < prevBottom || !next) {
+    if (prev.height > 0 && prev.lineTo > prev.lineFrom) {
+      const p = clampNum((top - prev.y) / prev.height, 0, 1);
+      return prev.lineFrom + p * (prev.lineTo - prev.lineFrom);
+    }
+    if (next && next.y > prev.y) {
+      const p = clampNum((top - prev.y) / (next.y - prev.y), 0, 1);
+      return prev.lineFrom + p * (next.lineFrom - prev.lineFrom);
+    }
+    if (!next && max > 0 && top >= max - 1) return last;
+    const p = prev.height > 0 ? clampNum((top - prev.y) / prev.height, 0, 1) : 0;
+    return prev.lineFrom + p * Math.max(0, last - prev.lineFrom);
+  }
+
+  const gap = next.y - prevBottom;
+  const p = gap > 0 ? (top - prevBottom) / gap : 0;
+  return prev.lineTo + p * (next.lineFrom - prev.lineTo);
 }
 
 function anchorPoints(anchors, lastLine, maxY) {

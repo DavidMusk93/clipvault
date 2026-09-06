@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, toGfmNestedLists, mapLineToScrollTop, mapScrollTopToLine } from '../web/markdown-render.mjs';
+import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, toGfmNestedLists, mapLineToScrollTop, mapScrollTopToLine, mapSourceToPreviewScroll, mapPreviewToSourceLine, tokenLineSpan } from '../web/markdown-render.mjs';
 import { formatTextForDisplay } from '../web/text-format.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +80,45 @@ test('mapScrollTopToLine is the inverse of mapLineToScrollTop', () => {
   assert.ok(Math.abs(back - 10) < 1e-6, back);
   assert.equal(mapScrollTopToLine(0, [], 10, 100), 1);
   assert.equal(mapScrollTopToLine(100, [], 10, 100), 10);
+});
+
+test('tokenLineSpan covers fence bodies and single-line tokens', () => {
+  assert.equal(tokenLineSpan('# Hi\n', 1), 1);
+  assert.equal(tokenLineSpan('```js\nfoo\nbar\n```\n', 10), 13);
+  assert.equal(tokenLineSpan('para', 4), 4);
+});
+
+test('mapSourceToPreviewScroll pins ends and interpolates inside fences', () => {
+  const blocks = [
+    { lineFrom: 1, lineTo: 1, y: 0, height: 40 },
+    { lineFrom: 3, lineTo: 12, y: 80, height: 200 },
+    { lineFrom: 14, lineTo: 14, y: 320, height: 30 },
+  ];
+  const opts = { lastLine: 20 };
+  assert.equal(mapSourceToPreviewScroll(1, blocks, 400, opts), 0);
+  assert.equal(mapSourceToPreviewScroll(20, blocks, 400, { ...opts, atEnd: true }), 400);
+  assert.equal(mapSourceToPreviewScroll(20, blocks, 400, opts), 400);
+  assert.equal(mapSourceToPreviewScroll(7.5, blocks, 400, opts), 180);
+  const between = mapSourceToPreviewScroll(2, blocks, 400, opts);
+  assert.equal(between, 60);
+});
+
+test('mapPreviewToSourceLine is the inverse inside a fence', () => {
+  const blocks = [
+    { lineFrom: 1, lineTo: 1, y: 0, height: 40 },
+    { lineFrom: 3, lineTo: 12, y: 80, height: 200 },
+    { lineFrom: 14, lineTo: 14, y: 320, height: 30 },
+  ];
+  const y = mapSourceToPreviewScroll(7.5, blocks, 400, { lastLine: 20 });
+  const back = mapPreviewToSourceLine(y, blocks, 400, 20);
+  assert.ok(Math.abs(back - 7.5) < 1e-6, back);
+  assert.equal(mapPreviewToSourceLine(0, blocks, 400, 20), 1);
+  assert.equal(mapPreviewToSourceLine(400, blocks, 400, 20, { atEnd: true }), 20);
+});
+
+test('this file is in the deploy frontend gate', () => {
+  const check = fs.readFileSync(path.join(__dirname, '../scripts/check-frontend.sh'), 'utf8');
+  assert.match(check, /markdown-render\.test\.mjs/);
 });
 
 test('neutralizeAnchorsHtml strips navigable anchors', () => {

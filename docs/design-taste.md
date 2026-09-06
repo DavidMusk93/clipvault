@@ -147,7 +147,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 预览正文 | SF / PingFang 17 / 1.65 · 最大 38rem | Apple Notes 纸面 |
 | 预览代码 | 浅板 `#F5F5F7` + 11px 语言条 + Xcode Light | **不是** View 的炭黑井 |
 | 模式 | 源码 / 分栏 / 预览；桌面默认分栏 | 窄屏默认源码 |
-| 分栏滚动 | 源码与预览按行锚点同步；无锚点则按比例 | 禁止只滚一边。锚点 y 相对预览滚动层，禁止用纸面 `offsetTop`。预览 `innerHTML` 重绘先钉住高度挡住回顶，布局完成后再按源码对齐；锚点 y 仍为 0 时才保留旧 scrollTop。禁止把旧 scrollTop 当终态（源码和渲染会错位） |
+| 分栏滚动 | 块锚点 + 块内进度（VS Code / MarkEdit）。头/底 2px 钉住 max | 禁止全程 `scrollTop/max`。禁止只把视口第一行钉在预览顶（滑到底会对不齐）。围栏用 `data-source-end-line` 摊到 PRE 内容盒。重绘钉住高度，布局后再按源码映射；禁止把旧 scrollTop 当终态 |
 | 保存态 | 11px 文案 + 6px 点：未保存 / 保存中 / 已保存 / 保存失败将重试 | 禁止只留圆点；失败指数退避 + `online` 重放 |
 | Tag | 标题内金色 `#F5A400` 同字号，不是黄胶囊 | `#auto gateway…`；`# 标题` 不算 tag；筛选时侧栏一颗可关的滤镜钮 |
 | 嵌套列表 | Tab 后源码 `a. b. c.`，再一层 `i. ii.`；预览同样 | 每层 4 空格；预览把 `a.`/`i.` 映成 GFM `1.` 再渲染。禁止 `5.1` |

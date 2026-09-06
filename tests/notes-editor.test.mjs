@@ -115,16 +115,19 @@ test('notes pin reuses clip pin API and sorts pinned first', () => {
 });
 
 test('split panes sync source and preview scroll', () => {
-  assert.match(entry, /mapLineToScrollTop/);
-  assert.match(entry, /mapScrollTopToLine/);
+  assert.match(entry, /mapSourceToPreviewScroll/);
+  assert.match(entry, /mapPreviewToSourceLine/);
   assert.match(entry, /syncPreviewToSource/);
   assert.match(entry, /syncSourceToPreview/);
-  assert.match(entry, /viewport\.from/);
+  assert.match(entry, /lineBlockAtHeight/);
+  assert.match(entry, /atEnd/);
+  assert.match(entry, /data-source-end-line/);
   assert.match(entry, /yInScroller/);
   assert.match(entry, /previewEl\.addEventListener\('scroll'/);
   assert.doesNotMatch(entry, /best\.offsetTop/);
+  assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n12/);
+  assert.match(html, /notes-editor\.js\?v=n13/);
 });
 
 test('preview re-render keeps scroll on long notes', () => {
@@ -135,7 +138,6 @@ test('preview re-render keeps scroll on long notes', () => {
   assert.match(entry, /paintingPreview\) return/);
   assert.match(entry, /preserveScroll: false/);
   assert.match(entry, /syncPreviewToSource\(view, \{ force: true \}\)/);
-  assert.match(entry, /laidOut/);
   assert.match(entry, /requestAnimationFrame\(\(\) => \{\s*paintUnlock = requestAnimationFrame\(finish\)/);
 });
 

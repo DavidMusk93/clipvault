@@ -6,7 +6,7 @@ import { HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput } fr
 import { tags as t } from '@lezer/highlight'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { renderMarkdownBlocks, mapLineToScrollTop, mapScrollTopToLine } from '../../markdown-render.mjs'
+import { renderMarkdownBlocks, mapSourceToPreviewScroll, mapPreviewToSourceLine } from '../../markdown-render.mjs'
 import { extractCalcExpr, formatCheckpoint, hrStampBlock, inFence, isHrLine, isStampLine, tryEval } from '../../notes-calc.mjs'
 
 const MODE_KEY = 'clipvault.notes.mode'
@@ -522,20 +522,10 @@ async function mount(root, opts) {
     cancelAnimationFrame(paintUnlock)
     const finish = () => {
       previewInner.style.minHeight = ''
-      if (mode === 'split') {
-        const srcTop = view.scrollDOM.scrollTop
-        const anchors = previewAnchors()
-        const laidOut = srcTop <= 0 || anchors.some((a) => a.y > 1)
-        if (laidOut) syncPreviewToSource(view, { force: true })
-        else if (preserveScroll) previewEl.scrollTop = stickBottom ? previewEl.scrollHeight : keepTop
-        else previewEl.scrollTop = 0
-      } else if (!preserveScroll) {
-        previewEl.scrollTop = 0
-      } else if (stickBottom) {
-        previewEl.scrollTop = previewEl.scrollHeight
-      } else {
-        previewEl.scrollTop = keepTop
-      }
+      if (mode === 'split') syncPreviewToSource(view, { force: true })
+      else if (!preserveScroll) previewEl.scrollTop = 0
+      else if (stickBottom) previewEl.scrollTop = previewEl.scrollHeight
+      else previewEl.scrollTop = keepTop
       paintingPreview = false
     }
     paintUnlock = requestAnimationFrame(() => {
@@ -638,36 +628,54 @@ async function mount(root, opts) {
     const b = scroller.getBoundingClientRect()
     return a.top - b.top + scroller.scrollTop
   }
-  function previewAnchors() {
+  function previewBlocks() {
     const out = []
     for (const n of previewInner.querySelectorAll('[data-source-line]')) {
-      const line = Number(n.getAttribute('data-source-line'))
-      if (!Number.isFinite(line) || line < 1) continue
-      out.push({ line, y: yInScroller(n, previewEl) })
+      const lineFrom = Number(n.getAttribute('data-source-line'))
+      if (!Number.isFinite(lineFrom) || lineFrom < 1) continue
+      const endRaw = Number(n.getAttribute('data-source-end-line'))
+      const lineTo = Number.isFinite(endRaw) ? Math.max(lineFrom, endRaw) : lineFrom
+      const box = (n.parentElement && n.parentElement.classList.contains('notes-code')) ? n.parentElement : n
+      let y = yInScroller(box, previewEl)
+      let height = box.getBoundingClientRect().height
+      if (n.tagName === 'PRE') {
+        const cs = window.getComputedStyle(n)
+        const padTop = parseFloat(cs.paddingTop) || 0
+        const padBottom = parseFloat(cs.paddingBottom) || 0
+        y += padTop
+        height = Math.max(1, height - padTop - padBottom)
+      }
+      out.push({ lineFrom, lineTo, y, height: Math.max(0, height) })
     }
     return out
   }
-  function sourceLineAtTop(v) {
+  function sourceProgress(v) {
+    const src = v.scrollDOM
+    const maxSrc = Math.max(0, src.scrollHeight - src.clientHeight)
+    const top = src.scrollTop
+    if (top <= 2) return { line: 1, atEnd: false }
+    if (maxSrc > 0 && top >= maxSrc - 2) return { line: v.state.doc.lines, atEnd: true }
     try {
-      if (v.viewport && Number.isFinite(v.viewport.from)) {
-        return v.state.doc.lineAt(v.viewport.from).number
+      if (typeof v.lineBlockAtHeight === 'function') {
+        const lb = v.lineBlockAtHeight(top)
+        const line = v.state.doc.lineAt(lb.from)
+        const progress = lb.height > 0 ? Math.min(1, Math.max(0, (top - lb.top) / lb.height)) : 0
+        return { line: line.number + progress, atEnd: false }
       }
     } catch (_) {}
-    const src = v.scrollDOM
-    const maxSrc = Math.max(1, src.scrollHeight - src.clientHeight)
-    return 1 + (src.scrollTop / maxSrc) * Math.max(0, v.state.doc.lines - 1)
+    const r = maxSrc > 0 ? top / maxSrc : 0
+    return { line: 1 + r * Math.max(0, v.state.doc.lines - 1), atEnd: r >= 1 }
   }
   function syncPreviewToSource(v, opts) {
     const force = !!(opts && opts.force)
     if (mode !== 'split' || (!force && (syncing || paintingPreview))) return
-    const src = v.scrollDOM
-    const maxSrc = Math.max(0, src.scrollHeight - src.clientHeight)
     const maxPr = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
     if (maxPr <= 0) return
-    const r = maxSrc > 0 ? src.scrollTop / maxSrc : 0
-    const top = r <= 0 ? 0 : r >= 1
-      ? maxPr
-      : mapLineToScrollTop(sourceLineAtTop(v), previewAnchors(), v.state.doc.lines, maxPr)
+    const { line, atEnd } = sourceProgress(v)
+    const top = mapSourceToPreviewScroll(line, previewBlocks(), maxPr, {
+      atEnd,
+      lastLine: v.state.doc.lines,
+    })
     if (Math.abs(previewEl.scrollTop - top) < 1) return
     if (!force) lockSync()
     previewEl.scrollTop = top
@@ -677,14 +685,21 @@ async function mount(root, opts) {
     const maxPr = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
     const maxSrc = Math.max(0, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight)
     if (maxSrc <= 0) return
-    const r = maxPr > 0 ? previewEl.scrollTop / maxPr : 0
+    const prTop = previewEl.scrollTop
+    const atEnd = maxPr > 0 && prTop >= maxPr - 2
     let next
-    if (r <= 0) next = 0
-    else if (r >= 1) next = maxSrc
+    if (prTop <= 2) next = 0
+    else if (atEnd) next = maxSrc
     else {
-      const line = mapScrollTopToLine(previewEl.scrollTop, previewAnchors(), view.state.doc.lines, maxPr)
-      const n = Math.max(1, Math.min(view.state.doc.lines, Math.round(line)))
-      next = view.lineBlockAt(view.state.doc.line(n).from).top
+      const frac = mapPreviewToSourceLine(prTop, previewBlocks(), maxPr, view.state.doc.lines)
+      const n = Math.max(1, Math.min(view.state.doc.lines, Math.floor(frac)))
+      const progress = frac - Math.floor(frac)
+      try {
+        const lb = view.lineBlockAt(view.state.doc.line(n).from)
+        next = lb.top + progress * lb.height
+      } catch (_) {
+        next = ((frac - 1) / Math.max(1, view.state.doc.lines - 1)) * maxSrc
+      }
     }
     next = Math.max(0, Math.min(maxSrc, next))
     if (Math.abs(view.scrollDOM.scrollTop - next) < 2) return
