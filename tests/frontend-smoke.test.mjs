@@ -91,9 +91,14 @@ test('notes and sessions sheets spring in, wall does not snap away', () => {
   assert.match(indexHtml, /function playSheet/);
   assert.match(indexHtml, /assets\/motion\.js/);
   assert.match(indexHtml, /function sheetTrigger/);
-  assert.match(indexHtml, /sheetClipFromButton/);
-  assert.match(indexHtml, /clipPath/);
+  assert.match(indexHtml, /function sheetClip/);
+  assert.match(indexHtml, /function paintSheet/);
+  assert.match(indexHtml, /function clearSheetInline/);
   assert.match(indexHtml, /type: 'spring'/);
+  assert.match(indexHtml, /onUpdate/);
+  assert.doesNotMatch(indexHtml, /function sheetFlip/);
+  assert.doesNotMatch(indexHtml, /function sheetClipFromButton/);
+  assert.doesNotMatch(indexHtml, /clipPath:\s*clipOpen/);
   assert.doesNotMatch(indexHtml, /const k = 240/);
   assert.doesNotMatch(indexHtml, /notesOpenBtn'\)\?\.classList\.add\('is-on'\)/);
   assert.doesNotMatch(indexHtml, /traeSessionsBtn'\)\?\.classList\.add\('is-on'\)/);
@@ -103,6 +108,7 @@ test('notes and sessions sheets spring in, wall does not snap away', () => {
 test('sessions reuse ClipVault port as a notes-like panel', () => {
   assert.match(indexHtml, /id="sessionsPanel"/);
   assert.match(indexHtml, /id="sessionsFrame"/);
+  assert.match(indexHtml, /\.sessions-shell \{[\s\S]{0,180}display:\s*flex/);
   assert.match(indexHtml, /function openSessionsPanel/);
   assert.match(indexHtml, /\/trae\/\?embed=1/);
   assert.match(indexHtml, /body\.sessions-open \.top-bar/);

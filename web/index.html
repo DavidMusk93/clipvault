@@ -1740,6 +1740,9 @@
     .notes-panel.open .notes-frost {
       pointer-events: auto;
     }
+    .notes-panel.open.is-settled .notes-frost {
+      opacity: 1;
+    }
     .notes-panel.open.is-settled .notes-frost,
     .notes-panel.open.is-settled .notes-shell,
     .notes-panel.open.is-settled .sessions-shell { will-change: auto; }
@@ -1752,12 +1755,18 @@
       -webkit-backdrop-filter: blur(28px) saturate(140%);
       backdrop-filter: blur(28px) saturate(140%);
     }
+    .notes-panel:not(.open) .notes-shell,
+    .notes-panel:not(.open) .sessions-shell {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .notes-panel.open .notes-shell,
+    .notes-panel.open .sessions-shell {
+      opacity: 1;
+    }
     .notes-shell,
     .sessions-shell {
-      opacity: 0;
-      overflow: hidden;
       background: #f5f5f7;
-      clip-path: inset(0 round 18px);
     }
     .notes-shell {
       position: relative; z-index: 1;
@@ -1963,7 +1972,11 @@
       .notes-panel:not(.is-writing) .notes-paper { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .notes-shell, .sessions-shell { transform: none !important; }
+      .notes-shell, .sessions-shell {
+        transform: none !important;
+        clip-path: none !important;
+        filter: none !important;
+      }
     }
     @media (prefers-reduced-transparency: reduce) {
       .notes-panel { background: #f5f5f7; }
@@ -1974,12 +1987,15 @@
     .sessions-shell {
       position: relative; z-index: 1;
       height: 100%;
+      min-height: 0;
       padding: 12px;
+      display: flex;
+      flex-direction: column;
     }
     .sessions-frame {
-      display: block;
+      flex: 1;
+      min-height: 0;
       width: 100%;
-      height: 100%;
       border: 0;
       border-radius: 18px;
       background: #fff;
@@ -3778,31 +3794,36 @@ window.ClipViewMasonry = Masonry;
 
     let sheetAnims = [];
     let sheetPanel = null;
-    const sheetSpringIn = { type: 'spring', bounce: 0.08, duration: 0.52 };
-    const sheetSpringOut = { type: 'spring', bounce: 0, duration: 0.42 };
+    let sheetProg = 0;
+    const sheetOrigin = { notes: null, sessions: null };
+    const sheetSpringIn = { type: 'spring', visualDuration: 0.44, bounce: 0.04, duration: 0.52 };
+    const sheetSpringOut = { type: 'spring', visualDuration: 0.34, bounce: 0, duration: 0.4 };
     function sheetReduce() {
       try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; }
     }
     function sheetTrigger(kind) {
       if (kind === 'sessions') return document.getElementById('traeSessionsBtn');
       const fab = document.getElementById('notesFab');
-      if (fab && window.getComputedStyle(fab).display !== 'none') return fab;
+      if (fab) {
+        const st = window.getComputedStyle(fab);
+        if (st.display !== 'none' && st.visibility !== 'hidden') return fab;
+      }
       return document.getElementById('notesOpenBtn');
     }
-    function sheetLocalOrigin(el, vx, vy) {
-      const box = el.getBoundingClientRect();
-      return `${vx - box.left}px ${vy - box.top}px`;
+    function readSheetRect(el) {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return null;
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
     }
-    function sheetClipFromButton(shell, btn) {
-      const s = shell.getBoundingClientRect();
-      if (!btn) return 'inset(0 round 18px)';
-      const b = btn.getBoundingClientRect();
-      const top = Math.max(0, b.top - s.top);
-      const left = Math.max(0, b.left - s.left);
-      const right = Math.max(0, s.right - b.right);
-      const bottom = Math.max(0, s.bottom - b.bottom);
-      const rad = Math.min(b.height, b.width) / 2;
-      return `inset(${top}px ${right}px ${bottom}px ${left}px round ${rad}px)`;
+    function sheetClip(from, to) {
+      return {
+        t: Math.max(0, from.top - to.top),
+        r: Math.max(0, to.right - from.right),
+        b: Math.max(0, to.bottom - from.bottom),
+        l: Math.max(0, from.left - to.left),
+        rad: Math.min(from.height, from.width) / 2,
+      };
     }
     function stopSheetAnims() {
       for (const a of sheetAnims) {
@@ -3810,90 +3831,124 @@ window.ClipViewMasonry = Masonry;
       }
       sheetAnims = [];
     }
-    function resetSheetVisual(panel) {
+    function clearSheetInline(panel) {
       if (!panel) return;
       const shell = panel.querySelector('.notes-shell, .sessions-shell');
       const frost = panel.querySelector('.notes-frost');
+      const scene = document.getElementById('wallScene');
       if (shell) {
-        shell.style.clipPath = 'inset(0 round 18px)';
-        shell.style.transform = 'none';
-        shell.style.opacity = '0';
-        shell.style.boxShadow = 'none';
+        shell.style.transform = '';
+        shell.style.opacity = '';
+        shell.style.boxShadow = '';
+        shell.style.filter = '';
+        shell.style.overflow = '';
+        shell.style.borderRadius = '';
+        shell.style.transformOrigin = '';
+        shell.style.clipPath = '';
+        shell.style.webkitClipPath = '';
+        shell.style.willChange = '';
+        for (const kid of shell.children) {
+          kid.style.opacity = '';
+          kid.style.transform = '';
+        }
       }
-      if (frost) frost.style.opacity = '0';
+      if (frost) frost.style.opacity = '';
+      if (scene) {
+        scene.style.transform = '';
+        scene.style.transformOrigin = '';
+      }
       const n = document.getElementById('notesOpenBtn');
       const s = document.getElementById('traeSessionsBtn');
+      const f = document.getElementById('notesFab');
       if (n) n.style.opacity = '';
       if (s) s.style.opacity = '';
+      if (f) f.style.opacity = '';
     }
-    function playSheet(panel, open, kind) {
-      const motion = globalThis.Motion;
-      const animate = motion && typeof motion.animate === 'function' ? motion.animate : null;
+    function paintSheet(panel, p, clip, kind) {
       const shell = panel.querySelector('.notes-shell, .sessions-shell');
       const frost = panel.querySelector('.notes-frost');
       const scene = document.getElementById('wallScene');
+      const btn = sheetTrigger(kind) || (
+        kind === 'sessions'
+          ? document.getElementById('traeSessionsBtn')
+          : document.getElementById('notesOpenBtn')
+      );
+      const u = Math.max(0, Math.min(1, p));
+      if (shell) {
+        if (u >= 0.995) {
+          shell.style.clipPath = '';
+          shell.style.webkitClipPath = '';
+          shell.style.overflow = '';
+          shell.style.willChange = '';
+        } else {
+          const t = clip.t * (1 - u);
+          const r = clip.r * (1 - u);
+          const b = clip.b * (1 - u);
+          const l = clip.l * (1 - u);
+          const rad = clip.rad + (18 - clip.rad) * u;
+          const hole = `inset(${t.toFixed(2)}px ${r.toFixed(2)}px ${b.toFixed(2)}px ${l.toFixed(2)}px round ${rad.toFixed(2)}px)`;
+          shell.style.clipPath = hole;
+          shell.style.webkitClipPath = hole;
+          shell.style.overflow = 'hidden';
+          shell.style.willChange = 'clip-path';
+        }
+      }
+      if (frost) frost.style.opacity = String(u);
+      if (scene) {
+        if (u <= 0.004) {
+          scene.style.transform = '';
+        } else {
+          scene.style.transformOrigin = '50% 50%';
+          scene.style.transform = `scale(${(1 - 0.016 * u).toFixed(4)})`;
+        }
+      }
+      if (btn) btn.style.opacity = String(1 - Math.min(1, u * 1.55));
+    }
+    function playSheet(panel, open, kind, fromRect) {
+      const motion = globalThis.Motion;
+      const animate = motion && typeof motion.animate === 'function' ? motion.animate : null;
+      const shell = panel.querySelector('.notes-shell, .sessions-shell');
       if (sheetPanel && sheetPanel !== panel) {
         stopSheetAnims();
-        resetSheetVisual(sheetPanel);
+        clearSheetInline(sheetPanel);
         sheetPanel.classList.remove('open', 'is-settled');
+        sheetProg = 0;
       }
       sheetPanel = panel;
-      const btn = sheetTrigger(kind);
-      if (shell) void shell.offsetWidth;
-      const clipBtn = shell ? sheetClipFromButton(shell, btn) : 'inset(0 round 18px)';
-      const clipOpen = 'inset(0 round 18px)';
-      const br = btn ? btn.getBoundingClientRect() : null;
-      const vx = br ? br.left + br.width / 2 : window.innerWidth * 0.82;
-      const vy = br ? br.top + br.height / 2 : 28;
-      if (shell) shell.style.transformOrigin = sheetLocalOrigin(shell, vx, vy);
-      if (scene) scene.style.transformOrigin = sheetLocalOrigin(scene, vx, vy);
+      panel.classList.remove('is-settled');
+      const live = fromRect || readSheetRect(sheetTrigger(kind));
+      if (open && live) sheetOrigin[kind] = live;
+      const from = (open ? live : null) || sheetOrigin[kind] || live;
+      if (shell) void shell.offsetHeight;
+      const to = shell ? readSheetRect(shell) : null;
+      const clip = from && to ? sheetClip(from, to) : { t: 0, r: 0, b: 0, l: 0, rad: 18 };
       stopSheetAnims();
-      if (!animate || sheetReduce()) {
-        if (shell) {
-          shell.style.clipPath = open ? clipOpen : clipBtn;
-          shell.style.opacity = open ? '1' : '0';
-          shell.style.transform = 'none';
-        }
-        if (frost) frost.style.opacity = open ? '1' : '0';
-        if (scene) scene.style.transform = open ? 'scale(0.97)' : 'none';
+      const finish = () => {
+        sheetProg = open ? 1 : 0;
+        if (!open) panel.classList.remove('open', 'is-settled');
+        clearSheetInline(panel);
         if (open) panel.classList.add('is-settled');
-        return;
-      }
-      const run = (el, keyframes, opts) => {
-        const c = animate(el, keyframes, opts);
-        sheetAnims.push(c);
-        return c;
       };
-      if (open) {
-        if (shell) {
-          shell.style.clipPath = clipBtn;
-          shell.style.opacity = '1';
-          shell.style.transform = 'scale(0.985)';
-          shell.style.boxShadow = '0 8px 28px rgba(0,0,0,0.12)';
-        }
-        if (frost) frost.style.opacity = '0';
-        if (btn) run(btn, { opacity: 0 }, { duration: 0.14, easing: 'linear' });
-        run(frost, { opacity: 1 }, { duration: 0.36, easing: [0.16, 1, 0.3, 1] });
-        if (scene) run(scene, { scale: 0.97 }, sheetSpringIn);
-        const fin = run(shell, {
-          clipPath: clipOpen,
-          transform: 'scale(1)',
-          boxShadow: '0 18px 60px rgba(0,0,0,0.14)',
-        }, sheetSpringIn);
-        Promise.resolve(fin && fin.finished).then(() => {
-          if (sheetPanel === panel && panel.classList.contains('open')) panel.classList.add('is-settled');
-        }).catch(() => {});
-      } else {
-        if (btn) run(btn, { opacity: 1 }, { duration: 0.2, delay: 0.14, easing: [0.16, 1, 0.3, 1] });
-        run(frost, { opacity: 0 }, { duration: 0.3, easing: [0.32, 0.72, 0, 1] });
-        if (scene) run(scene, { scale: 1 }, sheetSpringOut);
-        run(shell, {
-          clipPath: clipBtn,
-          transform: 'scale(0.985)',
-          opacity: 0,
-          boxShadow: '0 4px 14px rgba(0,0,0,0.08)',
-        }, sheetSpringOut);
+      if (!animate || sheetReduce() || !shell) {
+        finish();
+        return Promise.resolve();
       }
+      const fromP = sheetProg;
+      const toP = open ? 1 : 0;
+      paintSheet(panel, fromP, clip, kind);
+      const spring = open ? sheetSpringIn : sheetSpringOut;
+      const fin = animate(fromP, toP, {
+        type: spring.type,
+        visualDuration: spring.visualDuration,
+        bounce: spring.bounce,
+        duration: spring.duration,
+        onUpdate: (v) => {
+          sheetProg = v;
+          paintSheet(panel, v, clip, kind);
+        },
+      });
+      sheetAnims.push(fin);
+      return Promise.resolve(fin && (fin.finished || fin)).then(finish).catch(finish);
     }
 
     function notesBackdropEvent(e) {
@@ -3915,26 +3970,27 @@ window.ClipViewMasonry = Masonry;
       }
       const panel = document.getElementById('sessionsPanel');
       if (!panel) return;
-      panel.classList.add('open');
-      panel.classList.remove('is-settled');
-      panel.setAttribute('aria-hidden', 'false');
-      setSessionsWallLocked(true);
-      playSheet(panel, true, 'sessions');
+      const origin = readSheetRect(sheetTrigger('sessions'));
       const frame = document.getElementById('sessionsFrame');
       if (frame && !frame.getAttribute('src')) {
         frame.src = '/trae/?embed=1';
       }
+      panel.classList.add('open');
+      panel.classList.remove('is-settled');
+      panel.setAttribute('aria-hidden', 'false');
+      setSessionsWallLocked(true);
+      playSheet(panel, true, 'sessions', origin);
       try {
         if (parseAppHash().kind !== 'sessions') history.replaceState(null, '', '#sessions');
       } catch (_) {}
     }
 
-    function closeSessionsPanel() {
+    async function closeSessionsPanel() {
       const panel = document.getElementById('sessionsPanel');
-      panel?.classList.remove('open', 'is-settled');
-      panel?.setAttribute('aria-hidden', 'true');
+      if (!panel || !panel.classList.contains('open')) return;
+      await playSheet(panel, false, 'sessions');
+      panel.setAttribute('aria-hidden', 'true');
       setSessionsWallLocked(false);
-      if (panel) playSheet(panel, false, 'sessions');
       if (parseAppHash().kind === 'sessions') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
       }
@@ -3947,14 +4003,15 @@ window.ClipViewMasonry = Masonry;
     }
 
     async function openNotesPanel(preferredId) {
-      closeSessionsPanel();
+      await closeSessionsPanel();
       const panel = document.getElementById('notesPanel');
       if (!panel) return;
+      const origin = readSheetRect(sheetTrigger('notes'));
       panel.classList.add('open');
       panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       setNotesWallLocked(true);
-      playSheet(panel, true, 'notes');
+      playSheet(panel, true, 'notes', origin);
       notesState.openedAt = Date.now();
       const M = globalThis.ClipNotesMetrics;
       if (M) {
@@ -3975,10 +4032,11 @@ window.ClipViewMasonry = Masonry;
     async function closeNotesPanel() {
       if (notesState.dirty) await saveNoteNow();
       const panel = document.getElementById('notesPanel');
-      panel?.classList.remove('open', 'is-writing', 'is-settled');
-      panel?.setAttribute('aria-hidden', 'true');
+      if (!panel || !panel.classList.contains('open')) return;
+      await playSheet(panel, false, 'notes');
+      panel.classList.remove('is-writing');
+      panel.setAttribute('aria-hidden', 'true');
       setNotesWallLocked(false);
-      if (panel) playSheet(panel, false, 'notes');
       const M = globalThis.ClipNotesMetrics;
       if (M) {
         M.setOpen(false);
