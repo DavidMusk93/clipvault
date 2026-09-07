@@ -198,6 +198,14 @@ test('structured text format covers multiple kinds + chips', () => {
   assert.match(indexHtml, /function looksLikeNdjson/);
   assert.match(indexHtml, /function prettyXmlFallback|function prettyXml/);
   assert.match(indexHtml, /function formatSql/);
+  assert.match(indexHtml, /function stripSqlLeadingComments/);
+  assert.match(indexHtml, /Whole document is SQL/);
+  assert.match(indexHtml, /if \(looksLikeSql\(s\)\) return 'sql'/);
+  assert.doesNotMatch(
+    indexHtml,
+    /function looksLikeSql\(t\) \{\s*return \(\s*\/\^\\s\*\(SELECT/,
+    'looksLikeSql must not be a single /m keyword grep',
+  );
   assert.match(indexHtml, /format-chip--json/);
   assert.match(indexHtml, /format-chip--url/);
   assert.match(indexHtml, /structuredKindIsCodey/);

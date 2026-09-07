@@ -115,6 +115,42 @@ test('markdown', () => {
   );
 });
 
+test('prose with a CREATE TABLE fragment is not SQL', () => {
+  const mixed = [
+    '- 任何一个 block 中的 index 都是按照连续',
+    '1.写入侧（这里指的是 v1 writer）',
+    '持久化 next_rg_start_idx (= last_rg_first_run',
+    '2026-09-05 18:21 #理解block',
+    'block，即 parquet 文件是以 queue 为组织。',
+    '我的思考是不行。如果混在一起就会解耦失败。',
+    '这些 rg 的 index 一定是连续的。',
+    '使用 sqlite3 作为 rg_flush_event 的存储。',
+    'create table t_events{',
+    '  block_path TEXT,',
+    '  rg_idx INTEGER,',
+    '  rg_run_start_idx BIGINT',
+    '}',
+  ].join('\n');
+  assert.equal(detectStructuredText(mixed).kind, 'plain');
+  assert.equal(formatTextForDisplay(mixed).kind, 'plain');
+  assert.equal(formatTextForDisplay(mixed).pretty, false);
+});
+
+test('markdown note that embeds SQL stays markdown', () => {
+  const md = '# 笔记\n\n- 先写思路\n- 再落表\n\n```sql\nCREATE TABLE t (id INT);\n```\n';
+  assert.equal(detectStructuredText(md).kind, 'markdown');
+});
+
+test('leading SQL comments still count as SQL', () => {
+  const sql = '-- users\nSELECT id, name FROM users WHERE active = 1 ORDER BY id';
+  assert.equal(detectStructuredText(sql).kind, 'sql');
+});
+
+test('English Create prose is not SQL', () => {
+  const prose = 'Create a new block when the iterator is exhausted and persist the path.';
+  assert.notEqual(detectStructuredText(prose).kind, 'sql');
+});
+
 test('prose stays plain', () => {
   const f = formatTextForDisplay('hello world this is just a sentence');
   assert.equal(f.kind, 'plain');

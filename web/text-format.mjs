@@ -273,11 +273,77 @@ function looksLikeStack(t) {
   );
 }
 
+const SQL_VERB = /^(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXPLAIN|PRAGMA|REPLACE|MERGE|GRANT|REVOKE|TRUNCATE)\b/i;
+const SQL_OBJECT = /\b(TABLE|INDEX|VIEW|SCHEMA|DATABASE|INTO|FROM|COLUMN|CONSTRAINT|TEMP|TEMPORARY|UNIQUE|OR\s+REPLACE)\b/i;
+const SQL_CONT = /^(FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|GROUP|ORDER|HAVING|LIMIT|OFFSET|VALUES|SET|INTO|UNION|ON|AND|OR|RETURNING)\b/i;
+const SQL_COL = /^[A-Za-z_][\w]*\s+(TEXT|INTEGER|BIGINT|INT|VARCHAR|BOOLEAN|TIMESTAMP|DATETIME|NUMERIC|REAL|BLOB|PRIMARY|UNIQUE|NOT\s+NULL|REFERENCES)\b/i;
+
+function stripSqlLeadingComments(t) {
+  let s = String(t || '').trim();
+  for (let n = 0; n < 12; n++) {
+    if (s.startsWith('--')) {
+      const nl = s.indexOf('\n');
+      if (nl < 0) return '';
+      s = s.slice(nl + 1).trim();
+      continue;
+    }
+    if (s.startsWith('/*')) {
+      const end = s.indexOf('*/');
+      if (end < 0) return '';
+      s = s.slice(end + 2).trim();
+      continue;
+    }
+    break;
+  }
+  return s;
+}
+
+function markdownScore(t) {
+  let score = 0;
+  for (const line of String(t || '').split(/\n/).slice(0, 40)) {
+    if (/^#{1,6}\s+\S/.test(line)) score += 2;
+    if (/^\s*[-*+]\s+\S/.test(line)) score += 1;
+    if (/^\s*\d+\.\s+\S/.test(line)) score += 1;
+    if (/^\s*```/.test(line)) score += 2;
+    if (/\[[^\]]+\]\([^)]+\)/.test(line)) score += 1;
+    if (/^\s*>\s+\S/.test(line)) score += 1;
+  }
+  return score;
+}
+
+function cjkRatio(t) {
+  const s = String(t || '');
+  if (!s.length) return 0;
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0x3400 && c <= 0x9fff) n++;
+  }
+  return n / s.length;
+}
+
+/** Whole document is SQL, not "a CREATE/SELECT line exists somewhere". */
 function looksLikeSql(t) {
-  return (
-    /^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|EXPLAIN|PRAGMA|REPLACE|MERGE)\b/im.test(t) &&
-    t.length >= 24
-  );
+  if (t.length < 24) return false;
+  if (markdownScore(t) >= 3) return false;
+  const body = stripSqlLeadingComments(t);
+  if (!body || !SQL_VERB.test(body)) return false;
+  if (/^(CREATE|ALTER|DROP|GRANT|REVOKE|TRUNCATE)\b/i.test(body) && !SQL_OBJECT.test(body.slice(0, 240))) {
+    return false;
+  }
+  const lines = t.split(/\n/);
+  let sqlish = 0;
+  let nonempty = 0;
+  for (const line of lines.slice(0, 80)) {
+    const s = line.trim();
+    if (!s || s.startsWith('--')) continue;
+    nonempty++;
+    if (SQL_VERB.test(s) || SQL_CONT.test(s) || SQL_COL.test(s)) sqlish++;
+  }
+  const ratio = nonempty ? sqlish / nonempty : 0;
+  if (nonempty <= 12) return true;
+  if (cjkRatio(t) > 0.2 && ratio < 0.5) return false;
+  return ratio >= 0.35;
 }
 
 function formatSqlFallback(sql) {
@@ -355,18 +421,8 @@ function formatSqlFallback(sql) {
 
 function looksLikeMarkdown(t) {
   if (t.length < 8 || t.length > TEXT_PRETTY_MAX) return false;
-  const lines = t.split(/\n/);
-  if (lines.length < 2) return false;
-  let score = 0;
-  for (const line of lines.slice(0, 40)) {
-    if (/^#{1,6}\s+\S/.test(line)) score += 2;
-    if (/^\s*[-*+]\s+\S/.test(line)) score += 1;
-    if (/^\s*\d+\.\s+\S/.test(line)) score += 1;
-    if (/^\s*```/.test(line)) score += 2;
-    if (/\[[^\]]+\]\([^)]+\)/.test(line)) score += 1;
-    if (/^\s*>\s+\S/.test(line)) score += 1;
-  }
-  return score >= 3;
+  if (t.split(/\n/).length < 2) return false;
+  return markdownScore(t) >= 3;
 }
 
 function looksLikeYaml(t) {
@@ -421,10 +477,10 @@ export function detectStructuredText(text) {
   if (xmlKind === 'html') return { kind: 'html' };
   if (xmlKind === 'xml') return { kind: 'xml' };
   if (looksLikeStack(t)) return { kind: 'stack' };
+  if (looksLikeMarkdown(t)) return { kind: 'markdown' };
   if (looksLikeSql(t)) return { kind: 'sql' };
   if (looksLikeEnv(t)) return { kind: 'env' };
   if (looksLikeCsv(t)) return { kind: 'csv' };
-  if (looksLikeMarkdown(t)) return { kind: 'markdown' };
   if (looksLikeYaml(t)) return { kind: 'yaml' };
   if (looksLikeBase64Blob(t)) return { kind: 'base64' };
   return { kind: 'plain' };
