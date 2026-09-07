@@ -19,6 +19,7 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n15" />
   <script src="/assets/notes-editor/notes-editor.js?v=n15"></script>
+  <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n9"></script>
   <style>
     /* ClipVault · apple-design visual shell
@@ -60,7 +61,6 @@
       --chrome-pad-x: 22px;
       --spring: cubic-bezier(0.22, 1, 0.36, 1);
       --ease-sheet: cubic-bezier(0.16, 1, 0.3, 1);
-      --scene-scale: 1;
       --press: 100ms ease-out;
       --elev-1: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
       --elev-2: 0 4px 24px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.04);
@@ -175,8 +175,6 @@
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      transform: scale(var(--scene-scale));
-      transform-origin: 50% 42%;
     }
     html.notes-open,
     html.sessions-open,
@@ -1734,6 +1732,7 @@
       pointer-events: none;
       isolation: isolate;
       overscroll-behavior: none;
+      overflow: hidden;
     }
     .notes-panel.open {
       pointer-events: auto;
@@ -1748,16 +1747,16 @@
       position: absolute; inset: 0;
       pointer-events: none;
       touch-action: none;
-      opacity: var(--frost-o, 0);
+      opacity: 0;
       background: rgba(245, 245, 247, 0.42);
       -webkit-backdrop-filter: blur(28px) saturate(140%);
       backdrop-filter: blur(28px) saturate(140%);
     }
     .notes-shell,
     .sessions-shell {
-      opacity: var(--sheet-o, 0);
-      transform: translate3d(0, var(--sheet-y, 56px), 0) scale(var(--sheet-s, 0.92));
-      transform-origin: 50% 80%;
+      opacity: 0;
+      transform: scale(0.08);
+      transform-origin: 50% 8%;
     }
     .notes-shell {
       position: relative; z-index: 1;
@@ -1963,9 +1962,7 @@
       .notes-panel:not(.is-writing) .notes-paper { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .wall-scene, .notes-shell, .sessions-shell {
-        transform: none !important;
-      }
+      .notes-shell, .sessions-shell { transform: none !important; }
     }
     @media (prefers-reduced-transparency: reduce) {
       .notes-panel { background: #f5f5f7; }
@@ -3778,81 +3775,90 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
-    const sheetMotion = {
-      raf: 0,
-      panel: null,
-      opening: false,
-      last: 0,
-      x: { scene: 1, y: 56, s: 0.92, o: 0, frost: 0 },
-      v: { scene: 0, y: 0, s: 0, o: 0, frost: 0 },
-      to: { scene: 1, y: 56, s: 0.92, o: 0, frost: 0 },
-    };
+    let sheetAnims = [];
+    let sheetPanel = null;
     function sheetReduce() {
       try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; }
     }
-    function sheetApply() {
-      const r = document.documentElement;
-      r.style.setProperty('--scene-scale', sheetMotion.x.scene.toFixed(5));
-      const p = sheetMotion.panel;
-      if (!p) return;
-      p.style.setProperty('--sheet-y', sheetMotion.x.y.toFixed(2) + 'px');
-      p.style.setProperty('--sheet-s', sheetMotion.x.s.toFixed(5));
-      p.style.setProperty('--sheet-o', Math.min(1, Math.max(0, sheetMotion.x.o)).toFixed(4));
-      p.style.setProperty('--frost-o', Math.min(1, Math.max(0, sheetMotion.x.frost)).toFixed(4));
+    function sheetTrigger(kind) {
+      if (kind === 'sessions') return document.getElementById('traeSessionsBtn');
+      const fab = document.getElementById('notesFab');
+      if (fab && window.getComputedStyle(fab).display !== 'none') return fab;
+      return document.getElementById('notesOpenBtn');
     }
-    function sheetTick(now) {
-      const dt = Math.min(0.032, sheetMotion.last ? (now - sheetMotion.last) / 1000 : 0.016);
-      sheetMotion.last = now;
-      const k = 240;
-      const dmp = 26;
-      let live = false;
-      for (const key of ['scene', 'y', 's', 'o', 'frost']) {
-        const dest = sheetMotion.to[key];
-        let vel = sheetMotion.v[key];
-        const cur = sheetMotion.x[key];
-        vel += (-k * (cur - dest) - dmp * vel) * dt;
-        const next = cur + vel * dt;
-        sheetMotion.v[key] = vel;
-        sheetMotion.x[key] = next;
-        if (Math.abs(vel) > 0.04 || Math.abs(next - dest) > 0.04) live = true;
-      }
-      if (!live) {
-        Object.assign(sheetMotion.x, sheetMotion.to);
-        sheetMotion.v = { scene: 0, y: 0, s: 0, o: 0, frost: 0 };
-        sheetApply();
-        sheetMotion.raf = 0;
-        if (sheetMotion.panel && sheetMotion.opening) sheetMotion.panel.classList.add('is-settled');
-        return;
-      }
-      sheetApply();
-      sheetMotion.raf = requestAnimationFrame(sheetTick);
+    function sheetOrigin(el, vx, vy) {
+      const box = el.getBoundingClientRect();
+      return `${Math.max(0, vx - box.left)}px ${Math.max(0, vy - box.top)}px`;
     }
-    function playSheet(panel, open) {
-      if (sheetMotion.panel && sheetMotion.panel !== panel) {
-        const prev = sheetMotion.panel;
-        prev.style.setProperty('--sheet-y', '56px');
-        prev.style.setProperty('--sheet-s', '0.92');
-        prev.style.setProperty('--sheet-o', '0');
-        prev.style.setProperty('--frost-o', '0');
-        prev.classList.remove('open', 'is-settled');
+    function stopSheetAnims() {
+      for (const a of sheetAnims) {
+        try { if (a && typeof a.stop === 'function') a.stop(); } catch (_) {}
       }
-      sheetMotion.panel = panel;
-      sheetMotion.opening = open;
-      const dest = open
-        ? { scene: 0.92, y: 0, s: 1, o: 1, frost: 1 }
-        : { scene: 1, y: 48, s: 0.94, o: 0, frost: 0 };
-      if (sheetReduce()) {
-        Object.assign(sheetMotion.x, dest);
-        Object.assign(sheetMotion.to, dest);
-        sheetMotion.v = { scene: 0, y: 0, s: 0, o: 0, frost: 0 };
-        sheetApply();
+      sheetAnims = [];
+    }
+    function resetSheetVisual(panel) {
+      if (!panel) return;
+      const shell = panel.querySelector('.notes-shell, .sessions-shell');
+      const frost = panel.querySelector('.notes-frost');
+      if (shell) {
+        shell.style.transform = 'scale(0.08)';
+        shell.style.opacity = '0';
+      }
+      if (frost) frost.style.opacity = '0';
+    }
+    function playSheet(panel, open, kind) {
+      const motion = globalThis.Motion;
+      const animate = motion && typeof motion.animate === 'function' ? motion.animate : null;
+      const shell = panel.querySelector('.notes-shell, .sessions-shell');
+      const frost = panel.querySelector('.notes-frost');
+      if (sheetPanel && sheetPanel !== panel) {
+        stopSheetAnims();
+        resetSheetVisual(sheetPanel);
+        sheetPanel.classList.remove('open', 'is-settled');
+      }
+      sheetPanel = panel;
+      const btn = sheetTrigger(kind);
+      const br = btn ? btn.getBoundingClientRect() : null;
+      const vx = br ? br.left + br.width / 2 : window.innerWidth * 0.82;
+      const vy = br ? br.top + br.height / 2 : 28;
+      const startScale = br
+        ? Math.max(0.06, Math.min(0.2, (br.width / Math.max(1, window.innerWidth)) * 2.4))
+        : 0.08;
+      if (shell) shell.style.transformOrigin = sheetOrigin(panel, vx, vy);
+      if (frost) frost.style.transformOrigin = sheetOrigin(panel, vx, vy);
+      stopSheetAnims();
+      if (!animate || sheetReduce()) {
+        if (shell) {
+          shell.style.transform = open ? 'scale(1)' : `scale(${startScale})`;
+          shell.style.opacity = open ? '1' : '0';
+        }
+        if (frost) frost.style.opacity = open ? '1' : '0';
         if (open) panel.classList.add('is-settled');
         return;
       }
-      sheetMotion.to = dest;
-      if (!sheetMotion.raf) {
-        sheetMotion.last = 0;
-        sheetMotion.raf = requestAnimationFrame(sheetTick);
+      if (open) {
+        if (shell) {
+          shell.style.transform = `scale(${startScale})`;
+          shell.style.opacity = '0.35';
+        }
+        if (frost) frost.style.opacity = '0';
+        sheetAnims.push(animate(frost, { opacity: 1 }, { duration: 0.32, easing: [0.16, 1, 0.3, 1] }));
+        const run = animate(
+          shell,
+          { transform: ['scale(' + startScale + ')', 'scale(1)'], opacity: [0.35, 1] },
+          { type: 'spring', bounce: 0.16, duration: 0.58 },
+        );
+        sheetAnims.push(run);
+        Promise.resolve(run && run.finished).then(() => {
+          if (sheetPanel === panel && panel.classList.contains('open')) panel.classList.add('is-settled');
+        }).catch(() => {});
+      } else {
+        sheetAnims.push(animate(frost, { opacity: 0 }, { duration: 0.28, easing: [0.32, 0.72, 0, 1] }));
+        sheetAnims.push(animate(
+          shell,
+          { transform: 'scale(' + startScale + ')', opacity: 0 },
+          { type: 'spring', bounce: 0, duration: 0.42 },
+        ));
       }
     }
 
@@ -3879,7 +3885,7 @@ window.ClipViewMasonry = Masonry;
       panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       setSessionsWallLocked(true);
-      playSheet(panel, true);
+      playSheet(panel, true, 'sessions');
       const frame = document.getElementById('sessionsFrame');
       if (frame && !frame.getAttribute('src')) {
         frame.src = '/trae/?embed=1';
@@ -3894,7 +3900,7 @@ window.ClipViewMasonry = Masonry;
       panel?.classList.remove('open', 'is-settled');
       panel?.setAttribute('aria-hidden', 'true');
       setSessionsWallLocked(false);
-      if (panel) playSheet(panel, false);
+      if (panel) playSheet(panel, false, 'sessions');
       if (parseAppHash().kind === 'sessions') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
       }
@@ -3914,7 +3920,7 @@ window.ClipViewMasonry = Masonry;
       panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       setNotesWallLocked(true);
-      playSheet(panel, true);
+      playSheet(panel, true, 'notes');
       notesState.openedAt = Date.now();
       const M = globalThis.ClipNotesMetrics;
       if (M) {
@@ -3938,7 +3944,7 @@ window.ClipViewMasonry = Masonry;
       panel?.classList.remove('open', 'is-writing', 'is-settled');
       panel?.setAttribute('aria-hidden', 'true');
       setNotesWallLocked(false);
-      if (panel) playSheet(panel, false);
+      if (panel) playSheet(panel, false, 'notes');
       const M = globalThis.ClipNotesMetrics;
       if (M) {
         M.setOpen(false);

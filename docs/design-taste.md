@@ -166,7 +166,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 分割线 checkpoint | 源码行写成恰好 `---` 时，下一行自动写入本地 `YYYY-MM-DD HH:mm` | 让多次改动有时间戳。禁止写进围栏代码；已有戳不再盖。`---` 必须单独成行才是 hr |
 | 行内计算 | `1+2=` 后幽灵预览结果；**Tab 写入**，其它键丢掉预览 | 不 `eval()`。Tab 有幽灵时优先于列表缩进。`price=` / `==` / 代码围栏不触发 |
 | 新一篇 | 32×32 细线 +，无黑底「新一篇」文案 | 新建必须清空预览，禁止留上一篇 HTML |
-| 打开/关闭 | 上一幕 `.wall-scene` 弹簧缩到 0.92；纸面从下方 56px / 0.92 弹簧滑入。按钮不切 `.is-on` | 禁止点按钮立刻涂黑。禁止 `visibility` 掐墙。禁止只淡 opacity |
+| 打开/关闭 | Motion spring：纸面从触发按钮原点放大，关闭缩回同一按钮。`web/assets/motion.js` | 禁止自制弹簧积分。禁止按钮 `.is-on` 闪黑。禁止整页硬切 |
 
 规则：工具条向源码插入 Markdown，不改预览 DOM。预览只读。自动保存不得回写编辑器、不得 `mergeHead` 墙。霜层默认 `pointer-events: none`（关掉才能点墙），`.notes-panel.open` 才 `auto`；`main`/`chips`/`top-bar` 同时 `inert`。禁止霜层一直 `none` 把拖动手势漏到控制条。
 

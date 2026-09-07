@@ -89,8 +89,11 @@ test('notes are a panel on the same page', () => {
 test('notes and sessions sheets spring in, wall does not snap away', () => {
   assert.match(indexHtml, /id="wallScene"/);
   assert.match(indexHtml, /function playSheet/);
-  assert.match(indexHtml, /--scene-scale/);
-  assert.match(indexHtml, /--sheet-y/);
+  assert.match(indexHtml, /assets\/motion\.js/);
+  assert.match(indexHtml, /function sheetTrigger/);
+  assert.match(indexHtml, /transformOrigin/);
+  assert.match(indexHtml, /type: 'spring'/);
+  assert.doesNotMatch(indexHtml, /const k = 240/);
   assert.doesNotMatch(indexHtml, /notesOpenBtn'\)\?\.classList\.add\('is-on'\)/);
   assert.doesNotMatch(indexHtml, /traeSessionsBtn'\)\?\.classList\.add\('is-on'\)/);
   assert.doesNotMatch(indexHtml, /\.notes-panel \{[\s\S]{0,180}translateY\(18px\)/);

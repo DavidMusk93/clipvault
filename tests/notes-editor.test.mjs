@@ -105,7 +105,8 @@ test('notes panel open does not translate the chrome', () => {
   assert.doesNotMatch(html, /body\.notes-open \.top-bar[\s\S]{0,80}translateY\(-120%\)/);
   assert.match(html, /id="wallScene"/);
   assert.match(html, /function playSheet/);
-  assert.match(html, /--sheet-y/);
+  assert.match(html, /assets\/motion\.js/);
+  assert.match(html, /type: 'spring'/);
   assert.doesNotMatch(html, /notesOpenBtn'\)\?\.classList\.add\('is-on'\)/);
   assert.doesNotMatch(html, /\.notes-panel \{[\s\S]{0,200}translateY\(18px\)/);
 });
