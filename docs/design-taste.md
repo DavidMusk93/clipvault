@@ -80,7 +80,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 **跟底**：靠近底部时新消息钉住 `#thread` 底部（不动画）。用户上翻则停止跟踪，露出「↓」；有未读时 Accent 底。禁止新进展把人拽回底部。进入页默认打开**最新会话**。
 
-**展开 vs 压缩**：用户输入有限，**每一条用户气泡都展开**（含 AskUserQuestion 的选项答案）。助手结论（`Stop`）同样展开。工具 slog 只在 **助手一侧** 收成 `history-bundle`（左对齐），**每一段操作的最后一条始终展开**。禁止把用户话术卷进「更早 N 轮」。库里的 `ts` 是 naive UTC，界面必须按本地时区显示。
+**展开 vs 压缩**：用户输入有限，**每一条用户气泡都展开**（含 AskUserQuestion 的选项答案）。助手结论（`Stop`）同样展开。工具 slog 只在 **助手一侧** 收成 `history-bundle`（左对齐），**每一段操作的最后一条始终展开**。bundle 展开后每条是可点开的 `history-item`，里面是完整工具气泡；「查看全部」一次打开。禁止目录行点不开正文。禁止把用户话术卷进「更早 N 轮」。库 `ts` 是 naive UTC；**每条消息时间戳用本地 `YYYY-MM-DD HH:mm:ss`**，禁止只用「今天」或相对时间当消息时刻。
 
 **需要你**：Trae 自己几乎不提示。`permission_prompt` / `ask_user_question` 走 SSE `needs_user` 推到 ClipVault 墙（蜂蜜条 + 会话钮圆点），hook 同时 `osascript` 系统通知。确认动作仍在 Trae 里完成。
 

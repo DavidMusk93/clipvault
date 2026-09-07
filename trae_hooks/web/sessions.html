@@ -368,21 +368,47 @@
       user-select: none;
     }
     .history-bundle summary::-webkit-details-marker { display: none; }
-    .history-body { padding: 6px 4px 2px; }
-    .history-line {
+    .history-body { padding: 6px 4px 8px; }
+    .history-expand-all {
+      display: inline-flex; align-items: center;
+      height: 24px; margin: 2px 6px 8px; padding: 0 10px;
+      border: 0; border-radius: 8px;
+      background: rgba(21, 101, 192, 0.10); color: var(--tool);
+      font: 600 11px/24px var(--font-ui); cursor: pointer;
+    }
+    .history-expand-all:active { transform: scale(0.97); }
+    .history-item {
+      border-top: 0.5px solid var(--separator);
+    }
+    .history-item > summary {
+      list-style: none;
       display: grid;
-      grid-template-columns: 42px 36px minmax(0, 1fr);
+      grid-template-columns: 148px 36px minmax(0, 1fr);
       gap: 8px;
       font-size: 12px;
       color: var(--muted);
-      padding: 3px 6px;
+      padding: 6px;
       min-width: 0;
+      cursor: pointer;
+      align-items: center;
     }
-    .history-line .p {
+    .history-item > summary::-webkit-details-marker { display: none; }
+    .history-item > summary .t {
+      font-variant-numeric: tabular-nums;
+      font-size: 11px;
+      letter-spacing: -0.02em;
+    }
+    .history-item > summary .p {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      color: var(--ink);
     }
+    .history-item-body {
+      padding: 0 4px 10px 6px;
+    }
+    .history-item-body .row { margin: 0; }
+    .history-item-body .bubble.tool { max-width: 100%; }
     .follow {
       position: absolute;
       right: 20px;
@@ -498,7 +524,7 @@
   <script type="module">
     import {
       asObj, askAnswers, askQuestions, blocksFromEvent, bundleTitle, focusImRows,
-      imMessagesFromEvents, isAskTool, localClock, localDayKey, prettyJson,
+      imMessagesFromEvents, isAskTool, localDateTime, localDayKey, prettyJson,
       relLocalTime, renderEventBlocks, renderValue, rowPreview,
     } from "./session-render.mjs";
 
@@ -714,7 +740,7 @@
       const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
       const name = tools || "工具";
       const result = toolBits(e);
-      const meta = [localClock(e.ts), relTime(e.ts), tools].filter(Boolean).join(" · ");
+      const meta = [localDateTime(e.ts), tools].filter(Boolean).join(" · ");
       let html = `<div class="tool-head"><span class="tool-name">${esc(name)}</span><span class="tool-result">${esc(result)}</span></div>`;
       for (const b of blocksFromEvent(e)) {
         if (b.key === "result") continue;
@@ -759,7 +785,7 @@
         lastDay = day;
         lastRole = row.role;
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
-        const meta = [localClock(e.ts), relTime(e.ts), tools].filter(Boolean).join(" · ");
+        const meta = [localDateTime(e.ts), tools].filter(Boolean).join(" · ");
         const body = row.role === "tool" ? "" : renderEventBlocks(e, engines()).map((b) =>
           `<div class="kv">${b.key === "result" ? "" : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`
         ).join("");
@@ -771,7 +797,8 @@
           inner = `${who}<div class="bubble-body">${renderAskBody(e)}</div>
             <div class="meta">${esc(meta)}</div>`;
         } else if (row.role === "system") {
-          inner = `<div class="bubble-body">${esc(e.notification_message || e.hook_event || "")}</div>`;
+          inner = `<div class="bubble-body">${esc(e.notification_message || e.hook_event || "")}</div>
+            <div class="meta">${esc(localDateTime(e.ts))}</div>`;
         } else {
           inner = `${who}<div class="bubble-body">${body}</div>
             <div class="meta">${esc(meta)}</div>
@@ -804,14 +831,25 @@
     }
 
     function renderBundle(bundle) {
-      const lines = bundle.rows.map((r) => {
-        const clock = localClock(r.event.ts);
+      const items = bundle.rows.map((r) => {
+        const dt = localDateTime(r.event.ts);
         const pre = rowPreview(r);
-        return `<div class="history-line"><span class="t">${esc(clock)}</span><span class="w">${esc(r.label)}</span><span class="p" title="${esc(pre)}">${esc(pre.slice(0, 80))}</span></div>`;
+        const body = renderRows([r], { event: r.event, role: "__" });
+        return `<details class="history-item">
+          <summary>
+            <span class="t">${esc(dt)}</span>
+            <span class="w">${esc(r.label)}</span>
+            <span class="p" title="${esc(pre)}">${esc(pre.slice(0, 80))}</span>
+          </summary>
+          <div class="history-item-body">${body}</div>
+        </details>`;
       }).join("");
       return `<div class="row assistant"><details class="history-bundle">
         <summary>${esc(bundle.title || bundleTitle(bundle.rows))}</summary>
-        <div class="history-body">${lines}</div>
+        <div class="history-body">
+          <button type="button" class="history-expand-all">查看全部</button>
+          ${items}
+        </div>
       </details></div>`;
     }
 
@@ -820,6 +858,20 @@
         if (item.type === "bundle") return renderBundle(item);
         return renderRows([item.row]);
       }).join("");
+    }
+
+    function bindBundleExpand(root) {
+      root.querySelectorAll(".history-expand-all").forEach((btn) => {
+        if (btn.dataset.bound) return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const pack = btn.closest(".history-bundle");
+          if (!pack) return;
+          pack.querySelectorAll("details.history-item").forEach((d) => { d.open = true; });
+        });
+      });
     }
 
     function bindRaws(root) {
@@ -927,6 +979,7 @@
       thread.innerHTML = renderThread(rows);
       emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: rows.length, kind: "full" } });
       bindRaws(thread);
+      bindBundleExpand(thread);
       if (followTail || painted !== current) pinBottomSoon();
       else if (grew) {
         pendingNew = true;

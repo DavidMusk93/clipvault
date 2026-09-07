@@ -100,6 +100,14 @@ export function localClock(ts) {
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** Local wall clock with seconds. Store ts is naive UTC. */
+export function localDateTime(ts) {
+  const d = parseHookTs(ts);
+  if (!d) return String(ts || '');
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 export function relLocalTime(ts, nowMs = Date.now()) {
   const d = parseHookTs(ts);
   if (!d) return String(ts || '');

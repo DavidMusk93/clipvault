@@ -14,6 +14,7 @@ import {
   imMessagesFromEvents,
   parseHookTs,
   relLocalTime,
+  localDateTime,
   bundleTitle,
   focusImRows,
   needsUserInput,
@@ -104,6 +105,13 @@ test('naive hook timestamps are UTC, not local wall clock', () => {
   const d = parseHookTs('2026-09-07 04:49:23');
   assert.equal(d.toISOString(), '2026-09-07T04:49:23.000Z');
   assert.equal(relLocalTime('2026-09-07 04:49:23', Date.parse('2026-09-07T04:50:00Z')), '刚刚');
+  const stamp = localDateTime('2026-09-07 04:49:23');
+  assert.match(stamp, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  const p = (n) => String(n).padStart(2, '0');
+  assert.equal(
+    stamp,
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`,
+  );
 });
 
 test('all user prompts stay open; tools compress on the agent side', () => {

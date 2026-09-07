@@ -102,10 +102,14 @@ test('user turns stay open; agent tools compress on the left', () => {
   assert.match(html, /focusImRows/);
   assert.match(html, /history-bundle/);
   assert.match(html, /function renderThread/);
-  assert.match(html, /parseHookTs|localClock/);
+  assert.match(html, /localDateTime/);
   assert.match(html, /relLocalTime/);
   assert.match(html, /renderAskBody/);
   assert.match(html, /row assistant/);
+  assert.match(html, /history-item/);
+  assert.match(html, /history-expand-all/);
+  assert.match(html, /查看全部/);
+  assert.match(html, /bindBundleExpand/);
 });
 
 test('trae sessions use nmem SSE contract, not interval polling', () => {
