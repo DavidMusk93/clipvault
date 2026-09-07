@@ -17,6 +17,7 @@ import {
   localDateTime,
   bundleTitle,
   focusImRows,
+  layoutKey,
   needsUserInput,
   isAskTool,
 } from '../web/session-render.mjs';
@@ -138,6 +139,9 @@ test('all user prompts stay open; tools compress on the agent side', () => {
   assert.equal(lastTool.row.event.event_id, 't4');
   const mid = layout.filter((x) => x.type === 'focus' && x.row.role === 'tool');
   assert.ok(mid.some((x) => x.row.event.event_id === 't3'));
+  const bundled = layout.find((x) => x.type === 'bundle');
+  assert.equal(layoutKey(bundled).startsWith('b:'), true);
+  assert.equal(layoutKey(lastTool), 'e:t4');
 });
 
 test('permission and AskUserQuestion are needs-user; answers count as user input', () => {

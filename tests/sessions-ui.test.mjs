@@ -101,7 +101,7 @@ test('opens the latest session and shows tool command without folding it away', 
 test('user turns stay open; agent tools compress on the left', () => {
   assert.match(html, /focusImRows/);
   assert.match(html, /history-bundle/);
-  assert.match(html, /function renderThread/);
+  assert.match(html, /function patchThread/);
   assert.match(html, /localDateTime/);
   assert.match(html, /relLocalTime/);
   assert.match(html, /renderAskBody/);
@@ -110,6 +110,13 @@ test('user turns stay open; agent tools compress on the left', () => {
   assert.match(html, /history-expand-all/);
   assert.match(html, /查看全部/);
   assert.match(html, /bindBundleExpand/);
+  assert.match(html, /function patchThread/);
+  assert.match(html, /function ingestHookIds/);
+  assert.match(html, /function reconcile/);
+  assert.match(html, /paintFromLive/);
+  assert.doesNotMatch(html, /thread\.innerHTML = renderThread/);
+  assert.match(html, /history-item-body"><\/div>/);
+  assert.match(html, /contain:\s*layout/);
 });
 
 test('trae sessions use nmem SSE contract, not interval polling', () => {
@@ -168,7 +175,7 @@ test('sessions UI is prefix-aware so ClipVault :8080 can proxy /trae', () => {
 
 test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () => {
   assert.doesNotMatch(html, /if \(sig === lastSig\) \{\s*if \(followTail\) pinBottomSoon/);
-  assert.match(html, /if \(sig === lastSig\) return/);
+  assert.match(html, /if \(sig === lastSig && kind !== "full"\) return/);
   assert.match(html, /if \(listSig === lastListSig\) return/);
   assert.match(html, /trae_sessions_cls/);
   assert.match(html, /trae_sessions_paint/);

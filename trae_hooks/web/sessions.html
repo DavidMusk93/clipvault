@@ -377,9 +377,16 @@
       font: 600 11px/24px var(--font-ui); cursor: pointer;
     }
     .history-expand-all:active { transform: scale(0.97); }
+    .thread-block { min-width: 0; }
     .history-item {
       border-top: 0.5px solid var(--separator);
+      contain: layout style;
     }
+    .history-item:not([open]) {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 32px;
+    }
+    .history-item:not([open]) .history-item-body { display: none; }
     .history-item > summary {
       list-style: none;
       display: grid;
@@ -524,7 +531,7 @@
   <script type="module">
     import {
       asObj, askAnswers, askQuestions, blocksFromEvent, bundleTitle, focusImRows,
-      imMessagesFromEvents, isAskTool, localDateTime, localDayKey, prettyJson,
+      imMessagesFromEvents, isAskTool, layoutKey, localDateTime, localDayKey, prettyJson,
       relLocalTime, renderEventBlocks, renderValue, rowPreview,
     } from "./session-render.mjs";
 
@@ -544,6 +551,10 @@
     let pendingNew = false;
     let lastSig = "";
     let lastListSig = "";
+    let lastListIds = "";
+    let liveEvents = [];
+    const liveIds = new Set();
+    let pendingHookIds = [];
     let railY = 0;
     let es = null;
     const NEAR = 64;
@@ -830,46 +841,135 @@
       return esc(e.notification_message || e.hook_event || "需要你");
     }
 
-    function renderBundle(bundle) {
-      const items = bundle.rows.map((r) => {
-        const dt = localDateTime(r.event.ts);
-        const pre = rowPreview(r);
-        const body = renderRows([r], { event: r.event, role: "__" });
-        return `<details class="history-item">
-          <summary>
-            <span class="t">${esc(dt)}</span>
-            <span class="w">${esc(r.label)}</span>
-            <span class="p" title="${esc(pre)}">${esc(pre.slice(0, 80))}</span>
-          </summary>
-          <div class="history-item-body">${body}</div>
-        </details>`;
-      }).join("");
-      return `<div class="row assistant"><details class="history-bundle">
-        <summary>${esc(bundle.title || bundleTitle(bundle.rows))}</summary>
-        <div class="history-body">
-          <button type="button" class="history-expand-all">查看全部</button>
-          ${items}
-        </div>
-      </details></div>`;
+    function reconcile(parent, nextEls) {
+      let cursor = parent.firstChild;
+      for (const el of nextEls) {
+        if (!el) continue;
+        if (el === cursor) {
+          cursor = cursor.nextSibling;
+          continue;
+        }
+        parent.insertBefore(el, cursor);
+      }
+      while (cursor) {
+        const dead = cursor;
+        cursor = cursor.nextSibling;
+        dead.remove();
+      }
     }
 
-    function renderThread(rows) {
-      return focusImRows(rows).map((item) => {
-        if (item.type === "bundle") return renderBundle(item);
-        return renderRows([item.row]);
-      }).join("");
+    function bindHistoryItem(el) {
+      if (el.dataset.bound) return;
+      el.dataset.bound = "1";
+      el.addEventListener("toggle", () => {
+        if (!el.open) return;
+        const body = el.querySelector(".history-item-body");
+        if (!body || body.dataset.loaded) return;
+        const row = liveById(el.dataset.eid);
+        if (!row) return;
+        body.innerHTML = renderRows([row], { event: row.event, role: "__" });
+        body.dataset.loaded = "1";
+        bindRaws(body);
+      });
+    }
+
+    function makeHistoryItem(row) {
+      const el = document.createElement("details");
+      el.className = "history-item";
+      el.dataset.eid = row.event.event_id || "";
+      const dt = localDateTime(row.event.ts);
+      const pre = rowPreview(row);
+      el.innerHTML = `<summary>
+            <span class="t">${esc(dt)}</span>
+            <span class="w">${esc(row.label)}</span>
+            <span class="p" title="${esc(pre)}">${esc(pre.slice(0, 80))}</span>
+          </summary>
+          <div class="history-item-body"></div>`;
+      bindHistoryItem(el);
+      return el;
+    }
+
+    function liveById(id) {
+      const want = String(id || "");
+      return imMessagesFromEvents(liveEvents).find((r) => String(r.event.event_id || "") === want) || null;
+    }
+
+    function updateBundleEl(wrap, item) {
+      const pack = wrap.querySelector("details.history-bundle");
+      if (!pack) return;
+      const summary = pack.querySelector(":scope > summary");
+      const title = item.title || bundleTitle(item.rows);
+      if (summary && summary.textContent !== title) summary.textContent = title;
+      const body = pack.querySelector(".history-body");
+      if (!body) return;
+      let btn = body.querySelector(":scope > .history-expand-all");
+      if (!btn) {
+        btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "history-expand-all";
+        btn.textContent = "查看全部";
+      }
+      const items = (item.rows || []).map((row) => {
+        const eid = String(row.event.event_id || "");
+        let it = body.querySelector(`:scope > details.history-item[data-eid="${CSS.escape(eid)}"]`);
+        if (!it) it = makeHistoryItem(row);
+        return it;
+      });
+      reconcile(body, [btn, ...items]);
+      bindBundleExpand(wrap);
+    }
+
+    function makeBundleEl(item) {
+      const wrap = document.createElement("div");
+      wrap.dataset.key = layoutKey(item);
+      wrap.className = "thread-block";
+      wrap.innerHTML = `<div class="row assistant"><details class="history-bundle">
+        <summary></summary>
+        <div class="history-body">
+          <button type="button" class="history-expand-all">查看全部</button>
+        </div>
+      </details></div>`;
+      updateBundleEl(wrap, item);
+      return wrap;
+    }
+
+    function makeFocusEl(item, prevItem) {
+      const wrap = document.createElement("div");
+      wrap.dataset.key = layoutKey(item);
+      wrap.className = "thread-block";
+      let prev = null;
+      if (prevItem && prevItem.type === "focus") prev = prevItem.row;
+      else if (prevItem && prevItem.type === "bundle") prev = prevItem.rows[prevItem.rows.length - 1];
+      wrap.innerHTML = renderRows([item.row], prev);
+      bindRaws(wrap);
+      return wrap;
+    }
+
+    function patchThread(items) {
+      const nextEls = items.map((item, i) => {
+        const key = layoutKey(item);
+        let el = thread.querySelector(`:scope > [data-key="${CSS.escape(key)}"]`);
+        if (!el) el = item.type === "bundle" ? makeBundleEl(item) : makeFocusEl(item, items[i - 1]);
+        else if (item.type === "bundle") updateBundleEl(el, item);
+        return el;
+      });
+      reconcile(thread, nextEls);
     }
 
     function bindBundleExpand(root) {
       root.querySelectorAll(".history-expand-all").forEach((btn) => {
         if (btn.dataset.bound) return;
         btn.dataset.bound = "1";
-        btn.addEventListener("click", (ev) => {
+        btn.addEventListener("click", async (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
           const pack = btn.closest(".history-bundle");
           if (!pack) return;
-          pack.querySelectorAll("details.history-item").forEach((d) => { d.open = true; });
+          const items = [...pack.querySelectorAll("details.history-item")];
+          for (const d of items) {
+            d.open = true;
+            await new Promise((r) => requestAnimationFrame(r));
+          }
         });
       });
     }
@@ -908,6 +1008,7 @@
       const box = $("sessionList");
       if (!data.sessions || !data.sessions.length) {
         lastListSig = "";
+        lastListIds = "";
         box.innerHTML = '<div class="empty">还没有 hook 事件。装好 hooks 后硬重启 Trae，再发一条真实消息。</div>';
         return data.sessions || [];
       }
@@ -922,7 +1023,23 @@
         loadEvents();
       }
       if (listSig === lastListSig) return data.sessions;
+      const listIds = data.sessions.map((s) => s.session_id || "").join("|");
+      if (listIds === lastListIds) {
+        lastListSig = listSig;
+        for (const s of data.sessions) {
+          const card = box.querySelector(`[data-id="${CSS.escape(s.session_id || "")}"]`);
+          if (!card) continue;
+          const title = sessionTitle(s);
+          card.setAttribute("data-title", title);
+          const t = card.querySelector(".title");
+          if (t) t.textContent = title;
+          const meta = card.querySelector(".meta");
+          if (meta) meta.textContent = `${relTime(s.last_ts)} · ${s.event_count} 条`;
+        }
+        return data.sessions;
+      }
       lastListSig = listSig;
+      lastListIds = listIds;
       railY = box.scrollTop;
       box.innerHTML = data.sessions.map((s) => {
         const title = sessionTitle(s);
@@ -954,38 +1071,80 @@
       box.scrollTop = railY;
       return data.sessions;
     }
-    async function loadEvents() {
-      const q = (document.getElementById("q") || {}).value || "";
-      const params = new URLSearchParams({ limit: "200" });
-      if (current) params.set("session_id", current);
-      if (String(q).trim()) params.set("q", String(q).trim());
+    function paintFromLive(kind) {
       if (!current) {
         thread.innerHTML = '<div class="empty">选择左侧会话</div>';
         showSessionHead("");
+        liveEvents = [];
+        liveIds.clear();
+        lastSig = "";
         return;
       }
-      const data = await (await fetch(apiUrl("/api/events?" + params))).json();
-      if (!data.events || !data.events.length) {
+      if (!liveEvents.length) {
         thread.innerHTML = '<div class="empty">没有匹配事件</div>';
         lastSig = "";
         return;
       }
-      const rows = imMessagesFromEvents(data.events);
+      const rows = imMessagesFromEvents(liveEvents);
+      const items = focusImRows(rows);
       const sig = rows.map((r) => r.event.event_id).join(",");
-      if (sig === lastSig) return;
+      if (sig === lastSig && kind !== "full") return;
       const grew = lastSig && sig.startsWith(lastSig + ",");
       lastSig = sig;
       const t0 = performance.now();
-      thread.innerHTML = renderThread(rows);
-      emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: rows.length, kind: "full" } });
-      bindRaws(thread);
-      bindBundleExpand(thread);
+      if (kind === "full" || !thread.querySelector(":scope > [data-key]")) {
+        thread.replaceChildren();
+      }
+      patchThread(items);
+      emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: items.length, kind } });
       if (followTail || painted !== current) pinBottomSoon();
       else if (grew) {
         pendingNew = true;
         syncFollowBtn();
       }
       painted = current;
+    }
+
+    async function loadEvents() {
+      const q = (document.getElementById("q") || {}).value || "";
+      const params = new URLSearchParams({ limit: "200" });
+      if (current) params.set("session_id", current);
+      if (String(q).trim()) params.set("q", String(q).trim());
+      if (!current) {
+        paintFromLive("full");
+        return;
+      }
+      const data = await (await fetch(apiUrl("/api/events?" + params))).json();
+      liveEvents = data.events || [];
+      liveIds.clear();
+      for (const e of liveEvents) {
+        if (e && e.event_id) liveIds.add(e.event_id);
+      }
+      paintFromLive("full");
+    }
+
+    async function ingestHookIds(ids) {
+      const uniq = [...new Set(ids.filter(Boolean))];
+      if (!uniq.length || !current) return;
+      if (uniq.length > 16) {
+        await loadEvents();
+        return;
+      }
+      let added = 0;
+      for (const id of uniq) {
+        if (liveIds.has(id)) continue;
+        try {
+          const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(id)))).json();
+          const ev = d.event;
+          if (!ev || !ev.event_id) continue;
+          if (ev.session_id && current && ev.session_id !== current) continue;
+          if (liveIds.has(ev.event_id)) continue;
+          liveIds.add(ev.event_id);
+          liveEvents.push(ev);
+          added += 1;
+        } catch (_) {}
+      }
+      if (added) paintFromLive("patch");
     }
 
     $("q").addEventListener("keydown", (ev) => {
@@ -1005,7 +1164,11 @@
       if (hookPaintTimer) return;
       hookPaintTimer = setTimeout(() => {
         hookPaintTimer = 0;
-        scheduleResync();
+        const ids = pendingHookIds;
+        pendingHookIds = [];
+        loadHealth();
+        loadSessions();
+        ingestHookIds(ids);
       }, 40);
     };
     const setupSSE = () => {
@@ -1030,8 +1193,14 @@
             current = d.session_id;
             lastSig = "";
             painted = "";
+            liveEvents = [];
+            liveIds.clear();
+            pendingHookIds = [];
             markFollow(true);
+            scheduleResync();
+            return;
           }
+          if (d.event_id) pendingHookIds.push(d.event_id);
           scheduleHookPaint();
         }
       };

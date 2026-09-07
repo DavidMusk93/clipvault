@@ -192,6 +192,17 @@ export function focusImRows(rows) {
   return layoutImRows(rows);
 }
 
+/** Stable DOM identity: bundle keyed by first event, focus by event_id. */
+export function layoutKey(item) {
+  if (!item) return '';
+  if (item.type === 'bundle') {
+    const id = item.rows && item.rows[0] && item.rows[0].event && item.rows[0].event.event_id;
+    return 'b:' + (id || '');
+  }
+  const id = item.row && item.row.event && item.row.event.event_id;
+  return 'e:' + (id || '');
+}
+
 export function imMessagesFromEvents(events) {
   const list = [...(events || [])].sort((a, b) => {
     const ta = String(a.ts || '');
