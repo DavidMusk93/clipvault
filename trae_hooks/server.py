@@ -25,7 +25,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from row import utc_now  # noqa: E402
+from row import needs_user_input, utc_now  # noqa: E402
 
 LOG = logging.getLogger("clipvault-trae")
 
@@ -135,18 +135,12 @@ class Store:
                 [eid],
             ).fetchone()
             self.con.execute(INSERT_SQL, params)
-        if existed:
+        if existed and not needs_user_input(row):
             return True
         cb = self.on_insert
         if cb:
             try:
-                cb(
-                    {
-                        "type": "hook_event",
-                        "session_id": row.get("session_id") or "",
-                        "event_id": eid or "",
-                    }
-                )
+                cb(sse_hook_payload(row))
             except Exception:  # noqa: BLE001
                 LOG.exception("sse notify")
         return True
@@ -196,6 +190,22 @@ SSE_HEARTBEAT_SECONDS = 15
 SSE_PING = b': ping\n\ndata: {"type":"ping"}\n\n'
 SSE_RESYNC = b'data: {"type":"resync_required"}\n\n'
 SSE_HELLO = b'retry: 3000\n\n: connected\n\ndata: {"type":"connected"}\n\n'
+
+
+def sse_hook_payload(row: dict[str, Any]) -> dict[str, Any]:
+    msg = str(row.get("notification_message") or "")[:200]
+    preview = str(row.get("prompt") or msg or "")[:120]
+    return {
+        "type": "hook_event",
+        "session_id": row.get("session_id") or "",
+        "event_id": row.get("event_id") or "",
+        "hook_event": row.get("hook_event") or "",
+        "notification_type": row.get("notification_type") or "",
+        "notification_message": msg,
+        "tool_name": row.get("tool_name") or row.get("llm_tool_name") or "",
+        "needs_user": needs_user_input(row),
+        "preview": preview,
+    }
 
 
 class SseClient:
@@ -327,9 +337,34 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
         def do_OPTIONS(self) -> None:  # noqa: N802
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.end_headers()
+
+        def do_POST(self) -> None:  # noqa: N802
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/notify":
+                self._json(404, {"error": "not found"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+            except ValueError:
+                length = 0
+            raw = self.rfile.read(max(0, min(length, 8000))) if length else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self._json(400, {"error": "bad json"})
+                return
+            if not isinstance(payload, dict):
+                self._json(400, {"error": "object required"})
+                return
+            payload.setdefault("type", "hook_event")
+            payload["needs_user"] = bool(
+                payload.get("needs_user") or needs_user_input(payload)
+            )
+            hub.publish(payload)
+            self._json(200, {"ok": True})
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
@@ -376,6 +411,50 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 session_id = (qs.get("session_id") or [""])[0]
                 hook_event = (qs.get("hook_event") or [""])[0]
                 q = (qs.get("q") or [""])[0]
+                event_cols = (
+                    "event_id, ts, instance_id, session_id, hook_event, source, "
+                    "cwd, tool_name, llm_tool_name, tool_use_id, prompt, "
+                    "last_assistant_message, notification_type, notification_message, "
+                    "loop_count, tool_input, tool_response, raw_hash"
+                )
+                if session_id and not hook_event and not q:
+                    beats = store.query(
+                        f"""
+                        SELECT {event_cols}
+                        FROM hook_events
+                        WHERE session_id = ?
+                          AND (
+                            hook_event IN ('UserPromptSubmit', 'Stop', 'Notification')
+                            OR tool_name = 'AskUserQuestion'
+                            OR llm_tool_name = 'AskUserQuestion'
+                          )
+                        ORDER BY ts ASC
+                        """,
+                        [session_id],
+                    )
+                    tools = store.query(
+                        f"""
+                        SELECT {event_cols}
+                        FROM hook_events
+                        WHERE session_id = ?
+                          AND hook_event IN ('PreToolUse', 'PostToolUse')
+                          AND coalesce(tool_name, '') != 'AskUserQuestion'
+                          AND coalesce(llm_tool_name, '') != 'AskUserQuestion'
+                        ORDER BY ts DESC
+                        LIMIT ?
+                        """,
+                        [session_id, limit],
+                    )
+                    seen: set[str] = set()
+                    rows: list[dict[str, Any]] = []
+                    for item in list(beats) + list(tools):
+                        eid = str(item.get("event_id") or "")
+                        if eid in seen:
+                            continue
+                        seen.add(eid)
+                        rows.append(item)
+                    self._json(200, {"events": rows})
+                    return
                 where = ["1=1"]
                 params: list[Any] = []
                 if session_id:
@@ -395,10 +474,7 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 params.append(limit)
                 rows = store.query(
                     f"""
-                    SELECT event_id, ts, instance_id, session_id, hook_event, source,
-                           cwd, tool_name, llm_tool_name, tool_use_id, prompt,
-                           last_assistant_message, notification_type, notification_message,
-                           loop_count, tool_input, tool_response, raw_hash
+                    SELECT {event_cols}
                     FROM hook_events
                     WHERE {' AND '.join(where)}
                     ORDER BY ts DESC

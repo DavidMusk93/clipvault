@@ -71,15 +71,18 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | `user` | 你 | 右 | Honey `#C47A2C` / 12% | Honey |
 | `assistant` | 助手 | 左 | Ink + 白气泡 | Accent `#0071E3` |
 | `tool` | 工具 | 左 | `#1565C0` / 12% | `#1565C0` |
+| `ask` | 需要你 | 左 | Honey 软底 + 边 | Honey |
 | `system` | 系统 | 中 | `#8E8E93` / 12% | 灰 |
 
-映射：`UserPromptSubmit`→user；`Stop`（及 assistant 正文）→assistant；`PreToolUse`/`PostToolUse`→tool。`SessionStart` **不进气泡**（cwd 不是一句对话）。无正文的 `Notification` 也不进。同一 `tool_use_id` 有 Post 则不画 Pre。
+映射：`UserPromptSubmit`→user；`AskUserQuestion` 的 **Post 答案**→user（这也是用户输入）；`Stop`→assistant；`PreToolUse`/`PostToolUse`→tool。`Notification` 的 `permission_prompt` / `ask_user_question`，以及 `AskUserQuestion` 的 Pre→**ask「需要你」**。`idle_prompt` 是完成不是等待。`SessionStart` **不进气泡**。无正文的 `Notification` 不进。同一 `tool_use_id` 有 Post 则不画 Pre，**AskUserQuestion 除外**（要同时留下问题和答案）。
 
 **两层滚动**：会话列 `#sessionList` 与消息 `#thread` 是两个 scroller。`html, body { height:100%; overflow:hidden }`，`overscroll-behavior: contain`。禁止 `main { min-height: 100vh }` 让整页带着列表一起滚。
 
 **跟底**：靠近底部时新消息钉住 `#thread` 底部（不动画）。用户上翻则停止跟踪，露出「↓」；有未读时 Accent 底。禁止新进展把人拽回底部。进入页默认打开**最新会话**。
 
-**展开 vs 重点**：会话里工具调用是噪声（常 >90%）。重点是 **最后一轮用户意图、该轮助手结论、以及最新一条活着的事件**。更早的轮次和中间工具打成 `history-bundle` 一行摘要，点开才看目录。禁止把所有气泡当重点展开。库里的 `ts` 是 naive UTC，界面必须按本地时区显示。
+**展开 vs 压缩**：用户输入有限，**每一条用户气泡都展开**（含 AskUserQuestion 的选项答案）。助手结论（`Stop`）同样展开。工具 slog 只在 **助手一侧** 收成 `history-bundle`（左对齐），禁止把用户话术卷进「更早 N 轮」。库里的 `ts` 是 naive UTC，界面必须按本地时区显示。
+
+**需要你**：Trae 自己几乎不提示。`permission_prompt` / `ask_user_question` 走 SSE `needs_user` 推到 ClipVault 墙（蜂蜜条 + 会话钮圆点），hook 同时 `osascript` 系统通知。确认动作仍在 Trae 里完成。
 
 **实时**：Trae 页走 nmem SSE 契约（`GET /api/stream`：`retry: 3000`、15s ping、满 32 发 `resync_required`、浏览器原生重连）。禁止 `setInterval` 整页重绘。抖动用本机 `ui-metrics` 的 `trae_sessions_cls` / `trae_sessions_paint` / `trae_sessions_longtask` 追溯。
 

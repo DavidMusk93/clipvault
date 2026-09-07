@@ -30,15 +30,41 @@ export const IM_ROLES = {
   user: { label: '你', align: 'end' },
   assistant: { label: '助手', align: 'start' },
   tool: { label: '工具', align: 'start' },
+  ask: { label: '需要你', align: 'start' },
   system: { label: '系统', align: 'center' },
 };
+
+export function isAskTool(event) {
+  const n = `${event?.tool_name || ''} ${event?.llm_tool_name || ''}`;
+  return /askuserquestion/i.test(n);
+}
+
+/** Trae is blocked waiting on the human. idle_prompt is completion, not a wait. */
+export function needsUserInput(event) {
+  const t = String(event?.notification_type || '').toLowerCase();
+  if (t === 'permission_prompt' || t === 'ask_user_question') return true;
+  if (isAskTool(event) && String(event?.hook_event || '') === 'PreToolUse') return true;
+  return false;
+}
 
 export function roleFromEvent(event) {
   const name = String(event?.hook_event || '');
   if (name === 'UserPromptSubmit') return 'user';
+  if (isAskTool(event) && name === 'PostToolUse') return 'user';
   if (name === 'Stop') return 'assistant';
+  if (needsUserInput(event)) return 'ask';
   if (name === 'PreToolUse' || name === 'PostToolUse') return 'tool';
   return 'system';
+}
+
+export function askQuestions(event) {
+  const obj = asObj(event?.tool_input) || {};
+  return Array.isArray(obj.questions) ? obj.questions : [];
+}
+
+export function askAnswers(event) {
+  const obj = asObj(event?.tool_response) || {};
+  return Array.isArray(obj.answers) ? obj.answers : [];
 }
 
 /**
@@ -92,8 +118,16 @@ function firstLine(text) {
 
 export function rowPreview(row) {
   const e = row?.event || {};
+  if (row?.role === 'user' && isAskTool(e)) {
+    const ans = askAnswers(e).flatMap((a) => a.selected_options || []);
+    if (ans.length) return ans.join('、');
+  }
   if (row?.role === 'user') return firstLine(e.prompt);
   if (row?.role === 'assistant') return firstLine(e.last_assistant_message);
+  if (row?.role === 'ask') {
+    const q = askQuestions(e)[0];
+    return firstLine(e.notification_message) || firstLine(q?.header || q?.question) || '需要你';
+  }
   if (row?.role === 'tool') return e.tool_name || e.llm_tool_name || '工具';
   return firstLine(e.notification_message) || e.hook_event || '';
 }
@@ -101,9 +135,7 @@ export function rowPreview(row) {
 export function bundleTitle(rows) {
   const list = rows || [];
   const n = list.length;
-  const users = list.filter((r) => r.role === 'user').length;
   const tools = list.filter((r) => r.role === 'tool');
-  if (users) return `更早 ${users} 轮 · ${n} 条`;
   if (tools.length === n && n) {
     const counts = new Map();
     for (const r of tools) {
@@ -113,49 +145,38 @@ export function bundleTitle(rows) {
     const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
     return top ? `${n} 次工具 · ${top[0]} × ${top[1]}` : `${n} 次工具`;
   }
-  return `更早 ${n} 条`;
+  return `${n} 次操作`;
+}
+
+function isOpenBeat(row) {
+  return row?.role === 'user' || row?.role === 'assistant' || row?.role === 'ask' || row?.role === 'system';
 }
 
 /**
- * A Trae session is ~tool-call noise with sparse conversational beats.
- * Expand only: last user prompt (intent), last assistant Stop after it
- * (conclusion), and the newest event (live tip). Merge the rest.
+ * User turns are scarce: keep every user bubble.
+ * Compress only agent-side tool slog between beats, left-aligned.
  */
-export function focusImRows(rows) {
+export function layoutImRows(rows) {
   const list = rows || [];
-  if (!list.length) return [];
-  const last = list.length - 1;
-  let lastUser = -1;
-  for (let i = last; i >= 0; i--) {
-    if (list[i].role === 'user') {
-      lastUser = i;
-      break;
-    }
-  }
-  let lastAsst = -1;
-  for (let i = last; i >= 0; i--) {
-    if (list[i].role === 'assistant' && i >= lastUser) {
-      lastAsst = i;
-      break;
-    }
-  }
-  const focus = new Set([last]);
-  if (lastUser >= 0) focus.add(lastUser);
-  if (lastAsst >= 0) focus.add(lastAsst);
   const out = [];
   let i = 0;
   while (i < list.length) {
-    if (focus.has(i)) {
+    if (isOpenBeat(list[i])) {
       out.push({ type: 'focus', row: list[i] });
       i += 1;
       continue;
     }
     const start = i;
-    while (i < list.length && !focus.has(i)) i += 1;
+    while (i < list.length && !isOpenBeat(list[i])) i += 1;
     const chunk = list.slice(start, i);
-    out.push({ type: 'bundle', rows: chunk, title: bundleTitle(chunk) });
+    if (chunk.length === 1) out.push({ type: 'focus', row: chunk[0] });
+    else out.push({ type: 'bundle', rows: chunk, title: bundleTitle(chunk) });
   }
   return out;
+}
+
+export function focusImRows(rows) {
+  return layoutImRows(rows);
 }
 
 export function imMessagesFromEvents(events) {
@@ -173,8 +194,13 @@ export function imMessagesFromEvents(events) {
   );
   return list
     .filter((e) => e.hook_event !== 'SessionStart')
-    .filter((e) => !(e.hook_event === 'PreToolUse' && e.tool_use_id && posted.has(e.tool_use_id)))
-    .filter((e) => e.hook_event !== 'Notification' || Boolean(e.notification_message))
+    .filter((e) => !(
+      e.hook_event === 'PreToolUse'
+      && e.tool_use_id
+      && posted.has(e.tool_use_id)
+      && !isAskTool(e)
+    ))
+    .filter((e) => e.hook_event !== 'Notification' || Boolean(e.notification_message) || Boolean(e.notification_type))
     .map((event) => {
       const role = roleFromEvent(event);
       return { role, ...IM_ROLES[role], event };
@@ -191,6 +217,21 @@ export function blocksFromEvent(event) {
   const blocks = [];
   const resp = asObj(event.tool_response);
   const cmd = toolCommand(event.tool_input);
+  if (isAskTool(event)) {
+    const qs = askQuestions(event);
+    const ans = askAnswers(event);
+    if (qs.length) {
+      const lines = qs.map((q, i) => {
+        const head = q.header || q.question || '问题';
+        const picked = (ans[i]?.selected_options || []).join('、');
+        if (picked) return `- ${head} → ${picked}`;
+        const opts = (q.options || []).map((o) => o.label).filter(Boolean);
+        return opts.length ? `- ${head}\n  - ${opts.join('\n  - ')}` : `- ${head}`;
+      });
+      blocks.push({ key: 'ask', hint: 'markdown', text: lines.join('\n') });
+      return blocks;
+    }
+  }
   if (event.prompt) blocks.push({ key: 'prompt', hint: 'markdown', text: String(event.prompt) });
   if (event.last_assistant_message) {
     blocks.push({ key: 'assistant', hint: 'markdown', text: String(event.last_assistant_message) });

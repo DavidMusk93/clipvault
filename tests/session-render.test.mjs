@@ -16,6 +16,8 @@ import {
   relLocalTime,
   bundleTitle,
   focusImRows,
+  needsUserInput,
+  isAskTool,
 } from '../web/session-render.mjs';
 
 test('toolCommand prefers cmd then command', () => {
@@ -104,7 +106,7 @@ test('naive hook timestamps are UTC, not local wall clock', () => {
   assert.equal(relLocalTime('2026-09-07 04:49:23', Date.parse('2026-09-07T04:50:00Z')), '刚刚');
 });
 
-test('focus keeps last user, last assistant, latest; merges the tool slog', () => {
+test('all user prompts stay open; tools compress on the agent side', () => {
   const rows = imMessagesFromEvents([
     { hook_event: 'UserPromptSubmit', ts: '1', event_id: 'u1', prompt: 'old' },
     { hook_event: 'PostToolUse', ts: '2', event_id: 't1', tool_name: 'Read', tool_use_id: 'a' },
@@ -115,13 +117,40 @@ test('focus keeps last user, last assistant, latest; merges the tool slog', () =
     { hook_event: 'Stop', ts: '7', event_id: 's2', last_assistant_message: 'done new' },
     { hook_event: 'PostToolUse', ts: '8', event_id: 't4', tool_name: 'RunCommand', tool_use_id: 'd' },
   ]);
-  const focus = focusImRows(rows);
-  assert.deepEqual(focus.map((x) => x.type), ['bundle', 'focus', 'bundle', 'focus', 'focus']);
-  assert.equal(focus[1].row.event.prompt, 'new');
-  assert.equal(focus[3].row.event.last_assistant_message, 'done new');
-  assert.equal(focus[4].row.event.event_id, 't4');
-  assert.match(bundleTitle(focus[0].rows), /更早 1 轮/);
-  assert.match(bundleTitle(focus[2].rows), /2 次工具/);
+  const layout = focusImRows(rows);
+  const users = layout.filter((x) => x.type === 'focus' && x.row.role === 'user');
+  assert.deepEqual(users.map((x) => x.row.event.prompt), ['old', 'new']);
+  const asst = layout.filter((x) => x.type === 'focus' && x.row.role === 'assistant');
+  assert.equal(asst.length, 2);
+  const bundles = layout.filter((x) => x.type === 'bundle');
+  assert.ok(bundles.length >= 1);
+  assert.ok(bundles.every((b) => b.rows.every((r) => r.role === 'tool')));
+  assert.doesNotMatch(bundleTitle(bundles[0].rows), /更早/);
+  assert.match(bundleTitle(layout.find((x) => x.type === 'bundle' && x.rows.length === 2).rows), /2 次工具/);
+});
+
+test('permission and AskUserQuestion are needs-user; answers count as user input', () => {
+  assert.equal(needsUserInput({ notification_type: 'permission_prompt' }), true);
+  assert.equal(needsUserInput({ notification_type: 'idle_prompt' }), false);
+  assert.equal(isAskTool({ tool_name: 'AskUserQuestion' }), true);
+  assert.equal(roleFromEvent({ hook_event: 'Notification', notification_type: 'permission_prompt' }), 'ask');
+  const rows = imMessagesFromEvents([
+    { hook_event: 'UserPromptSubmit', ts: '1', event_id: 'u', prompt: 'go' },
+    {
+      hook_event: 'PreToolUse', ts: '2', event_id: 'pre', tool_use_id: 'q1',
+      tool_name: 'AskUserQuestion',
+      tool_input: { questions: [{ header: '列裁剪', question: '从哪取？', options: [{ label: 'A' }] }] },
+    },
+    {
+      hook_event: 'PostToolUse', ts: '3', event_id: 'post', tool_use_id: 'q1',
+      tool_name: 'AskUserQuestion',
+      tool_input: { questions: [{ header: '列裁剪', question: '从哪取？', options: [{ label: 'A' }] }] },
+      tool_response: { answers: [{ selected_options: ['A'] }] },
+    },
+  ]);
+  assert.deepEqual(rows.map((r) => r.role), ['user', 'ask', 'user']);
+  const layout = focusImRows(rows);
+  assert.ok(layout.every((x) => x.type === 'focus'));
 });
 
 test('IM overview hides SessionStart cwd pills', () => {

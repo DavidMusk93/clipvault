@@ -217,7 +217,7 @@
     }
     .row.grouped { margin-top: -4px; }
     .row.user { justify-content: flex-end; }
-    .row.assistant, .row.tool { justify-content: flex-start; }
+    .row.assistant, .row.tool, .row.ask { justify-content: flex-start; }
     .row.system { justify-content: center; }
     .bubble {
       max-width: min(560px, 76%);
@@ -236,6 +236,28 @@
       background: var(--card);
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
       border-bottom-left-radius: 5px;
+    }
+    .bubble.ask {
+      background: var(--honey-soft);
+      color: var(--user-ink);
+      border: 0.5px solid rgba(196, 122, 44, 0.28);
+      border-bottom-left-radius: 5px;
+    }
+    .bubble.ask .who { color: var(--honey); }
+    .ask-q { margin: 0 0 10px; }
+    .ask-q:last-child { margin-bottom: 0; }
+    .ask-h { font-weight: 650; margin-bottom: 5px; }
+    .ask-opt {
+      font-size: 13px;
+      line-height: 1.35;
+      padding: 5px 8px;
+      border-radius: 8px;
+      color: var(--muted);
+    }
+    .ask-opt.is-on {
+      background: rgba(255,255,255,0.72);
+      color: var(--user-ink);
+      font-weight: 600;
     }
     .bubble.tool {
       max-width: min(720px, 92%);
@@ -328,23 +350,25 @@
     .bubble.tool .tool-fold summary { padding: 6px 8px; }
     .empty { color: var(--muted); padding: 48px 12px; text-align: center; font-size: 14px; }
     .history-bundle {
-      margin: 6px auto 14px;
-      max-width: 440px;
+      margin: 2px 0 12px;
+      max-width: min(560px, 76%);
     }
+    .row.assistant .history-bundle { margin-left: 0; }
     .history-bundle summary {
       list-style: none;
       cursor: pointer;
-      text-align: center;
+      text-align: left;
       font-size: 12px;
       font-weight: 600;
-      color: var(--muted);
-      padding: 6px 14px;
-      border-radius: 980px;
-      background: rgba(120, 120, 128, 0.10);
+      color: var(--tool);
+      padding: 6px 12px;
+      border-radius: 12px;
+      background: var(--card);
+      border: 0.5px solid var(--separator);
       user-select: none;
     }
     .history-bundle summary::-webkit-details-marker { display: none; }
-    .history-body { padding: 8px 4px 2px; }
+    .history-body { padding: 6px 4px 2px; }
     .history-line {
       display: grid;
       grid-template-columns: 42px 36px minmax(0, 1fr);
@@ -473,9 +497,9 @@
   </div>
   <script type="module">
     import {
-      asObj, blocksFromEvent, bundleTitle, focusImRows, imMessagesFromEvents,
-      localClock, localDayKey, prettyJson, relLocalTime, renderEventBlocks,
-      renderValue, rowPreview,
+      asObj, askAnswers, askQuestions, blocksFromEvent, bundleTitle, focusImRows,
+      imMessagesFromEvents, isAskTool, localClock, localDayKey, prettyJson,
+      relLocalTime, renderEventBlocks, renderValue, rowPreview,
     } from "./session-render.mjs";
 
     const TRAE_BASE = location.pathname.startsWith("/trae") ? "/trae" : "";
@@ -743,8 +767,11 @@
         let inner;
         if (row.role === "tool") {
           inner = renderTool(e);
+        } else if (row.role === "ask" || (row.role === "user" && isAskTool(e))) {
+          inner = `${who}<div class="bubble-body">${renderAskBody(e)}</div>
+            <div class="meta">${esc(meta)}</div>`;
         } else if (row.role === "system") {
-          inner = `<div class="bubble-body">${body || esc(e.hook_event || "")}</div>`;
+          inner = `<div class="bubble-body">${esc(e.notification_message || e.hook_event || "")}</div>`;
         } else {
           inner = `${who}<div class="bubble-body">${body}</div>
             <div class="meta">${esc(meta)}</div>
@@ -759,16 +786,33 @@
       }).join("");
     }
 
+    function renderAskBody(e) {
+      const qs = askQuestions(e);
+      const ans = askAnswers(e);
+      if (qs.length) {
+        return qs.map((q, i) => {
+          const head = esc(q.header || q.question || "问题");
+          const picked = ans[i]?.selected_options || [];
+          const opts = (q.options || []).map((o) => {
+            const on = picked.includes(o.label);
+            return `<div class="ask-opt${on ? " is-on" : ""}">${esc(o.label || "")}</div>`;
+          }).join("");
+          return `<div class="ask-q"><div class="ask-h">${head}</div>${opts}</div>`;
+        }).join("");
+      }
+      return esc(e.notification_message || e.hook_event || "需要你");
+    }
+
     function renderBundle(bundle) {
       const lines = bundle.rows.map((r) => {
         const clock = localClock(r.event.ts);
         const pre = rowPreview(r);
         return `<div class="history-line"><span class="t">${esc(clock)}</span><span class="w">${esc(r.label)}</span><span class="p" title="${esc(pre)}">${esc(pre.slice(0, 80))}</span></div>`;
       }).join("");
-      return `<details class="history-bundle">
+      return `<div class="row assistant"><details class="history-bundle">
         <summary>${esc(bundle.title || bundleTitle(bundle.rows))}</summary>
         <div class="history-body">${lines}</div>
-      </details>`;
+      </details></div>`;
     }
 
     function renderThread(rows) {

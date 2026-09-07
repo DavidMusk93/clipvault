@@ -158,6 +158,35 @@
     }
     .search input::placeholder { color: var(--muted); }
     .search .material-symbols-outlined { color: var(--muted); font-size: 20px; }
+    #traeSessionsBtn { position: relative; }
+    #traeAskDot {
+      position: absolute; top: 5px; right: 6px;
+      width: 7px; height: 7px; border-radius: 980px;
+      background: var(--accent);
+      box-shadow: 0 0 0 2px rgba(245,245,247,0.9);
+    }
+    .trae-ask-banner {
+      display: flex;
+      margin: 8px var(--chrome-pad-x) 0;
+      padding: 8px 12px;
+      border-radius: 12px;
+      background: var(--honey-soft);
+      color: var(--type-text, #C47A2C);
+      border: 0.5px solid rgba(196, 122, 44, 0.28);
+      font: 600 13px/1.3 var(--font-ui);
+      letter-spacing: -0.01em;
+      align-items: center; gap: 10px;
+    }
+    .trae-ask-banner[hidden] { display: none !important; }
+    .trae-ask-banner .grow { flex: 1; min-width: 0; }
+    .trae-ask-banner button {
+      height: 26px; padding: 0 10px; border: 0; border-radius: 8px;
+      background: #fff; color: var(--ink); font: inherit; font-size: 12px;
+      font-weight: 650; cursor: pointer;
+    }
+    .trae-ask-banner .trae-ask-x {
+      width: 26px; padding: 0; background: transparent; color: var(--muted);
+    }
 
     /* Filter chips — segmented strip */
     .chips {
@@ -2188,6 +2217,7 @@
       <button type="button" class="backup-btn" id="traeSessionsBtn" title="会话">
         <span class="material-symbols-outlined" style="font-size:18px">account_tree</span>
         <span>会话</span>
+        <span id="traeAskDot" hidden aria-hidden="true"></span>
       </button>
       <button type="button" class="backup-btn" id="notesOpenBtn" title="笔记">
         <span class="material-symbols-outlined" style="font-size:18px">edit_note</span>
@@ -2203,6 +2233,11 @@
       </button>
     </div>
   </header>
+  <div class="trae-ask-banner" id="traeAskBanner" hidden>
+    <span class="grow" id="traeAskText">会话需要你确认</span>
+    <button type="button" id="traeAskOpen">打开会话</button>
+    <button type="button" class="trae-ask-x" id="traeAskDismiss" aria-label="关闭">×</button>
+  </div>
 
   <div class="backup-scrim" id="backupScrim"></div>
   <aside class="backup-drawer" id="backupDrawer" aria-label="ClipVault 备份">
@@ -3965,6 +4000,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     async function openSessionsPanel() {
+      hideTraeAsk();
       if (document.getElementById('notesPanel')?.classList.contains('open')) {
         await closeNotesPanel();
       }
@@ -7333,6 +7369,51 @@ window.ClipViewMasonry = Masonry;
         && (Date.now() - sseLastEventAt) <= SSE_STALE_MS;
     }
 
+    let traeAskES = null;
+    let traeAskSeen = '';
+    function hideTraeAsk() {
+      const ban = document.getElementById('traeAskBanner');
+      const dot = document.getElementById('traeAskDot');
+      if (ban) ban.hidden = true;
+      if (dot) dot.hidden = true;
+    }
+    function showTraeAsk(d) {
+      const id = String(d && d.event_id || '');
+      if (id && id === traeAskSeen) return;
+      if (id) traeAskSeen = id;
+      if (document.getElementById('sessionsPanel')?.classList.contains('open')) return;
+      const text = (d && (d.notification_message || d.preview)) || '会话需要你确认';
+      const el = document.getElementById('traeAskText');
+      if (el) el.textContent = String(text).slice(0, 120);
+      const ban = document.getElementById('traeAskBanner');
+      const dot = document.getElementById('traeAskDot');
+      if (ban) ban.hidden = false;
+      if (dot) dot.hidden = false;
+    }
+    function setupTraeAskSSE() {
+      if (traeAskES && traeAskES.readyState !== EventSource.CLOSED) return;
+      try { if (traeAskES) traeAskES.close(); } catch (_) {}
+      const es = new EventSource('/trae/api/stream');
+      traeAskES = es;
+      es.onmessage = (ev) => {
+        let d;
+        try { d = JSON.parse(ev.data); } catch (_) { return; }
+        if (!d || !d.needs_user) return;
+        showTraeAsk(d);
+      };
+      es.onerror = () => {
+        if (es.readyState !== EventSource.CLOSED) return;
+        if (traeAskES === es) traeAskES = null;
+        try { es.close(); } catch (_) {}
+        setTimeout(setupTraeAskSSE, 4000);
+      };
+    }
+    document.getElementById('traeAskOpen')?.addEventListener('click', () => {
+      hideTraeAsk();
+      openSessionsPanel();
+    });
+    document.getElementById('traeAskDismiss')?.addEventListener('click', hideTraeAsk);
+
     function setupSSE() {
       if (sseIsFresh()) return;
       if (liveSSE) {
@@ -7802,6 +7883,7 @@ window.ClipViewMasonry = Masonry;
     fetchPage({ reset: true }).then(() => applyAppHash());
     window.addEventListener('hashchange', () => { applyAppHash(); });
     setupSSE();
+    setupTraeAskSSE();
   </script>
 </body>
 </html>

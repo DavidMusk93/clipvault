@@ -20,6 +20,14 @@ OFFICIAL_EVENTS = (
     "Notification",
 )
 
+# Trae is blocked waiting on the human. idle_prompt is completion, not a wait.
+NEEDS_USER_TYPES = ("permission_prompt", "ask_user_question")
+
+
+def needs_user_input(row: dict[str, Any] | None) -> bool:
+    t = str((row or {}).get("notification_type") or "")
+    return t in NEEDS_USER_TYPES
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)

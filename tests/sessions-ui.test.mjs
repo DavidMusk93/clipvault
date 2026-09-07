@@ -98,12 +98,14 @@ test('opens the latest session and shows tool command without folding it away', 
   assert.match(html, /blocksFromEvent/);
 });
 
-test('history is bundled; only last user, last assistant, and latest stay open', () => {
+test('user turns stay open; agent tools compress on the left', () => {
   assert.match(html, /focusImRows/);
   assert.match(html, /history-bundle/);
   assert.match(html, /function renderThread/);
   assert.match(html, /parseHookTs|localClock/);
   assert.match(html, /relLocalTime/);
+  assert.match(html, /renderAskBody/);
+  assert.match(html, /row assistant/);
 });
 
 test('trae sessions use nmem SSE contract, not interval polling', () => {
@@ -127,6 +129,21 @@ test('trae sessions use nmem SSE contract, not interval polling', () => {
     /es\.close\(\);\s*setTimeout\(setupSSE/,
   );
   assert.match(html, /EventSource\.CLOSED/);
+});
+
+test('server push carries needs_user for permission and ask', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '../trae_hooks/hook_client.py'), 'utf8');
+  const row = fs.readFileSync(path.join(__dirname, '../trae_hooks/row.py'), 'utf8');
+  assert.match(row, /NEEDS_USER_TYPES/);
+  assert.match(row, /permission_prompt/);
+  assert.match(server, /path != \"\/api\/notify\"/);
+  assert.match(server, /needs_user/);
+  assert.match(server, /sse_hook_payload/);
+  assert.match(server, /hook_event IN \('UserPromptSubmit', 'Stop', 'Notification'\)/);
+  assert.match(client, /ping_needs_user/);
+  assert.match(client, /osascript/);
+  assert.match(client, /\/api\/notify/);
 });
 
 test('sessions UI is prefix-aware so ClipVault :8080 can proxy /trae', () => {

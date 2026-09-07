@@ -16,7 +16,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from row import parse_stdin, row_from_payload  # noqa: E402
+from row import needs_user_input, parse_stdin, row_from_payload  # noqa: E402
 
 INSERT_COLS = (
     "event_id",
@@ -164,6 +164,56 @@ def quack_insert(row: dict, uri: str, token: str, con: object | None = None) -> 
             con.close()
 
 
+def ping_needs_user(row: dict) -> None:
+    """Best-effort: macOS banner + ClipVault SSE. Never raise, never block Trae."""
+    if not needs_user_input(row):
+        return
+    msg = str(row.get("notification_message") or "会话需要你")[:120]
+    try:
+        import subprocess
+
+        subprocess.Popen(
+            [
+                "osascript",
+                "-e",
+                f'display notification {json.dumps(msg)} with title "ClipVault 会话"',
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        pass
+    try:
+        from urllib.request import Request, urlopen
+
+        host = os.environ.get("CLIPVAULT_TRAE_HTTP_HOST", "127.0.0.1")
+        port = os.environ.get("CLIPVAULT_TRAE_HTTP_PORT", "9488")
+        body = json.dumps(
+            {
+                "type": "hook_event",
+                "session_id": row.get("session_id") or "",
+                "event_id": row.get("event_id") or "",
+                "hook_event": row.get("hook_event") or "",
+                "notification_type": row.get("notification_type") or "",
+                "notification_message": msg,
+                "tool_name": row.get("tool_name") or row.get("llm_tool_name") or "",
+                "needs_user": True,
+                "preview": msg,
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        req = Request(
+            f"http://{host}:{port}/api/notify",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        urlopen(req, timeout=0.4).read()
+    except Exception:
+        pass
+
+
 def pick_uri(uris: list[str], probe: float) -> str | None:
     for uri in uris:
         if tcp_ready(uri, timeout=probe):
@@ -208,6 +258,7 @@ def main() -> int:
             pass
         return 0
 
+    ping_needs_user(row)
     if skip_quack:
         return 0
     try:
