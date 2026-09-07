@@ -128,15 +128,8 @@ class Store:
             row.get("host"),
             row.get("pid"),
         ]
-        eid = row.get("event_id")
         with self.lock:
-            existed = self.con.execute(
-                "SELECT 1 FROM hook_events WHERE event_id = ? LIMIT 1",
-                [eid],
-            ).fetchone()
             self.con.execute(INSERT_SQL, params)
-        if existed and not needs_user_input(row):
-            return True
         cb = self.on_insert
         if cb:
             try:

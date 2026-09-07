@@ -513,6 +513,6 @@ Hook 事件进 **单独 DuckDB**，禁止写入 `clipboard_items`。
 
 安装：`bash trae_hooks/install.sh`。改配置后 **硬重启 Trae** 才加载 hook。采集脚本必须永远 exit 0。
 
-会话时间线是长期前端，**入口与笔记同一套**：ClipVault 顶栏「会话」弹出霜层面板，iframe 同源 `/trae/?embed=1`。禁止再让用户去 `:9488`。进程仍听 `127.0.0.1:9488`，Swift 只对 loopback 反代 `/trae`（含 `/trae/api/stream` SSE）。按 **IM 俯瞰**：用户右 / 助手左 / 工具与系统分色。会话列与消息列 **分两个 overflow**，禁止共用页面滚动。新消息在跟底时钉住 thread 底部。进入默认打开最新会话。时间按 **本地时区**（库 ts 为 naive UTC）。**所有用户输入展开**；工具压缩只在助手侧。`permission_prompt` / `ask_user_question` 经 SSE `needs_user` 推墙，hook 可 `osascript` 通知。实时走 **nmem SSE 契约** `GET /api/stream`（heartbeat + bounded resync），禁止 `setInterval` 刷 DOM。JSON / Markdown 走 `web/session-render.mjs` + `markdown-render.mjs` / `text-format.mjs`。角色色与 chrome 真源：`docs/design-taste.md`。禁止 DIY markdown 语法。气泡内等宽必须换行，禁止撑破卡片。
+会话时间线是长期前端，**入口与笔记同一套**：ClipVault 顶栏「会话」弹出霜层面板，iframe 同源 `/trae/?embed=1`。禁止再让用户去 `:9488`。进程仍听 `127.0.0.1:9488`，Swift 只对 loopback 反代 `/trae`（含 `/trae/api/stream` SSE）。按 **IM 俯瞰**：用户右 / 助手左 / 工具与系统分色。会话列与消息列 **分两个 overflow**，禁止共用页面滚动。新消息在跟底时钉住 thread 底部。进入默认打开最新会话。时间按 **本地时区**（库 ts 为 naive UTC）。**所有用户输入展开**；工具压缩只在助手侧，**最后一条操作始终展开**。hook 每条事件 `POST /api/notify` 推 SSE（Quack INSERT 不会发 SSE）。`permission_prompt` / `ask_user_question` 经 SSE `needs_user` 推墙，hook 可 `osascript` 通知。实时走 **nmem SSE 契约** `GET /api/stream`（heartbeat + bounded resync），禁止 `setInterval` 刷 DOM。JSON / Markdown 走 `web/session-render.mjs` + `markdown-render.mjs` / `text-format.mjs`。角色色与 chrome 真源：`docs/design-taste.md`。禁止 DIY markdown 语法。气泡内等宽必须换行，禁止撑破卡片。
 
 

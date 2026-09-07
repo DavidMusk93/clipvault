@@ -947,6 +947,14 @@
       loadSessions();
       if (current) loadEvents();
     };
+    let hookPaintTimer = 0;
+    const scheduleHookPaint = () => {
+      if (hookPaintTimer) return;
+      hookPaintTimer = setTimeout(() => {
+        hookPaintTimer = 0;
+        scheduleResync();
+      }, 40);
+    };
     const setupSSE = () => {
       if (es && es.readyState !== EventSource.CLOSED) return;
       try { if (es) es.close(); } catch (_) {}
@@ -971,9 +979,7 @@
             painted = "";
             markFollow(true);
           }
-          loadHealth();
-          loadSessions();
-          if (!current || d.session_id === current) loadEvents();
+          scheduleHookPaint();
         }
       };
     };

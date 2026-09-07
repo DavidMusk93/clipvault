@@ -141,9 +141,13 @@ test('server push carries needs_user for permission and ask', () => {
   assert.match(server, /needs_user/);
   assert.match(server, /sse_hook_payload/);
   assert.match(server, /hook_event IN \('UserPromptSubmit', 'Stop', 'Notification'\)/);
+  assert.match(client, /def ping_sse/);
+  assert.match(client, /ping_sse\(row\)/);
   assert.match(client, /ping_needs_user/);
   assert.match(client, /osascript/);
   assert.match(client, /\/api\/notify/);
+  assert.doesNotMatch(server, /if existed and not needs_user_input/);
+  assert.match(html, /scheduleHookPaint/);
 });
 
 test('sessions UI is prefix-aware so ClipVault :8080 can proxy /trae', () => {

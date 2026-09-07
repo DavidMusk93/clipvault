@@ -154,7 +154,7 @@ function isOpenBeat(row) {
 
 /**
  * User turns are scarce: keep every user bubble.
- * Compress only agent-side tool slog between beats, left-aligned.
+ * Compress earlier tools on the agent side; always leave the last op open.
  */
 export function layoutImRows(rows) {
   const list = rows || [];
@@ -169,8 +169,13 @@ export function layoutImRows(rows) {
     const start = i;
     while (i < list.length && !isOpenBeat(list[i])) i += 1;
     const chunk = list.slice(start, i);
-    if (chunk.length === 1) out.push({ type: 'focus', row: chunk[0] });
-    else out.push({ type: 'bundle', rows: chunk, title: bundleTitle(chunk) });
+    if (chunk.length === 1) {
+      out.push({ type: 'focus', row: chunk[0] });
+    } else {
+      const earlier = chunk.slice(0, -1);
+      out.push({ type: 'bundle', rows: earlier, title: bundleTitle(earlier) });
+      out.push({ type: 'focus', row: chunk[chunk.length - 1] });
+    }
   }
   return out;
 }

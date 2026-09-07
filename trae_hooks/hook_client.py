@@ -164,8 +164,41 @@ def quack_insert(row: dict, uri: str, token: str, con: object | None = None) -> 
             con.close()
 
 
+def ping_sse(row: dict) -> None:
+    """Tell the Trae HTTP hub immediately. Quack INSERT does not fire SSE."""
+    try:
+        from urllib.request import Request, urlopen
+
+        host = os.environ.get("CLIPVAULT_TRAE_HTTP_HOST", "127.0.0.1")
+        port = os.environ.get("CLIPVAULT_TRAE_HTTP_PORT", "9488")
+        msg = str(row.get("notification_message") or "")[:200]
+        body = json.dumps(
+            {
+                "type": "hook_event",
+                "session_id": row.get("session_id") or "",
+                "event_id": row.get("event_id") or "",
+                "hook_event": row.get("hook_event") or "",
+                "notification_type": row.get("notification_type") or "",
+                "notification_message": msg,
+                "tool_name": row.get("tool_name") or row.get("llm_tool_name") or "",
+                "needs_user": needs_user_input(row),
+                "preview": str(row.get("prompt") or msg or row.get("tool_name") or "")[:120],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        req = Request(
+            f"http://{host}:{port}/api/notify",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        urlopen(req, timeout=0.35).read()
+    except Exception:
+        pass
+
+
 def ping_needs_user(row: dict) -> None:
-    """Best-effort: macOS banner + ClipVault SSE. Never raise, never block Trae."""
+    """macOS banner only when Trae is blocked on the human."""
     if not needs_user_input(row):
         return
     msg = str(row.get("notification_message") or "会话需要你")[:120]
@@ -182,34 +215,6 @@ def ping_needs_user(row: dict) -> None:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    except Exception:
-        pass
-    try:
-        from urllib.request import Request, urlopen
-
-        host = os.environ.get("CLIPVAULT_TRAE_HTTP_HOST", "127.0.0.1")
-        port = os.environ.get("CLIPVAULT_TRAE_HTTP_PORT", "9488")
-        body = json.dumps(
-            {
-                "type": "hook_event",
-                "session_id": row.get("session_id") or "",
-                "event_id": row.get("event_id") or "",
-                "hook_event": row.get("hook_event") or "",
-                "notification_type": row.get("notification_type") or "",
-                "notification_message": msg,
-                "tool_name": row.get("tool_name") or row.get("llm_tool_name") or "",
-                "needs_user": True,
-                "preview": msg,
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
-        req = Request(
-            f"http://{host}:{port}/api/notify",
-            data=body,
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-        urlopen(req, timeout=0.4).read()
     except Exception:
         pass
 
@@ -247,6 +252,8 @@ def main() -> int:
             source=source,
         )
         append_spool(spool_dir, row)
+        ping_sse(row)
+        ping_needs_user(row)
     except Exception:
         # Last resort: do not block Trae.
         try:

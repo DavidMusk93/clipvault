@@ -126,7 +126,10 @@ test('all user prompts stay open; tools compress on the agent side', () => {
   assert.ok(bundles.length >= 1);
   assert.ok(bundles.every((b) => b.rows.every((r) => r.role === 'tool')));
   assert.doesNotMatch(bundleTitle(bundles[0].rows), /更早/);
-  assert.match(bundleTitle(layout.find((x) => x.type === 'bundle' && x.rows.length === 2).rows), /2 次工具/);
+  const lastTool = [...layout].reverse().find((x) => x.type === 'focus' && x.row.role === 'tool');
+  assert.equal(lastTool.row.event.event_id, 't4');
+  const mid = layout.filter((x) => x.type === 'focus' && x.row.role === 'tool');
+  assert.ok(mid.some((x) => x.row.event.event_id === 't3'));
 });
 
 test('permission and AskUserQuestion are needs-user; answers count as user input', () => {
