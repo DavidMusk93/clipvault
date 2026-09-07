@@ -34,6 +34,8 @@
       overflow: hidden;
     }
     html.embed .top { display: none; }
+    html.embed .session-head { display: none !important; }
+    html.embed .stage { padding-top: 36px; }
     body {
       display: flex;
       flex-direction: column;
@@ -464,7 +466,6 @@
     <section class="stage">
       <div class="session-head" id="sessionHead" hidden>
         <span class="sid" id="sessionSid"></span>
-        <button type="button" class="copy-id" id="copySid" title="复制 session id" aria-label="复制 session id">复制</button>
       </div>
       <div class="thread" id="thread"><div class="empty">选择左侧会话</div></div>
       <button type="button" class="follow" id="jumpBot" hidden title="回到最新" aria-label="回到最新并跟踪">↓</button>
@@ -896,11 +897,6 @@
     jumpBot.addEventListener("click", () => {
       markFollow(true);
       pinBottomSoon();
-    });
-    $("copySid").addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      copySessionId(current, $("copySid"));
     });
     const scheduleResync = () => {
       loadHealth();

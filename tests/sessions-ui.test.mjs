@@ -35,16 +35,16 @@ test('sessions.html inline module passes node --check', () => {
   assert.equal(r.status, 0, `SyntaxError in sessions.html:\n${r.stderr || r.stdout}`);
 });
 
-test('list and detail can copy session id', () => {
+test('list cards copy session id; thread header does not duplicate it', () => {
   assert.match(html, /id="sessionHead"/);
-  assert.match(html, /id="copySid"/);
   assert.match(html, /data-copy-sid=/);
   assert.match(html, /title="复制 session id"/);
   assert.match(html, /const copySessionId = async/);
   assert.match(html, /navigator\.clipboard\.writeText/);
   assert.match(html, /ev\.stopPropagation\(\)/);
   assert.match(html, /bindCopyButtons\(box\)/);
-  assert.match(html, /copySessionId\(current, \$ \("copySid"\)\)|copySessionId\(current, \$\("copySid"\)\)/);
+  assert.doesNotMatch(html, /id="copySid"/);
+  assert.match(html, /html\.embed \.session-head \{ display: none/);
 });
 
 test('copy button press feedback stays short and origin-safe', () => {
