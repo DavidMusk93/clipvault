@@ -24,6 +24,8 @@ test('notes editor is CodeMirror 6, not Crepe/Vditor', () => {
   assert.match(vendor, /@codemirror\/view/);
   assert.doesNotMatch(vendor, /@milkdown\/crepe/);
   assert.match(js, /ClipNotesEditor/);
+  assert.match(js, /notes-md-block/);
+  assert.match(js, /createRoot/);
   assert.doesNotMatch(js, /milkdown-top-bar/);
   assert.match(restart, /rsync -a/);
   assert.match(restart, /web\//);
@@ -127,22 +129,38 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n14/);
+  assert.match(html, /notes-editor\.js\?v=n15/);
 });
 
-test('preview re-render keeps scroll on long notes', () => {
+test('preview compiles blocks incrementally and React reconciles by hash', () => {
+  const preview = readFileSync(join(root, 'web/notes-preview.mjs'), 'utf8');
+  assert.match(preview, /from 'react'/);
+  assert.match(preview, /react-dom\/client/);
+  assert.match(preview, /createRoot/);
+  assert.match(preview, /dangerouslySetInnerHTML/);
+  assert.match(preview, /useLayoutEffect/);
+  assert.match(preview, /className: 'notes-md-block'/);
+  assert.match(preview, /key: b\.key/);
+  assert.match(entry, /compileMarkdownBlocks/);
+  assert.match(entry, /mountNotesPreview/);
+  assert.match(entry, /preview\.render\(/);
+  assert.match(entry, /preview\.unmount\(/);
   assert.match(entry, /paintingPreview/);
   assert.match(entry, /keepTop/);
   assert.match(entry, /stickBottom/);
-  assert.match(entry, /previewInner\.style\.minHeight/);
   assert.match(entry, /paintingPreview\) return/);
   assert.match(entry, /preserveScroll: false/);
-  assert.match(entry, /function swapPreview/);
   assert.match(entry, /const remap = !!\(opts && opts.remap\)/);
   assert.match(entry, /remap && mode === 'split'\) syncPreviewToSource\(view, \{ force: true \}\)/);
-  assert.match(entry, /schedulePreview[\s\S]{0,220}renderPreview\(lastMd\)/);
+  assert.match(entry, /schedulePreview[\s\S]{0,280}requestAnimationFrame/);
+  assert.match(entry, /renderPreview\(lastMd\)/);
+  assert.doesNotMatch(entry, /function swapPreview/);
+  assert.doesNotMatch(entry, /previewInner\.innerHTML/);
   assert.doesNotMatch(entry, /IMG' && mode === 'split'\) queueSyncFromSource/);
-  assert.match(entry, /requestAnimationFrame\(\(\) => \{\s*paintUnlock = requestAnimationFrame\(finish\)/);
+  assert.match(css, /\.notes-md-block \{[\s\S]{0,40}display:\s*contents/);
+  assert.match(vendor, /react@18/);
+  assert.match(vendor, /react-dom@18/);
+  assert.match(vendor, /notes-preview\.mjs/);
 });
 
 test('open notes lock the wall so chips and format toolbar cannot drag', () => {

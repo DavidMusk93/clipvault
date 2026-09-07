@@ -157,7 +157,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 预览正文 | SF / PingFang 17 / 1.65 · 最大 38rem | Apple Notes 纸面 |
 | 预览代码 | 浅板 `#F5F5F7` + 11px 语言条 + Xcode Light | **不是** View 的炭黑井 |
 | 模式 | 源码 / 分栏 / 预览；桌面默认分栏 | 窄屏默认源码 |
-| 分栏滚动 | 块锚点 + 块内进度（VS Code / MarkEdit）。头/底 2px 钉住 max | 禁止全程 `scrollTop/max`。禁止只把视口第一行钉在预览顶。围栏用 `data-source-end-line` 摊到 PRE 内容盒。**输入编译**钉住预览 `scrollTop`，禁止每次 marked 后 `force` 按源码重映射（结构一变就会抖）。高亮在屏外做完再换上。图 load 不 remap |
+| 分栏滚动 | 块锚点 + 块内进度（VS Code / MarkEdit）。头/底 2px 钉住 max | 禁止全程 `scrollTop/max`。禁止只把视口第一行钉在预览顶。围栏用 `data-source-end-line` 摊到 PRE 内容盒。**预览终局**：lexer 块 hash LRU 编译 + React 18 keyed `.notes-md-block`（`display:contents`，行号在 wrapper）。禁止整页 `innerHTML` 换预览。输入不 `force` remap。图 load 不 remap |
 | 保存态 | 11px 文案 + 6px 点：未保存 / 保存中 / 已保存 / 保存失败将重试 | 禁止只留圆点；失败指数退避 + `online` 重放 |
 | Tag | 标题内金色 `#F5A400` 同字号，不是黄胶囊 | `#auto gateway…`；`# 标题` 不算 tag；筛选时侧栏一颗可关的滤镜钮 |
 | 嵌套列表 | Tab 后源码 `a. b. c.`，再一层 `i. ii.`；预览同样 | 每层 4 空格；预览把 `a.`/`i.` 映成 GFM `1.` 再渲染。禁止 `5.1` |

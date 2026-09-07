@@ -87,15 +87,78 @@ export function toGfmNestedLists(src) {
   }).join('\n');
 }
 
-export function renderMarkdownBlocks(src, engines = {}) {
+const COMPILE_CACHE_LIMIT = 400;
+const compileCache = new Map();
+
+export function resetMarkdownCompileCache() {
+  compileCache.clear();
+}
+
+/** FNV-1a of token type + raw. Line numbers stay off the key so insert-above reuses HTML. */
+export function hashMarkdownToken(type, raw) {
+  const s = String(type || '') + '\n' + String(raw || '');
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}
+
+function cacheGet(hash) {
+  const hit = compileCache.get(hash);
+  if (!hit) return null;
+  compileCache.delete(hash);
+  compileCache.set(hash, hit);
+  return hit;
+}
+
+function cacheSet(hash, html) {
+  if (compileCache.has(hash)) compileCache.delete(hash);
+  compileCache.set(hash, { html });
+  while (compileCache.size > COMPILE_CACHE_LIMIT) {
+    const first = compileCache.keys().next().value;
+    compileCache.delete(first);
+  }
+}
+
+function compileTokenHtml(token, parser, purify, enhance) {
+  let html = parser([token]);
+  html = purify.sanitize(String(html || ''), PURIFY_OPTS);
+  html = html.replace(/<a\b/gi, '<a target="_blank" rel="noopener noreferrer"');
+  if (typeof enhance === 'function' && typeof document !== 'undefined') {
+    const staging = document.createElement('div');
+    staging.innerHTML = html;
+    enhance(staging);
+    html = staging.innerHTML;
+  }
+  return html;
+}
+
+function bakeLineAttrs(html, lineFrom, lineTo) {
+  return String(html || '').replace(
+    /^\s*<([a-zA-Z][a-zA-Z0-9]*)/,
+    `<$1 data-source-line="${lineFrom}" data-source-end-line="${lineTo}"`,
+  );
+}
+
+/**
+ * Incremental notes compile: lexer tokens → hash → LRU HTML (no baked line attrs).
+ * React keys `key`; scroll maps `lineFrom`/`lineTo` on the wrapper.
+ *
+ * @typedef {{ key: string, hash: string, type: string, lineFrom: number, lineTo: number, html: string }} CompiledBlock
+ * @returns {{ ok: boolean, engine: string, blocks: CompiledBlock[], stats: { compiled: number, reused: number } }}
+ */
+export function compileMarkdownBlocks(src, engines = {}, opts = {}) {
+  const empty = { ok: false, engine: '', blocks: [], stats: { compiled: 0, reused: 0 } };
   const text = toGfmNestedLists(String(src ?? '').replace(/\r\n/g, '\n'));
   const marked = engines.marked ?? (typeof globalThis !== 'undefined' ? globalThis.marked : null);
   const purify = engines.purify ?? (typeof globalThis !== 'undefined' ? globalThis.DOMPurify : null);
   if (!marked || (typeof marked.lexer !== 'function' && typeof marked.parse !== 'function')) {
-    return { html: '', ok: false, engine: '' };
+    return empty;
   }
   if (!purify || typeof purify.sanitize !== 'function') {
-    return { html: '', ok: false, engine: 'marked-no-purify' };
+    return { ...empty, engine: 'marked-no-purify' };
   }
   try {
     if (typeof marked.setOptions === 'function') {
@@ -107,32 +170,73 @@ export function renderMarkdownBlocks(src, engines = {}) {
       const raw = typeof marked.parse === 'function'
         ? marked.parse(text, { async: false, gfm: true, breaks: true })
         : marked(text);
-      const safe = purify.sanitize(String(raw || ''), PURIFY_OPTS);
-      return { html: safe, ok: true, engine: 'marked+dompurify' };
+      const html = purify.sanitize(String(raw || ''), PURIFY_OPTS);
+      const hash = hashMarkdownToken('document', text);
+      const occ = 0;
+      return {
+        ok: true,
+        engine: 'marked+dompurify',
+        blocks: [{
+          key: `${hash}:${occ}`,
+          hash,
+          type: 'document',
+          lineFrom: 1,
+          lineTo: tokenLineSpan(text, 1),
+          html,
+        }],
+        stats: { compiled: 1, reused: 0 },
+      };
     }
     const tokens = lexer(text);
+    const seen = new Map();
+    const blocks = [];
+    let compiled = 0;
+    let reused = 0;
     let pos = 0;
-    const parts = [];
     for (const t of tokens) {
       const raw = String(t.raw || '');
       const i = raw ? text.indexOf(raw, pos) : pos;
       const at = i >= 0 ? i : pos;
-      const line = text.slice(0, at).split('\n').length;
+      const lineFrom = text.slice(0, at).split('\n').length;
       pos = at + raw.length;
-      const lineTo = tokenLineSpan(raw, line);
-      let html = parser([t]);
-      html = purify.sanitize(String(html || ''), PURIFY_OPTS);
-      html = html.replace(
-        /^\s*<([a-zA-Z][a-zA-Z0-9]*)/,
-        `<$1 data-source-line="${line}" data-source-end-line="${lineTo}"`,
-      );
-      html = html.replace(/<a\b/gi, '<a target="_blank" rel="noopener noreferrer"');
-      parts.push(html);
+      if (t.type === 'space' || !String(raw).trim()) continue;
+      const lineTo = tokenLineSpan(raw, lineFrom);
+      const hash = hashMarkdownToken(t.type, raw);
+      const occ = seen.get(hash) || 0;
+      seen.set(hash, occ + 1);
+      const hit = cacheGet(hash);
+      let html;
+      if (hit) {
+        html = hit.html;
+        reused += 1;
+      } else {
+        html = compileTokenHtml(t, parser, purify, opts.enhance);
+        cacheSet(hash, html);
+        compiled += 1;
+      }
+      blocks.push({
+        key: `${hash}:${occ}`,
+        hash,
+        type: String(t.type || 'block'),
+        lineFrom,
+        lineTo,
+        html,
+      });
     }
-    return { html: parts.join(''), ok: true, engine: 'marked+dompurify' };
+    return { ok: true, engine: 'marked+dompurify', blocks, stats: { compiled, reused } };
   } catch (_) {
-    return { html: '', ok: false, engine: 'marked-error' };
+    return { ...empty, engine: 'marked-error' };
   }
+}
+
+export function renderMarkdownBlocks(src, engines = {}) {
+  const r = compileMarkdownBlocks(src, engines);
+  if (!r.ok) return { html: '', ok: false, engine: r.engine || '' };
+  return {
+    html: r.blocks.map((b) => bakeLineAttrs(b.html, b.lineFrom, b.lineTo)).join(''),
+    ok: true,
+    engine: r.engine,
+  };
 }
 
 function clampNum(n, lo, hi) {

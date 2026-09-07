@@ -6,7 +6,8 @@ import { HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput } fr
 import { tags as t } from '@lezer/highlight'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { renderMarkdownBlocks, mapSourceToPreviewScroll, mapPreviewToSourceLine } from '../../markdown-render.mjs'
+import { compileMarkdownBlocks, mapSourceToPreviewScroll, mapPreviewToSourceLine } from '../../markdown-render.mjs'
+import { mountNotesPreview } from '../../notes-preview.mjs'
 import { extractCalcExpr, formatCheckpoint, hrStampBlock, inFence, isHrLine, isStampLine, tryEval } from '../../notes-calc.mjs'
 
 const MODE_KEY = 'clipvault.notes.mode'
@@ -402,13 +403,13 @@ async function mount(root, opts) {
   previewInner.className = 'notes-preview-inner'
   previewEl.appendChild(previewInner)
   root.append(sourceEl, splitEl, previewEl)
+  const preview = mountNotesPreview(previewInner)
 
   let applying = false
   let gen = 0
   let lastMd = String(opts.markdown || '')
   let lastHash = ''
-  let previewTimer = 0
-  let paintUnlock = 0
+  let previewRaf = 0
   let mode = loadMode()
   let split = loadSplit()
   let syncing = false
@@ -496,16 +497,6 @@ async function mount(root, opts) {
     }
   }
 
-  function swapPreview(from) {
-    previewInner.replaceChildren()
-    let n = from.firstChild
-    while (n) {
-      const next = n.nextSibling
-      previewInner.appendChild(n)
-      n = next
-    }
-  }
-
   function renderPreview(md, force, opts) {
     const text = String(md || '')
     if (!force && text === lastHash) return
@@ -517,47 +508,43 @@ async function mount(root, opts) {
     const keepTop = preserveScroll ? previewEl.scrollTop : 0
     const maxBefore = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
     const stickBottom = preserveScroll && maxBefore > 0 && (maxBefore - keepTop) < 48
-    const keepH = previewInner.offsetHeight
-    if (keepH > 0) previewInner.style.minHeight = `${keepH}px`
-    if (!text.trim()) {
-      previewInner.replaceChildren()
-    } else {
-      const r = renderMarkdownBlocks(text, { marked, purify: DOMPurify })
-      const staging = document.createElement('div')
-      staging.innerHTML = r.ok ? r.html : ''
-      enhancePreview(staging)
-      swapPreview(staging)
-    }
-    previewEl.scrollTop = stickBottom ? previewEl.scrollHeight : keepTop
-    const dur = performance.now() - t
-    metric('notes_preview_ms', { dur_ms: dur, payload: { chars: text.length } })
-    if (dur > 16) metric('notes_input_to_preview', { dur_ms: dur })
-    cancelAnimationFrame(paintUnlock)
     const finish = () => {
-      previewInner.style.minHeight = ''
       if (remap && mode === 'split') syncPreviewToSource(view, { force: true })
       else if (!preserveScroll) previewEl.scrollTop = 0
       else if (stickBottom) previewEl.scrollTop = previewEl.scrollHeight
       else previewEl.scrollTop = keepTop
       paintingPreview = false
     }
-    paintUnlock = requestAnimationFrame(() => {
-      paintUnlock = requestAnimationFrame(finish)
+    let compiled = 0
+    let reused = 0
+    let blocks = []
+    if (text.trim()) {
+      const r = compileMarkdownBlocks(text, { marked, purify: DOMPurify }, { enhance: enhancePreview })
+      blocks = r.ok ? r.blocks : []
+      compiled = r.stats ? r.stats.compiled : 0
+      reused = r.stats ? r.stats.reused : 0
+    }
+    preview.render(blocks, {
+      scrollEl: previewEl,
+      keepTop: preserveScroll ? keepTop : 0,
+      stickBottom,
+      onPainted: finish,
     })
+    const dur = performance.now() - t
+    metric('notes_preview_ms', {
+      dur_ms: dur,
+      payload: { chars: text.length, compiled, reused, blocks: blocks.length },
+    })
+    if (dur > 16) metric('notes_input_to_preview', { dur_ms: dur })
   }
 
   function schedulePreview(md) {
     lastMd = md
-    clearTimeout(previewTimer)
-    const delay = md.length > 50000 ? 280 : (md.length > 20000 ? 180 : 140)
-    const run = () => renderPreview(lastMd)
-    previewTimer = setTimeout(() => {
-      if (md.length > 20000 && typeof requestIdleCallback === 'function') {
-        requestIdleCallback(run, { timeout: 400 })
-      } else {
-        run()
-      }
-    }, delay)
+    if (previewRaf) return
+    previewRaf = requestAnimationFrame(() => {
+      previewRaf = 0
+      renderPreview(lastMd)
+    })
   }
 
   function insertImage(file) {
@@ -643,20 +630,26 @@ async function mount(root, opts) {
   }
   function previewBlocks() {
     const out = []
-    for (const n of previewInner.querySelectorAll('[data-source-line]')) {
+    for (const n of previewInner.querySelectorAll('.notes-md-block[data-source-line]')) {
       const lineFrom = Number(n.getAttribute('data-source-line'))
       if (!Number.isFinite(lineFrom) || lineFrom < 1) continue
       const endRaw = Number(n.getAttribute('data-source-end-line'))
       const lineTo = Number.isFinite(endRaw) ? Math.max(lineFrom, endRaw) : lineFrom
-      const box = (n.parentElement && n.parentElement.classList.contains('notes-code')) ? n.parentElement : n
-      let y = yInScroller(box, previewEl)
-      let height = box.getBoundingClientRect().height
-      if (n.tagName === 'PRE') {
-        const cs = window.getComputedStyle(n)
+      const host = n.querySelector(':scope .notes-code, :scope > pre') || n.firstElementChild || n
+      let y = yInScroller(host, previewEl)
+      let height = host.getBoundingClientRect().height
+      const pre = host.tagName === 'PRE' ? host : host.querySelector('pre')
+      if (pre) {
+        const cs = window.getComputedStyle(pre)
         const padTop = parseFloat(cs.paddingTop) || 0
         const padBottom = parseFloat(cs.paddingBottom) || 0
-        y += padTop
-        height = Math.max(1, height - padTop - padBottom)
+        if (host === pre) {
+          y += padTop
+          height = Math.max(1, height - padTop - padBottom)
+        } else {
+          y = yInScroller(pre, previewEl) + padTop
+          height = Math.max(1, pre.getBoundingClientRect().height - padTop - padBottom)
+        }
       }
       out.push({ lineFrom, lineTo, y, height: Math.max(0, height) })
     }
@@ -772,9 +765,10 @@ async function mount(root, opts) {
       requestAnimationFrame(clear)
     },
     destroy() {
-      clearTimeout(previewTimer)
+      if (previewRaf) cancelAnimationFrame(previewRaf)
+      previewRaf = 0
       clearTimeout(unlockTimer)
-      cancelAnimationFrame(paintUnlock)
+      preview.unmount()
       view.destroy()
       root.replaceChildren()
     },

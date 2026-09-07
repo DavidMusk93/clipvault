@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, toGfmNestedLists, mapLineToScrollTop, mapScrollTopToLine, mapSourceToPreviewScroll, mapPreviewToSourceLine, tokenLineSpan } from '../web/markdown-render.mjs';
+import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, compileMarkdownBlocks, resetMarkdownCompileCache, hashMarkdownToken, toGfmNestedLists, mapLineToScrollTop, mapScrollTopToLine, mapSourceToPreviewScroll, mapPreviewToSourceLine, tokenLineSpan } from '../web/markdown-render.mjs';
 import { formatTextForDisplay } from '../web/text-format.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,6 +60,71 @@ test('toGfmNestedLists maps indented a./i. to 1. and leaves column-0 prose', () 
 test('renderMarkdownBlocks refuses without engines', () => {
   const r = renderMarkdownBlocks('# Hi\n\npara\n', {});
   assert.equal(r.ok, false);
+});
+
+function fakeMarkdownEngines() {
+  return {
+    marked: {
+      setOptions() {},
+      lexer(text) {
+        const tokens = [];
+        const parts = String(text).split(/(?<=\n\n)/);
+        for (const raw of parts) {
+          if (!raw || !raw.trim()) continue;
+          if (raw.startsWith('# ')) tokens.push({ type: 'heading', raw });
+          else tokens.push({ type: 'paragraph', raw });
+        }
+        return tokens;
+      },
+      parser(toks) {
+        const t = toks[0];
+        const body = String(t.raw || '').replace(/\n+$/, '');
+        if (t.type === 'heading') {
+          const m = /^(#+)\s*([\s\S]*)$/.exec(body);
+          const d = m ? m[1].length : 1;
+          const title = m ? m[2] : body;
+          return `<h${d}>${title}</h${d}>`;
+        }
+        return `<p>${body}</p>`;
+      },
+    },
+    purify: { sanitize: (html) => html },
+  };
+}
+
+test('compileMarkdownBlocks reuses unchanged token HTML by hash', () => {
+  resetMarkdownCompileCache();
+  const engines = fakeMarkdownEngines();
+  const a = compileMarkdownBlocks('# Hi\n\nfoo\n\nbar\n', engines);
+  assert.equal(a.ok, true);
+  assert.equal(a.blocks.length, 3);
+  assert.equal(a.stats.compiled, 3);
+  assert.equal(a.stats.reused, 0);
+  assert.doesNotMatch(a.blocks[0].html, /data-source-line/);
+  assert.equal(a.blocks[0].lineFrom, 1);
+  assert.match(a.blocks[0].key, /^[0-9a-f]+:0$/);
+
+  const b = compileMarkdownBlocks('# Hi\n\nfoo!\n\nbar\n', engines);
+  assert.equal(b.blocks.length, 3);
+  assert.equal(b.stats.compiled, 1);
+  assert.equal(b.stats.reused, 2);
+  assert.equal(a.blocks[0].hash, b.blocks[0].hash);
+  assert.equal(a.blocks[2].hash, b.blocks[2].hash);
+  assert.notEqual(a.blocks[1].hash, b.blocks[1].hash);
+});
+
+test('compileMarkdownBlocks hash ignores source line so insert-above reuses', () => {
+  resetMarkdownCompileCache();
+  const engines = fakeMarkdownEngines();
+  const a = compileMarkdownBlocks('# Hi\n\nhello\n', engines);
+  const b = compileMarkdownBlocks('# New\n\n# Hi\n\nhello\n', engines);
+  const helloA = a.blocks.find((x) => x.html.includes('hello'));
+  const helloB = b.blocks.find((x) => x.html.includes('hello'));
+  assert.ok(helloA && helloB);
+  assert.equal(helloA.hash, helloB.hash);
+  assert.notEqual(helloA.lineFrom, helloB.lineFrom);
+  assert.equal(helloA.key, `${helloA.hash}:0`);
+  assert.equal(hashMarkdownToken('heading', '# Hi\n\n'), hashMarkdownToken('heading', '# Hi\n\n'));
 });
 
 test('mapLineToScrollTop interpolates anchors and falls back proportionally', () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild web/assets/notes-editor/notes-editor.js from CodeMirror 6 + marked.
+# Rebuild web/assets/notes-editor/notes-editor.js from CodeMirror 6 + marked + React 18.
 # Network: SOCKS5 127.0.0.1:2080 if present. Does not overwrite notes-editor.css.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,12 +25,15 @@ npm install --no-fund --no-audit \
   @lezer/highlight@1 \
   marked@9.1.6 \
   dompurify@3.1.6 \
+  react@18 \
+  react-dom@18 \
   esbuild
 
 mkdir -p "$WORKDIR/web/assets/notes-editor"
 cp "$OUT/entry.js" "$WORKDIR/web/assets/notes-editor/entry.js"
 cp "$ROOT/web/markdown-render.mjs" "$WORKDIR/web/markdown-render.mjs"
 cp "$ROOT/web/notes-calc.mjs" "$WORKDIR/web/notes-calc.mjs"
+cp "$ROOT/web/notes-preview.mjs" "$WORKDIR/web/notes-preview.mjs"
 
 ./node_modules/.bin/esbuild \
   web/assets/notes-editor/entry.js \
@@ -38,6 +41,7 @@ cp "$ROOT/web/notes-calc.mjs" "$WORKDIR/web/notes-calc.mjs"
   --format=iife \
   --minify \
   --platform=browser \
+  --define:process.env.NODE_ENV='"production"' \
   --outfile="$OUT/notes-editor.js"
 
 echo "wrote $OUT/notes-editor.js"

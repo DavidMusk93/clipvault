@@ -86,7 +86,10 @@
   text-rendering: optimizeLegibility;
   word-wrap: break-word;
 }
-.notes-preview-inner > :first-child { margin-top: 0; }
+.notes-md-block {
+  display: contents;
+}
+.notes-preview-inner > .notes-md-block:first-child > :first-child { margin-top: 0; }
 
 .notes-preview-inner h1,
 .notes-preview-inner h2,
