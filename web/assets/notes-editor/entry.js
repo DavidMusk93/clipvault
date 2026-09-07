@@ -496,12 +496,23 @@ async function mount(root, opts) {
     }
   }
 
+  function swapPreview(from) {
+    previewInner.replaceChildren()
+    let n = from.firstChild
+    while (n) {
+      const next = n.nextSibling
+      previewInner.appendChild(n)
+      n = next
+    }
+  }
+
   function renderPreview(md, force, opts) {
     const text = String(md || '')
     if (!force && text === lastHash) return
     lastHash = text
     const t = performance.now()
     const preserveScroll = !(opts && opts.preserveScroll === false)
+    const remap = !!(opts && opts.remap)
     paintingPreview = true
     const keepTop = preserveScroll ? previewEl.scrollTop : 0
     const maxBefore = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
@@ -509,11 +520,13 @@ async function mount(root, opts) {
     const keepH = previewInner.offsetHeight
     if (keepH > 0) previewInner.style.minHeight = `${keepH}px`
     if (!text.trim()) {
-      previewInner.innerHTML = ''
+      previewInner.replaceChildren()
     } else {
       const r = renderMarkdownBlocks(text, { marked, purify: DOMPurify })
-      previewInner.innerHTML = r.ok ? r.html : ''
-      enhancePreview(previewInner)
+      const staging = document.createElement('div')
+      staging.innerHTML = r.ok ? r.html : ''
+      enhancePreview(staging)
+      swapPreview(staging)
     }
     previewEl.scrollTop = stickBottom ? previewEl.scrollHeight : keepTop
     const dur = performance.now() - t
@@ -522,7 +535,7 @@ async function mount(root, opts) {
     cancelAnimationFrame(paintUnlock)
     const finish = () => {
       previewInner.style.minHeight = ''
-      if (mode === 'split') syncPreviewToSource(view, { force: true })
+      if (remap && mode === 'split') syncPreviewToSource(view, { force: true })
       else if (!preserveScroll) previewEl.scrollTop = 0
       else if (stickBottom) previewEl.scrollTop = previewEl.scrollHeight
       else previewEl.scrollTop = keepTop
@@ -536,7 +549,7 @@ async function mount(root, opts) {
   function schedulePreview(md) {
     lastMd = md
     clearTimeout(previewTimer)
-    const delay = md.length > 50000 ? 200 : (md.length > 20000 ? 120 : 64)
+    const delay = md.length > 50000 ? 280 : (md.length > 20000 ? 180 : 140)
     const run = () => renderPreview(lastMd)
     previewTimer = setTimeout(() => {
       if (md.length > 20000 && typeof requestIdleCallback === 'function') {
@@ -711,9 +724,6 @@ async function mount(root, opts) {
   }
   view.scrollDOM.addEventListener('scroll', () => syncPreviewToSource(view), { passive: true })
   previewEl.addEventListener('scroll', syncSourceToPreview, { passive: true })
-  previewEl.addEventListener('load', (e) => {
-    if (e.target && e.target.tagName === 'IMG' && mode === 'split') queueSyncFromSource()
-  }, true)
 
   previewEl.addEventListener('click', (e) => {
     const tag = e.target.closest && e.target.closest('.notes-tag')
@@ -756,7 +766,7 @@ async function mount(root, opts) {
         changes: { from: 0, to: view.state.doc.length, insert: next },
       })
       lastMd = next
-      renderPreview(next, true, { preserveScroll: false })
+      renderPreview(next, true, { preserveScroll: false, remap: true })
       const clear = () => { if (g === gen) applying = false }
       queueMicrotask(clear)
       requestAnimationFrame(clear)

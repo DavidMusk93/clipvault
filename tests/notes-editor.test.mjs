@@ -65,7 +65,7 @@ test('nested lists indent in source and restyle in preview', () => {
   assert.match(entry, /nextOlMarker/);
   assert.doesNotMatch(entry, /head !== line\.to/);
   assert.match(css, /ol ol \{ list-style-type: lower-alpha/);
-  assert.match(entry, /renderPreview\(next, true, \{ preserveScroll: false \}\)/);
+  assert.match(entry, /renderPreview\(next, true, \{ preserveScroll: false, remap: true \}\)/);
 });
 
 test('save status is labeled and retries on failure', () => {
@@ -127,7 +127,7 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n13/);
+  assert.match(html, /notes-editor\.js\?v=n14/);
 });
 
 test('preview re-render keeps scroll on long notes', () => {
@@ -137,7 +137,11 @@ test('preview re-render keeps scroll on long notes', () => {
   assert.match(entry, /previewInner\.style\.minHeight/);
   assert.match(entry, /paintingPreview\) return/);
   assert.match(entry, /preserveScroll: false/);
-  assert.match(entry, /syncPreviewToSource\(view, \{ force: true \}\)/);
+  assert.match(entry, /function swapPreview/);
+  assert.match(entry, /const remap = !!\(opts && opts.remap\)/);
+  assert.match(entry, /remap && mode === 'split'\) syncPreviewToSource\(view, \{ force: true \}\)/);
+  assert.match(entry, /schedulePreview[\s\S]{0,220}renderPreview\(lastMd\)/);
+  assert.doesNotMatch(entry, /IMG' && mode === 'split'\) queueSyncFromSource/);
   assert.match(entry, /requestAnimationFrame\(\(\) => \{\s*paintUnlock = requestAnimationFrame\(finish\)/);
 });
 
