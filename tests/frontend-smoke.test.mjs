@@ -86,6 +86,17 @@ test('notes are a panel on the same page', () => {
   assert.doesNotMatch(indexHtml, /milkdown-top-bar/);
 });
 
+test('sessions reuse ClipVault port as a notes-like panel', () => {
+  assert.match(indexHtml, /id="sessionsPanel"/);
+  assert.match(indexHtml, /id="sessionsFrame"/);
+  assert.match(indexHtml, /function openSessionsPanel/);
+  assert.match(indexHtml, /\/trae\/\?embed=1/);
+  assert.match(indexHtml, /body\.sessions-open \.top-bar/);
+  assert.match(indexHtml, /id="traeSessionsBtn"/);
+  assert.doesNotMatch(indexHtml, /href="http:\/\/127\.0\.0\.1:9488/);
+  assert.match(indexHtml, /<button type="button" class="backup-btn" id="traeSessionsBtn"/);
+});
+
 test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {
   assert.match(indexHtml, /notes-rich\$\{tiny\}/, 'structured HTML may use notes-rich');
   assert.match(indexHtml, /function looksLikeCode/);

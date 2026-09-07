@@ -169,18 +169,24 @@
       transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
     }
     html.notes-open,
-    body.notes-open {
+    html.sessions-open,
+    body.notes-open,
+    body.sessions-open {
       overflow: hidden;
       overscroll-behavior: none;
     }
     body.notes-open .top-bar,
+    body.sessions-open .top-bar,
     body.notes-open .chips,
-    body.notes-open main {
+    body.sessions-open .chips,
+    body.notes-open main,
+    body.sessions-open main {
       opacity: 0;
       pointer-events: none;
       visibility: hidden;
     }
-    body.notes-open .notes-fab { display: none !important; }
+    body.notes-open .notes-fab,
+    body.sessions-open .notes-fab { display: none !important; }
     .chips::-webkit-scrollbar { display: none; }
     .chip {
       height: 32px; padding: 0 14px; border-radius: var(--radius-pill);
@@ -1688,7 +1694,7 @@
       .top-bar { padding: 10px var(--chrome-pad-x); flex-wrap: wrap; }
       .chips { top: auto; position: relative; }
       main { padding: 6px var(--chrome-pad-x) 88px; }
-      .top-actions .backup-btn:not(#notesOpenBtn) { display: none; }
+      .top-actions .backup-btn:not(#notesOpenBtn):not(#traeSessionsBtn) { display: none; }
       #notesOpenBtn { display: none; }
       .notes-fab { display: inline-flex; }
     }
@@ -1704,7 +1710,8 @@
       text-decoration: none;
     }
     .notes-fab:active { transform: scale(0.97); }
-    #notesOpenBtn.is-on {
+    #notesOpenBtn.is-on,
+    #traeSessionsBtn.is-on {
       background: var(--ink); color: #fff; border-color: transparent;
     }
 
@@ -1947,6 +1954,25 @@
       .notes-rail, .notes-paper { background: #fff !important; backdrop-filter: none; -webkit-backdrop-filter: none; }
     }
 
+    .sessions-shell {
+      position: relative; z-index: 1;
+      height: 100%;
+      padding: 12px;
+    }
+    .sessions-frame {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .sessions-panel .notes-close { top: 22px; right: 26px; }
+    @media (max-width: 820px) {
+      .sessions-shell { padding: 8px; }
+    }
+
     /* —— Backup / Sync sheet —— */
     .backup-btn {
       height: 32px; padding: 0 13px; border-radius: var(--radius-pill);
@@ -2125,10 +2151,10 @@
       <input type="search" id="searchInput" placeholder="搜索文本 / OCR / 评论…" autocomplete="off" />
     </div>
     <div class="top-actions">
-      <a class="backup-btn" id="traeSessionsBtn" href="http://127.0.0.1:9488/" title="Trae 会话过程图">
+      <button type="button" class="backup-btn" id="traeSessionsBtn" title="会话">
         <span class="material-symbols-outlined" style="font-size:18px">account_tree</span>
         <span>会话</span>
-      </a>
+      </button>
       <button type="button" class="backup-btn" id="notesOpenBtn" title="笔记">
         <span class="material-symbols-outlined" style="font-size:18px">edit_note</span>
         <span>笔记</span>
@@ -2349,6 +2375,16 @@
   <button type="button" class="notes-fab" id="notesFab" aria-label="笔记">
     <span class="material-symbols-outlined">edit_note</span>笔记
   </button>
+
+  <div id="sessionsPanel" class="notes-panel sessions-panel" aria-hidden="true">
+    <div class="notes-frost" aria-hidden="true"></div>
+    <div class="sessions-shell">
+      <button type="button" class="notes-close" id="sessionsClose" title="关闭" aria-label="关闭">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+      <iframe id="sessionsFrame" class="sessions-frame" title="会话"></iframe>
+    </div>
+  </div>
 
   <div id="notesPanel" class="notes-panel" aria-hidden="true">
     <div class="notes-frost" aria-hidden="true"></div>
@@ -2783,6 +2819,7 @@ window.ClipViewMasonry = Masonry;
       if (!raw) return { kind: null };
       let nm = raw.match(/^notes(?:\/([0-9a-fA-F-]{36}))?$/i);
       if (nm) return { kind: 'notes', noteId: nm[1] || null };
+      if (/^sessions$/i.test(raw)) return { kind: 'sessions' };
       let m = raw.match(/^h=([0-9a-fA-F]{64})$/);
       if (m) return { kind: 'hash', hash: m[1].toLowerCase() };
       m = raw.match(/^id=([0-9a-fA-F-]{36})$/i);
@@ -2846,6 +2883,10 @@ window.ClipViewMasonry = Masonry;
       if (!loc || !loc.kind) return;
       if (loc.kind === 'notes') {
         await openNotesPanel(loc.noteId);
+        return;
+      }
+      if (loc.kind === 'sessions') {
+        openSessionsPanel();
         return;
       }
       let item = null;
@@ -3698,6 +3739,16 @@ window.ClipViewMasonry = Masonry;
     function setNotesWallLocked(on) {
       document.documentElement.classList.toggle('notes-open', on);
       document.body.classList.toggle('notes-open', on);
+      lockWallChrome(on || document.body.classList.contains('sessions-open'));
+    }
+
+    function setSessionsWallLocked(on) {
+      document.documentElement.classList.toggle('sessions-open', on);
+      document.body.classList.toggle('sessions-open', on);
+      lockWallChrome(on || document.body.classList.contains('notes-open'));
+    }
+
+    function lockWallChrome(on) {
       for (const sel of ['.top-bar', '.chips', 'main']) {
         const el = document.querySelector(sel);
         if (!el) continue;
@@ -3707,16 +3758,56 @@ window.ClipViewMasonry = Masonry;
     }
 
     function notesBackdropEvent(e) {
-      if (!document.body.classList.contains('notes-open')) return;
+      const notes = document.body.classList.contains('notes-open');
+      const sessions = document.body.classList.contains('sessions-open');
+      if (!notes && !sessions) return;
       const t = e.target;
       if (!(t && t.closest)) return;
-      if (t.closest('.notes-rail, .notes-paper')) return;
+      if (notes && t.closest('.notes-rail, .notes-paper')) return;
+      if (sessions && t.closest('.sessions-shell')) return;
       if (t.closest('.event-toast.open, .archive-reader.open, .eval-sheet.open, .backup-drawer, .lightbox.open')) return;
       e.preventDefault();
       e.stopPropagation();
     }
 
+    async function openSessionsPanel() {
+      if (document.getElementById('notesPanel')?.classList.contains('open')) {
+        await closeNotesPanel();
+      }
+      const panel = document.getElementById('sessionsPanel');
+      if (!panel) return;
+      panel.classList.add('open');
+      panel.setAttribute('aria-hidden', 'false');
+      setSessionsWallLocked(true);
+      document.getElementById('traeSessionsBtn')?.classList.add('is-on');
+      const frame = document.getElementById('sessionsFrame');
+      if (frame && !frame.getAttribute('src')) {
+        frame.src = '/trae/?embed=1';
+      }
+      try {
+        if (parseAppHash().kind !== 'sessions') history.replaceState(null, '', '#sessions');
+      } catch (_) {}
+    }
+
+    function closeSessionsPanel() {
+      const panel = document.getElementById('sessionsPanel');
+      panel?.classList.remove('open');
+      panel?.setAttribute('aria-hidden', 'true');
+      setSessionsWallLocked(false);
+      document.getElementById('traeSessionsBtn')?.classList.remove('is-on');
+      if (parseAppHash().kind === 'sessions') {
+        try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+      }
+    }
+
+    function toggleSessionsPanel() {
+      const open = document.getElementById('sessionsPanel')?.classList.contains('open');
+      if (open) closeSessionsPanel();
+      else openSessionsPanel();
+    }
+
     async function openNotesPanel(preferredId) {
+      closeSessionsPanel();
       const panel = document.getElementById('notesPanel');
       if (!panel) return;
       panel.classList.add('open');
@@ -3770,6 +3861,8 @@ window.ClipViewMasonry = Masonry;
     }
 
     document.getElementById('notesOpenBtn')?.addEventListener('click', toggleNotesPanel);
+    document.getElementById('traeSessionsBtn')?.addEventListener('click', toggleSessionsPanel);
+    document.getElementById('sessionsClose')?.addEventListener('click', closeSessionsPanel);
     document.getElementById('notesFab')?.addEventListener('click', toggleNotesPanel);
     document.getElementById('notesClose')?.addEventListener('click', closeNotesPanel);
     document.getElementById('notesShare')?.addEventListener('click', () => {
@@ -3812,6 +3905,11 @@ window.ClipViewMasonry = Masonry;
       notesState.editor.command(btn.dataset.cmd);
     });
     document.addEventListener('keydown', e => {
+      const sessionsOpen = document.getElementById('sessionsPanel')?.classList.contains('open');
+      if (sessionsOpen && e.key === 'Escape') {
+        closeSessionsPanel();
+        return;
+      }
       const open = document.getElementById('notesPanel')?.classList.contains('open');
       if (!open) return;
       if (e.key === 'Escape') {
@@ -3830,6 +3928,9 @@ window.ClipViewMasonry = Masonry;
     });
     if (parseAppHash().kind === 'notes') {
       requestAnimationFrame(() => openNotesPanel());
+    }
+    if (parseAppHash().kind === 'sessions') {
+      requestAnimationFrame(() => openSessionsPanel());
     }
     document.getElementById('evalNote')?.addEventListener('input', paintEvalStars);
     document.addEventListener('keydown', e => {

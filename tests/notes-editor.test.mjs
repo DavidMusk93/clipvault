@@ -166,7 +166,8 @@ test('preview compiles blocks incrementally and React reconciles by hash', () =>
 test('open notes lock the wall so chips and format toolbar cannot drag', () => {
   assert.match(html, /html\.notes-open/);
   assert.match(html, /body\.notes-open[\s\S]{0,80}overflow:\s*hidden/);
-  assert.match(html, /body\.notes-open \.chips,\s*body\.notes-open main/);
+  assert.match(html, /body\.notes-open \.chips,/);
+  assert.match(html, /body\.notes-open main/);
   assert.match(html, /setNotesWallLocked/);
   assert.match(html, /setAttribute\('inert'/);
   assert.match(html, /notesBackdropEvent/);

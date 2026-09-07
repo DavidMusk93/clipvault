@@ -115,7 +115,8 @@ test('trae sessions use nmem SSE contract, not interval polling', () => {
   assert.match(server, /SSE_HEARTBEAT_SECONDS = 15/);
   assert.match(server, /resync_required/);
   assert.match(server, /: ping/);
-  assert.match(html, /EventSource\(\"\/api\/stream\"\)/);
+  assert.match(html, /TRAE_BASE/);
+  assert.match(html, /EventSource\(apiUrl\(\"\/api\/stream\"\)\)/);
   assert.match(html, /resync_required/);
   assert.match(html, /scheduleResync/);
   assert.match(html, /visibilitychange/);
@@ -126,6 +127,18 @@ test('trae sessions use nmem SSE contract, not interval polling', () => {
     /es\.close\(\);\s*setTimeout\(setupSSE/,
   );
   assert.match(html, /EventSource\.CLOSED/);
+});
+
+test('sessions UI is prefix-aware so ClipVault :8080 can proxy /trae', () => {
+  assert.match(html, /from \"\.\/session-render\.mjs\"/);
+  assert.match(html, /location\.pathname\.startsWith\(\"\/trae\"\)/);
+  assert.match(html, /html\.embed \.top/);
+  assert.match(html, /classList\.add\(\"embed\"\)/);
+  const server = fs.readFileSync(path.join(__dirname, '../ClipFlow/WebServer.swift'), 'utf8');
+  assert.match(server, /func handleTraeProxy/);
+  assert.match(server, /func traeBackendURL/);
+  assert.match(server, /class TraeStreamPipe/);
+  assert.match(server, /pathOnly == \"\/trae\"/);
 });
 
 test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () => {

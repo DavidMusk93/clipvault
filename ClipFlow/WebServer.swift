@@ -297,6 +297,14 @@ class WebServer {
                 sendStaticAsset(pathOnly: pathOnly, connection: connection)
                 return
             }
+            if pathOnly == "/trae" || pathOnly.hasPrefix("/trae/") {
+                if !loopback {
+                    sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+                    return
+                }
+                handleTraeProxy(path: path, connection: connection)
+                return
+            }
         }
 
         if !loopback, !Self.publicRequestAuthorized(headers) {
@@ -504,9 +512,72 @@ class WebServer {
             sendArchiveStatus(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/assets/") {
             sendStaticAsset(pathOnly: pathOnly, connection: connection)
+        } else if pathOnly == "/trae" || pathOnly.hasPrefix("/trae/") {
+            handleTraeProxy(path: path, connection: connection)
         } else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
         }
+    }
+
+    /// Loopback-only reverse proxy to the Trae DuckDB UI (default :9488).
+    /// Browser stays on ClipVault :8080; 9488 is an internal process port.
+    static func traeBackendURL(from path: String) -> URL? {
+        let port = Int(ProcessInfo.processInfo.environment["CLIPVAULT_TRAE_HTTP_PORT"] ?? "") ?? 9488
+        let qMark = path.firstIndex(of: "?")
+        let pathOnly = qMark.map { String(path[..<$0]) } ?? path
+        let query = qMark.map { String(path[$0...]) } ?? ""
+        var backend: String
+        if pathOnly == "/trae" || pathOnly == "/trae/" {
+            backend = "/"
+        } else if pathOnly.hasPrefix("/trae/") {
+            backend = String(pathOnly.dropFirst("/trae".count))
+            if backend.isEmpty { backend = "/" }
+        } else {
+            return nil
+        }
+        return URL(string: "http://127.0.0.1:\(port)\(backend)\(query)")
+    }
+
+    private func handleTraeProxy(path: String, connection: NWConnection) {
+        guard let url = Self.traeBackendURL(from: path) else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
+        if pathOnly == "/trae/api/stream" {
+            TraeStreamPipe(client: connection, url: url).start()
+            return
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 20
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
+            guard let self else { return }
+            if err != nil {
+                let body = Data(#"{"error":"trae store unreachable"}"#.utf8)
+                self.sendBinary(
+                    status: 502,
+                    reason: "Bad Gateway",
+                    contentType: "application/json; charset=utf-8",
+                    body: body,
+                    connection: connection,
+                    extraHeaders: [("Cache-Control", "no-store")]
+                )
+                return
+            }
+            let http = resp as? HTTPURLResponse
+            let status = http?.statusCode ?? 200
+            let ctype = http?.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream"
+            let reason = HTTPURLResponse.localizedString(forStatusCode: status)
+            self.sendBinary(
+                status: status,
+                reason: reason.capitalized,
+                contentType: ctype,
+                body: data ?? Data(),
+                connection: connection,
+                extraHeaders: [("Cache-Control", "no-store")]
+            )
+        }.resume()
     }
 
     private func handleSSEEvents(connection: NWConnection) {
@@ -2535,6 +2606,129 @@ class WebServer {
     
     deinit {
         stop()
+    }
+}
+
+/// Streams Trae `/api/stream` onto a ClipVault client connection without buffering.
+final class TraeStreamPipe: NSObject, URLSessionDataDelegate {
+    private let client: NWConnection
+    private let url: URL
+    private let lock = NSLock()
+    private var headerSent = false
+    private var dead = false
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+
+    init(client: NWConnection, url: URL) {
+        self.client = client
+        self.url = url
+        super.init()
+    }
+
+    func start() {
+        let config = URLSessionConfiguration.default
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 86400
+        config.timeoutIntervalForResource = 86400
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        self.session = session
+        var req = URLRequest(url: url)
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let task = session.dataTask(with: req)
+        self.task = task
+        watchClient()
+        task.resume()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 200
+        let ctype = http?.value(forHTTPHeaderField: "Content-Type")
+            ?? "text/event-stream; charset=utf-8"
+        sendHeader(status: status, contentType: ctype)
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        if !headerSent {
+            sendHeader(status: 200, contentType: "text/event-stream; charset=utf-8")
+        }
+        send(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if !headerSent {
+            let body = Data(#"{"error":"trae store unreachable"}"#.utf8)
+            sendHeader(status: 502, contentType: "application/json; charset=utf-8", contentLength: body.count)
+            send(body)
+        }
+        close()
+    }
+
+    private func sendHeader(status: Int, contentType: String, contentLength: Int? = nil) {
+        lock.lock()
+        if headerSent || dead {
+            lock.unlock()
+            return
+        }
+        headerSent = true
+        lock.unlock()
+        var headers: [(String, String)] = [
+            ("Content-Type", contentType),
+            ("Cache-Control", "no-cache, no-transform"),
+            ("Connection", "keep-alive"),
+            ("X-Accel-Buffering", "no"),
+            ("Access-Control-Allow-Origin", "*"),
+        ]
+        if let contentLength {
+            headers.append(("Content-Length", "\(contentLength)"))
+        }
+        var lines: [String] = ["HTTP/1.1 \(status) \(status == 200 ? "OK" : "Error")"]
+        lines.append(contentsOf: headers.map { "\($0.0): \($0.1)" })
+        send(Data((lines.joined(separator: "\r\n") + "\r\n\r\n").utf8))
+    }
+
+    private func send(_ data: Data) {
+        lock.lock()
+        if dead {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        client.send(content: data, completion: .contentProcessed { [weak self] error in
+            if error != nil { self?.close() }
+        })
+    }
+
+    private func watchClient() {
+        client.receive(minimumIncompleteLength: 1, maximumLength: 4) { [weak self] _, _, isComplete, error in
+            guard let self else { return }
+            if isComplete || error != nil {
+                self.close()
+                return
+            }
+            self.watchClient()
+        }
+    }
+
+    private func close() {
+        lock.lock()
+        if dead {
+            lock.unlock()
+            return
+        }
+        dead = true
+        lock.unlock()
+        task?.cancel()
+        session?.invalidateAndCancel()
+        session = nil
+        client.cancel()
     }
 }
 

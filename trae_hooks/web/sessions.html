@@ -33,6 +33,7 @@
       height: 100%;
       overflow: hidden;
     }
+    html.embed .top { display: none; }
     body {
       display: flex;
       flex-direction: column;
@@ -474,7 +475,13 @@
       asObj, blocksFromEvent, bundleTitle, focusImRows, imMessagesFromEvents,
       localClock, localDayKey, prettyJson, relLocalTime, renderEventBlocks,
       renderValue, rowPreview,
-    } from "/session-render.mjs";
+    } from "./session-render.mjs";
+
+    const TRAE_BASE = location.pathname.startsWith("/trae") ? "/trae" : "";
+    const apiUrl = (p) => TRAE_BASE + p;
+    if (window.parent !== window || /(?:^|[?&])embed(?:[=&]|$)/.test(location.search)) {
+      document.documentElement.classList.add("embed");
+    }
 
     const $ = (id) => document.getElementById(id);
     const thread = $("thread");
@@ -780,7 +787,7 @@
           if (!host || host.dataset.loaded) return;
           const id = el.closest(".bubble").getAttribute("data-id");
           try {
-            const d = await (await fetch("/api/event?id=" + encodeURIComponent(id))).json();
+            const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(id)))).json();
             const raw = d.event && d.event.raw_json ? d.event.raw_json : prettyJson(d.event);
             host.innerHTML = renderValue(raw, "json", engines()).html;
             host.dataset.loaded = "1";
@@ -793,14 +800,14 @@
 
     async function loadHealth() {
       try {
-        const h = await (await fetch("/api/health")).json();
+        const h = await (await fetch(apiUrl("/api/health"))).json();
         $("health").textContent = `${h.events ?? 0} 条 · ${relTime(h.last_ts) || "—"}`;
       } catch (e) {
         $("health").textContent = "store 未就绪";
       }
     }
     async function loadSessions() {
-      const data = await (await fetch("/api/sessions?limit=80")).json();
+      const data = await (await fetch(apiUrl("/api/sessions?limit=80"))).json();
       const box = $("sessionList");
       if (!data.sessions || !data.sessions.length) {
         lastListSig = "";
@@ -860,7 +867,7 @@
         showSessionHead("");
         return;
       }
-      const data = await (await fetch("/api/events?" + params)).json();
+      const data = await (await fetch(apiUrl("/api/events?" + params))).json();
       if (!data.events || !data.events.length) {
         thread.innerHTML = '<div class="empty">没有匹配事件</div>';
         lastSig = "";
@@ -903,7 +910,7 @@
     const setupSSE = () => {
       if (es && es.readyState !== EventSource.CLOSED) return;
       try { if (es) es.close(); } catch (_) {}
-      es = new EventSource("/api/stream");
+      es = new EventSource(apiUrl("/api/stream"));
       es.onopen = () => scheduleResync();
       es.onmessage = (ev) => {
         let d;

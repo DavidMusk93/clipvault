@@ -111,7 +111,7 @@ curl -fsS --max-time 3 "http://127.0.0.1:9488/api/health" || {
 }
 echo
 echo "install ok"
-echo "UI:   http://127.0.0.1:9488/"
+echo "UI:   ClipVault 顶栏「会话」→ http://127.0.0.1:8080/#sessions （:9488 仅进程口）"
 echo "hook: $WRAPPER_DST"
 echo "json: $HOOKS_JSON_DST"
 echo "Next: Trae 设置 > Hooks > 启用全局 + 本地自动运行，然后完全退出 Trae 再开。"

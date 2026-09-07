@@ -62,6 +62,8 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 ## Trae 会话 IM 角色色
 
+入口与笔记统一：ClipVault `:8080` 顶栏「会话」弹出霜层 + 圆角纸面（`#sessionsPanel`），不要另开 `:9488` 标签。`:9488` 是 DuckDB 进程口，只给本机反代。
+
 时间线按即时通讯俯瞰：用户右、助手左、工具/系统居中偏左。语义色与类型标签同源，禁止灰底灰字一锅炖。
 
 | role | 中文 | 对齐 | Ink / 软底 | 轨 |
