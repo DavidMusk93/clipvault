@@ -45,6 +45,119 @@ export function roleFromEvent(event) {
  * Chronological IM rows. Drop PreToolUse when PostToolUse shares tool_use_id.
  * @param {object[]} events
  */
+/** Store writes naive UTC (`utc_now()`). Display must treat it as UTC, then format locally. */
+export function parseHookTs(ts) {
+  const s = String(ts || '').trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    const d = new Date(n > 1e12 ? n : n * 1000);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const iso = s.includes('T') ? s : s.replace(' ', 'T');
+  const aware = /Z$|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`;
+  const d = new Date(aware);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function localDayKey(ts) {
+  const d = parseHookTs(ts);
+  if (!d) return String(ts || '').slice(0, 10);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function localClock(ts) {
+  const d = parseHookTs(ts);
+  if (!d) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function relLocalTime(ts, nowMs = Date.now()) {
+  const d = parseHookTs(ts);
+  if (!d) return String(ts || '');
+  const sec = (nowMs - d.getTime()) / 1000;
+  if (sec < 45) return '刚刚';
+  if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`;
+  if (sec < 86400 * 7) return `${Math.floor(sec / 86400)} 天前`;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function firstLine(text) {
+  return String(text || '').trim().split(/\n/)[0] || '';
+}
+
+export function rowPreview(row) {
+  const e = row?.event || {};
+  if (row?.role === 'user') return firstLine(e.prompt);
+  if (row?.role === 'assistant') return firstLine(e.last_assistant_message);
+  if (row?.role === 'tool') return e.tool_name || e.llm_tool_name || '工具';
+  return firstLine(e.notification_message) || e.hook_event || '';
+}
+
+export function bundleTitle(rows) {
+  const list = rows || [];
+  const n = list.length;
+  const users = list.filter((r) => r.role === 'user').length;
+  const tools = list.filter((r) => r.role === 'tool');
+  if (users) return `更早 ${users} 轮 · ${n} 条`;
+  if (tools.length === n && n) {
+    const counts = new Map();
+    for (const r of tools) {
+      const name = r.event?.tool_name || r.event?.llm_tool_name || '工具';
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    return top ? `${n} 次工具 · ${top[0]} × ${top[1]}` : `${n} 次工具`;
+  }
+  return `更早 ${n} 条`;
+}
+
+/**
+ * A Trae session is ~tool-call noise with sparse conversational beats.
+ * Expand only: last user prompt (intent), last assistant Stop after it
+ * (conclusion), and the newest event (live tip). Merge the rest.
+ */
+export function focusImRows(rows) {
+  const list = rows || [];
+  if (!list.length) return [];
+  const last = list.length - 1;
+  let lastUser = -1;
+  for (let i = last; i >= 0; i--) {
+    if (list[i].role === 'user') {
+      lastUser = i;
+      break;
+    }
+  }
+  let lastAsst = -1;
+  for (let i = last; i >= 0; i--) {
+    if (list[i].role === 'assistant' && i >= lastUser) {
+      lastAsst = i;
+      break;
+    }
+  }
+  const focus = new Set([last]);
+  if (lastUser >= 0) focus.add(lastUser);
+  if (lastAsst >= 0) focus.add(lastAsst);
+  const out = [];
+  let i = 0;
+  while (i < list.length) {
+    if (focus.has(i)) {
+      out.push({ type: 'focus', row: list[i] });
+      i += 1;
+      continue;
+    }
+    const start = i;
+    while (i < list.length && !focus.has(i)) i += 1;
+    const chunk = list.slice(start, i);
+    out.push({ type: 'bundle', rows: chunk, title: bundleTitle(chunk) });
+  }
+  return out;
+}
+
 export function imMessagesFromEvents(events) {
   const list = [...(events || [])].sort((a, b) => {
     const ta = String(a.ts || '');

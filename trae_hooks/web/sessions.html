@@ -324,6 +324,38 @@
     .bubble.tool .tool-fold { margin: 0 8px 8px; }
     .bubble.tool .tool-fold summary { padding: 6px 8px; }
     .empty { color: var(--muted); padding: 48px 12px; text-align: center; font-size: 14px; }
+    .history-bundle {
+      margin: 6px auto 14px;
+      max-width: 440px;
+    }
+    .history-bundle summary {
+      list-style: none;
+      cursor: pointer;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      padding: 6px 14px;
+      border-radius: 980px;
+      background: rgba(120, 120, 128, 0.10);
+      user-select: none;
+    }
+    .history-bundle summary::-webkit-details-marker { display: none; }
+    .history-body { padding: 8px 4px 2px; }
+    .history-line {
+      display: grid;
+      grid-template-columns: 42px 36px minmax(0, 1fr);
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 3px 6px;
+      min-width: 0;
+    }
+    .history-line .p {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .follow {
       position: absolute;
       right: 20px;
@@ -438,7 +470,11 @@
     </section>
   </div>
   <script type="module">
-    import { asObj, blocksFromEvent, imMessagesFromEvents, prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
+    import {
+      asObj, blocksFromEvent, bundleTitle, focusImRows, imMessagesFromEvents,
+      localClock, localDayKey, prettyJson, relLocalTime, renderEventBlocks,
+      renderValue, rowPreview,
+    } from "/session-render.mjs";
 
     const $ = (id) => document.getElementById(id);
     const thread = $("thread");
@@ -610,32 +646,17 @@
       });
     };
 
-    const dayKey = (ts) => {
-      const raw = String(ts || "").replace(" ", "T");
-      const d = new Date(raw);
-      if (Number.isNaN(d.getTime())) return String(ts || "").slice(0, 10);
-      const p = (n) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-    };
+    const dayKey = localDayKey;
     const dayLabel = (key) => {
       const now = new Date();
-      const today = dayKey(now.toISOString());
+      const today = localDayKey(now.toISOString());
       const y = new Date(now);
       y.setDate(y.getDate() - 1);
       if (key === today) return "今天";
-      if (key === dayKey(y.toISOString())) return "昨天";
+      if (key === localDayKey(y.toISOString())) return "昨天";
       return key.replace(/-/g, "/");
     };
-    const relTime = (ts) => {
-      const d = new Date(String(ts || "").replace(" ", "T"));
-      if (Number.isNaN(d.getTime())) return ts || "";
-      const sec = (Date.now() - d.getTime()) / 1000;
-      if (sec < 45) return "刚刚";
-      if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
-      if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`;
-      if (sec < 86400 * 7) return `${Math.floor(sec / 86400)} 天前`;
-      return dayLabel(dayKey(ts));
-    };
+    const relTime = relLocalTime;
     const sessionTitle = (s) => {
       const p = String(s.last_prompt || "").trim().split(/\n/)[0];
       if (p) return p.slice(0, 56);
@@ -661,7 +682,7 @@
       const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
       const name = tools || "工具";
       const result = toolBits(e);
-      const meta = [relTime(e.ts), e.hook_event, tools].filter(Boolean).join(" · ");
+      const meta = [localClock(e.ts), relTime(e.ts), tools].filter(Boolean).join(" · ");
       let html = `<div class="tool-head"><span class="tool-name">${esc(name)}</span><span class="tool-result">${esc(result)}</span></div>`;
       for (const b of blocksFromEvent(e)) {
         if (b.key === "result") continue;
@@ -706,7 +727,7 @@
         lastDay = day;
         lastRole = row.role;
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
-        const meta = [relTime(e.ts), e.hook_event, tools].filter(Boolean).join(" · ");
+        const meta = [localClock(e.ts), relTime(e.ts), tools].filter(Boolean).join(" · ");
         const body = row.role === "tool" ? "" : renderEventBlocks(e, engines()).map((b) =>
           `<div class="kv">${b.key === "result" ? "" : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`
         ).join("");
@@ -727,6 +748,25 @@
         return `${chip}<div class="row ${esc(row.role)}${grouped ? " grouped" : ""}">
           <article class="bubble ${esc(row.role)}" data-id="${esc(e.event_id)}">${inner}</article>
         </div>`;
+      }).join("");
+    }
+
+    function renderBundle(bundle) {
+      const lines = bundle.rows.map((r) => {
+        const clock = localClock(r.event.ts);
+        const pre = rowPreview(r);
+        return `<div class="history-line"><span class="t">${esc(clock)}</span><span class="w">${esc(r.label)}</span><span class="p" title="${esc(pre)}">${esc(pre.slice(0, 80))}</span></div>`;
+      }).join("");
+      return `<details class="history-bundle">
+        <summary>${esc(bundle.title || bundleTitle(bundle.rows))}</summary>
+        <div class="history-body">${lines}</div>
+      </details>`;
+    }
+
+    function renderThread(rows) {
+      return focusImRows(rows).map((item) => {
+        if (item.type === "bundle") return renderBundle(item);
+        return renderRows([item.row]);
       }).join("");
     }
 
@@ -829,29 +869,17 @@
       const rows = imMessagesFromEvents(data.events);
       const sig = rows.map((r) => r.event.event_id).join(",");
       if (sig === lastSig) return;
-      const canAppend = lastSig && sig.startsWith(lastSig + ",") && thread.querySelector(".row");
-      if (canAppend) {
-        const oldN = lastSig.split(",").filter(Boolean).length;
-        const added = rows.slice(oldN);
-        const prev = rows[oldN - 1];
-        const t0 = performance.now();
-        thread.insertAdjacentHTML("beforeend", renderRows(added, prev));
-        emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: added.length, kind: "append" } });
-        lastSig = sig;
-        bindRaws(thread);
-        if (followTail) pinBottomSoon();
-        else {
-          pendingNew = true;
-          syncFollowBtn();
-        }
-        return;
-      }
+      const grew = lastSig && sig.startsWith(lastSig + ",");
       lastSig = sig;
       const t0 = performance.now();
-      thread.innerHTML = renderRows(rows);
+      thread.innerHTML = renderThread(rows);
       emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: rows.length, kind: "full" } });
       bindRaws(thread);
       if (followTail || painted !== current) pinBottomSoon();
+      else if (grew) {
+        pendingNew = true;
+        syncFollowBtn();
+      }
       painted = current;
     }
 

@@ -98,6 +98,14 @@ test('opens the latest session and shows tool command without folding it away', 
   assert.match(html, /blocksFromEvent/);
 });
 
+test('history is bundled; only last user, last assistant, and latest stay open', () => {
+  assert.match(html, /focusImRows/);
+  assert.match(html, /history-bundle/);
+  assert.match(html, /function renderThread/);
+  assert.match(html, /parseHookTs|localClock/);
+  assert.match(html, /relLocalTime/);
+});
+
 test('trae sessions use nmem SSE contract, not interval polling', () => {
   const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
   assert.match(server, /path == \"\/api\/stream\"/);
