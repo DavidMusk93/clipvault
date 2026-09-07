@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ClipVault · Trae 会话</title>
+  <title>会话 · ClipVault</title>
   <meta name="color-scheme" content="light" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
@@ -13,171 +13,308 @@
   <style>
     :root {
       --bg: #f5f5f7;
+      --rail: #f2f2f7;
       --ink: #1d1d1f;
       --muted: #6e6e73;
       --separator: rgba(60, 60, 67, 0.12);
       --card: #ffffff;
       --accent: #0071e3;
       --honey: #c47a2c;
-      --honey-soft: rgba(196, 122, 44, 0.12);
-      --user-ink: #8a5414;
+      --honey-soft: rgba(196, 122, 44, 0.14);
+      --user-ink: #6b3f0e;
       --tool: #1565c0;
-      --tool-soft: rgba(21, 101, 192, 0.12);
+      --tool-soft: rgba(21, 101, 192, 0.10);
       --system: #8e8e93;
-      --system-soft: rgba(142, 142, 147, 0.14);
-      --radius: 16px;
       --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
       --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: var(--font-ui);
-      background:
-        radial-gradient(900px 420px at 8% -8%, rgba(196, 146, 66, 0.10), transparent 55%),
-        var(--bg);
-      color: var(--ink);
-      min-height: 100vh;
+    html, body {
+      height: 100%;
+      overflow: hidden;
     }
-    header {
-      position: sticky; top: 0; z-index: 10;
-      display: flex; align-items: center; gap: 14px;
-      padding: 14px 22px;
-      background: rgba(245,245,247,0.78);
+    body {
+      display: flex;
+      flex-direction: column;
+      font-family: var(--font-ui);
+      background: var(--bg);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+    }
+    .top {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 52px;
+      padding: 0 16px 0 18px;
+      background: rgba(245, 245, 247, 0.72);
+      backdrop-filter: blur(22px) saturate(180%);
+      -webkit-backdrop-filter: blur(22px) saturate(180%);
+      border-bottom: 0.5px solid var(--separator);
+      z-index: 4;
+    }
+    h1 {
+      font-size: 17px;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+    .sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .grow { flex: 1; }
+    a.back {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .app {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      overflow: hidden;
+    }
+    .rail {
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--rail);
+      border-right: 0.5px solid var(--separator);
+    }
+    .rail-search { flex: 0 0 auto; padding: 10px 10px 8px; }
+    #sessionList {
+      flex: 1;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 0 8px 28px;
+    }
+    input[type="search"] {
+      width: 100%;
+      border: 0;
+      background: rgba(120, 120, 128, 0.12);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 13px;
+    }
+    input:focus { outline: none; background: #fff; }
+    .card {
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      min-width: 0;
+    }
+    .card.active { background: rgba(0, 0, 0, 0.06); }
+    @media (hover: hover) and (pointer: fine) {
+      .card:hover { background: rgba(0, 0, 0, 0.04); }
+    }
+    .card .title {
+      font-size: 14px;
+      font-weight: 590;
+      letter-spacing: -0.015em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .card .meta {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 3px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .id-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .stage {
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background:
+        radial-gradient(900px 280px at 100% -10%, rgba(196, 122, 44, 0.06), transparent 50%),
+        #fafafa;
+      position: relative;
+    }
+    .session-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      height: 48px;
+      padding: 0 18px;
+      background: rgba(250, 250, 250, 0.72);
       backdrop-filter: blur(18px);
       border-bottom: 0.5px solid var(--separator);
     }
-    h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
-    .sub { color: var(--muted); font-size: 13px; }
-    .grow { flex: 1; }
-    input[type="search"] {
-      width: min(360px, 42vw);
-      border: 0.5px solid transparent;
-      background: rgba(120,120,128,0.12);
-      border-radius: 980px;
-      padding: 8px 14px;
-      font: inherit;
-    }
-    input:focus { outline: none; background: #fff; border-color: rgba(0,113,227,0.35); }
-    a.back {
-      color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 500;
-    }
-    main {
-      display: grid; grid-template-columns: 280px minmax(0, 1fr);
-      min-height: calc(100vh - 58px); min-width: 0;
-    }
-    .list, .detail { padding: 16px 18px; min-width: 0; }
-    .list { border-right: 0.5px solid var(--separator); overflow: auto; }
-    .detail { display: flex; flex-direction: column; overflow: hidden; position: relative; }
-    #events { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-    .jump {
-      position: absolute; right: 22px; bottom: 18px; z-index: 5;
-      display: flex; flex-direction: column; gap: 6px;
-    }
-    .jump button {
-      width: 36px; height: 36px; border-radius: 980px;
-      border: 0.5px solid var(--separator);
-      background: rgba(255,255,255,0.88);
-      backdrop-filter: blur(12px);
-      color: var(--ink); font: inherit; font-size: 13px; font-weight: 650;
-      cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.06);
-    }
-    .jump button:hover { background: #fff; }
-    .jump button.on { background: var(--accent); color: #fff; border-color: transparent; }
-    .card {
-      background: var(--card);
-      border-radius: 12px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
-      box-shadow: 0 1px 2px rgba(0,0,0,.04);
-      cursor: pointer;
-    }
-    .card.active { outline: 2px solid rgba(0,113,227,0.35); }
-    .id-row, .session-head {
-      display: flex; align-items: center; gap: 6px; min-width: 0;
-    }
-    .session-head { padding: 0 4px 10px; }
     .session-head[hidden] { display: none !important; }
-    .card .id, .card .meta, .session-head .sid {
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    .session-head .sid {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 590;
+      letter-spacing: -0.02em;
     }
-    .card .id, .session-head .sid {
-      flex: 1; min-width: 0;
-      font-family: var(--font-mono); font-size: 12px;
-    }
-    .session-head .sid { user-select: all; }
     .copy-id {
       flex-shrink: 0;
-      height: 22px; padding: 0 8px; border: 0; border-radius: 980px;
-      background: rgba(120,120,128,0.12);
+      height: 24px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 980px;
+      background: rgba(120, 120, 128, 0.12);
       color: var(--muted);
-      font: inherit; font-size: 11px; font-weight: 600;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 600;
       cursor: pointer;
       transition: background 100ms ease-out, color 100ms ease-out, transform 100ms ease-out;
     }
     .copy-id:active { transform: scale(0.97); }
     .copy-id.ok { background: var(--honey-soft); color: var(--honey); }
     @media (hover: hover) and (pointer: fine) {
-      .copy-id:hover { background: rgba(120,120,128,0.18); color: var(--ink); }
+      .copy-id:hover { background: rgba(120, 120, 128, 0.18); color: var(--ink); }
     }
-    .thread { flex: 1; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
+    .thread {
+      flex: 1;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 18px 22px 72px;
+    }
+    .day {
+      display: flex;
+      justify-content: center;
+      margin: 8px 0 16px;
+    }
+    .day span {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      background: rgba(120, 120, 128, 0.12);
+      padding: 3px 10px;
+      border-radius: 980px;
+    }
     .row {
-      display: flex; width: 100%; margin: 0 0 10px;
+      display: flex;
+      width: 100%;
+      margin: 0 0 10px;
       min-width: 0;
     }
+    .row.grouped { margin-top: -4px; }
     .row.user { justify-content: flex-end; }
     .row.assistant, .row.tool { justify-content: flex-start; }
     .row.system { justify-content: center; }
     .bubble {
-      max-width: min(640px, 78%);
+      max-width: min(560px, 76%);
       min-width: 0;
       width: fit-content;
-      border-radius: 16px;
-      padding: 10px 12px;
-      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+      border-radius: 18px;
+      padding: 9px 13px 10px;
       overflow: hidden;
-    }
-    .bubble-body {
-      max-height: min(280px, 38vh);
-      overflow: auto;
-      min-width: 0;
     }
     .bubble.user {
       background: var(--honey-soft);
       color: var(--user-ink);
-      border-bottom-right-radius: 6px;
+      border-bottom-right-radius: 5px;
     }
     .bubble.assistant {
       background: var(--card);
-      border-left: 3px solid var(--accent);
-      border-bottom-left-radius: 6px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      border-bottom-left-radius: 5px;
     }
     .bubble.tool {
-      background: var(--tool-soft);
-      border-left: 3px solid var(--tool);
-      max-width: min(820px, 94%);
+      max-width: min(720px, 92%);
+      background: var(--card);
+      border: 0.5px solid var(--separator);
+      border-radius: 14px;
+      padding: 0;
+      box-shadow: none;
     }
     .bubble.system {
-      background: var(--system-soft);
-      color: var(--system);
-      border-radius: 980px;
-      padding: 6px 12px;
-      font-size: 12px;
-      max-width: min(520px, 80%);
+      background: transparent;
+      box-shadow: none;
+      padding: 0;
+      max-width: min(420px, 86%);
     }
+    .bubble.system .who,
+    .row.grouped .who { display: none; }
     .who {
-      font-size: 11px; font-weight: 650; letter-spacing: 0.02em;
-      margin-bottom: 4px; opacity: 0.85;
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      margin-bottom: 4px;
+      opacity: 0.8;
     }
-    .bubble.user .who { color: var(--honey); text-align: right; }
     .bubble.assistant .who { color: var(--accent); }
     .bubble.tool .who { color: var(--tool); }
-    .meta { color: var(--muted); font-size: 11px; margin-top: 6px; }
-    .badge {
-      display: inline-block;
-      font-size: 11px; font-weight: 600;
-      padding: 2px 8px; border-radius: 980px;
-      background: var(--honey-soft); color: var(--honey);
+    .bubble-body { min-width: 0; }
+    .bubble.tool .bubble-body {
+      max-height: min(240px, 32vh);
+      overflow: auto;
+      padding: 0 12px 10px;
     }
+    .meta {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 6px;
+    }
+    .bubble.tool .meta { padding: 0 12px 10px; margin-top: 0; }
+    .tool-fold summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      user-select: none;
+    }
+    .tool-fold summary::-webkit-details-marker { display: none; }
+    .tool-fold .tool-name {
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--tool);
+    }
+    .tool-fold .tool-result {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .tool-fold[open] summary {
+      border-bottom: 0.5px solid var(--separator);
+    }
+    .empty { color: var(--muted); padding: 48px 12px; text-align: center; font-size: 14px; }
+    .follow {
+      position: absolute;
+      right: 20px;
+      bottom: 20px;
+      z-index: 5;
+      width: 36px;
+      height: 36px;
+      border: 0;
+      border-radius: 980px;
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(12px);
+      color: var(--ink);
+      font: inherit;
+      font-size: 16px;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10);
+    }
+    .follow[hidden] { display: none !important; }
+    .follow:active { transform: scale(0.97); }
+    .follow.has-new { background: var(--accent); color: #fff; }
     .bubble pre, .bubble code, .bubble .hljs, .bubble .md-preview, .bubble .kv {
       max-width: 100%; min-width: 0;
     }
@@ -193,106 +330,123 @@
     }
     .kv { margin-top: 8px; }
     .kv .k {
-      font-size: 11px; font-weight: 600; color: var(--muted);
-      letter-spacing: 0.02em; text-transform: uppercase;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
     }
     .kv pre { margin-top: 3px; }
     details.raw {
-      margin-top: 8px; font-size: 12px; color: var(--muted);
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
     }
+    .bubble.tool details.raw { margin: 0 12px 10px; }
     details.raw summary { cursor: pointer; user-select: none; }
-    .empty { color: var(--muted); padding: 24px 8px; }
-    .md-preview { font-size: 14px; line-height: 1.5; color: var(--ink); }
+    .md-preview { font-size: 15px; line-height: 1.47; letter-spacing: -0.011em; color: var(--ink); }
     .md-preview > :first-child { margin-top: 0; }
     .md-preview > :last-child { margin-bottom: 0; }
     .md-preview h1, .md-preview h2, .md-preview h3,
     .md-preview h4, .md-preview h5, .md-preview h6 {
       font-weight: 650; letter-spacing: -0.02em; margin: 0.85em 0 0.35em;
     }
-    .md-preview h1 { font-size: 1.28em; }
-    .md-preview h2 { font-size: 1.14em; }
-    .md-preview h3 { font-size: 1.05em; }
-    .md-preview p { margin: 0 0 0.6em; }
-    .md-preview ul, .md-preview ol { margin: 0.15em 0 0.65em; padding-left: 1.3em; }
-    .md-preview li { margin: 0.12em 0; }
+    .md-preview p { margin: 0 0 0.55em; }
+    .md-preview ul, .md-preview ol { margin: 0.15em 0 0.55em; padding-left: 1.25em; }
+    .md-preview li { margin: 0.1em 0; }
     .md-preview blockquote {
-      margin: 0.4em 0 0.7em; padding: 0 0 0 10px;
-      border-left: 3px solid rgba(196,122,44,0.35); color: var(--muted);
+      margin: 0.4em 0 0.6em; padding: 0 0 0 10px;
+      border-left: 3px solid rgba(196, 122, 44, 0.35); color: var(--muted);
     }
     .md-preview code {
       font-family: var(--font-mono); font-size: 12.5px;
-      background: rgba(120,120,128,0.12); padding: 0.08em 0.35em; border-radius: 5px;
+      background: rgba(120, 120, 128, 0.12); padding: 0.08em 0.35em; border-radius: 5px;
       white-space: pre-wrap !important; overflow-wrap: anywhere !important;
     }
     .md-preview pre {
-      background: #f6f8fa; border-radius: 10px; padding: 10px 12px;
-      overflow: auto; max-height: 28em;
+      background: #f5f5f7; border-radius: 10px; padding: 10px 12px;
+      overflow: auto; max-height: 22em;
     }
     .md-preview pre code { background: transparent; padding: 0; }
     .kv .hljs, .kv pre.hljs {
       margin-top: 4px; border-radius: 10px; padding: 10px 12px;
-      overflow: auto; max-height: 28em;
+      overflow: auto; max-height: 22em;
     }
     .url-inert.md-link { color: var(--accent); }
     @media (max-width: 800px) {
-      main { grid-template-columns: 1fr; }
-      .list { border-right: 0; border-bottom: 0.5px solid var(--separator); }
+      .app {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(132px, 30vh) minmax(0, 1fr);
+      }
+      .rail { border-right: 0; border-bottom: 0.5px solid var(--separator); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .card:active, .copy-id:active, .follow:active { transform: none; }
     }
   </style>
 </head>
 <body>
-  <header>
+  <header class="top">
     <div>
-      <h1>ClipVault · Trae 会话</h1>
+      <h1>会话</h1>
       <div class="sub" id="health">加载中…</div>
     </div>
     <div class="grow"></div>
-    <input type="search" id="q" placeholder="搜 prompt / 工具 / 原文" />
     <a class="back" href="http://127.0.0.1:8080/">回剪贴板</a>
   </header>
-  <main>
-    <section class="list" id="sessions"><div class="empty">暂无会话</div></section>
-    <section class="detail">
+  <div class="app">
+    <aside class="rail">
+      <div class="rail-search"><input type="search" id="q" placeholder="搜 prompt / 工具" /></div>
+      <div id="sessionList"><div class="empty">暂无会话</div></div>
+    </aside>
+    <section class="stage">
       <div class="session-head" id="sessionHead" hidden>
         <span class="sid" id="sessionSid"></span>
         <button type="button" class="copy-id" id="copySid" title="复制 session id" aria-label="复制 session id">复制</button>
       </div>
-      <div id="events"><div class="empty">选择左侧会话</div></div>
-      <div class="jump">
-        <button type="button" id="jumpTop" title="滑到顶部">顶</button>
-        <button type="button" id="jumpBot" title="滑到底部并跟踪">底</button>
-      </div>
+      <div class="thread" id="thread"><div class="empty">选择左侧会话</div></div>
+      <button type="button" class="follow" id="jumpBot" hidden title="回到最新" aria-label="回到最新并跟踪">↓</button>
     </section>
-  </main>
+  </div>
   <script type="module">
-    import { imMessagesFromEvents, prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
+    import { asObj, imMessagesFromEvents, prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
 
     const $ = (id) => document.getElementById(id);
+    const thread = $("thread");
+    const jumpBot = $("jumpBot");
     let current = "";
     let painted = "";
     let followTail = true;
+    let pendingNew = false;
     let lastSig = "";
-    const NEAR = 48;
-    const threadEl = () => $("events").querySelector(".thread");
+    let railY = 0;
+    const NEAR = 64;
+
     const nearBottom = (el) =>
       !el || el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR;
-    const scrollThread = (where) => {
-      const el = threadEl();
-      if (!el) return;
-      el.scrollTop = where === "top" ? 0 : el.scrollHeight;
+    const pinBottom = () => {
+      thread.scrollTop = thread.scrollHeight;
+    };
+    const pinBottomSoon = () => {
+      pinBottom();
+      requestAnimationFrame(() => {
+        pinBottom();
+        requestAnimationFrame(pinBottom);
+      });
+    };
+    const syncFollowBtn = () => {
+      jumpBot.hidden = followTail;
+      jumpBot.classList.toggle("has-new", pendingNew && !followTail);
     };
     const markFollow = (on) => {
       followTail = on;
-      $("jumpBot").classList.toggle("on", on);
+      if (on) pendingNew = false;
+      syncFollowBtn();
     };
-    const bindThreadScroll = () => {
-      const el = threadEl();
-      if (!el || el.dataset.bound) return;
-      el.dataset.bound = "1";
-      el.addEventListener("scroll", () => {
-        markFollow(nearBottom(el));
-      }, { passive: true });
-    };
+    thread.addEventListener("scroll", () => {
+      markFollow(nearBottom(thread));
+    }, { passive: true });
+
     const engines = () => ({
       marked: globalThis.marked,
       purify: globalThis.DOMPurify,
@@ -302,6 +456,7 @@
     const esc = (s) => String(s ?? "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
     const copyTimers = new WeakMap();
     const flashCopy = (btn, ok) => {
       if (!btn) return;
@@ -340,7 +495,7 @@
         return false;
       }
     };
-    const showSessionHead = (sid) => {
+    const showSessionHead = (sid, title) => {
       const head = $("sessionHead");
       if (!sid) {
         head.hidden = true;
@@ -348,7 +503,7 @@
         return;
       }
       head.hidden = false;
-      $("sessionSid").textContent = sid;
+      $("sessionSid").textContent = title || sid;
       $("sessionSid").title = sid;
     };
     const bindCopyButtons = (root) => {
@@ -361,89 +516,109 @@
       });
     };
 
-    async function loadHealth() {
-      try {
-        const h = await (await fetch("/api/health")).json();
-        $("health").textContent = `events ${h.events ?? 0} · last ${h.last_ts || "—"} · duckdb ${h.duckdb}`;
-      } catch (e) {
-        $("health").textContent = "store 未就绪";
-      }
-    }
-    async function loadSessions() {
-      const data = await (await fetch("/api/sessions?limit=80")).json();
-      const box = $("sessions");
-      if (!data.sessions || !data.sessions.length) {
-        box.innerHTML = '<div class="empty">还没有 hook 事件。装好 hooks.json 后硬重启 Trae，再发一条真实消息。</div>';
-        return;
-      }
-      box.innerHTML = data.sessions.map((s) => `
-        <div class="card${s.session_id === current ? " active" : ""}" data-id="${esc(s.session_id || "")}">
-          <div class="id-row">
-            <div class="id" title="${esc(s.session_id || "")}">${esc(s.session_id || "(no session)")}</div>
-            ${s.session_id ? `<button type="button" class="copy-id" data-copy-sid="${esc(s.session_id)}" title="复制 session id" aria-label="复制 session id">复制</button>` : ""}
-          </div>
-          <div class="meta">${s.event_count} 事件 · ${s.last_ts || ""}</div>
-          <div class="meta">${esc(s.cwd || "")}</div>
-        </div>`).join("");
-      box.querySelectorAll(".card").forEach((el) => {
-        el.addEventListener("click", () => {
-          current = el.getAttribute("data-id") || "";
-          lastSig = "";
-          markFollow(true);
-          showSessionHead(current);
-          loadEvents();
-          loadSessions();
-        });
-      });
-      bindCopyButtons(box);
-    }
-    async function loadEvents() {
-      showSessionHead(current);
-      const q = $("q").value.trim();
-      const params = new URLSearchParams({ limit: "200" });
-      if (current) params.set("session_id", current);
-      if (q) params.set("q", q);
-      const data = await (await fetch("/api/events?" + params)).json();
-      const box = $("events");
-      if (!data.events || !data.events.length) {
-        box.innerHTML = '<div class="empty">没有匹配事件</div>';
-        return;
-      }
-      const rows = imMessagesFromEvents(data.events);
-      const sig = rows.map((r) => r.event.event_id).join(",");
-      const unchanged = sig === lastSig && threadEl();
-      lastSig = sig;
-      if (unchanged) {
-        if (followTail) scrollThread("bottom");
-        return;
-      }
-      box.innerHTML = `<div class="thread">${rows.map((row) => {
+    const dayKey = (ts) => {
+      const raw = String(ts || "").replace(" ", "T");
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) return String(ts || "").slice(0, 10);
+      const p = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    };
+    const dayLabel = (key) => {
+      const now = new Date();
+      const today = dayKey(now.toISOString());
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      if (key === today) return "今天";
+      if (key === dayKey(y.toISOString())) return "昨天";
+      return key.replace(/-/g, "/");
+    };
+    const relTime = (ts) => {
+      const d = new Date(String(ts || "").replace(" ", "T"));
+      if (Number.isNaN(d.getTime())) return ts || "";
+      const sec = (Date.now() - d.getTime()) / 1000;
+      if (sec < 45) return "刚刚";
+      if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
+      if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`;
+      if (sec < 86400 * 7) return `${Math.floor(sec / 86400)} 天前`;
+      return dayLabel(dayKey(ts));
+    };
+    const sessionTitle = (s) => {
+      const p = String(s.last_prompt || "").trim().split(/\n/)[0];
+      if (p) return p.slice(0, 56);
+      const cwd = String(s.cwd || "").replace(/\/$/, "");
+      const base = cwd.split("/").filter(Boolean).pop();
+      if (base) return base;
+      const id = String(s.session_id || "");
+      return id ? `${id.slice(0, 10)}…` : "无会话";
+    };
+    const toolBits = (e) => {
+      const resp = asObj(e.tool_response) || {};
+      const bits = [];
+      if (resp.exit_code != null) bits.push("exit " + resp.exit_code);
+      if (resp.status) bits.push(String(resp.status));
+      if (resp.wall_time_seconds != null) bits.push(resp.wall_time_seconds + "s");
+      return bits.join(" · ");
+    };
+
+    function renderRows(rows, prev) {
+      let lastDay = prev ? dayKey(prev.event.ts) : "";
+      let lastRole = prev ? prev.role : "";
+      return rows.map((row) => {
         const e = row.event;
+        const day = dayKey(e.ts);
+        const grouped = lastRole === row.role && row.role !== "system" && day === lastDay;
+        const chip = day && day !== lastDay
+          ? `<div class="day"><span>${esc(dayLabel(day))}</span></div>`
+          : "";
+        lastDay = day;
+        lastRole = row.role;
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
-        const meta = [e.ts, e.hook_event, tools].filter(Boolean).join(" · ");
+        const meta = [relTime(e.ts), e.hook_event, tools].filter(Boolean).join(" · ");
         const body = renderEventBlocks(e, engines()).map((b) =>
-          `<div class="kv">${b.html}</div>`
+          `<div class="kv">${b.key === "result" ? "" : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`
         ).join("");
-        return `<div class="row ${esc(row.role)}">
-          <article class="bubble ${esc(row.role)}" data-id="${esc(e.event_id)}">
-            <div class="who">${esc(row.label)}</div>
+        const who = grouped ? "" : `<div class="who">${esc(row.label)}</div>`;
+        let inner;
+        if (row.role === "tool") {
+          const name = tools || "工具";
+          const result = toolBits(e);
+          inner = `<details class="tool-fold">
+            <summary>
+              <span class="tool-name">${esc(name)}</span>
+              <span class="tool-result">${esc(result)}</span>
+            </summary>
+            ${who}
             <div class="bubble-body">${body}</div>
             <div class="meta">${esc(meta)}</div>
             <details class="raw">
               <summary>原始 JSON</summary>
               <div class="raw-body">加载中…</div>
             </details>
-          </article>
+          </details>`;
+        } else if (row.role === "system") {
+          inner = `<div class="bubble-body">${body || esc(e.hook_event || "")}</div>`;
+        } else {
+          inner = `${who}<div class="bubble-body">${body}</div>
+            <div class="meta">${esc(meta)}</div>
+            <details class="raw">
+              <summary>原始 JSON</summary>
+              <div class="raw-body">加载中…</div>
+            </details>`;
+        }
+        return `${chip}<div class="row ${esc(row.role)}${grouped ? " grouped" : ""}">
+          <article class="bubble ${esc(row.role)}" data-id="${esc(e.event_id)}">${inner}</article>
         </div>`;
-      }).join("")}</div>`;
-      bindThreadScroll();
-      if (followTail || painted !== current) scrollThread("bottom");
-      painted = current;
-      box.querySelectorAll("details.raw").forEach((el) => {
+      }).join("");
+    }
+
+    function bindRaws(root) {
+      root.querySelectorAll("details.raw").forEach((el) => {
+        if (el.dataset.bound) return;
+        el.dataset.bound = "1";
         el.addEventListener("toggle", async () => {
           if (!el.open) return;
           const host = el.querySelector(".raw-body");
-          if (host.dataset.loaded) return;
+          if (!host || host.dataset.loaded) return;
           const id = el.closest(".bubble").getAttribute("data-id");
           try {
             const d = await (await fetch("/api/event?id=" + encodeURIComponent(id))).json();
@@ -456,16 +631,98 @@
         });
       });
     }
+
+    async function loadHealth() {
+      try {
+        const h = await (await fetch("/api/health")).json();
+        $("health").textContent = `${h.events ?? 0} 条 · ${relTime(h.last_ts) || "—"}`;
+      } catch (e) {
+        $("health").textContent = "store 未就绪";
+      }
+    }
+    async function loadSessions() {
+      const data = await (await fetch("/api/sessions?limit=80")).json();
+      const box = $("sessionList");
+      railY = box.scrollTop;
+      if (!data.sessions || !data.sessions.length) {
+        box.innerHTML = '<div class="empty">还没有 hook 事件。装好 hooks 后硬重启 Trae，再发一条真实消息。</div>';
+        return;
+      }
+      box.innerHTML = data.sessions.map((s) => {
+        const title = sessionTitle(s);
+        return `
+        <div class="card${s.session_id === current ? " active" : ""}" data-id="${esc(s.session_id || "")}" data-title="${esc(title)}">
+          <div class="id-row">
+            <div class="title" title="${esc(s.session_id || "")}">${esc(title)}</div>
+            ${s.session_id ? `<button type="button" class="copy-id" data-copy-sid="${esc(s.session_id)}" title="复制 session id" aria-label="复制 session id">复制</button>` : ""}
+          </div>
+          <div class="meta">${relTime(s.last_ts)} · ${s.event_count} 条</div>
+        </div>`;
+      }).join("");
+      box.querySelectorAll(".card").forEach((el) => {
+        el.addEventListener("click", () => {
+          current = el.getAttribute("data-id") || "";
+          lastSig = "";
+          painted = "";
+          markFollow(true);
+          showSessionHead(current, el.getAttribute("data-title") || current);
+          loadEvents();
+          loadSessions();
+        });
+      });
+      bindCopyButtons(box);
+      box.scrollTop = railY;
+    }
+    async function loadEvents() {
+      const q = (document.getElementById("q") || {}).value || "";
+      const params = new URLSearchParams({ limit: "200" });
+      if (current) params.set("session_id", current);
+      if (String(q).trim()) params.set("q", String(q).trim());
+      if (!current) {
+        thread.innerHTML = '<div class="empty">选择左侧会话</div>';
+        showSessionHead("");
+        return;
+      }
+      const data = await (await fetch("/api/events?" + params)).json();
+      if (!data.events || !data.events.length) {
+        thread.innerHTML = '<div class="empty">没有匹配事件</div>';
+        lastSig = "";
+        return;
+      }
+      const rows = imMessagesFromEvents(data.events);
+      const sig = rows.map((r) => r.event.event_id).join(",");
+      if (sig === lastSig) {
+        if (followTail) pinBottomSoon();
+        return;
+      }
+      const canAppend = lastSig && sig.startsWith(lastSig + ",") && thread.querySelector(".row");
+      if (canAppend) {
+        const oldN = lastSig.split(",").filter(Boolean).length;
+        const added = rows.slice(oldN);
+        const prev = rows[oldN - 1];
+        thread.insertAdjacentHTML("beforeend", renderRows(added, prev));
+        lastSig = sig;
+        bindRaws(thread);
+        if (followTail) pinBottomSoon();
+        else {
+          pendingNew = true;
+          syncFollowBtn();
+        }
+        return;
+      }
+      lastSig = sig;
+      thread.innerHTML = renderRows(rows);
+      bindRaws(thread);
+      if (followTail || painted !== current) pinBottomSoon();
+      painted = current;
+    }
+
     $("q").addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") loadEvents();
     });
-    $("jumpTop").addEventListener("click", () => {
-      markFollow(false);
-      scrollThread("top");
-    });
-    $("jumpBot").addEventListener("click", () => {
+    jumpBot.addEventListener("click", () => {
       markFollow(true);
-      scrollThread("bottom");
+      pinBottomSoon();
     });
     $("copySid").addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -475,7 +732,12 @@
     markFollow(true);
     loadHealth();
     loadSessions();
-    setInterval(() => { loadHealth(); if (current) loadEvents(); else loadSessions(); }, 8000);
+    const tick = () => {
+      loadHealth();
+      if (current) loadEvents();
+      loadSessions();
+    };
+    setInterval(tick, 2500);
   </script>
 </body>
 </html>

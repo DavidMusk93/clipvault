@@ -55,3 +55,36 @@ test('copy button press feedback stays short and origin-safe', () => {
   );
   assert.doesNotMatch(html, /data-copy-sid=\"\$\{s\.session_id\}/);
 });
+
+test('rail and thread are separate scroll layers', () => {
+  assert.match(html, /html, body \{[\s\S]*?overflow:\s*hidden/);
+  assert.match(html, /#sessionList \{[\s\S]*?overflow-y:\s*auto/);
+  assert.match(html, /\.thread \{[\s\S]*?overflow-y:\s*auto/);
+  assert.match(html, /overscroll-behavior:\s*contain/);
+  assert.match(html, /id="thread"/);
+  assert.match(html, /id="sessionList"/);
+  assert.doesNotMatch(html, /min-height:\s*calc\(100vh/);
+});
+
+test('new events follow the thread tail unless the user scrolled up', () => {
+  assert.match(html, /followTail/);
+  assert.match(html, /pinBottomSoon/);
+  assert.match(html, /nearBottom/);
+  assert.match(html, /id="jumpBot"/);
+  assert.match(html, /pendingNew/);
+  assert.match(html, /sig\.startsWith\(lastSig/);
+  assert.doesNotMatch(html, /id="jumpTop"/);
+});
+
+test('chat chrome: tool fold, no shared bubble max-height on user', () => {
+  assert.match(html, /tool-fold/);
+  assert.match(html, /\.bubble\.tool \.bubble-body \{[\s\S]*?max-height/);
+  assert.doesNotMatch(html, /\.bubble-body \{\s*max-height:\s*min\(280px/);
+  assert.match(html, /sessionTitle/);
+});
+
+test('session list asks the store for last_prompt', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
+  assert.match(server, /last_prompt/);
+  assert.match(html, /s\.last_prompt/);
+});

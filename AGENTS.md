@@ -513,6 +513,6 @@ Hook 事件进 **单独 DuckDB**，禁止写入 `clipboard_items`。
 
 安装：`bash trae_hooks/install.sh`。改配置后 **硬重启 Trae** 才加载 hook。采集脚本必须永远 exit 0。
 
-会话时间线是长期前端，按 **IM 俯瞰**：用户右 / 助手左 / 工具与系统分色。JSON / Markdown 走 `web/session-render.mjs` + `markdown-render.mjs` / `text-format.mjs`。角色色真源：`docs/design-taste.md`。禁止 DIY markdown 语法。气泡内等宽必须换行，禁止撑破卡片。
+会话时间线是长期前端，按 **IM 俯瞰**：用户右 / 助手左 / 工具与系统分色。会话列与消息列 **分两个 overflow**，禁止共用页面滚动。新消息在跟底时钉住 thread 底部。JSON / Markdown 走 `web/session-render.mjs` + `markdown-render.mjs` / `text-format.mjs`。角色色与 chrome 真源：`docs/design-taste.md`。禁止 DIY markdown 语法。气泡内等宽必须换行，禁止撑破卡片。
 
 

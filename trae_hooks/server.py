@@ -264,7 +264,8 @@ def make_handler(store: Store, http_origin_note: str) -> type[BaseHTTPRequestHan
                            count(*) AS event_count,
                            count(DISTINCT hook_event) AS hook_kinds,
                            arg_max(cwd, ts) AS cwd,
-                           arg_max(instance_id, ts) AS instance_id
+                           arg_max(instance_id, ts) AS instance_id,
+                           arg_max(prompt, CASE WHEN coalesce(prompt, '') = '' THEN NULL ELSE ts END) AS last_prompt
                     FROM hook_events
                     GROUP BY session_id
                     ORDER BY last_ts DESC

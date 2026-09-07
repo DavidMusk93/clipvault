@@ -73,7 +73,13 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 映射：`UserPromptSubmit`→user；`Stop`（及 assistant 正文）→assistant；`PreToolUse`/`PostToolUse`→tool。`SessionStart` **不进气泡**（cwd 不是一句对话）。无正文的 `Notification` 也不进。同一 `tool_use_id` 有 Post 则不画 Pre。
 
-**溢出**：气泡 `min-width:0`；等宽覆盖 highlight.js 的 `white-space:pre`，必须 `pre-wrap !important` + `overflow-wrap:anywhere`。聊天正文限高，内部滚动。
+**两层滚动**：会话列 `#sessionList` 与消息 `#thread` 是两个 scroller。`html, body { height:100%; overflow:hidden }`，`overscroll-behavior: contain`。禁止 `main { min-height: 100vh }` 让整页带着列表一起滚。
+
+**跟底**：靠近底部时新消息钉住 `#thread` 底部（不动画）。用户上翻则停止跟踪，露出「↓」；有未读时 Accent 底。禁止新进展把人拽回底部。
+
+**聊天 chrome**：左栏 `#F2F2F7` 会话行（标题=最近 prompt，不是整段 uuid）；右栏 IM 气泡。工具默认折叠。用户/助手气泡不套第二层 max-height 滚动。
+
+**溢出**：气泡 `min-width:0`；等宽覆盖 highlight.js 的 `white-space:pre`，必须 `pre-wrap !important` + `overflow-wrap:anywhere`。工具输出才限高。
 
 ## 源码绑定
 
