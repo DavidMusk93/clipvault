@@ -88,3 +88,44 @@ test('session list asks the store for last_prompt', () => {
   assert.match(server, /last_prompt/);
   assert.match(html, /s\.last_prompt/);
 });
+
+test('opens the latest session and shows tool command without folding it away', () => {
+  assert.match(html, /followLatest/);
+  assert.match(html, /latest\.session_id/);
+  assert.match(html, /const renderTool =/);
+  assert.match(html, /tool-cmd/);
+  assert.match(html, /展开输出/);
+  assert.match(html, /blocksFromEvent/);
+});
+
+test('trae sessions use nmem SSE contract, not interval polling', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
+  assert.match(server, /path == \"\/api\/stream\"/);
+  assert.match(server, /retry: 3000/);
+  assert.match(server, /X-Accel-Buffering/);
+  assert.match(server, /SSE_MAX_BUFFERED = 32/);
+  assert.match(server, /SSE_HEARTBEAT_SECONDS = 15/);
+  assert.match(server, /resync_required/);
+  assert.match(server, /: ping/);
+  assert.match(html, /EventSource\(\"\/api\/stream\"\)/);
+  assert.match(html, /resync_required/);
+  assert.match(html, /scheduleResync/);
+  assert.match(html, /visibilitychange/);
+  assert.match(html, /pageshow/);
+  assert.doesNotMatch(html, /setInterval\(/);
+  assert.doesNotMatch(
+    html,
+    /es\.close\(\);\s*setTimeout\(setupSSE/,
+  );
+  assert.match(html, /EventSource\.CLOSED/);
+});
+
+test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () => {
+  assert.doesNotMatch(html, /if \(sig === lastSig\) \{\s*if \(followTail\) pinBottomSoon/);
+  assert.match(html, /if \(sig === lastSig\) return/);
+  assert.match(html, /if \(listSig === lastListSig\) return/);
+  assert.match(html, /trae_sessions_cls/);
+  assert.match(html, /trae_sessions_paint/);
+  assert.match(html, /trae_sessions_longtask/);
+  assert.match(html, /127\.0\.0\.1:8080\/api\/ui-metrics/);
+});

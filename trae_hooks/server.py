@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import traceback
+from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -69,6 +70,7 @@ class Store:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.lock = threading.Lock()
+        self.on_insert: Any = None
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.con = duckdb.connect(str(db_path))
         self.con.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -126,13 +128,28 @@ class Store:
             row.get("host"),
             row.get("pid"),
         ]
+        eid = row.get("event_id")
         with self.lock:
-            self.con.execute(INSERT_SQL, params)
-            exists = self.con.execute(
+            existed = self.con.execute(
                 "SELECT 1 FROM hook_events WHERE event_id = ? LIMIT 1",
-                [row.get("event_id")],
+                [eid],
             ).fetchone()
-        return bool(exists)
+            self.con.execute(INSERT_SQL, params)
+        if existed:
+            return True
+        cb = self.on_insert
+        if cb:
+            try:
+                cb(
+                    {
+                        "type": "hook_event",
+                        "session_id": row.get("session_id") or "",
+                        "event_id": eid or "",
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                LOG.exception("sse notify")
+        return True
 
     def query(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
         with self.lock:
@@ -174,6 +191,80 @@ class Store:
         self.con.close()
 
 
+SSE_MAX_BUFFERED = 32
+SSE_HEARTBEAT_SECONDS = 15
+SSE_PING = b': ping\n\ndata: {"type":"ping"}\n\n'
+SSE_RESYNC = b'data: {"type":"resync_required"}\n\n'
+SSE_HELLO = b'retry: 3000\n\n: connected\n\ndata: {"type":"connected"}\n\n'
+
+
+class SseClient:
+    def __init__(self, wfile: Any) -> None:
+        self.wfile = wfile
+        self.lock = threading.Lock()
+        self.cond = threading.Condition(self.lock)
+        self.queue: deque[bytes] = deque()
+        self.resync = False
+        self.dead = False
+
+    def push(self, payload: bytes) -> None:
+        with self.cond:
+            if self.dead:
+                return
+            if self.resync:
+                return
+            if len(self.queue) >= SSE_MAX_BUFFERED:
+                self.queue.clear()
+                self.resync = True
+                self.queue.append(SSE_RESYNC)
+            else:
+                self.queue.append(payload)
+            self.cond.notify()
+
+    def wait_frame(self, timeout: float) -> bytes | None:
+        with self.cond:
+            if self.dead:
+                return b""
+            if not self.queue:
+                self.cond.wait(timeout)
+            if self.dead:
+                return b""
+            if not self.queue:
+                return None
+            frame = self.queue.popleft()
+            if self.resync and not self.queue:
+                self.resync = False
+            return frame
+
+    def close(self) -> None:
+        with self.cond:
+            self.dead = True
+            self.cond.notify()
+
+
+class SseHub:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.clients: list[SseClient] = []
+
+    def add(self, client: SseClient) -> None:
+        with self.lock:
+            self.clients.append(client)
+
+    def drop(self, client: SseClient) -> None:
+        client.close()
+        with self.lock:
+            self.clients = [c for c in self.clients if c is not client]
+
+    def publish(self, obj: dict[str, Any]) -> None:
+        raw = json.dumps(obj, ensure_ascii=False, default=json_default).encode("utf-8")
+        payload = b"data: " + raw + b"\n\n"
+        with self.lock:
+            clients = list(self.clients)
+        for client in clients:
+            client.push(payload)
+
+
 def drain_spool(store: Store, spool_dir: Path) -> int:
     if not spool_dir.is_dir():
         return 0
@@ -211,8 +302,10 @@ def drain_spool(store: Store, spool_dir: Path) -> int:
     return ingested
 
 
-def make_handler(store: Store, http_origin_note: str) -> type[BaseHTTPRequestHandler]:
+def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def log_message(self, fmt: str, *args: Any) -> None:
             LOG.info("%s %s", self.address_string(), fmt % args)
 
@@ -248,6 +341,9 @@ def make_handler(store: Store, http_origin_note: str) -> type[BaseHTTPRequestHan
             if path in ("/", "/index.html", "/trae", "/sessions"):
                 html = UI_PATH.read_bytes() if UI_PATH.is_file() else b"<h1>missing UI</h1>"
                 self._send(200, html, "text/html; charset=utf-8")
+                return
+            if path == "/api/stream":
+                self._sse(hub)
                 return
             static = _static_file(path)
             if static is not None:
@@ -328,6 +424,39 @@ def make_handler(store: Store, http_origin_note: str) -> type[BaseHTTPRequestHan
                 return
             self._json(404, {"error": "not found"})
 
+        def _sse(self, hub: SseHub) -> None:
+            self.close_connection = True
+            try:
+                self.request.settimeout(None)
+            except OSError:
+                pass
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            client = SseClient(self.wfile)
+            hub.add(client)
+            try:
+                self.wfile.write(SSE_HELLO)
+                self.wfile.flush()
+                while not client.dead:
+                    frame = client.wait_frame(float(SSE_HEARTBEAT_SECONDS))
+                    if client.dead:
+                        break
+                    if frame is None:
+                        frame = SSE_PING
+                    if frame == b"":
+                        break
+                    self.wfile.write(frame)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                hub.drop(client)
+
     return Handler
 
 
@@ -403,6 +532,8 @@ def main() -> int:
 
     db_path = home / "trae" / "hook_events.duckdb"
     store = Store(db_path)
+    hub = SseHub()
+    store.on_insert = hub.publish
     store.load_quack()
     store.serve_quack(args.quack_uri, token)
 
@@ -421,7 +552,7 @@ def main() -> int:
 
     threading.Thread(target=drain_loop, name="spool-drain", daemon=True).start()
 
-    handler = make_handler(store, f"http://{args.http_host}:{args.http_port}")
+    handler = make_handler(store, f"http://{args.http_host}:{args.http_port}", hub)
     httpd = ThreadingHTTPServer((args.http_host, args.http_port), handler)
     LOG.info("http://%s:%s  quack=%s  db=%s", args.http_host, args.http_port, args.quack_uri, db_path)
 

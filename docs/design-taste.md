@@ -75,7 +75,9 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 **两层滚动**：会话列 `#sessionList` 与消息 `#thread` 是两个 scroller。`html, body { height:100%; overflow:hidden }`，`overscroll-behavior: contain`。禁止 `main { min-height: 100vh }` 让整页带着列表一起滚。
 
-**跟底**：靠近底部时新消息钉住 `#thread` 底部（不动画）。用户上翻则停止跟踪，露出「↓」；有未读时 Accent 底。禁止新进展把人拽回底部。
+**跟底**：靠近底部时新消息钉住 `#thread` 底部（不动画）。用户上翻则停止跟踪，露出「↓」；有未读时 Accent 底。禁止新进展把人拽回底部。进入页默认打开**最新会话**。工具露出命令与结果；只有长输出才折叠。
+
+**实时**：Trae 页走 nmem SSE 契约（`GET /api/stream`：`retry: 3000`、15s ping、满 32 发 `resync_required`、浏览器原生重连）。禁止 `setInterval` 整页重绘。抖动用本机 `ui-metrics` 的 `trae_sessions_cls` / `trae_sessions_paint` / `trae_sessions_longtask` 追溯。
 
 **聊天 chrome**：左栏 `#F2F2F7` 会话行（标题=最近 prompt，不是整段 uuid）；右栏 IM 气泡。工具默认折叠。用户/助手气泡不套第二层 max-height 滚动。
 

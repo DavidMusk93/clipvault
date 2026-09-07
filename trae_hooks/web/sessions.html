@@ -294,6 +294,35 @@
     .tool-fold[open] summary {
       border-bottom: 0.5px solid var(--separator);
     }
+    .tool-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px 6px;
+    }
+    .tool-head .tool-name {
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--tool);
+    }
+    .tool-head .tool-result {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .tool-cmd, .tool-out, .tool-preview {
+      padding: 0 12px 8px;
+      min-width: 0;
+    }
+    .tool-cmd pre, .tool-preview pre {
+      margin-top: 0;
+      background: #f5f5f7;
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .tool-preview { opacity: 0.82; }
+    .bubble.tool .tool-fold { margin: 0 8px 8px; }
+    .bubble.tool .tool-fold summary { padding: 6px 8px; }
     .empty { color: var(--muted); padding: 48px 12px; text-align: center; font-size: 14px; }
     .follow {
       position: absolute;
@@ -409,7 +438,7 @@
     </section>
   </div>
   <script type="module">
-    import { asObj, imMessagesFromEvents, prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
+    import { asObj, blocksFromEvent, imMessagesFromEvents, prettyJson, renderEventBlocks, renderValue } from "/session-render.mjs";
 
     const $ = (id) => document.getElementById(id);
     const thread = $("thread");
@@ -417,10 +446,75 @@
     let current = "";
     let painted = "";
     let followTail = true;
+    let followLatest = true;
     let pendingNew = false;
     let lastSig = "";
+    let lastListSig = "";
     let railY = 0;
+    let es = null;
     const NEAR = 64;
+    const METRICS = "http://127.0.0.1:8080/api/ui-metrics";
+    const metricQ = [];
+    let metricFlush = 0;
+    const emit = (name, extra) => {
+      if (!/^[a-z][a-z0-9_]{1,63}$/.test(name)) return;
+      const ev = { name, ts: Date.now() };
+      if (extra && extra.dur_ms != null && Number.isFinite(extra.dur_ms)) ev.dur_ms = extra.dur_ms;
+      if (extra && extra.payload && typeof extra.payload === "object") {
+        const p = {};
+        for (const [k, v] of Object.entries(extra.payload)) {
+          if (!/^(mode|ratio|chars|bytes|n|value|interaction|q_len|kind|phase|reason|lag|host)$/.test(k)) continue;
+          if (typeof v === "number" && Number.isFinite(v)) p[k] = v;
+          else if (typeof v === "string" && v.length <= 32) p[k] = v;
+        }
+        if (Object.keys(p).length) ev.payload = p;
+      }
+      metricQ.push(ev);
+      if (metricQ.length >= 20) flushMetrics();
+      else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 2000);
+    };
+    const flushMetrics = () => {
+      metricFlush = 0;
+      if (!metricQ.length) return;
+      const events = metricQ.splice(0, 100);
+      const body = JSON.stringify({ events, session: "trae-sessions" });
+      try {
+        if (navigator.sendBeacon) {
+          const blob = new Blob([body], { type: "application/json" });
+          if (navigator.sendBeacon(METRICS, blob)) return;
+        }
+      } catch (_) {}
+      fetch(METRICS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushMetrics();
+    });
+    window.addEventListener("pagehide", flushMetrics);
+    if (typeof PerformanceObserver !== "undefined") {
+      try {
+        const cls = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) {
+            if (!e.hadRecentInput && e.value > 0.001) {
+              emit("trae_sessions_cls", { dur_ms: e.value * 1000, payload: { value: Math.round(e.value * 10000) / 10000 } });
+            }
+          }
+        });
+        cls.observe({ type: "layout-shift", buffered: false });
+      } catch (_) {}
+      try {
+        const lt = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) {
+            if (e.duration >= 50) emit("trae_sessions_longtask", { dur_ms: e.duration });
+          }
+        });
+        lt.observe({ type: "longtask", buffered: false });
+      } catch (_) {}
+    }
 
     const nearBottom = (el) =>
       !el || el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR;
@@ -559,6 +653,45 @@
       if (resp.wall_time_seconds != null) bits.push(resp.wall_time_seconds + "s");
       return bits.join(" · ");
     };
+    const bulky = (text) => {
+      const s = String(text || "");
+      return s.length > 900 || s.split(/\n/).length > 14;
+    };
+    const renderTool = (e) => {
+      const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
+      const name = tools || "工具";
+      const result = toolBits(e);
+      const meta = [relTime(e.ts), e.hook_event, tools].filter(Boolean).join(" · ");
+      let html = `<div class="tool-head"><span class="tool-name">${esc(name)}</span><span class="tool-result">${esc(result)}</span></div>`;
+      for (const b of blocksFromEvent(e)) {
+        if (b.key === "result") continue;
+        const rendered = renderValue(b.text, b.hint, engines());
+        if (b.key === "command" || b.key === "tool_input") {
+          html += `<div class="tool-cmd">${rendered.html}</div>`;
+          continue;
+        }
+        if (b.key === "output") {
+          if (bulky(b.text)) {
+            const preview = String(b.text).trim().split(/\n/).slice(0, 3).join("\n");
+            const n = String(b.text).split(/\n/).length;
+            html += `<div class="tool-preview"><pre>${esc(preview)}</pre></div>
+              <details class="tool-fold"><summary>展开输出 · ${n} 行</summary>
+                <div class="bubble-body">${rendered.html}</div>
+              </details>`;
+          } else {
+            html += `<div class="tool-out">${rendered.html}</div>`;
+          }
+          continue;
+        }
+        html += `<div class="kv"><div class="k">${esc(b.key)}</div>${rendered.html}</div>`;
+      }
+      html += `<div class="meta">${esc(meta)}</div>
+        <details class="raw">
+          <summary>原始 JSON</summary>
+          <div class="raw-body">加载中…</div>
+        </details>`;
+      return html;
+    };
 
     function renderRows(rows, prev) {
       let lastDay = prev ? dayKey(prev.event.ts) : "";
@@ -574,27 +707,13 @@
         lastRole = row.role;
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
         const meta = [relTime(e.ts), e.hook_event, tools].filter(Boolean).join(" · ");
-        const body = renderEventBlocks(e, engines()).map((b) =>
+        const body = row.role === "tool" ? "" : renderEventBlocks(e, engines()).map((b) =>
           `<div class="kv">${b.key === "result" ? "" : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`
         ).join("");
         const who = grouped ? "" : `<div class="who">${esc(row.label)}</div>`;
         let inner;
         if (row.role === "tool") {
-          const name = tools || "工具";
-          const result = toolBits(e);
-          inner = `<details class="tool-fold">
-            <summary>
-              <span class="tool-name">${esc(name)}</span>
-              <span class="tool-result">${esc(result)}</span>
-            </summary>
-            ${who}
-            <div class="bubble-body">${body}</div>
-            <div class="meta">${esc(meta)}</div>
-            <details class="raw">
-              <summary>原始 JSON</summary>
-              <div class="raw-body">加载中…</div>
-            </details>
-          </details>`;
+          inner = renderTool(e);
         } else if (row.role === "system") {
           inner = `<div class="bubble-body">${body || esc(e.hook_event || "")}</div>`;
         } else {
@@ -643,11 +762,24 @@
     async function loadSessions() {
       const data = await (await fetch("/api/sessions?limit=80")).json();
       const box = $("sessionList");
-      railY = box.scrollTop;
       if (!data.sessions || !data.sessions.length) {
+        lastListSig = "";
         box.innerHTML = '<div class="empty">还没有 hook 事件。装好 hooks 后硬重启 Trae，再发一条真实消息。</div>';
-        return;
+        return data.sessions || [];
       }
+      const listSig = data.sessions.map((s) => `${s.session_id}:${s.event_count}:${s.last_ts}`).join("|");
+      const latest = data.sessions[0];
+      if (followLatest && latest && latest.session_id && latest.session_id !== current) {
+        current = latest.session_id;
+        lastSig = "";
+        painted = "";
+        markFollow(true);
+        showSessionHead(current, sessionTitle(latest));
+        loadEvents();
+      }
+      if (listSig === lastListSig) return data.sessions;
+      lastListSig = listSig;
+      railY = box.scrollTop;
       box.innerHTML = data.sessions.map((s) => {
         const title = sessionTitle(s);
         return `
@@ -661,17 +793,22 @@
       }).join("");
       box.querySelectorAll(".card").forEach((el) => {
         el.addEventListener("click", () => {
-          current = el.getAttribute("data-id") || "";
+          const id = el.getAttribute("data-id") || "";
+          followLatest = !!(data.sessions[0] && data.sessions[0].session_id === id);
+          current = id;
           lastSig = "";
           painted = "";
           markFollow(true);
           showSessionHead(current, el.getAttribute("data-title") || current);
+          box.querySelectorAll(".card").forEach((c) => {
+            c.classList.toggle("active", c.getAttribute("data-id") === current);
+          });
           loadEvents();
-          loadSessions();
         });
       });
       bindCopyButtons(box);
       box.scrollTop = railY;
+      return data.sessions;
     }
     async function loadEvents() {
       const q = (document.getElementById("q") || {}).value || "";
@@ -691,16 +828,15 @@
       }
       const rows = imMessagesFromEvents(data.events);
       const sig = rows.map((r) => r.event.event_id).join(",");
-      if (sig === lastSig) {
-        if (followTail) pinBottomSoon();
-        return;
-      }
+      if (sig === lastSig) return;
       const canAppend = lastSig && sig.startsWith(lastSig + ",") && thread.querySelector(".row");
       if (canAppend) {
         const oldN = lastSig.split(",").filter(Boolean).length;
         const added = rows.slice(oldN);
         const prev = rows[oldN - 1];
+        const t0 = performance.now();
         thread.insertAdjacentHTML("beforeend", renderRows(added, prev));
+        emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: added.length, kind: "append" } });
         lastSig = sig;
         bindRaws(thread);
         if (followTail) pinBottomSoon();
@@ -711,7 +847,9 @@
         return;
       }
       lastSig = sig;
+      const t0 = performance.now();
       thread.innerHTML = renderRows(rows);
+      emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: rows.length, kind: "full" } });
       bindRaws(thread);
       if (followTail || painted !== current) pinBottomSoon();
       painted = current;
@@ -729,15 +867,53 @@
       ev.stopPropagation();
       copySessionId(current, $("copySid"));
     });
-    markFollow(true);
-    loadHealth();
-    loadSessions();
-    const tick = () => {
+    const scheduleResync = () => {
       loadHealth();
-      if (current) loadEvents();
       loadSessions();
+      if (current) loadEvents();
     };
-    setInterval(tick, 2500);
+    const setupSSE = () => {
+      if (es && es.readyState !== EventSource.CLOSED) return;
+      try { if (es) es.close(); } catch (_) {}
+      es = new EventSource("/api/stream");
+      es.onopen = () => scheduleResync();
+      es.onmessage = (ev) => {
+        let d;
+        try { d = JSON.parse(ev.data); } catch (_) { return; }
+        if (!d || d.type === "ping" || d.type === "connected") return;
+        if (d.type === "resync_required") {
+          emit("trae_sessions_resync", { payload: { reason: "overflow" } });
+          lastSig = "";
+          lastListSig = "";
+          scheduleResync();
+          return;
+        }
+        if (d.type === "hook_event") {
+          emit("trae_sessions_hook", { payload: { n: 1 } });
+          if (followLatest && d.session_id && d.session_id !== current) {
+            current = d.session_id;
+            lastSig = "";
+            painted = "";
+            markFollow(true);
+          }
+          loadHealth();
+          loadSessions();
+          if (!current || d.session_id === current) loadEvents();
+        }
+      };
+    };
+    const onVisible = () => {
+      setupSSE();
+      scheduleResync();
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") onVisible();
+    });
+    window.addEventListener("pageshow", onVisible);
+    window.addEventListener("online", onVisible);
+    markFollow(true);
+    setupSSE();
+    scheduleResync();
   </script>
 </body>
 </html>
