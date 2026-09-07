@@ -59,7 +59,8 @@
       --gap: 14px;
       --chrome-pad-x: 22px;
       --spring: cubic-bezier(0.22, 1, 0.36, 1);
-      --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+      --ease-sheet: cubic-bezier(0.16, 1, 0.3, 1);
+      --scene-scale: 1;
       --press: 100ms ease-out;
       --elev-1: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
       --elev-2: 0 4px 24px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.04);
@@ -123,7 +124,7 @@
       backdrop-filter: blur(20px) saturate(180%);
       border-bottom: 0.5px solid var(--separator);
       box-shadow: none;
-      transition: transform 0.38s var(--spring), opacity 0.28s var(--ease-sheet), visibility 0s linear 0s;
+      transition: opacity 0.28s var(--ease-sheet);
     }
     .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .brand-logo {
@@ -167,7 +168,15 @@
       -webkit-backdrop-filter: blur(16px) saturate(160%);
       backdrop-filter: blur(16px) saturate(160%);
       scrollbar-width: none;
-      transition: transform 0.38s var(--spring), opacity 0.28s var(--ease-sheet), visibility 0s linear 0s;
+      transition: opacity 0.28s var(--ease-sheet);
+    }
+    .wall-scene {
+      flex: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      transform: scale(var(--scene-scale));
+      transform-origin: 50% 42%;
     }
     html.notes-open,
     html.sessions-open,
@@ -176,16 +185,17 @@
       overflow: hidden;
       overscroll-behavior: none;
     }
+    body.notes-open .wall-scene,
+    body.sessions-open .wall-scene {
+      pointer-events: none;
+    }
     body.notes-open .top-bar,
     body.sessions-open .top-bar,
     body.notes-open .chips,
     body.sessions-open .chips,
     body.notes-open main,
     body.sessions-open main {
-      opacity: 0;
       pointer-events: none;
-      visibility: hidden;
-      transition: opacity 0.28s var(--ease-sheet), visibility 0s linear 0.28s;
     }
     body.notes-open .notes-fab,
     body.sessions-open .notes-fab { display: none !important; }
@@ -457,11 +467,7 @@
     .link-empty { font-size: 13px; color: var(--muted); padding: 10px 0 6px; line-height: 1.4; }
     .top-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-    main {
-      flex: 1;
-      padding: 6px var(--chrome-pad-x) 48px;
-      transition: opacity 0.28s var(--ease-sheet), visibility 0s linear 0s;
-    }
+    main { flex: 1; padding: 6px var(--chrome-pad-x) 48px; }
     .pin-rail { margin: 0 0 2px; }
     .feed-split {
       display: flex; align-items: center; gap: 10px;
@@ -1716,9 +1722,9 @@
       text-decoration: none;
     }
     .notes-fab:active { transform: scale(0.97); }
-    #notesOpenBtn.is-on,
-    #traeSessionsBtn.is-on {
-      background: var(--ink); color: #fff; border-color: transparent;
+    #notesOpenBtn:active,
+    #traeSessionsBtn:active {
+      transform: none;
     }
 
     /* Notes: same page, panel from the 笔记 control. No second document.
@@ -1734,8 +1740,6 @@
     }
     .notes-panel.open .notes-frost {
       pointer-events: auto;
-      opacity: 1;
-      will-change: opacity;
     }
     .notes-panel.open.is-settled .notes-frost,
     .notes-panel.open.is-settled .notes-shell,
@@ -1744,30 +1748,16 @@
       position: absolute; inset: 0;
       pointer-events: none;
       touch-action: none;
-      opacity: 0;
+      opacity: var(--frost-o, 0);
       background: rgba(245, 245, 247, 0.42);
       -webkit-backdrop-filter: blur(28px) saturate(140%);
       backdrop-filter: blur(28px) saturate(140%);
-      transition: opacity 0.28s var(--ease-sheet);
     }
     .notes-shell,
     .sessions-shell {
-      opacity: 0;
-      transform: translate3d(0, 12px, 0) scale(0.97);
-      transform-origin: 50% 44%;
-      will-change: transform, opacity;
-      transition:
-        transform 0.34s var(--ease-sheet),
-        opacity 0.22s var(--ease-sheet);
-    }
-    .notes-panel.open .notes-shell,
-    .notes-panel.open .sessions-shell {
-      opacity: 1;
-      transform: translate3d(0, 0, 0) scale(1);
-    }
-    .notes-panel:not(.open) .notes-shell,
-    .notes-panel:not(.open) .sessions-shell {
-      transition-duration: 0.2s, 0.16s;
+      opacity: var(--sheet-o, 0);
+      transform: translate3d(0, var(--sheet-y, 56px), 0) scale(var(--sheet-s, 0.92));
+      transform-origin: 50% 80%;
     }
     .notes-shell {
       position: relative; z-index: 1;
@@ -1973,8 +1963,7 @@
       .notes-panel:not(.is-writing) .notes-paper { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .notes-panel, .notes-frost, .notes-shell, .sessions-shell, .top-bar, .chips, main {
-        transition: opacity 180ms ease, visibility 0s;
+      .wall-scene, .notes-shell, .sessions-shell {
         transform: none !important;
       }
     }
@@ -2169,6 +2158,7 @@
   </style>
 </head>
 <body>
+  <div class="wall-scene" id="wallScene">
   <header class="top-bar">
     <div class="brand">
       <div class="brand-logo" title="ClipVault">
@@ -2313,6 +2303,7 @@
     <div id="sentinel" class="sentinel" aria-hidden="true"></div>
     <div id="loadingMore" class="loading-more" hidden>加载更多…</div>
   </main>
+  </div>
 
   <!-- Image lightbox / preview -->
   <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="图片预览">
@@ -3787,6 +3778,84 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
+    const sheetMotion = {
+      raf: 0,
+      panel: null,
+      opening: false,
+      last: 0,
+      x: { scene: 1, y: 56, s: 0.92, o: 0, frost: 0 },
+      v: { scene: 0, y: 0, s: 0, o: 0, frost: 0 },
+      to: { scene: 1, y: 56, s: 0.92, o: 0, frost: 0 },
+    };
+    function sheetReduce() {
+      try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; }
+    }
+    function sheetApply() {
+      const r = document.documentElement;
+      r.style.setProperty('--scene-scale', sheetMotion.x.scene.toFixed(5));
+      const p = sheetMotion.panel;
+      if (!p) return;
+      p.style.setProperty('--sheet-y', sheetMotion.x.y.toFixed(2) + 'px');
+      p.style.setProperty('--sheet-s', sheetMotion.x.s.toFixed(5));
+      p.style.setProperty('--sheet-o', Math.min(1, Math.max(0, sheetMotion.x.o)).toFixed(4));
+      p.style.setProperty('--frost-o', Math.min(1, Math.max(0, sheetMotion.x.frost)).toFixed(4));
+    }
+    function sheetTick(now) {
+      const dt = Math.min(0.032, sheetMotion.last ? (now - sheetMotion.last) / 1000 : 0.016);
+      sheetMotion.last = now;
+      const k = 240;
+      const dmp = 26;
+      let live = false;
+      for (const key of ['scene', 'y', 's', 'o', 'frost']) {
+        const dest = sheetMotion.to[key];
+        let vel = sheetMotion.v[key];
+        const cur = sheetMotion.x[key];
+        vel += (-k * (cur - dest) - dmp * vel) * dt;
+        const next = cur + vel * dt;
+        sheetMotion.v[key] = vel;
+        sheetMotion.x[key] = next;
+        if (Math.abs(vel) > 0.04 || Math.abs(next - dest) > 0.04) live = true;
+      }
+      if (!live) {
+        Object.assign(sheetMotion.x, sheetMotion.to);
+        sheetMotion.v = { scene: 0, y: 0, s: 0, o: 0, frost: 0 };
+        sheetApply();
+        sheetMotion.raf = 0;
+        if (sheetMotion.panel && sheetMotion.opening) sheetMotion.panel.classList.add('is-settled');
+        return;
+      }
+      sheetApply();
+      sheetMotion.raf = requestAnimationFrame(sheetTick);
+    }
+    function playSheet(panel, open) {
+      if (sheetMotion.panel && sheetMotion.panel !== panel) {
+        const prev = sheetMotion.panel;
+        prev.style.setProperty('--sheet-y', '56px');
+        prev.style.setProperty('--sheet-s', '0.92');
+        prev.style.setProperty('--sheet-o', '0');
+        prev.style.setProperty('--frost-o', '0');
+        prev.classList.remove('open', 'is-settled');
+      }
+      sheetMotion.panel = panel;
+      sheetMotion.opening = open;
+      const dest = open
+        ? { scene: 0.92, y: 0, s: 1, o: 1, frost: 1 }
+        : { scene: 1, y: 48, s: 0.94, o: 0, frost: 0 };
+      if (sheetReduce()) {
+        Object.assign(sheetMotion.x, dest);
+        Object.assign(sheetMotion.to, dest);
+        sheetMotion.v = { scene: 0, y: 0, s: 0, o: 0, frost: 0 };
+        sheetApply();
+        if (open) panel.classList.add('is-settled');
+        return;
+      }
+      sheetMotion.to = dest;
+      if (!sheetMotion.raf) {
+        sheetMotion.last = 0;
+        sheetMotion.raf = requestAnimationFrame(sheetTick);
+      }
+    }
+
     function notesBackdropEvent(e) {
       const notes = document.body.classList.contains('notes-open');
       const sessions = document.body.classList.contains('sessions-open');
@@ -3810,9 +3879,7 @@ window.ClipViewMasonry = Masonry;
       panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       setSessionsWallLocked(true);
-      clearTimeout(panel._settleTimer);
-      panel._settleTimer = setTimeout(() => panel.classList.add('is-settled'), 340);
-      document.getElementById('traeSessionsBtn')?.classList.add('is-on');
+      playSheet(panel, true);
       const frame = document.getElementById('sessionsFrame');
       if (frame && !frame.getAttribute('src')) {
         frame.src = '/trae/?embed=1';
@@ -3827,7 +3894,7 @@ window.ClipViewMasonry = Masonry;
       panel?.classList.remove('open', 'is-settled');
       panel?.setAttribute('aria-hidden', 'true');
       setSessionsWallLocked(false);
-      document.getElementById('traeSessionsBtn')?.classList.remove('is-on');
+      if (panel) playSheet(panel, false);
       if (parseAppHash().kind === 'sessions') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
       }
@@ -3847,10 +3914,8 @@ window.ClipViewMasonry = Masonry;
       panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       setNotesWallLocked(true);
-      document.getElementById('notesOpenBtn')?.classList.add('is-on');
+      playSheet(panel, true);
       notesState.openedAt = Date.now();
-      clearTimeout(notesState.settleTimer);
-      notesState.settleTimer = setTimeout(() => panel.classList.add('is-settled'), 340);
       const M = globalThis.ClipNotesMetrics;
       if (M) {
         M.setOpen(true);
@@ -3873,7 +3938,7 @@ window.ClipViewMasonry = Masonry;
       panel?.classList.remove('open', 'is-writing', 'is-settled');
       panel?.setAttribute('aria-hidden', 'true');
       setNotesWallLocked(false);
-      document.getElementById('notesOpenBtn')?.classList.remove('is-on');
+      if (panel) playSheet(panel, false);
       const M = globalThis.ClipNotesMetrics;
       if (M) {
         M.setOpen(false);

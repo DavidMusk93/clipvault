@@ -103,8 +103,10 @@ test('compose save does not broadcast wall update', () => {
 test('notes panel open does not translate the chrome', () => {
   assert.match(html, /body\.notes-open \.top-bar/);
   assert.doesNotMatch(html, /body\.notes-open \.top-bar[\s\S]{0,80}translateY\(-120%\)/);
-  assert.match(html, /--ease-sheet:\s*cubic-bezier\(0\.32, 0\.72, 0, 1\)/);
-  assert.match(html, /\.notes-shell,[\s\S]{0,40}\.sessions-shell \{[\s\S]{0,220}scale\(0\.97\)/);
+  assert.match(html, /id="wallScene"/);
+  assert.match(html, /function playSheet/);
+  assert.match(html, /--sheet-y/);
+  assert.doesNotMatch(html, /notesOpenBtn'\)\?\.classList\.add\('is-on'\)/);
   assert.doesNotMatch(html, /\.notes-panel \{[\s\S]{0,200}translateY\(18px\)/);
 });
 
