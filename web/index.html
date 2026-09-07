@@ -59,6 +59,7 @@
       --gap: 14px;
       --chrome-pad-x: 22px;
       --spring: cubic-bezier(0.22, 1, 0.36, 1);
+      --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
       --press: 100ms ease-out;
       --elev-1: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
       --elev-2: 0 4px 24px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.04);
@@ -122,7 +123,7 @@
       backdrop-filter: blur(20px) saturate(180%);
       border-bottom: 0.5px solid var(--separator);
       box-shadow: none;
-      transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
+      transition: transform 0.38s var(--spring), opacity 0.28s var(--ease-sheet), visibility 0s linear 0s;
     }
     .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .brand-logo {
@@ -166,7 +167,7 @@
       -webkit-backdrop-filter: blur(16px) saturate(160%);
       backdrop-filter: blur(16px) saturate(160%);
       scrollbar-width: none;
-      transition: transform 0.38s var(--spring), opacity 0.28s var(--spring);
+      transition: transform 0.38s var(--spring), opacity 0.28s var(--ease-sheet), visibility 0s linear 0s;
     }
     html.notes-open,
     html.sessions-open,
@@ -184,6 +185,7 @@
       opacity: 0;
       pointer-events: none;
       visibility: hidden;
+      transition: opacity 0.28s var(--ease-sheet), visibility 0s linear 0.28s;
     }
     body.notes-open .notes-fab,
     body.sessions-open .notes-fab { display: none !important; }
@@ -455,7 +457,11 @@
     .link-empty { font-size: 13px; color: var(--muted); padding: 10px 0 6px; line-height: 1.4; }
     .top-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-    main { flex: 1; padding: 6px var(--chrome-pad-x) 48px; }
+    main {
+      flex: 1;
+      padding: 6px var(--chrome-pad-x) 48px;
+      transition: opacity 0.28s var(--ease-sheet), visibility 0s linear 0s;
+    }
     .pin-rail { margin: 0 0 2px; }
     .feed-split {
       display: flex; align-items: center; gap: 10px;
@@ -1720,27 +1726,48 @@
     .notes-panel {
       position: fixed; inset: 0; z-index: 2100;
       pointer-events: none;
-      opacity: 0;
       isolation: isolate;
       overscroll-behavior: none;
-      transition: opacity 0.2s cubic-bezier(0.23, 1, 0.32, 1);
     }
     .notes-panel.open {
       pointer-events: auto;
-      opacity: 1;
     }
     .notes-panel.open .notes-frost {
       pointer-events: auto;
+      opacity: 1;
       will-change: opacity;
     }
-    .notes-panel.open.is-settled .notes-frost { will-change: auto; }
+    .notes-panel.open.is-settled .notes-frost,
+    .notes-panel.open.is-settled .notes-shell,
+    .notes-panel.open.is-settled .sessions-shell { will-change: auto; }
     .notes-frost {
       position: absolute; inset: 0;
       pointer-events: none;
       touch-action: none;
+      opacity: 0;
       background: rgba(245, 245, 247, 0.42);
       -webkit-backdrop-filter: blur(28px) saturate(140%);
       backdrop-filter: blur(28px) saturate(140%);
+      transition: opacity 0.28s var(--ease-sheet);
+    }
+    .notes-shell,
+    .sessions-shell {
+      opacity: 0;
+      transform: translate3d(0, 12px, 0) scale(0.97);
+      transform-origin: 50% 44%;
+      will-change: transform, opacity;
+      transition:
+        transform 0.34s var(--ease-sheet),
+        opacity 0.22s var(--ease-sheet);
+    }
+    .notes-panel.open .notes-shell,
+    .notes-panel.open .sessions-shell {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    .notes-panel:not(.open) .notes-shell,
+    .notes-panel:not(.open) .sessions-shell {
+      transition-duration: 0.2s, 0.16s;
     }
     .notes-shell {
       position: relative; z-index: 1;
@@ -1946,7 +1973,10 @@
       .notes-panel:not(.is-writing) .notes-paper { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .notes-panel, .top-bar, .chips { transition: opacity 180ms ease; transform: none; }
+      .notes-panel, .notes-frost, .notes-shell, .sessions-shell, .top-bar, .chips, main {
+        transition: opacity 180ms ease, visibility 0s;
+        transform: none !important;
+      }
     }
     @media (prefers-reduced-transparency: reduce) {
       .notes-panel { background: #f5f5f7; }
@@ -3777,8 +3807,11 @@ window.ClipViewMasonry = Masonry;
       const panel = document.getElementById('sessionsPanel');
       if (!panel) return;
       panel.classList.add('open');
+      panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       setSessionsWallLocked(true);
+      clearTimeout(panel._settleTimer);
+      panel._settleTimer = setTimeout(() => panel.classList.add('is-settled'), 340);
       document.getElementById('traeSessionsBtn')?.classList.add('is-on');
       const frame = document.getElementById('sessionsFrame');
       if (frame && !frame.getAttribute('src')) {
@@ -3791,7 +3824,7 @@ window.ClipViewMasonry = Masonry;
 
     function closeSessionsPanel() {
       const panel = document.getElementById('sessionsPanel');
-      panel?.classList.remove('open');
+      panel?.classList.remove('open', 'is-settled');
       panel?.setAttribute('aria-hidden', 'true');
       setSessionsWallLocked(false);
       document.getElementById('traeSessionsBtn')?.classList.remove('is-on');
@@ -3817,7 +3850,7 @@ window.ClipViewMasonry = Masonry;
       document.getElementById('notesOpenBtn')?.classList.add('is-on');
       notesState.openedAt = Date.now();
       clearTimeout(notesState.settleTimer);
-      notesState.settleTimer = setTimeout(() => panel.classList.add('is-settled'), 240);
+      notesState.settleTimer = setTimeout(() => panel.classList.add('is-settled'), 340);
       const M = globalThis.ClipNotesMetrics;
       if (M) {
         M.setOpen(true);

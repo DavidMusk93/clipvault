@@ -86,6 +86,13 @@ test('notes are a panel on the same page', () => {
   assert.doesNotMatch(indexHtml, /milkdown-top-bar/);
 });
 
+test('notes and sessions sheets spring in, wall does not snap away', () => {
+  assert.match(indexHtml, /--ease-sheet:\s*cubic-bezier\(0\.32, 0\.72, 0, 1\)/);
+  assert.match(indexHtml, /scale\(0\.97\)/);
+  assert.match(indexHtml, /visibility 0s linear 0\.28s/);
+  assert.doesNotMatch(indexHtml, /\.notes-panel \{[\s\S]{0,180}translateY\(18px\)/);
+});
+
 test('sessions reuse ClipVault port as a notes-like panel', () => {
   assert.match(indexHtml, /id="sessionsPanel"/);
   assert.match(indexHtml, /id="sessionsFrame"/);
