@@ -1755,8 +1755,9 @@
     .notes-shell,
     .sessions-shell {
       opacity: 0;
-      transform: scale(0.08);
-      transform-origin: 50% 8%;
+      overflow: hidden;
+      background: #f5f5f7;
+      clip-path: inset(0 round 18px);
     }
     .notes-shell {
       position: relative; z-index: 1;
@@ -3777,6 +3778,8 @@ window.ClipViewMasonry = Masonry;
 
     let sheetAnims = [];
     let sheetPanel = null;
+    const sheetSpringIn = { type: 'spring', bounce: 0.08, duration: 0.52 };
+    const sheetSpringOut = { type: 'spring', bounce: 0, duration: 0.42 };
     function sheetReduce() {
       try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; }
     }
@@ -3786,9 +3789,20 @@ window.ClipViewMasonry = Masonry;
       if (fab && window.getComputedStyle(fab).display !== 'none') return fab;
       return document.getElementById('notesOpenBtn');
     }
-    function sheetOrigin(el, vx, vy) {
+    function sheetLocalOrigin(el, vx, vy) {
       const box = el.getBoundingClientRect();
-      return `${Math.max(0, vx - box.left)}px ${Math.max(0, vy - box.top)}px`;
+      return `${vx - box.left}px ${vy - box.top}px`;
+    }
+    function sheetClipFromButton(shell, btn) {
+      const s = shell.getBoundingClientRect();
+      if (!btn) return 'inset(0 round 18px)';
+      const b = btn.getBoundingClientRect();
+      const top = Math.max(0, b.top - s.top);
+      const left = Math.max(0, b.left - s.left);
+      const right = Math.max(0, s.right - b.right);
+      const bottom = Math.max(0, s.bottom - b.bottom);
+      const rad = Math.min(b.height, b.width) / 2;
+      return `inset(${top}px ${right}px ${bottom}px ${left}px round ${rad}px)`;
     }
     function stopSheetAnims() {
       for (const a of sheetAnims) {
@@ -3801,16 +3815,23 @@ window.ClipViewMasonry = Masonry;
       const shell = panel.querySelector('.notes-shell, .sessions-shell');
       const frost = panel.querySelector('.notes-frost');
       if (shell) {
-        shell.style.transform = 'scale(0.08)';
+        shell.style.clipPath = 'inset(0 round 18px)';
+        shell.style.transform = 'none';
         shell.style.opacity = '0';
+        shell.style.boxShadow = 'none';
       }
       if (frost) frost.style.opacity = '0';
+      const n = document.getElementById('notesOpenBtn');
+      const s = document.getElementById('traeSessionsBtn');
+      if (n) n.style.opacity = '';
+      if (s) s.style.opacity = '';
     }
     function playSheet(panel, open, kind) {
       const motion = globalThis.Motion;
       const animate = motion && typeof motion.animate === 'function' ? motion.animate : null;
       const shell = panel.querySelector('.notes-shell, .sessions-shell');
       const frost = panel.querySelector('.notes-frost');
+      const scene = document.getElementById('wallScene');
       if (sheetPanel && sheetPanel !== panel) {
         stopSheetAnims();
         resetSheetVisual(sheetPanel);
@@ -3818,47 +3839,60 @@ window.ClipViewMasonry = Masonry;
       }
       sheetPanel = panel;
       const btn = sheetTrigger(kind);
+      if (shell) void shell.offsetWidth;
+      const clipBtn = shell ? sheetClipFromButton(shell, btn) : 'inset(0 round 18px)';
+      const clipOpen = 'inset(0 round 18px)';
       const br = btn ? btn.getBoundingClientRect() : null;
       const vx = br ? br.left + br.width / 2 : window.innerWidth * 0.82;
       const vy = br ? br.top + br.height / 2 : 28;
-      const startScale = br
-        ? Math.max(0.06, Math.min(0.2, (br.width / Math.max(1, window.innerWidth)) * 2.4))
-        : 0.08;
-      if (shell) shell.style.transformOrigin = sheetOrigin(panel, vx, vy);
-      if (frost) frost.style.transformOrigin = sheetOrigin(panel, vx, vy);
+      if (shell) shell.style.transformOrigin = sheetLocalOrigin(shell, vx, vy);
+      if (scene) scene.style.transformOrigin = sheetLocalOrigin(scene, vx, vy);
       stopSheetAnims();
       if (!animate || sheetReduce()) {
         if (shell) {
-          shell.style.transform = open ? 'scale(1)' : `scale(${startScale})`;
+          shell.style.clipPath = open ? clipOpen : clipBtn;
           shell.style.opacity = open ? '1' : '0';
+          shell.style.transform = 'none';
         }
         if (frost) frost.style.opacity = open ? '1' : '0';
+        if (scene) scene.style.transform = open ? 'scale(0.97)' : 'none';
         if (open) panel.classList.add('is-settled');
         return;
       }
+      const run = (el, keyframes, opts) => {
+        const c = animate(el, keyframes, opts);
+        sheetAnims.push(c);
+        return c;
+      };
       if (open) {
         if (shell) {
-          shell.style.transform = `scale(${startScale})`;
-          shell.style.opacity = '0.35';
+          shell.style.clipPath = clipBtn;
+          shell.style.opacity = '1';
+          shell.style.transform = 'scale(0.985)';
+          shell.style.boxShadow = '0 8px 28px rgba(0,0,0,0.12)';
         }
         if (frost) frost.style.opacity = '0';
-        sheetAnims.push(animate(frost, { opacity: 1 }, { duration: 0.32, easing: [0.16, 1, 0.3, 1] }));
-        const run = animate(
-          shell,
-          { transform: ['scale(' + startScale + ')', 'scale(1)'], opacity: [0.35, 1] },
-          { type: 'spring', bounce: 0.16, duration: 0.58 },
-        );
-        sheetAnims.push(run);
-        Promise.resolve(run && run.finished).then(() => {
+        if (btn) run(btn, { opacity: 0 }, { duration: 0.14, easing: 'linear' });
+        run(frost, { opacity: 1 }, { duration: 0.36, easing: [0.16, 1, 0.3, 1] });
+        if (scene) run(scene, { scale: 0.97 }, sheetSpringIn);
+        const fin = run(shell, {
+          clipPath: clipOpen,
+          transform: 'scale(1)',
+          boxShadow: '0 18px 60px rgba(0,0,0,0.14)',
+        }, sheetSpringIn);
+        Promise.resolve(fin && fin.finished).then(() => {
           if (sheetPanel === panel && panel.classList.contains('open')) panel.classList.add('is-settled');
         }).catch(() => {});
       } else {
-        sheetAnims.push(animate(frost, { opacity: 0 }, { duration: 0.28, easing: [0.32, 0.72, 0, 1] }));
-        sheetAnims.push(animate(
-          shell,
-          { transform: 'scale(' + startScale + ')', opacity: 0 },
-          { type: 'spring', bounce: 0, duration: 0.42 },
-        ));
+        if (btn) run(btn, { opacity: 1 }, { duration: 0.2, delay: 0.14, easing: [0.16, 1, 0.3, 1] });
+        run(frost, { opacity: 0 }, { duration: 0.3, easing: [0.32, 0.72, 0, 1] });
+        if (scene) run(scene, { scale: 1 }, sheetSpringOut);
+        run(shell, {
+          clipPath: clipBtn,
+          transform: 'scale(0.985)',
+          opacity: 0,
+          boxShadow: '0 4px 14px rgba(0,0,0,0.08)',
+        }, sheetSpringOut);
       }
     }
 

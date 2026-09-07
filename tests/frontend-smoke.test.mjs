@@ -91,7 +91,8 @@ test('notes and sessions sheets spring in, wall does not snap away', () => {
   assert.match(indexHtml, /function playSheet/);
   assert.match(indexHtml, /assets\/motion\.js/);
   assert.match(indexHtml, /function sheetTrigger/);
-  assert.match(indexHtml, /transformOrigin/);
+  assert.match(indexHtml, /sheetClipFromButton/);
+  assert.match(indexHtml, /clipPath/);
   assert.match(indexHtml, /type: 'spring'/);
   assert.doesNotMatch(indexHtml, /const k = 240/);
   assert.doesNotMatch(indexHtml, /notesOpenBtn'\)\?\.classList\.add\('is-on'\)/);
