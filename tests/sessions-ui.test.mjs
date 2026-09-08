@@ -259,6 +259,12 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(html, /hookIsBeat/);
   assert.match(html, /pendingHookMeta/);
   assert.match(html, /clipvault-sessions-pause/);
+  assert.match(html, /clipvault-ui-metrics/);
+  assert.match(html, /html.embed \.app \{/);
+  assert.match(html, /truncated /);
+  assert.match(server, /raw_truncated/);
+  const indexHtml = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+  assert.match(indexHtml, /clipvault-ui-metrics/);
   assert.match(server, /"ts": str\(row.get\("ts"\)/);
   assert.doesNotMatch(html, /loadHealth\(\);\s*loadSessions\(\);\s*ingestHookIds/);
   assert.doesNotMatch(html, /if \(uniq\.length > 16\) \{\s*await loadEvents\(\)/);

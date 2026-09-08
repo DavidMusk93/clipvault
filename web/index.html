@@ -4054,6 +4054,17 @@ window.ClipViewMasonry = Masonry;
       const frame = document.getElementById('sessionsFrame');
       try { frame?.contentWindow?.postMessage({ type }, location.origin); } catch (_) {}
     }
+    window.addEventListener('message', (ev) => {
+      if (ev.origin !== location.origin) return;
+      const d = ev.data;
+      if (!d || d.type !== 'clipvault-ui-metrics' || !Array.isArray(d.events)) return;
+      fetch('/api/ui-metrics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: d.events, session: d.session || 'trae-sessions' }),
+        keepalive: true,
+      }).catch(() => {});
+    });
     async function openSessionsPanel() {
       hideTraeAsk();
       if (document.getElementById('notesPanel')?.classList.contains('open')) {

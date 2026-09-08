@@ -578,7 +578,16 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 if not rows:
                     self._json(404, {"error": "not found"})
                     return
-                self._json(200, {"event": rows[0]})
+                row = dict(rows[0])
+                full = (qs.get("full") or [""])[0] in ("1", "true")
+                cap = 16000
+                if not full:
+                    for key in ("raw_json", "tool_input", "tool_response"):
+                        val = row.get(key)
+                        if isinstance(val, str) and len(val) > cap:
+                            row[key] = val[:cap] + "\n/* truncated */"
+                            row["raw_truncated"] = True
+                self._json(200, {"event": row})
                 return
             self._json(404, {"error": "not found"})
 

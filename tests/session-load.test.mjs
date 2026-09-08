@@ -36,7 +36,7 @@ test('boot connects and asks for a snapshot', () => {
   const { state, effects } = reduce(createLoadState(), { type: 'boot' });
   assert.equal(state.phase, 'connecting');
   assert.equal(state.stream, 'connecting');
-  assert.deepEqual(effects, ['readSnap', 'setupSSE']);
+  assert.deepEqual(effects, ['readSnap', 'setupSSE', 'runResync']);
 });
 
 test('cache_hit then stream_open still resyncs to confirm', () => {

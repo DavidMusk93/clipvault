@@ -63,7 +63,7 @@ export function reduce(state, event, now = Date.now()) {
     next.paused = false;
     next.phase = 'connecting';
     next.stream = 'connecting';
-    effects.push('readSnap', 'setupSSE');
+    effects.push('readSnap', 'setupSSE', 'runResync');
     return { state: next, effects };
   }
 

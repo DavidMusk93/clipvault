@@ -35,7 +35,11 @@
     }
     html.embed .top { display: none; }
     html.embed .session-head { display: none !important; }
-    html.embed .stage { padding-top: 36px; }
+    html.embed .stage { padding-top: 12px; }
+    html.embed .app {
+      grid-template-columns: minmax(200px, 34%) minmax(0, 1fr) !important;
+      grid-template-rows: 1fr !important;
+    }
     body {
       display: flex;
       flex-direction: column;
@@ -656,9 +660,8 @@
         if (Object.keys(p).length) ev.payload = p;
       }
       metricQ.push(ev);
-      if (name.startsWith("trae_")) {
-        if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 0);
-      } else if (metricQ.length >= 20) flushMetrics();
+      if (name.startsWith("trae_")) flushMetrics();
+      else if (metricQ.length >= 20) flushMetrics();
       else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 2000);
     };
     const flushMetrics = () => {
@@ -666,6 +669,11 @@
       if (!metricQ.length) return;
       const events = metricQ.splice(0, 100);
       const body = JSON.stringify({ events, session: "trae-sessions" });
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "clipvault-ui-metrics", events, session: "trae-sessions" }, location.origin);
+        }
+      } catch (_) {}
       try {
         if (navigator.sendBeacon) {
           const blob = new Blob([body], { type: "application/json" });
@@ -701,15 +709,21 @@
       }
       if (sessionRows.length) {
         lastListSig = "";
-        patchSessionList(sessionRows);
+        try { patchSessionList(sessionRows); } catch (err) {
+          emit("trae_sessions_error", { payload: { reason: "list" } });
+        }
+        emit("trae_sessions_list", { payload: { n: sessionRows.length, kind: "cache" } });
       }
       if (current) {
         const row = sessionRows.find((s) => s.session_id === current);
         showSessionHead(current, row ? sessionTitle(row) : current);
-        paintFromLive("cache");
-        markTtfp("cache");
       }
       dispatch({ type: "cache_hit" });
+      if (current && liveEvents.length) {
+        requestAnimationFrame(() => {
+          try { paintFromLive("cache"); markTtfp("cache"); } catch (_) {}
+        });
+      }
       return true;
     };
     const saveSnap = () => {
@@ -755,9 +769,7 @@
       }
     };
     const applyLoadEffect = (fx) => {
-      if (fx === "readSnap") {
-        if (!applySnap(readSnap(window.localStorage))) scheduleResync();
-      }
+      if (fx === "readSnap") applySnap(readSnap(window.localStorage));
       if (fx === "setupSSE") setupSSE();
       if (fx === "runResync") scheduleResync();
       if (fx === "closeSSE") {
@@ -1312,12 +1324,21 @@
           const host = el.querySelector(".raw-body");
           if (!host || host.dataset.loaded) return;
           const id = el.closest(".bubble").getAttribute("data-id");
+          const t0 = performance.now();
           try {
-            const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(id)))).json();
+            const d = await netJson("event", apiUrl("/api/event?id=" + encodeURIComponent(id)));
             const raw = d.event && d.event.raw_json ? d.event.raw_json : prettyJson(d.event);
-            host.innerHTML = renderValue(raw, "json", engines()).html;
+            const text = String(raw || "");
+            const cap = 12000;
+            if (text.length > cap) {
+              host.textContent = text.slice(0, cap) + "\n… truncated " + text.length + " chars";
+            } else {
+              host.innerHTML = renderValue(text, "json", engines()).html;
+            }
             host.dataset.loaded = "1";
+            emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { kind: "raw", n: text.length } });
           } catch (err) {
+            emit("trae_sessions_error", { payload: { reason: "raw" } });
             host.textContent = String(err);
           }
         });
@@ -1505,31 +1526,18 @@
         if (liveIds.has(id)) continue;
         const meta = pendingHookMeta.get(id) || {};
         if (meta.session_id && current && meta.session_id !== current) continue;
-        if (!hookIsBeat(meta)) {
-          liveIds.add(id);
-          liveEvents.push({
-            event_id: id,
-            ts: meta.ts || "",
-            session_id: meta.session_id || current,
-            hook_event: meta.hook_event || "PostToolUse",
-            tool_name: meta.tool_name || "",
-            prompt: meta.preview || "",
-            notification_message: meta.notification_message || "",
-            notification_type: meta.notification_type || "",
-          });
-          added += 1;
-          continue;
-        }
-        try {
-          const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(id)))).json();
-          const ev = d.event;
-          if (!ev || !ev.event_id) continue;
-          if (ev.session_id && current && ev.session_id !== current) continue;
-          if (liveIds.has(ev.event_id)) continue;
-          liveIds.add(ev.event_id);
-          liveEvents.push(ev);
-          added += 1;
-        } catch (_) {}
+        liveIds.add(id);
+        liveEvents.push({
+          event_id: id,
+          ts: meta.ts || "",
+          session_id: meta.session_id || current,
+          hook_event: meta.hook_event || "PostToolUse",
+          tool_name: meta.tool_name || "",
+          prompt: meta.preview || "",
+          notification_message: meta.notification_message || "",
+          notification_type: meta.notification_type || "",
+        });
+        added += 1;
       }
       if (added) paintFromLive("patch");
     }

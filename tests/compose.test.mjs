@@ -49,6 +49,7 @@ test('notes list load failure must not open a blank new note', () => {
   assert.match(html, /notesState.loaded && !notesState.items.length/);
   assert.match(html, /clipvault-sessions-pause/);
   assert.match(html, /clipvault-sessions-resume/);
+  assert.match(html, /clipvault-ui-metrics/);
   assert.match(html, /setTimeout\(\(\) => \{ once\(\); resolve\(\); \}, 800\)/);
 });
 
