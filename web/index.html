@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n17" />
   <script src="/assets/notes-editor/notes-editor.js?v=n17"></script>
   <script src="/assets/motion.js?v=m1"></script>
-  <script src="/assets/notes-metrics.js?v=n11"></script>
+  <script src="/assets/notes-metrics.js?v=n12"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -4238,7 +4238,7 @@ window.ClipViewMasonry = Masonry;
         const dur = performance.now() - t0;
         nm('sheet_morph', {
           dur_ms: dur,
-          ok: value < 0.1 && ltMax < 50,
+          ok: value < 0.1 && ltMax < 50 && dur < 800,
           payload: {
             kind: String(kind || '').slice(0, 16),
             phase: String(phase || '').slice(0, 16),
@@ -4301,18 +4301,22 @@ window.ClipViewMasonry = Masonry;
       let resolvePlay = () => {};
       const play = new Promise((r) => { resolvePlay = r; });
       let fin = null;
+      const vis = Math.max(0.18, Number((open ? sheetSpringIn : sheetSpringOut).visualDuration) || 0.36);
+      const cap = vis * 1000 + 80;
       const once = () => {
         if (done) return;
         done = true;
+        clearTimeout(killer);
         try { fin && fin.stop(); } catch (_) {}
         paintSheet(panel, toP, clip, kind);
         finish();
         resolvePlay();
       };
+      const killer = setTimeout(once, cap);
       fin = animateSheetProgress(fromP, toP, (v) => {
         sheetProg = v;
         paintSheet(panel, v, clip, kind);
-        if (v === toP) once();
+        if (v === toP || Math.abs(v - toP) < 0.002) once();
       });
       sheetAnims.push({ stop: once });
       return play;

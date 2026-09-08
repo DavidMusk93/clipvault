@@ -145,10 +145,10 @@
         if (!panelOpen || !root) return;
         for (const e of list.getEntries()) {
           const t = e.target;
-          if (t && root.contains(t) && e.duration >= 16) {
-            const kind = String(e.name || '').slice(0, 24);
-            emit('notes_inp', { dur_ms: e.duration, payload: { interaction: kind } });
-          }
+          if (!t || !root.contains(t) || e.duration < 40) continue;
+          const kind = String(e.name || '').slice(0, 24);
+          if (/over$|out$|enter$|leave$/.test(kind)) continue;
+          emit('notes_inp', { dur_ms: e.duration, payload: { interaction: kind } });
         }
       });
       etObs.observe({ type: 'event', buffered: false, durationThreshold: 16 });

@@ -160,6 +160,8 @@ test('notes panel open does not translate the chrome', () => {
   assert.match(html, /function playSheet/);
   assert.match(html, /assets\/motion\.js/);
   assert.match(html, /function animateSheetProgress/);
+  assert.match(html, /const killer = setTimeout\(once, cap\)/);
+  assert.match(html, /Math\.abs\(v - toP\) < 0\.002/);
   assert.doesNotMatch(html, /notesOpenBtn'\)\?\.classList\.add\('is-on'\)/);
   assert.doesNotMatch(html, /\.notes-panel \{[\s\S]{0,200}translateY\(18px\)/);
 });
