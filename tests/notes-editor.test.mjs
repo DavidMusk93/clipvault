@@ -76,6 +76,10 @@ test('save status is labeled and retries on failure', () => {
   assert.match(html, /保存失败/);
   assert.match(html, /notes-new-plus/);
   assert.doesNotMatch(html, />新一篇</);
+  assert.doesNotMatch(html, /notes-status-dot/);
+  assert.match(html, /id="notesStatus"[\s\S]{0,280}id="notesShare"/);
+  assert.match(html, /\.notes-status\[data-state="saved"\] \{ color: #248A3D; \}/);
+  assert.match(html, /\.notes-status\[data-state="dirty"\] \{ color: #C47A2C; \}/);
 });
 
 test('panel is source + preview split', () => {

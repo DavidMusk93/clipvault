@@ -1974,6 +1974,15 @@
     .notes-tools button:hover { background: rgba(60, 60, 67, 0.08); }
     .notes-tools button:active { transform: scale(0.96); }
     .notes-tools button .material-symbols-outlined { font-size: 16px; }
+    .notes-status {
+      display: inline-flex; align-items: center; flex: none;
+      font: 500 11px/26px var(--font-ui); letter-spacing: -0.01em; color: var(--muted);
+    }
+    .notes-status[data-state="dirty"] { color: #C47A2C; }
+    .notes-status[data-state="saving"] { color: #0071E3; }
+    .notes-status[data-state="saved"] { color: #248A3D; }
+    .notes-status[data-state="error"] { color: #D70015; }
+    .notes-status-label { white-space: nowrap; }
     .notes-share {
       width: 28px; height: 26px; border: 0; border-radius: 6px; flex: none;
       background: transparent; color: var(--ink); cursor: pointer;
@@ -1982,22 +1991,6 @@
     .notes-share:hover { background: rgba(60, 60, 67, 0.08); }
     .notes-share.is-shared { color: var(--accent, #0071E3); }
     .notes-share .material-symbols-outlined { font-size: 16px; }
-    .notes-status {
-      display: inline-flex; align-items: center; gap: 6px; flex: none;
-      min-width: 4.2em; justify-content: flex-end;
-      font: 500 11px/1 var(--font-ui); letter-spacing: -0.01em; color: var(--muted);
-    }
-    .notes-status-dot {
-      width: 6px; height: 6px; border-radius: 980px; flex: none;
-      background: rgba(60, 60, 67, 0.22);
-    }
-    .notes-status[data-state="dirty"] .notes-status-dot { background: #C47A2C; }
-    .notes-status[data-state="saving"] .notes-status-dot { background: #0071E3; }
-    .notes-status[data-state="saved"] .notes-status-dot { background: #34C759; }
-    .notes-status[data-state="error"] .notes-status-dot,
-    .notes-status[data-state="error"] .notes-status-label { color: #D70015; }
-    .notes-status[data-state="error"] .notes-status-dot { background: #D70015; }
-    .notes-status-label { white-space: nowrap; }
     .notes-merge-hint {
       display: none;
       margin: 0 16px 8px;
@@ -2570,13 +2563,12 @@
           <button type="button" data-cmd="link" title="链接"><span class="material-symbols-outlined">link</span></button>
           <button type="button" data-cmd="table" title="表格"><span class="material-symbols-outlined">table</span></button>
         </div>
+        <span class="notes-status" id="notesStatus" data-state="idle" title="保存状态">
+          <span class="notes-status-label" id="notesStatusLabel"></span>
+        </span>
         <button type="button" class="notes-share" id="notesShare" title="复制分享链接" aria-label="分享">
           <span class="material-symbols-outlined">ios_share</span>
         </button>
-        <span class="notes-status" id="notesStatus" data-state="idle" title="保存状态">
-          <i class="notes-status-dot" aria-hidden="true"></i>
-          <span class="notes-status-label" id="notesStatusLabel"></span>
-        </span>
       </div>
       <div id="notesMergeHint" class="notes-merge-hint" hidden></div>
       <div id="notesEditor" class="notes-work"></div>
