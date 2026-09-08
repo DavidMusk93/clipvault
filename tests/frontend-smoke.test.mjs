@@ -302,6 +302,21 @@ test('url dual surface locked in index.html (canonical + parse)', () => {
   assert.match(indexHtml, /function requestOpenExternalUrl/);
 });
 
+test('head merge prepends new cards and skips unchanged signatures', () => {
+  assert.match(indexHtml, /function prependCardsIncremental/);
+  assert.match(indexHtml, /function ingestClipById/);
+  assert.match(indexHtml, /function applyFreshItems/);
+  assert.match(indexHtml, /insertBefore\(card, colEls\[0\]\.firstChild\)/);
+  assert.match(indexHtml, /sig === lastHeadSig/);
+  assert.match(indexHtml, /fields: 'head'/);
+  assert.match(indexHtml, /kind: 'prepend'/);
+  assert.doesNotMatch(
+    indexHtml,
+    /Head insert changes order — full rebuild/,
+    'new captures must not full-rebuild the masonry',
+  );
+});
+
 test('delete/restore use differential remove (no full rebuild scroll jump)', () => {
   assert.match(indexHtml, /function removeCardFromMasonry/, 'differential remove required');
   const delIdx = indexHtml.indexOf('async function deleteClip');

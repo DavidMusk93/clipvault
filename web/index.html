@@ -2377,7 +2377,7 @@
       <button type="button" class="btn-icon" id="debugCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。刷新慢先看 wall_fetch / wall_paint / wall_merge。</p>
+      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。刷新慢先看 wall_fetch / wall_paint / wall_merge。merge 应走 fields=head / one+prepend，≥200ms 标红。</p>
       <h3 style="font-size:14px;font-weight:600">SSE</h3>
       <div class="debug-kv" id="debugSseKv"></div>
       <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
@@ -2726,6 +2726,12 @@
 
     const PAGE_SIZE = 30;
     const CLIENT_CAP = 300; // soft cap in memory — drop oldest (tail) when exceeded
+    let lastHeadSig = '';
+    function clipHeadSig(items) {
+      return (items || []).slice(0, PAGE_SIZE).map((i) =>
+        `${i.id}:${i.pinnedAt || ''}:${i.archived ? 1 : 0}:${i.linkCount || 0}`
+      ).join('|');
+    }
 
     /**
      * Pure pagination helpers — keep in sync with tests/pagination.test.mjs
@@ -4429,6 +4435,7 @@ window.ClipViewMasonry = Masonry;
           // If nothing new but API returned rows, they were all dups — stay put.
         }
         ensureSentinelObserved();
+        if (reset) lastHeadSig = clipHeadSig(items);
         nm('wall_fetch', {
           dur_ms: performance.now() - t0,
           ok: true,
@@ -4513,12 +4520,42 @@ window.ClipViewMasonry = Masonry;
       return out;
     }
 
-    /** SSE: only pull the newest page and merge by id — no full history reload */
+    function applyFreshItems(newItems) {
+      const incoming = (newItems || []).filter((i) => i && i.id && i.type !== 'note' && !i.isCompose && !i.inTrash);
+      if (!incoming.length) return 0;
+      const seen = new Set(clips.map((c) => c.id));
+      const fresh = incoming.filter((i) => !seen.has(i.id));
+      if (!fresh.length) return 0;
+      clips = sortClipsForFeed(dedupeClipsById([...fresh, ...clips]));
+      if (clips.length > CLIENT_CAP) {
+        const removed = clips.splice(CLIENT_CAP);
+        removed.forEach((r) => { cardCache.get(r.id)?.remove(); cardCache.delete(r.id); });
+      }
+      lastHeadSig = clipHeadSig(clips);
+      const pinnedNew = fresh.filter((it) => itemIsPinned(it));
+      const restNew = fresh.filter((it) => !itemIsPinned(it));
+      if (pinnedNew.length) {
+        colHeights = null;
+        rebuildFromData({ preserveScroll: true });
+      } else {
+        prependCardsIncremental(restNew);
+      }
+      return fresh.length;
+    }
+
+    async function fetchClipById(id) {
+      const res = await fetch(`${API}/api/clips?id=${encodeURIComponent(id)}`);
+      if (!res.ok) throw new Error('API ' + res.status);
+      const data = await res.json();
+      return (Array.isArray(data) ? data[0] : (data.items || [])[0]) || null;
+    }
+
+    /** SSE: cheap fields=head, then one-card ingest — no fat page + masonry rebuild. */
     async function mergeHead() {
       const t0 = performance.now();
       nm('wall_merge', { payload: { kind: 'head', phase: 'start' } });
       try {
-        const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+        const params = new URLSearchParams({ limit: String(PAGE_SIZE), fields: 'head' });
         if (searchQuery) params.set('q', searchQuery);
         if (currentView === 'trash') params.set('view', 'trash');
         params.set('exclude', 'note');
@@ -4527,15 +4564,24 @@ window.ClipViewMasonry = Masonry;
           nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'head', phase: 'error', reason: 'http' } });
           return;
         }
+        const bytes = Number(res.headers.get('content-length') || 0) || undefined;
         const data = await res.json();
         const items = Array.isArray(data) ? data : (data.items || []);
         if (!items.length) {
-          nm('wall_merge', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'head', phase: 'end', n: 0, reason: 'empty' } });
+          nm('wall_merge', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'head', phase: 'end', n: 0, reason: 'empty', bytes } });
+          return;
+        }
+        const sig = clipHeadSig(items);
+        if (sig && sig === lastHeadSig) {
+          nm('wall_merge', {
+            dur_ms: performance.now() - t0,
+            ok: true,
+            payload: { kind: 'head', phase: 'end', n: 0, reason: 'sig', bytes },
+          });
           return;
         }
         const seen = new Set(clips.map(c => c.id));
-        const fresh = items.filter(i => !seen.has(i.id));
-        // Refresh archived flags on existing rows (list JSON has no article HTML).
+        const fresh = items.filter(i => i && i.id && !seen.has(i.id) && i.type !== 'note' && !i.isCompose);
         const byId = new Map(items.map((i) => [i.id, i]));
         const flagDirty = [];
         let pinChanged = false;
@@ -4546,8 +4592,6 @@ window.ClipViewMasonry = Masonry;
           const next = {
             ...c,
             archived: n.archived,
-            archive: n.archive,
-            textContent: n.textContent || c.textContent,
             pinned: pf.pinned,
             pinnedAt: pf.pinnedAt,
             linkCount: n.linkCount != null ? n.linkCount : c.linkCount,
@@ -4559,43 +4603,96 @@ window.ClipViewMasonry = Masonry;
           }
           return next;
         });
+        lastHeadSig = sig;
         if (!fresh.length) {
-          clips = sortClipsForFeed(dedupeClipsById(clips));
           if (pinChanged) {
+            clips = sortClipsForFeed(dedupeClipsById(clips));
             colHeights = null;
             rebuildFromData({ preserveScroll: true });
-          } else {
+          } else if (flagDirty.length) {
             flagDirty.forEach((c) => replaceCardInPlace(c));
           }
           nm('wall_merge', {
             dur_ms: performance.now() - t0,
             ok: true,
-            payload: { kind: 'head', phase: 'end', n: 0, reason: pinChanged ? 'pin' : 'noop' },
+            payload: { kind: 'head', phase: 'end', n: 0, reason: pinChanged ? 'pin' : 'noop', bytes },
           });
           return;
         }
-        clips = sortClipsForFeed(dedupeClipsById([...fresh, ...clips]));
-        if (clips.length > CLIENT_CAP) {
-          const removed = clips.splice(CLIENT_CAP);
-          removed.forEach(r => { cardCache.get(r.id)?.remove(); cardCache.delete(r.id); });
+        let got = [];
+        if (fresh.length <= 2) {
+          for (const it of fresh) {
+            try {
+              const one = await fetchClipById(it.id);
+              if (one) got.push(one);
+            } catch (_) {}
+          }
+        } else {
+          const fat = new URLSearchParams({ limit: String(PAGE_SIZE), exclude: 'note' });
+          if (searchQuery) fat.set('q', searchQuery);
+          if (currentView === 'trash') fat.set('view', 'trash');
+          const fatRes = await fetch(`${API}/api/clips?${fat.toString().replace(/\+/g, '%20')}`);
+          if (fatRes.ok) {
+            const fatData = await fatRes.json();
+            const fatItems = Array.isArray(fatData) ? fatData : (fatData.items || []);
+            const want = new Set(fresh.map((i) => i.id));
+            got = fatItems.filter((i) => i && want.has(i.id));
+          }
         }
-        // Head insert changes order — full rebuild with scroll anchor.
-        colHeights = null;
-        rebuildFromData({ preserveScroll: true });
+        const n = applyFreshItems(got);
         nm('wall_merge', {
           dur_ms: performance.now() - t0,
           ok: true,
-          payload: { kind: 'head', phase: 'end', n: fresh.length, reason: 'insert' },
+          payload: { kind: 'head', phase: 'end', n, reason: 'insert', bytes },
         });
       } catch (_) {
         nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'head', phase: 'error' } });
       }
     }
 
+    let ingestChain = Promise.resolve();
+    function ingestClipById(id) {
+      ingestChain = ingestChain.then(() => ingestClipByIdNow(id), () => ingestClipByIdNow(id));
+      return ingestChain;
+    }
+
+    async function ingestClipByIdNow(id) {
+      const sid = String(id || '');
+      const t0 = performance.now();
+      if (!sid) {
+        nm('wall_merge', { dur_ms: 0, ok: true, payload: { kind: 'one', phase: 'end', n: 0, reason: 'noid' } });
+        return;
+      }
+      if (searchQuery || currentView === 'trash') {
+        await mergeHead();
+        return;
+      }
+      nm('wall_merge', { payload: { kind: 'one', phase: 'start' } });
+      if (clips.some((c) => c.id === sid)) {
+        nm('wall_merge', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'one', phase: 'end', n: 0, reason: 'have' } });
+        return;
+      }
+      try {
+        const item = await fetchClipById(sid);
+        if (!item || !item.id || item.type === 'note' || item.isCompose || item.inTrash) {
+          nm('wall_merge', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'one', phase: 'end', n: 0, reason: 'skip' } });
+          return;
+        }
+        const n = applyFreshItems([item]);
+        nm('wall_merge', {
+          dur_ms: performance.now() - t0,
+          ok: true,
+          payload: { kind: 'one', phase: 'end', n, reason: n ? 'insert' : 'have' },
+        });
+      } catch (_) {
+        nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'one', phase: 'error' } });
+      }
+    }
+
     /** Notes are excluded from mergeHead. Idle/visibility resync must still snapshot them. */
     async function mergeNotesHead() {
       const panelOpen = document.getElementById('notesPanel')?.classList.contains('open');
-      if (!notesState.loaded && !panelOpen) return;
+      if (!panelOpen) return;
       try { await loadNotesList(); } catch (_) { return; }
       if (!panelOpen || !notesState.id || notesState.saving) return;
       const item = notesState.items.find((n) => n.id === notesState.id);
@@ -7211,6 +7308,36 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
+    /** Newest captures belong at the top of col 0, not at the tail of the shortest column. */
+    function prependCardsIncremental(newItems) {
+      const host = document.getElementById('grid');
+      let colEls = [...host.querySelectorAll(':scope > .masonry-col')];
+      const cols = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
+      if (!colEls.length || colEls.length !== cols || colHeights == null || colHeights.length !== cols) {
+        rebuildFromData({ preserveScroll: true });
+        return;
+      }
+      const viewIds = new Set(clientFilter(clips).map((i) => i.id));
+      const toAdd = (newItems || []).filter((it) => viewIds.has(it.id) && !itemIsPinned(it));
+      if (!toAdd.length) return;
+      const newestFirst = toAdd.slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      const t0 = performance.now();
+      const colWidth = colEls[0].clientWidth || Math.floor((host.clientWidth || 800) / cols);
+      let added = 0;
+      for (const item of newestFirst) {
+        if (cardCache.has(item.id) && cardCache.get(item.id)?.isConnected) continue;
+        const card = ensureCard(item);
+        const h = Masonry.measureHeightAtWidth(card, colWidth);
+        colEls[0].insertBefore(card, colEls[0].firstChild);
+        const realH = Masonry.measureHeight(card) || h;
+        colHeights[0] += realH + (colHeights[0] > 0 ? MASONRY_GAP : 0);
+        added += 1;
+      }
+      if (added) {
+        nm('wall_paint', { dur_ms: performance.now() - t0, payload: { kind: 'prepend', n: added } });
+      }
+    }
+
     function packMasonry(host, orderedCards) {
       const seenEl = new Set();
       orderedCards = (orderedCards || []).filter((c) => {
@@ -7730,9 +7857,16 @@ window.ClipViewMasonry = Masonry;
             scheduleResync();
             return;
           }
+          if (d.type === 'update') {
+            if (d.id && !searchQuery && currentView !== 'trash') {
+              ingestClipById(d.id);
+              return;
+            }
+            scheduleResync();
+            return;
+          }
           if (d.type === 'resync_required'
-              || d.type === 'control.resync_required' || d.type === 'sync.resync_required'
-              || d.type === 'update') {
+              || d.type === 'control.resync_required' || d.type === 'sync.resync_required') {
             scheduleResync();
             return;
           }

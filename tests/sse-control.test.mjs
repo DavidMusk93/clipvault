@@ -23,12 +23,25 @@ test('this file is in the deploy frontend gate', () => {
   assert.match(check, /sse-control\.test\.mjs/);
 });
 
+test('sync capture posts ClipFlowItemAdded with itemId', () => {
+  const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
+  const slice = sliceFrom(sync, 'if changed {', 600);
+  assert.match(slice, /object: capture \? op\.itemId : nil/);
+  assert.match(slice, /kind == "upsert"/);
+});
+
 test('unpin JSON nulls pinnedAt and SSE clip_pinned', () => {
   const json = sliceFrom(web, 'dict["pinned"] = true', 400);
   assert.match(json, /pinnedAt"\] = NSNull\(\)/);
   const pin = sliceFrom(web, 'func handleClipPin', 1800);
   assert.match(pin, /broadcastSSE\(event: "clip_pinned"/);
   assert.match(indexHtml, /d\.type === 'clip_pinned'/);
+  assert.match(web, /broadcastSSE\(event: "update", id: id\)/);
+  assert.match(web, /note\.object as\? ClipboardItem/);
+  assert.match(web, /note\.object as\? String/);
+  assert.match(web, /headOnly/);
+  assert.match(web, /\$0\.name == "fields"/);
+  assert.match(web, /headOnly: headOnly/);
 });
 
 test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
@@ -68,6 +81,12 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   assert.match(setup, /resync_required/);
   assert.match(setup, /scheduleResync\(\)/);
   assert.match(setup, /backup_status/);
+  assert.match(setup, /ingestClipById/);
+  assert.match(indexHtml, /prependCardsIncremental/);
+  assert.match(indexHtml, /clipHeadSig/);
+  assert.match(indexHtml, /reason: 'sig'/);
+  assert.match(indexHtml, /fields: 'head'/);
+  assert.match(indexHtml, /function applyFreshItems/);
   assert.match(indexHtml, /scheduleBackupLite/);
   assert.match(indexHtml, /\/api\/backup\/status/);
   assert.match(indexHtml, /\?lite=1/);

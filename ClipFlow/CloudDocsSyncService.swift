@@ -908,7 +908,13 @@ final class CloudDocsSyncService {
                 applied += 1
                 batch += 1
                 if changed {
-                    NotificationCenter.default.post(name: Notification.Name("ClipFlowItemAdded"), object: nil)
+                    // Capture kinds carry itemId so the wall can ingest one card.
+                    // Pin/link/archive still fire id-less update → cheap fields=head merge.
+                    let capture = (op.kind == "upsert" || op.kind == "compose" || op.kind == "touch")
+                    NotificationCenter.default.post(
+                        name: Notification.Name("ClipFlowItemAdded"),
+                        object: capture ? op.itemId : nil
+                    )
                 }
             }
             appliedTotal += applied

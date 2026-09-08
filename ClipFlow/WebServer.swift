@@ -146,8 +146,14 @@ class WebServer {
                 forName: Notification.Name("ClipFlowItemAdded"),
                 object: nil,
                 queue: nil
-            ) { [weak self] _ in
-                self?.broadcastSSE(event: "update")
+            ) { [weak self] note in
+                let id: String? = {
+                    if let item = note.object as? ClipboardItem { return item.id.uuidString }
+                    if let uuid = note.object as? UUID { return uuid.uuidString }
+                    if let s = note.object as? String, !s.isEmpty { return s }
+                    return nil
+                }()
+                self?.broadcastSSE(event: "update", id: id)
             }
             NotificationCenter.default.addObserver(
                 forName: .clipFlowOCRReady,
@@ -1439,7 +1445,26 @@ class WebServer {
         """
     }
     
-    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false) -> [String: Any] {
+    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false, headOnly: Bool = false) -> [String: Any] {
+        if headOnly {
+            var head: [String: Any] = [
+                "id": item.id.uuidString,
+                "timestamp": item.timestamp.timeIntervalSince1970,
+                "type": item.type.rawValue,
+                "linkCount": item.linkCount,
+                "archived": item.archiveHtmlSha != nil,
+                "inTrash": item.deletedAt != nil,
+            ]
+            if let pin = item.pinnedAt {
+                head["pinned"] = true
+                head["pinnedAt"] = pin.timeIntervalSince1970
+            } else {
+                head["pinned"] = false
+                head["pinnedAt"] = NSNull()
+            }
+            if item.type == .note { head["isCompose"] = true }
+            return head
+        }
         let ts = item.timestamp.timeIntervalSince1970
         let first = (item.firstSeenAt ?? item.timestamp).timeIntervalSince1970
         var dict: [String: Any] = [
@@ -2313,6 +2338,7 @@ class WebServer {
         let trashOnly = (view == "trash")
         let typeFilter = items.first(where: { $0.name == "type" })?.value
         let excludeType = items.first(where: { $0.name == "exclude" })?.value
+        let headOnly = (items.first(where: { $0.name == "fields" })?.value == "head")
         if let idStr = items.first(where: { $0.name == "id" })?.value, let uuid = UUID(uuidString: idStr) {
             database.fetchItem(id: uuid) { [weak self] item in
                 guard let self else { return }
@@ -2333,7 +2359,7 @@ class WebServer {
 
         database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType) { [weak self] page in
             guard let self = self else { return }
-            let jsonItems = page.items.map { self.itemToJSON($0) }
+            let jsonItems = page.items.map { self.itemToJSON($0, headOnly: headOnly) }
             var payload: [String: Any] = [
                 "items": jsonItems,
                 "nextCursor": page.nextCursor?.encode() as Any
