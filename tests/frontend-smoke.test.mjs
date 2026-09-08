@@ -67,6 +67,16 @@ test('quarkDiscovery UI hooks stay wired', () => {
   assert.match(indexHtml, /id="bkQuarkDiscover"/);
   assert.match(indexHtml, /s\.quarkDiscovery/);
   assert.match(indexHtml, /card-header-lead/);
+  const swift = fs.readFileSync(path.join(__dirname, '../ClipFlow/WebServer.swift'), 'utf8');
+  assert.match(swift, /backup_status/);
+  assert.match(swift, /lite: lite/);
+  const dest = fs.readFileSync(path.join(__dirname, '../ClipFlow/BackupDestinations.swift'), 'utf8');
+  assert.match(dest, /kickQuarkCloudListScan/);
+  assert.doesNotMatch(
+    dest,
+    /Data\(contentsOf: f\), data\.count < 8_000_000/,
+    'IndexedDB scan must not run on the status request path',
+  );
 });
 
 test('product brand is ClipVault in title', () => {

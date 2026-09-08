@@ -211,7 +211,69 @@ enum BackupDestinationResolver {
     }
 
     /// Parse Quark client configs so UI does not ask users to "find" paths.
+    /// Fast path never reads Quark IndexedDB (can be multi-MB and stall `/api/backup/status` for seconds).
+    /// Cloud-list scan runs once in the background and refreshes the cache.
+    private static let quarkLock = NSLock()
+    private static var quarkCached: QuarkDiscoveryReport?
+    private static var quarkCloudScanStarted = false
+
     static func discoverQuark() -> QuarkDiscoveryReport {
+        quarkLock.lock()
+        if let cached = quarkCached {
+            quarkLock.unlock()
+            return cached
+        }
+        quarkLock.unlock()
+        let report = discoverQuarkFast(cloudListed: false)
+        quarkLock.lock()
+        quarkCached = report
+        quarkLock.unlock()
+        kickQuarkCloudListScan()
+        return report
+    }
+
+    private static func kickQuarkCloudListScan() {
+        quarkLock.lock()
+        if quarkCloudScanStarted {
+            quarkLock.unlock()
+            return
+        }
+        quarkCloudScanStarted = true
+        quarkLock.unlock()
+        DispatchQueue.global(qos: .utility).async {
+            let listed = quarkIndexedDBListsClipVault()
+            guard listed else { return }
+            quarkLock.lock()
+            if var cur = quarkCached, !cur.cloudListedClipVaultBackups {
+                cur.cloudListedClipVaultBackups = true
+                if !cur.summary.contains("ClipVault-Backups") {
+                    cur.summary += " · 夸克云端目录列表出现 ClipVault-Backups"
+                }
+                quarkCached = cur
+            }
+            quarkLock.unlock()
+        }
+    }
+
+    private static func quarkIndexedDBListsClipVault() -> Bool {
+        let idb = fm.homeDirectoryForCurrentUser.appendingPathComponent(
+            "Library/Application Support/Quark/Default/IndexedDB/uccd_cloud.quark_0.indexeddb.leveldb"
+        )
+        guard let files = try? fm.contentsOfDirectory(at: idb, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) else {
+            return false
+        }
+        let needle = Data("ClipVault-Backups".utf8)
+        for f in files where f.pathExtension == "log" || f.pathExtension == "ldb" {
+            let size = (try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            if size <= 0 || size >= 8_000_000 { continue }
+            if let data = try? Data(contentsOf: f), data.range(of: needle) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func discoverQuarkFast(cloudListed: Bool) -> QuarkDiscoveryReport {
         let appPath = quarkAppPath()
         let appInstalled = appPath != nil
         let home = fm.homeDirectoryForCurrentUser
@@ -260,21 +322,6 @@ enum BackupDestinationResolver {
             } else if let hosts = try? fm.contentsOfDirectory(at: s.appendingPathComponent("hosts", isDirectory: true), includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
                 hasArtifact = hosts.contains {
                     fm.fileExists(atPath: $0.appendingPathComponent("latest/clipflow.db").path)
-                }
-            }
-        }
-        // Best-effort: IndexedDB cloud listing mentions ClipVault-Backups (user uploaded/synced name).
-        var cloudListed = false
-        let idb = home.appendingPathComponent(
-            "Library/Application Support/Quark/Default/IndexedDB/uccd_cloud.quark_0.indexeddb.leveldb"
-        )
-        if let files = try? fm.contentsOfDirectory(at: idb, includingPropertiesForKeys: nil) {
-            for f in files where f.pathExtension == "log" || f.pathExtension == "ldb" {
-                if let data = try? Data(contentsOf: f), data.count < 8_000_000 {
-                    if data.range(of: Data("ClipVault-Backups".utf8)) != nil {
-                        cloudListed = true
-                        break
-                    }
                 }
             }
         }

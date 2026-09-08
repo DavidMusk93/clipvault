@@ -400,9 +400,9 @@ final class CloudDocsBackupService {
         }
     }
 
-    func statusSnapshot(completion: @escaping (Status) -> Void) {
+    func statusSnapshot(lite: Bool = false, completion: @escaping (Status) -> Void) {
         queue.async {
-            let st = self.buildStatus()
+            let st = self.buildStatus(lite: lite)
             DispatchQueue.main.async { completion(st) }
         }
     }
@@ -1367,7 +1367,7 @@ final class CloudDocsBackupService {
 
     // MARK: Status
 
-    private func buildStatus() -> Status {
+    private func buildStatus(lite: Bool = false) -> Status {
         let cloud = Self.cloudDocsURL()
         let gdrive = Self.googleDriveMyDriveURL()
         let root = backupRootURL
@@ -1503,7 +1503,7 @@ final class CloudDocsBackupService {
             lastSnapshotUnix: lastSnapshotUnix ?? newestSnapshotUnix(),
             snapshotCount: snaps.count,
             destinations: destStatuses,
-            quarkDiscovery: BackupDestinationResolver.discoverQuark(),
+            quarkDiscovery: lite ? nil : BackupDestinationResolver.discoverQuark(),
             googleDriveAvailable: gdrive != nil,
             googleDrivePath: gdrive?.path,
             hostId: ClipHostIdentity.id

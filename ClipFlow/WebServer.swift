@@ -157,6 +157,13 @@ class WebServer {
                 let id = (note.object as? UUID)?.uuidString
                 self?.broadcastSSE(event: "ocr_ready", id: id)
             }
+            NotificationCenter.default.addObserver(
+                forName: CloudDocsBackupService.statusChangedNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] _ in
+                self?.broadcastSSE(event: "backup_status")
+            }
         } catch {
             print("Failed to start server: \(error)")
         }
@@ -496,9 +503,9 @@ class WebServer {
         } else if pathOnly == "/api/ui-metrics/recent" {
             handleUiMetricsRecent(path: path, connection: connection)
         } else if pathOnly == "/api/backup/status" {
-            sendBackupStatus(connection: connection)
+            sendBackupStatus(path: path, connection: connection)
         } else if pathOnly == "/api/backup/snapshots" {
-            sendBackupStatus(connection: connection) // same payload includes snapshots
+            sendBackupStatus(path: path, connection: connection)
         } else if pathOnly == "/api/sync/status" {
             sendSyncStatus(connection: connection)
         } else if pathOnly == "/api/oplogs" {
@@ -2552,7 +2559,8 @@ class WebServer {
         sendResponse(response, connection: connection)
     }
 
-    private func sendBackupStatus(connection: NWConnection) {
+    private func sendBackupStatus(path: String, connection: NWConnection) {
+        let lite = (Self.formQueryValue(path: path, name: "lite") == "1")
         guard let backup = backup ?? CloudDocsBackupService.shared else {
             sendJSONObject([
                 "enabled": false,
@@ -2562,7 +2570,7 @@ class WebServer {
             ], connection: connection)
             return
         }
-        backup.statusSnapshot { status in
+        backup.statusSnapshot(lite: lite) { status in
             // Encode via JSONEncoder for nested Codable
             if let data = try? JSONEncoder().encode(status),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {

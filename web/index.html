@@ -7765,6 +7765,10 @@ window.ClipViewMasonry = Masonry;
             refreshClipInPlace(d.id);
             return;
           }
+          if (d.type === 'backup_status') {
+            scheduleBackupLite();
+            return;
+          }
         } catch (_) {}
       };
       es.onerror = () => {
@@ -7784,6 +7788,7 @@ window.ClipViewMasonry = Masonry;
       if (document.visibilityState === 'hidden') return;
       if (!sseIsFresh()) setupSSE();
       scheduleResync();
+      scheduleBackupLite();
     }
     document.addEventListener('visibilitychange', onFeedVisible);
     window.addEventListener('pageshow', (ev) => { if (ev.persisted) onFeedVisible(); });
@@ -8012,7 +8017,7 @@ window.ClipViewMasonry = Masonry;
     function openBackup() {
       bkDrawer.classList.add('open');
       bkScrim.classList.add('open');
-      refreshBackupStatus();
+      refreshBackupStatus({ lite: false });
       refreshSyncStatus();
     }
     function closeBackup() { bkDrawer.classList.remove('open'); bkScrim.classList.remove('open'); }
@@ -8027,10 +8032,11 @@ window.ClipViewMasonry = Masonry;
       return (n/1048576).toFixed(2) + ' MB';
     }
 
-    async function refreshBackupStatus() {
+    async function refreshBackupStatus({ lite = false } = {}) {
       const t0 = performance.now();
+      const kind = lite ? 'lite' : 'full';
       try {
-        const res = await fetch(API + '/api/backup/status');
+        const res = await fetch(API + '/api/backup/status' + (lite ? '?lite=1' : ''));
         if (!res.ok) throw new Error('status ' + res.status);
         const s = await res.json();
         const btn = document.getElementById('backupOpenBtn');
@@ -8162,10 +8168,10 @@ window.ClipViewMasonry = Masonry;
             ul.appendChild(li);
           });
         }
-        nm('wall_backup', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'status', phase: 'end' } });
+        nm('wall_backup', { dur_ms: performance.now() - t0, ok: true, payload: { kind, phase: 'end' } });
       } catch (e) {
         console.error(e);
-        nm('wall_backup', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'status', phase: 'error' } });
+        nm('wall_backup', { dur_ms: performance.now() - t0, ok: false, payload: { kind, phase: 'error' } });
         document.getElementById('backupBtnLabel').textContent = '备份?';
       }
     }
@@ -8276,13 +8282,19 @@ window.ClipViewMasonry = Masonry;
       mo.observe(backupDrawerEl, { attributes: true, attributeFilter: ['class'] });
     }
 
-    // poll badge lightly
-    setInterval(() => {
-      if (!document.getElementById('backupDrawer')?.classList.contains('open')) {
-        refreshBackupStatus();
+    let backupLiteTimer = 0;
+    function scheduleBackupLite() {
+      if (document.getElementById('backupDrawer')?.classList.contains('open')) {
+        refreshBackupStatus({ lite: false });
+        return;
       }
-    }, 30000);
-    setTimeout(() => refreshBackupStatus(), 800);
+      if (backupLiteTimer) return;
+      backupLiteTimer = window.setTimeout(() => {
+        backupLiteTimer = 0;
+        refreshBackupStatus({ lite: true });
+      }, 400);
+    }
+    setTimeout(() => refreshBackupStatus({ lite: true }), 800);
 
     nm('wall_boot', { payload: { phase: 'start' } });
     try {

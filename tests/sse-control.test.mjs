@@ -67,6 +67,15 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   assert.match(setup, /d\.type === 'ping'/);
   assert.match(setup, /resync_required/);
   assert.match(setup, /scheduleResync\(\)/);
+  assert.match(setup, /backup_status/);
+  assert.match(indexHtml, /scheduleBackupLite/);
+  assert.match(indexHtml, /\/api\/backup\/status/);
+  assert.match(indexHtml, /\?lite=1/);
+  assert.doesNotMatch(
+    indexHtml,
+    /setInterval\(\(\) => \{\s*if \(!document\.getElementById\('backupDrawer'\)/,
+    'must not poll backup/status every 30s on the wall',
+  );
   assert.doesNotMatch(setup, /fetchPage\(\{\s*reset:\s*true/);
   assert.doesNotMatch(
     setup,
