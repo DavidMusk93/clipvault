@@ -842,7 +842,21 @@
         const cls = new PerformanceObserver((list) => {
           for (const e of list.getEntries()) {
             if (!e.hadRecentInput && e.value > 0.001) {
-              emit("trae_sessions_cls", { dur_ms: e.value * 1000, payload: { value: Math.round(e.value * 10000) / 10000 } });
+              const src = (e.sources || [])[0];
+              const node = src && src.node;
+              let kind = "";
+              if (node) {
+                const klass = (node.getAttribute && node.getAttribute("class")) || "";
+                kind = String(node.id || klass || node.nodeName || "").replace(/\s+/g, ".").slice(0, 32);
+              }
+              emit("trae_sessions_cls", {
+                dur_ms: e.value * 1000,
+                payload: {
+                  value: Math.round(e.value * 10000) / 10000,
+                  phase: layoutReady ? "live" : "boot",
+                  kind,
+                },
+              });
             }
           }
         });

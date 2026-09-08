@@ -225,6 +225,7 @@ test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () =>
   assert.match(html, /if \(sig === lastSig && kind !== "full" && kind !== "settle"\) return/);
   assert.match(html, /if \(listSig === lastListSig\) return/);
   assert.match(html, /trae_sessions_cls/);
+  assert.match(html, /phase: layoutReady \? "live" : "boot"/);
   assert.match(html, /trae_sessions_paint/);
   assert.match(html, /trae_sessions_longtask/);
   assert.match(html, /127\.0\.0\.1:8080\/api\/ui-metrics/);

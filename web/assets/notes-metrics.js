@@ -77,7 +77,8 @@
     queue.push(ev);
     ring.push(ev);
     if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
-    const hot = name.startsWith('trae_') || name.startsWith('wall_') || name.startsWith('sse_');
+    const hot = name.startsWith('trae_') || name.startsWith('wall_') || name.startsWith('sse_')
+      || name.startsWith('sheet_') || name === 'notes_cls' || name === 'notes_longtask' || name === 'notes_open';
     if (hot) flush();
     else if (queue.length >= 20) flush();
     else if (!flushTimer) flushTimer = setTimeout(flush, 2000);
@@ -105,7 +106,22 @@
           if (!e.hadRecentInput && e.value > 0.001) {
             const inPanel = (e.sources || []).some((s) => root && root.contains(s.node));
             if (inPanel || !(e.sources || []).length) {
-              emit('notes_cls', { dur_ms: e.value * 1000, payload: { value: Math.round(e.value * 10000) / 10000 } });
+              const morphing = !!(root && root.classList.contains('open') && !root.classList.contains('is-settled'));
+              const src = (e.sources || [])[0];
+              const node = src && src.node;
+              let kind = '';
+              if (node) {
+                const klass = (node.getAttribute && node.getAttribute('class')) || '';
+                kind = String(node.id || klass || node.nodeName || '').replace(/\s+/g, '.').slice(0, 32);
+              }
+              emit('notes_cls', {
+                dur_ms: e.value * 1000,
+                payload: {
+                  value: Math.round(e.value * 10000) / 10000,
+                  phase: morphing ? 'morph' : 'live',
+                  kind,
+                },
+              });
             }
           }
         }

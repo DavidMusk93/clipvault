@@ -112,8 +112,13 @@ test('notes and sessions sheets spring in, wall does not snap away', () => {
   assert.match(indexHtml, /function sheetClip/);
   assert.match(indexHtml, /function paintSheet/);
   assert.match(indexHtml, /function clearSheetInline/);
+  assert.match(indexHtml, /function watchSheetJitter/);
+  assert.match(indexHtml, /sheet_morph/);
+  assert.match(indexHtml, /sheet_cls/);
   assert.match(indexHtml, /type: 'spring'/);
+  assert.match(indexHtml, /bounce: 0/);
   assert.match(indexHtml, /onUpdate/);
+  assert.doesNotMatch(indexHtml, /0\.016 \* u/);
   assert.doesNotMatch(indexHtml, /function sheetFlip/);
   assert.doesNotMatch(indexHtml, /function sheetClipFromButton/);
   assert.doesNotMatch(indexHtml, /clipPath:\s*clipOpen/);

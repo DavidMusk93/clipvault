@@ -61,6 +61,9 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(html, /wall_fetch/);
   assert.match(html, /wall_paint/);
   assert.match(html, /wall_ttfp/);
+  assert.match(html, /sheet_morph/);
+  assert.match(html, /sheet_cls/);
+  assert.match(metricsJs, /phase: morphing \? 'morph' : 'live'/);
   assert.doesNotMatch(html, /nm\([^)]*title/);
   assert.doesNotMatch(html, /payload:\s*\{[^}]*title/);
 });

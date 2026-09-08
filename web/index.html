@@ -215,6 +215,7 @@
     body.notes-open .wall-scene,
     body.sessions-open .wall-scene {
       pointer-events: none;
+      contain: strict;
     }
     body.notes-open .top-bar,
     body.sessions-open .top-bar,
@@ -1781,6 +1782,8 @@
       touch-action: none;
       opacity: 0;
       background: rgba(245, 245, 247, 0.42);
+    }
+    .notes-panel.open .notes-frost {
       -webkit-backdrop-filter: blur(28px) saturate(140%);
       backdrop-filter: blur(28px) saturate(140%);
     }
@@ -1803,6 +1806,7 @@
       display: grid; grid-template-columns: min(300px, 36vw) 1fr;
       padding: 12px;
       gap: 10px;
+      contain: layout paint;
     }
     .notes-rail, .notes-paper {
       position: relative; z-index: 1;
@@ -2030,6 +2034,10 @@
       padding: 12px;
       display: flex;
       flex-direction: column;
+      contain: layout paint;
+    }
+    .sessions-panel[data-boot]:not(.is-settled) .sessions-frame {
+      opacity: 0;
     }
     .sessions-frame {
       flex: 1;
@@ -2377,7 +2385,7 @@
       <button type="button" class="btn-icon" id="debugCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。刷新慢先看 wall_fetch / wall_paint / wall_merge。merge 应走 fields=head / one+prepend，≥200ms 标红。</p>
+      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。墙慢看 wall_*。打开笔记/会话抖看 sheet_morph / sheet_cls / notes_cls / trae_sessions_cls（CLS≥0.1 或 dur≥80 标红）。</p>
       <h3 style="font-size:14px;font-weight:600">SSE</h3>
       <div class="debug-kv" id="debugSseKv"></div>
       <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
@@ -3963,8 +3971,8 @@ window.ClipViewMasonry = Masonry;
     let sheetPanel = null;
     let sheetProg = 0;
     const sheetOrigin = { notes: null, sessions: null };
-    const sheetSpringIn = { type: 'spring', visualDuration: 0.44, bounce: 0.04, duration: 0.52 };
-    const sheetSpringOut = { type: 'spring', visualDuration: 0.34, bounce: 0, duration: 0.4 };
+    const sheetSpringIn = { type: 'spring', visualDuration: 0.4, bounce: 0, duration: 0.46 };
+    const sheetSpringOut = { type: 'spring', visualDuration: 0.32, bounce: 0, duration: 0.38 };
     function sheetReduce() {
       try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; }
     }
@@ -4034,7 +4042,6 @@ window.ClipViewMasonry = Masonry;
     function paintSheet(panel, p, clip, kind) {
       const shell = panel.querySelector('.notes-shell, .sessions-shell');
       const frost = panel.querySelector('.notes-frost');
-      const scene = document.getElementById('wallScene');
       const btn = sheetTrigger(kind) || (
         kind === 'sessions'
           ? document.getElementById('traeSessionsBtn')
@@ -4061,15 +4068,65 @@ window.ClipViewMasonry = Masonry;
         }
       }
       if (frost) frost.style.opacity = String(u);
-      if (scene) {
-        if (u <= 0.004) {
-          scene.style.transform = '';
-        } else {
-          scene.style.transformOrigin = '50% 50%';
-          scene.style.transform = `scale(${(1 - 0.016 * u).toFixed(4)})`;
-        }
-      }
       if (btn) btn.style.opacity = String(1 - Math.min(1, u * 1.55));
+    }
+    function watchSheetJitter(kind, phase) {
+      let cls = 0;
+      let n = 0;
+      let ltMax = 0;
+      const t0 = performance.now();
+      let clsObs;
+      let ltObs;
+      try {
+        clsObs = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) {
+            if (e.hadRecentInput || !(e.value > 0.001)) continue;
+            cls += e.value;
+            n += 1;
+          }
+        });
+        clsObs.observe({ type: 'layout-shift', buffered: false });
+      } catch (_) {}
+      try {
+        ltObs = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) {
+            if (e.duration > ltMax) ltMax = e.duration;
+          }
+        });
+        ltObs.observe({ type: 'longtask', buffered: false });
+      } catch (_) {}
+      let done = false;
+      return () => {
+        if (done) return;
+        done = true;
+        try { clsObs && clsObs.disconnect(); } catch (_) {}
+        try { ltObs && ltObs.disconnect(); } catch (_) {}
+        const value = Math.round(cls * 10000) / 10000;
+        const dur = performance.now() - t0;
+        nm('sheet_morph', {
+          dur_ms: dur,
+          ok: value < 0.1 && ltMax < 50,
+          payload: {
+            kind: String(kind || '').slice(0, 16),
+            phase: String(phase || '').slice(0, 16),
+            value,
+            n,
+            lag: Math.round(ltMax),
+          },
+        });
+        if (value >= 0.01) {
+          nm('sheet_cls', {
+            dur_ms: value * 1000,
+            ok: value < 0.1,
+            payload: {
+              kind: String(kind || '').slice(0, 16),
+              phase: String(phase || '').slice(0, 16),
+              value,
+              n,
+            },
+          });
+        }
+      };
     }
     function playSheet(panel, open, kind, fromRect) {
       const motion = globalThis.Motion;
@@ -4090,11 +4147,13 @@ window.ClipViewMasonry = Masonry;
       const to = shell ? readSheetRect(shell) : null;
       const clip = from && to ? sheetClip(from, to) : { t: 0, r: 0, b: 0, l: 0, rad: 18 };
       stopSheetAnims();
+      const endWatch = watchSheetJitter(kind, open ? 'open' : 'close');
       const finish = () => {
         sheetProg = open ? 1 : 0;
         if (!open) panel.classList.remove('open', 'is-settled');
         clearSheetInline(panel);
         if (open) panel.classList.add('is-settled');
+        endWatch();
       };
       if (!animate || sheetReduce() || !shell) {
         finish();
@@ -4104,6 +4163,14 @@ window.ClipViewMasonry = Masonry;
       const toP = open ? 1 : 0;
       paintSheet(panel, fromP, clip, kind);
       const spring = open ? sheetSpringIn : sheetSpringOut;
+      let done = false;
+      const once = () => {
+        if (done) return;
+        done = true;
+        stopSheetAnims();
+        paintSheet(panel, toP, clip, kind);
+        finish();
+      };
       const fin = animate(fromP, toP, {
         type: spring.type,
         visualDuration: spring.visualDuration,
@@ -4113,13 +4180,12 @@ window.ClipViewMasonry = Masonry;
           sheetProg = v;
           paintSheet(panel, v, clip, kind);
         },
+        onComplete: once,
       });
       sheetAnims.push(fin);
-      let done = false;
-      const once = () => { if (done) return; done = true; finish(); };
       return Promise.race([
         Promise.resolve(fin && (fin.finished || fin)).then(once, once),
-        new Promise((resolve) => setTimeout(() => { once(); resolve(); }, 800)),
+        new Promise((resolve) => setTimeout(once, 480)),
       ]);
     }
 
@@ -4183,7 +4249,9 @@ window.ClipViewMasonry = Masonry;
       if (!panel) return;
       const origin = readSheetRect(sheetTrigger('sessions'));
       const frame = document.getElementById('sessionsFrame');
-      if (frame && !frame.getAttribute('src')) {
+      const firstBoot = !!(frame && !frame.getAttribute('src'));
+      if (firstBoot) {
+        panel.dataset.boot = '1';
         frame.src = '/trae/?embed=1';
       } else {
         sessionsFrameCtl('clipvault-sessions-resume');
@@ -4194,6 +4262,7 @@ window.ClipViewMasonry = Masonry;
       setSessionsWallLocked(true);
       emitSessionsLayout('open');
       await playSheet(panel, true, 'sessions', origin);
+      delete panel.dataset.boot;
       sessionsFrameCtl('clipvault-sessions-settled');
       emitSessionsLayout('settled');
       try {
@@ -4229,7 +4298,8 @@ window.ClipViewMasonry = Masonry;
       panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       setNotesWallLocked(true);
-      playSheet(panel, true, 'notes', origin);
+      const alreadyId = notesState.id;
+      const morph = playSheet(panel, true, 'notes', origin);
       notesState.openedAt = Date.now();
       const M = globalThis.ClipNotesMetrics;
       if (M) {
@@ -4237,13 +4307,16 @@ window.ClipViewMasonry = Masonry;
         M.startObservers(panel);
       }
       nm('notes_open');
+      await morph;
       try { await loadNotesList(); } catch (e) {
         if (!notesState.loaded) notesState.items = notesState.items || [];
       }
-      const want = preferredId || lastNotesId();
-      if (want && notesState.items.some(n => n.id === want)) await openNoteInPanel(want);
-      else if (notesState.items[0]) await openNoteInPanel(notesState.items[0].id);
-      else if (notesState.loaded && !notesState.items.length) await newNoteInPanel();
+      const want = preferredId || lastNotesId() || alreadyId;
+      if (want && notesState.items.some(n => n.id === want)) {
+        if (want !== alreadyId) await openNoteInPanel(want);
+      } else if (notesState.items[0]) {
+        if (notesState.items[0].id !== alreadyId) await openNoteInPanel(notesState.items[0].id);
+      } else if (notesState.loaded && !notesState.items.length) await newNoteInPanel();
       persistNotesId(notesState.id);
     }
 
@@ -8006,7 +8079,7 @@ window.ClipViewMasonry = Masonry;
       const agg = new Map();
       for (const ev of rows) {
         const name = ev.name || '';
-        if (!name.startsWith('wall_') && !name.startsWith('sse_')) continue;
+        if (!/^(wall_|sse_|sheet_|notes_cls|notes_longtask|notes_open|notes_editor|trae_sessions_cls|trae_sessions_longtask|trae_sessions_layout|trae_sessions_paint|trae_sessions_ttfp)/.test(name)) continue;
         let a = agg.get(name);
         if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0 }; agg.set(name, a); }
         a.n += 1;
@@ -8020,15 +8093,15 @@ window.ClipViewMasonry = Masonry;
       hot.innerHTML = hotRows.length ? hotRows.map((r) => {
         const avg = r.durN ? Math.round(r.sum / r.durN) : '—';
         const mx = r.durN ? Math.round(r.max) : '—';
-        const slow = r.max >= 200;
+        const slow = /_cls$/.test(r.name) ? r.max >= 80 : (r.name === 'sheet_morph' ? (r.max >= 800) : r.max >= 200);
         return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(r.name)}</td><td>${r.n}</td><td>${avg}</td><td>${mx}</td></tr>`;
-      }).join('') : '<tr><td colspan="4">尚无 wall_/sse_ 打点</td></tr>';
+      }).join('') : '<tr><td colspan="4">尚无 wall_/sse_/sheet_/cls 打点</td></tr>';
       const latest = rows.slice(-24).reverse();
       log.innerHTML = latest.length ? latest.map((ev) => {
         const tms = new Date(ev.ts || Date.now()).toLocaleTimeString();
         const dur = ev.dur_ms != null ? ` ${Math.round(ev.dur_ms)}ms` : '';
         const p = ev.payload ? ' ' + JSON.stringify(ev.payload) : '';
-        const slow = ev.dur_ms != null && ev.dur_ms >= 200;
+        const slow = ev.dur_ms != null && (/_cls$/.test(ev.name || '') ? ev.dur_ms >= 80 : ev.dur_ms >= 200);
         return `<li class="${slow ? 'is-slow' : ''}">${esc(tms)} ${esc(ev.name)}${esc(dur)}${esc(p)}</li>`;
       }).join('') : '<li class="backup-label">尚无本页打点</li>';
     }
