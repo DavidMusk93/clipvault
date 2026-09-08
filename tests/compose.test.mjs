@@ -33,6 +33,18 @@ test('compose images go to CAS sha URLs', () => {
   assert.match(html, /ClipNotesEditor/);
 });
 
+test('idle notes resync without a full page refresh', () => {
+  assert.match(html, /function mergeNotesHead/);
+  assert.match(html, /await mergeNotesHead\(\)/);
+  assert.match(html, /lastLocalSaveAt/);
+  assert.doesNotMatch(html, /if \(!notesState\.loaded\) \{\s*try \{ await loadNotesList/);
+  assert.doesNotMatch(
+    html,
+    /d\.id !== notesState\.id && notesState\.loaded/,
+  );
+  assert.match(html, /d\.type === 'compose_saved'[\s\S]{0,180}mergeNotesHead/);
+});
+
 test('notes are a same-page panel, not clip-card chrome', () => {
   assert.match(html, /id="notesPanel"/);
   assert.match(html, /exclude.*note|exclude', 'note'/);

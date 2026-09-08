@@ -180,6 +180,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 行内计算 | `1+2=` 后幽灵预览结果；**Tab 写入**，其它键丢掉预览 | 不 `eval()`。Tab 有幽灵时优先于列表缩进。`price=` / `==` / 代码围栏不触发 |
 | 新一篇 | 32×32 细线 +，无黑底「新一篇」文案 | 新建必须清空预览，禁止留上一篇 HTML |
 | 打开/关闭 | Motion 数字弹簧插值窗口：`clip-path: inset(t r b l round r)` 从按钮矩形长到全纸；内容原尺寸被揭开，不 `scale`。结束必须 `clearSheetInline`（清 clip/filter/overflow） | 禁止让 Motion 直接 tween `clipPath` 字符串（`round` 对不上就跳变，会话会卡在按钮洞里）。禁止整页均匀 scale |
+| 闲置同步 | 打开面板总是拉列表；`visibility`/`onopen`/`update` 走 `mergeNotesHead`；远端更新补当前篇 | 只靠整页刷新。`mergeHead` 排除 note 不等于笔记已对齐。正在输入时不覆盖 |
 
 规则：工具条向源码插入 Markdown，不改预览 DOM。预览只读。自动保存不得回写编辑器、不得 `mergeHead` 墙。霜层默认 `pointer-events: none`（关掉才能点墙），`.notes-panel.open` 才 `auto`；`main`/`chips`/`top-bar` 同时 `inert`。禁止霜层一直 `none` 把拖动手势漏到控制条。
 

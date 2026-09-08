@@ -3330,7 +3330,7 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0 };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0 };
     const NOTE_ID_KEY = 'clipvault.notes.id';
 
     function noteExcerpt(md) {
@@ -3753,6 +3753,7 @@ window.ClipViewMasonry = Masonry;
         }
         notesState.id = j.item.id;
         persistNotesId(notesState.id);
+        notesState.lastLocalSaveAt = Date.now() / 1000;
         const idx = notesState.items.findIndex(n => n.id === notesState.id);
         if (idx >= 0) notesState.items[idx] = j.item;
         else notesState.items.unshift(j.item);
@@ -4055,8 +4056,8 @@ window.ClipViewMasonry = Masonry;
         M.startObservers(panel);
       }
       nm('notes_open');
-      if (!notesState.loaded) {
-        try { await loadNotesList(); } catch (e) { notesState.items = []; }
+      try { await loadNotesList(); } catch (e) {
+        if (!notesState.loaded) notesState.items = [];
       }
       const want = preferredId || lastNotesId();
       if (want && notesState.items.some(n => n.id === want)) await openNoteInPanel(want);
@@ -4377,6 +4378,27 @@ window.ClipViewMasonry = Masonry;
         colHeights = null;
         rebuildFromData({ preserveScroll: true });
       } catch (_) {}
+    }
+
+    /** Notes are excluded from mergeHead. Idle/visibility resync must still snapshot them. */
+    async function mergeNotesHead() {
+      const panelOpen = document.getElementById('notesPanel')?.classList.contains('open');
+      if (!notesState.loaded && !panelOpen) return;
+      try { await loadNotesList(); } catch (_) { return; }
+      if (!panelOpen || !notesState.id || notesState.dirty || notesState.saving) return;
+      const item = notesState.items.find((n) => n.id === notesState.id);
+      if (!item) return;
+      const remoteTs = Number(item.timestamp) || 0;
+      if (remoteTs && remoteTs <= (notesState.lastLocalSaveAt || 0) + 0.25) return;
+      const t = noteTitleOf(item);
+      const body = noteStripTitle(item.textContent || '', t);
+      const titleEl = document.getElementById('notesTitle');
+      const curTitle = titleEl ? titleEl.value : '';
+      const curBody = notesState.editor?.getMarkdown?.() ?? '';
+      if (curTitle === t && curBody === body) return;
+      if (titleEl) titleEl.value = t;
+      paintNotesTitleView();
+      await ensureNotesEditor(body);
     }
 
     function thumbSrc(item) {
@@ -7355,8 +7377,10 @@ window.ClipViewMasonry = Masonry;
       resyncTimer = setTimeout(async () => {
         resyncTimer = 0;
         resyncing = true;
-        try { await mergeHead(); }
-        finally {
+        try {
+          await mergeHead();
+          await mergeNotesHead();
+        } finally {
           resyncing = false;
           if (resyncQueued) { resyncQueued = false; scheduleResync(); }
         }
@@ -7429,9 +7453,7 @@ window.ClipViewMasonry = Masonry;
           const d = JSON.parse(e.data);
           if (d.type === 'ping') return;
           if (d.type === 'compose_saved') {
-            if (d.id && d.id !== notesState.id && notesState.loaded) {
-              loadNotesList().catch(() => {});
-            }
+            mergeNotesHead().catch(() => {});
             return;
           }
           if (d.type === 'connected' || d.type === 'resync_required'

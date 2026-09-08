@@ -55,6 +55,7 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   assert.ok(start >= 0 && end > start, 'setupSSE before onFeedVisible');
   const setup = indexHtml.slice(start, end);
   assert.match(indexHtml, /function scheduleResync/);
+  assert.match(indexHtml, /await mergeNotesHead\(\)/);
   assert.match(indexHtml, /visibilitychange/);
   assert.match(indexHtml, /pageshow/);
   assert.match(setup, /EventSource\.CLOSED/);
