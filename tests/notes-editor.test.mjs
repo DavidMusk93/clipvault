@@ -227,7 +227,11 @@ test('open notes lock the wall so chips and format toolbar cannot drag', () => {
   assert.match(html, /body\.notes-open[\s\S]{0,80}overflow:\s*hidden/);
   assert.match(html, /body\.notes-open \.chips,/);
   assert.match(html, /body\.notes-open main/);
-  assert.doesNotMatch(html, /body\.notes-open \.wall-scene[\s\S]{0,80}contain:\s*strict/);
+  assert.match(html, /sheet-unlocking/);
+  assert.match(html, /body\.notes-open:not\(\.sheet-unlocking\) main/);
+  assert.match(html, /contain: strict/);
+  assert.doesNotMatch(html, /sheet-unlocking\) \.wall-scene/);
+  assert.match(html, /function beginSheetUnlock/);
   assert.match(html, /setNotesWallLocked/);
   assert.match(html, /setAttribute\('inert'/);
   assert.match(html, /notesBackdropEvent/);

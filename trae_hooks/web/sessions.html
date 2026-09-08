@@ -778,12 +778,8 @@
       if (current && liveEvents.length) {
         requestAnimationFrame(() => {
           emitLayout("cache");
-          const gate = paintGateReason();
-          if (gate) {
-            emit("trae_sessions_skip", { payload: { reason: gate, kind: "cache", n: liveEvents.length } });
-            return;
-          }
-          try { paintFromLive("cache"); markTtfp("cache"); } catch (_) {}
+          // Snap is beats-only. Painting it here then merging tools shoves
+          // thread-block layout (trae_sessions_cls). One paint in loadThreadPair.
         });
       }
       return true;
@@ -1547,9 +1543,7 @@
           return;
         }
         lastSig = sig;
-        if (painted !== current || !thread.querySelector(":scope > [data-key]")) {
-          thread.replaceChildren();
-        }
+        thread.querySelectorAll(":scope > .empty").forEach((n) => n.remove());
         patchThread(items);
         if (painted !== current) pinBottom();
         emit("trae_sessions_paint", {
@@ -1693,8 +1687,8 @@
 
     async function loadThreadPair() {
       await loadEvents("beats", { paint: false });
-      if (canFetch(load)) await loadEvents("tools");
-      if (current && liveEvents.length) paintFromLive(painted === current ? "tools" : "beats");
+      if (canFetch(load)) await loadEvents("tools", { paint: false });
+      if (current && liveEvents.length) paintFromLive("pair");
       else if (current) paintFromLive("beats");
     }
     $("q").addEventListener("keydown", (ev) => {
@@ -1802,10 +1796,12 @@
       if (t === "clipvault-sessions-settled") {
         layoutReady = true;
         emitLayout("settled");
-        if (current && liveEvents.length) {
-          try { paintFromLive("settle"); markTtfp("settle"); } catch (_) {}
+        if (thread.querySelector(":scope > [data-key]")) {
+          markTtfp("settle");
         } else if (canFetch(load)) {
           scheduleResync();
+        } else if (current && liveEvents.length) {
+          try { paintFromLive("settle"); markTtfp("settle"); } catch (_) {}
         }
       }
     });

@@ -233,6 +233,10 @@ test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () =>
   assert.match(html, /takeLatest/);
   assert.match(html, /if \(!current\) \{/);
   assert.match(html, /loadEvents\("beats", \{ paint: false \}\)/);
+  assert.match(html, /loadEvents\("tools", \{ paint: false \}\)/);
+  assert.match(html, /paintFromLive\("pair"\)/);
+  assert.doesNotMatch(html, /thread\.replaceChildren\(\)/);
+  assert.doesNotMatch(html, /paintFromLive\("cache"\)/);
   assert.doesNotMatch(html, /thread\.innerHTML = '<div class="empty">没有匹配事件<\/div>';\n          lastSig/);
   assert.doesNotMatch(html, /requestAnimationFrame\(pinBottom\)/);
   assert.match(html, /trae_sessions_cls/);

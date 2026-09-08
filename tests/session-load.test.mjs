@@ -166,7 +166,9 @@ test('sessions.html imports the load machine and does not resync on every onopen
   assert.match(html, /readSnap/);
   assert.match(html, /writeSnap/);
   assert.match(html, /trae_sessions_fsm/);
-  assert.match(html, /paintFromLive\(\"cache\"\)/);
+  assert.match(html, /emitLayout\(\"cache\"\)/);
+  assert.doesNotMatch(html, /paintFromLive\(\"cache\"\)/);
+  assert.match(html, /loadEvents\(\"tools\", \{ paint: false \}\)/);
   assert.doesNotMatch(html, /es\.onopen = \(\) => scheduleResync\(\)/);
   assert.match(agents, /session-load\.mjs/);
   assert.match(taste, /先画上次快照/);

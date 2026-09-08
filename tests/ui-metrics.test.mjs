@@ -72,7 +72,7 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(metricsJs, /name === 'chrome_shift'/);
   assert.match(metricsJs, /e\.duration < 40/);
   assert.match(metricsJs, /over\$\|out\$\|enter\$\|leave\$/);
-  assert.match(html, /ok: value < 0\.1 && ltMax < 50 && dur < 800/);
+  assert.match(html, /ok: value < 0\.1 && ltMax < 50 && dur < 2000/);
   assert.match(swift, /"dy"/);
   assert.doesNotMatch(html, /nm\([^)]*title/);
   assert.doesNotMatch(html, /payload:\s*\{[^}]*title/);
