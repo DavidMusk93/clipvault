@@ -229,3 +229,26 @@ test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () =>
   assert.match(html, /trae_sessions_longtask/);
   assert.match(html, /127\.0\.0\.1:8080\/api\/ui-metrics/);
 });
+
+test('session load coalesces hooks and omits bulky tool payloads from the list', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
+  const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
+  const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
+  assert.match(server, /list_cols =/);
+  assert.match(server, /beat_cols =/);
+  assert.match(server, /SELECT \{list_cols\}/);
+  assert.match(server, /SELECT \{beat_cols\}/);
+  assert.match(html, /eventsGen/);
+  assert.match(html, /AbortController/);
+  assert.match(html, /trae_sessions_load/);
+  assert.match(html, /trae_sessions_error/);
+  assert.match(html, /trae_sessions_list/);
+  assert.match(html, /scheduleList/);
+  assert.match(html, /hydrateSlimTools/);
+  assert.match(html, /加载对话…/);
+  assert.match(html, /if \(current\) await loadEvents\(\)/);
+  assert.doesNotMatch(html, /loadHealth\(\);\s*loadSessions\(\);\s*ingestHookIds/);
+  assert.doesNotMatch(html, /if \(uniq\.length > 16\) \{\s*await loadEvents\(\)/);
+  assert.match(taste, /\/api\/events[`']? 列表不含 tool_input/);
+  assert.match(agents, /hook 禁止每次拉[^\\n]*\/api\/sessions[^\\n]*全量 events/);
+});

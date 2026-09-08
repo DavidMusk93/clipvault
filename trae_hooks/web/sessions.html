@@ -625,6 +625,11 @@
     let pendingHookIds = [];
     let railY = 0;
     let es = null;
+    let eventsGen = 0;
+    let eventsAbort = null;
+    let resyncTimer = 0;
+    let listTimer = 0;
+    let hookPaintTimer = 0;
     const NEAR = 64;
     const METRICS = "http://127.0.0.1:8080/api/ui-metrics";
     const metricQ = [];
@@ -1032,7 +1037,7 @@
     function bindHistoryItem(el) {
       if (el.dataset.bound) return;
       el.dataset.bound = "1";
-      el.addEventListener("toggle", () => {
+      el.addEventListener("toggle", async () => {
         if (!el.open) return;
         const pack = el.closest(".history-body");
         if (pack && pack.dataset.expandAll !== "1") {
@@ -1043,7 +1048,26 @@
         const body = el.querySelector(".history-item-body");
         if (!body) return;
         if (body.dataset.loaded) return;
-        const row = liveById(el.dataset.eid);
+        let row = liveById(el.dataset.eid);
+        const slim = row && row.role === "tool"
+          && row.event && row.event.tool_input == null && row.event.tool_response == null;
+        if (!row || slim) {
+          try {
+            const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(el.dataset.eid)))).json();
+            if (d.event && d.event.event_id) {
+              const i = liveEvents.findIndex((x) => x.event_id === d.event.event_id);
+              if (i >= 0) liveEvents[i] = d.event;
+              else {
+                liveEvents.push(d.event);
+                liveIds.add(d.event.event_id);
+              }
+              row = imMessagesFromEvents([d.event])[0];
+            }
+          } catch (err) {
+            body.textContent = String(err);
+            return;
+          }
+        }
         if (!row) {
           body.innerHTML = '<div class="empty">这条还不在当前窗口，请点「查看全部」或刷新</div>';
           return;
@@ -1188,91 +1212,148 @@
       }
     }
     async function loadSessions() {
-      const data = await (await fetch(apiUrl("/api/sessions?limit=80"))).json();
       const box = $("sessionList");
-      const sessions = data.sessions || [];
-      sessionRows = sessions;
-      if (!sessions.length) {
-        lastListSig = "";
-        box.innerHTML = '<div class="empty">还没有 hook 事件。装好 hooks 后硬重启 Trae，再发一条真实消息。</div>';
-        return sessions;
+      let switched = false;
+      try {
+        const data = await (await fetch(apiUrl("/api/sessions?limit=80"))).json();
+        const sessions = data.sessions || [];
+        sessionRows = sessions;
+        if (!sessions.length) {
+          lastListSig = "";
+          box.innerHTML = '<div class="empty">还没有 hook 事件。装好 hooks 后硬重启 Trae，再发一条真实消息。</div>';
+          return { sessions, switched };
+        }
+        const listSig = sessions.map((s) =>
+          `${s.session_id}:${s.event_count}:${s.last_ts}:${s.pinned_at || ""}:${recencyTone(s.last_ts)}:${volumeBand(s.event_count)}`
+        ).join("|");
+        const latest = newestSession(sessions);
+        if (followLatest && latest && latest.session_id && latest.session_id !== current) {
+          current = latest.session_id;
+          lastSig = "";
+          painted = "";
+          liveEvents = [];
+          liveIds.clear();
+          markFollow(true);
+          showSessionHead(current, sessionTitle(latest));
+          switched = true;
+        }
+        emit("trae_sessions_list", { payload: { n: sessions.length } });
+        if (listSig === lastListSig) return { sessions, switched };
+        lastListSig = listSig;
+        railY = box.scrollTop;
+        patchSessionList(sessions);
+        box.scrollTop = railY;
+        return { sessions, switched };
+      } catch (err) {
+        emit("trae_sessions_error", { payload: { reason: "list" } });
+        box.innerHTML = `<div class="empty">加载会话列表失败${err && err.message ? " · " + esc(err.message) : ""}</div>`;
+        return { sessions: [], switched };
       }
-      const listSig = sessions.map((s) =>
-        `${s.session_id}:${s.event_count}:${s.last_ts}:${s.pinned_at || ""}:${recencyTone(s.last_ts)}:${volumeBand(s.event_count)}`
-      ).join("|");
-      const latest = newestSession(sessions);
-      if (followLatest && latest && latest.session_id && latest.session_id !== current) {
-        current = latest.session_id;
-        lastSig = "";
-        painted = "";
-        markFollow(true);
-        showSessionHead(current, sessionTitle(latest));
-        loadEvents();
-      }
-      if (listSig === lastListSig) return sessions;
-      lastListSig = listSig;
-      railY = box.scrollTop;
-      patchSessionList(sessions);
-      box.scrollTop = railY;
-      return sessions;
     }
     function paintFromLive(kind) {
-      if (!current) {
-        thread.innerHTML = '<div class="empty">选择左侧会话</div>';
-        showSessionHead("");
-        liveEvents = [];
-        liveIds.clear();
-        lastSig = "";
-        return;
-      }
-      if (!liveEvents.length) {
-        thread.innerHTML = '<div class="empty">没有匹配事件</div>';
-        lastSig = "";
-        return;
-      }
-      const rows = imMessagesFromEvents(liveEvents);
-      const items = focusImRows(rows);
-      const sig = rows.map((r) => r.event.event_id).join(",");
-      if (sig === lastSig && kind !== "full") return;
-      const grew = lastSig && sig.startsWith(lastSig + ",");
-      lastSig = sig;
-      const t0 = performance.now();
       try {
+        if (!current) {
+          thread.innerHTML = '<div class="empty">选择左侧会话</div>';
+          showSessionHead("");
+          liveEvents = [];
+          liveIds.clear();
+          lastSig = "";
+          return;
+        }
+        if (!liveEvents.length) {
+          thread.innerHTML = '<div class="empty">没有匹配事件</div>';
+          lastSig = "";
+          return;
+        }
+        const rows = imMessagesFromEvents(liveEvents);
+        const items = focusImRows(rows);
+        const sig = rows.map((r) => r.event.event_id).join(",");
+        if (sig === lastSig && kind !== "full") return;
+        const grew = lastSig && sig.startsWith(lastSig + ",");
+        lastSig = sig;
+        const t0 = performance.now();
         if (kind === "full" || !thread.querySelector(":scope > [data-key]")) {
           thread.replaceChildren();
         }
         patchThread(items);
+        emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: items.length, kind } });
+        if (followTail || painted !== current) pinBottomSoon();
+        else if (grew) {
+          pendingNew = true;
+          syncFollowBtn();
+        }
+        painted = current;
       } catch (err) {
+        emit("trae_sessions_error", { payload: { reason: "paint" } });
         thread.innerHTML = `<div class="empty">渲染对话失败${err && err.message ? " · " + esc(err.message) : ""}</div>`;
-        return;
       }
-      emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: items.length, kind } });
-      if (followTail || painted !== current) pinBottomSoon();
-      else if (grew) {
-        pendingNew = true;
-        syncFollowBtn();
+    }
+
+    async function hydrateSlimTools() {
+      const gen = eventsGen;
+      const items = focusImRows(imMessagesFromEvents(liveEvents));
+      const ids = [];
+      for (const item of items) {
+        if (item.type !== "focus") continue;
+        const row = item.row;
+        const e = row && row.event;
+        if (!e || row.role !== "tool") continue;
+        if (e.tool_input != null || e.tool_response != null) continue;
+        if (e.event_id) ids.push(e.event_id);
       }
-      painted = current;
+      const want = ids.slice(-4);
+      if (!want.length) return;
+      let n = 0;
+      for (const id of want) {
+        if (gen !== eventsGen) return;
+        try {
+          const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(id)))).json();
+          const ev = d.event;
+          if (!ev || !ev.event_id) continue;
+          const i = liveEvents.findIndex((x) => x.event_id === ev.event_id);
+          if (i >= 0) liveEvents[i] = ev;
+          n += 1;
+        } catch (_) {}
+      }
+      if (n && gen === eventsGen) paintFromLive("patch");
     }
 
     async function loadEvents() {
+      const gen = ++eventsGen;
+      const sid = current;
+      if (eventsAbort) {
+        try { eventsAbort.abort(); } catch (_) {}
+      }
+      const ac = new AbortController();
+      eventsAbort = ac;
       const q = (document.getElementById("q") || {}).value || "";
       const params = new URLSearchParams({ limit: "200" });
-      if (current) params.set("session_id", current);
+      if (sid) params.set("session_id", sid);
       if (String(q).trim()) params.set("q", String(q).trim());
-      if (!current) {
+      if (!sid) {
         paintFromLive("full");
         return;
       }
+      if (!liveEvents.length) {
+        thread.innerHTML = '<div class="empty">加载对话…</div>';
+      }
+      emit("trae_sessions_load", { payload: { kind: "full", phase: "start" } });
       try {
-        const data = await (await fetch(apiUrl("/api/events?" + params))).json();
+        const res = await fetch(apiUrl("/api/events?" + params), { signal: ac.signal });
+        const data = await res.json();
+        if (gen !== eventsGen || current !== sid) return;
         liveEvents = data.events || [];
         liveIds.clear();
         for (const e of liveEvents) {
           if (e && e.event_id) liveIds.add(e.event_id);
         }
         paintFromLive("full");
+        emit("trae_sessions_load", { payload: { n: liveEvents.length, kind: "full", phase: "end" } });
+        hydrateSlimTools();
       } catch (err) {
+        if (err && err.name === "AbortError") return;
+        if (gen !== eventsGen) return;
+        emit("trae_sessions_error", { payload: { reason: "events" } });
         liveEvents = [];
         liveIds.clear();
         lastSig = "";
@@ -1283,12 +1364,12 @@
     async function ingestHookIds(ids) {
       const uniq = [...new Set(ids.filter(Boolean))];
       if (!uniq.length || !current) return;
+      const batch = uniq.length > 16 ? uniq.slice(-16) : uniq;
       if (uniq.length > 16) {
-        await loadEvents();
-        return;
+        emit("trae_sessions_load", { payload: { n: uniq.length, kind: "patch", reason: "overflow" } });
       }
       let added = 0;
-      for (const id of uniq) {
+      for (const id of batch) {
         if (liveIds.has(id)) continue;
         try {
           const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(id)))).json();
@@ -1311,20 +1392,35 @@
       markFollow(true);
       pinBottomSoon();
     });
-    const scheduleResync = () => {
-      loadHealth();
-      loadSessions();
-      if (current) loadEvents();
+    const scheduleList = () => {
+      if (listTimer) return;
+      listTimer = setTimeout(async () => {
+        listTimer = 0;
+        await loadHealth();
+        const r = await loadSessions();
+        if ((r && r.switched) || (current && !liveEvents.length)) await loadEvents();
+      }, 1000);
     };
-    let hookPaintTimer = 0;
+    const scheduleResync = () => {
+      if (resyncTimer) return;
+      resyncTimer = setTimeout(async () => {
+        resyncTimer = 0;
+        try {
+          await loadHealth();
+          await loadSessions();
+          if (current) await loadEvents();
+        } catch (err) {
+          emit("trae_sessions_error", { payload: { reason: "resync" } });
+        }
+      }, 50);
+    };
     const scheduleHookPaint = () => {
       if (hookPaintTimer) return;
       hookPaintTimer = setTimeout(() => {
         hookPaintTimer = 0;
         const ids = pendingHookIds;
         pendingHookIds = [];
-        loadHealth();
-        loadSessions();
+        scheduleList();
         ingestHookIds(ids);
       }, 40);
     };

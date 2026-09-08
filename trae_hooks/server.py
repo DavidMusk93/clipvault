@@ -479,7 +479,15 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 session_id = (qs.get("session_id") or [""])[0]
                 hook_event = (qs.get("hook_event") or [""])[0]
                 q = (qs.get("q") or [""])[0]
-                event_cols = (
+                # Thread list is IM chrome: beats need Ask payloads; tool slog
+                # bodies stay on GET /api/event?id= so WKWebView is not parsing MB.
+                list_cols = (
+                    "event_id, ts, instance_id, session_id, hook_event, source, "
+                    "cwd, tool_name, llm_tool_name, tool_use_id, prompt, "
+                    "last_assistant_message, notification_type, notification_message, "
+                    "loop_count, raw_hash"
+                )
+                beat_cols = (
                     "event_id, ts, instance_id, session_id, hook_event, source, "
                     "cwd, tool_name, llm_tool_name, tool_use_id, prompt, "
                     "last_assistant_message, notification_type, notification_message, "
@@ -488,7 +496,7 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 if session_id and not hook_event and not q:
                     beats = store.query(
                         f"""
-                        SELECT {event_cols}
+                        SELECT {beat_cols}
                         FROM hook_events
                         WHERE session_id = ?
                           AND (
@@ -502,7 +510,7 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                     )
                     tools = store.query(
                         f"""
-                        SELECT {event_cols}
+                        SELECT {list_cols}
                         FROM hook_events
                         WHERE session_id = ?
                           AND hook_event IN ('PreToolUse', 'PostToolUse')
@@ -542,7 +550,7 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 params.append(limit)
                 rows = store.query(
                     f"""
-                    SELECT {event_cols}
+                    SELECT {list_cols}
                     FROM hook_events
                     WHERE {' AND '.join(where)}
                     ORDER BY ts DESC
