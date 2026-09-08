@@ -75,11 +75,7 @@ const appleLight = HighlightStyle.define([
 ])
 
 function loadMode() {
-  try {
-    const v = localStorage.getItem(MODE_KEY)
-    if (MODES.includes(v)) return v
-  } catch (_) {}
-  return window.matchMedia && window.matchMedia('(max-width: 820px)').matches ? 'source' : 'split'
+  return 'preview'
 }
 
 function loadSplit() {
@@ -410,7 +406,7 @@ async function mount(root, opts) {
   let lastMd = String(opts.markdown || '')
   let lastHash = ''
   let previewRaf = 0
-  let mode = loadMode()
+  let mode = (opts.mode && MODES.includes(opts.mode)) ? opts.mode : loadMode()
   let split = loadSplit()
   let syncing = false
   let paintingPreview = false

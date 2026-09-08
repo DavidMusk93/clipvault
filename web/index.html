@@ -17,8 +17,8 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n15" />
-  <script src="/assets/notes-editor/notes-editor.js?v=n15"></script>
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n16" />
+  <script src="/assets/notes-editor/notes-editor.js?v=n16"></script>
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n10"></script>
   <style>
@@ -1958,6 +1958,7 @@
       display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0;
       overflow: hidden;
     }
+    .notes-tools[hidden] { display: none; }
     .notes-tools button {
       width: 28px; height: 26px; border: 0; border-radius: 6px;
       background: transparent; color: var(--ink); cursor: pointer;
@@ -3507,7 +3508,31 @@ window.ClipViewMasonry = Masonry;
       const t = (title || '').trim();
       const raw = decodeNoteBody(md);
       if (!t) return raw;
-      return raw.replace(new RegExp('^#\\s+' + t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '\\n?'), '');
+      const esc = t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
+      // Storage is "# title\n\nbody". Eat the heading plus the separator blank
+      // line so the editor does not grow a leading empty line on every save.
+      return raw.replace(new RegExp('^#\\s+' + esc + '(?:\\n\\n|\\n)?'), '');
+    }
+    function trimNoteTrailingBlanks(md) {
+      return String(md || '').replace(/(?:\r?\n[ \t]*)+$/, '');
+    }
+    function applyNotesMode(mode) {
+      if (!notesState.editor || !mode) return;
+      notesState.editor.setMode(mode);
+      paintNotesModes();
+    }
+    async function flushNoteTrailingTrim() {
+      if (!notesState.editor) return;
+      const body = notesState.editor.getMarkdown();
+      const trimmed = trimNoteTrailingBlanks(body);
+      if (trimmed === body) return;
+      notesState.applying = true;
+      try {
+        notesState.editor.setMarkdown(trimmed);
+        notesState.dirty = true;
+      } finally {
+        notesState.applying = false;
+      }
     }
 
     function noteIsPinned(n) {
@@ -3755,10 +3780,12 @@ window.ClipViewMasonry = Masonry;
       if (el) el.title = text || '保存状态';
     }
     function paintNotesModes() {
-      const mode = notesState.editor?.getMode?.() || 'split';
+      const mode = notesState.editor?.getMode?.() || 'preview';
       document.querySelectorAll('#notesModes [data-mode]').forEach((b) => {
         b.classList.toggle('is-on', b.dataset.mode === mode);
       });
+      const tools = document.getElementById('notesTools');
+      if (tools) tools.hidden = mode === 'preview';
     }
     function nm(name, extra) {
       const M = globalThis.ClipNotesMetrics;
@@ -3788,7 +3815,7 @@ window.ClipViewMasonry = Masonry;
       return 'closed';
     }
 
-    async function ensureNotesEditor(markdown) {
+    async function ensureNotesEditor(markdown, mode) {
       const host = document.getElementById('notesEditor');
       if (!host || typeof ClipNotesEditor === 'undefined') return;
       const text = decodeNoteBody(markdown);
@@ -3800,11 +3827,13 @@ window.ClipViewMasonry = Masonry;
         const clear = () => { if (notesState.gen === g) notesState.applying = false; };
         queueMicrotask(clear);
         requestAnimationFrame(clear);
-        paintNotesModes();
+        if (mode) applyNotesMode(mode);
+        else paintNotesModes();
         return;
       }
       notesState.editor = await ClipNotesEditor.mount(host, {
         markdown: text || '',
+        mode: mode || 'preview',
         uploadImage: uploadNoteImage,
         onUpdate() {
           if (notesState.applying) return;
@@ -3816,7 +3845,8 @@ window.ClipViewMasonry = Masonry;
         onMetric(name, extra) { nm(name, extra); },
       });
       if (notesState.gen === g) notesState.applying = false;
-      paintNotesModes();
+      if (mode) applyNotesMode(mode);
+      else paintNotesModes();
     }
 
     function scheduleNoteSave() {
@@ -3911,7 +3941,7 @@ window.ClipViewMasonry = Masonry;
       const titleEl = document.getElementById('notesTitle');
       if (titleEl) titleEl.value = t;
       paintNotesTitleView();
-      ensureNotesEditor(noteStripTitle(item.textContent || '', t));
+      await ensureNotesEditor(noteStripTitle(item.textContent || '', t), 'preview');
       document.getElementById('notesPanel')?.classList.add('is-writing');
       paintNotesList();
       paintNotesTagBar();
@@ -3933,7 +3963,7 @@ window.ClipViewMasonry = Masonry;
       if (titleEl) titleEl.value = '';
       paintNotesTitleView();
       notesStatus('idle');
-      ensureNotesEditor('');
+      await ensureNotesEditor('', 'source');
       document.getElementById('notesPanel')?.classList.add('is-writing');
       try { history.replaceState(null, '', '#notes'); } catch (_) {}
       paintNotesList();
@@ -4321,13 +4351,16 @@ window.ClipViewMasonry = Masonry;
       const want = preferredId || lastNotesId() || alreadyId;
       if (want && notesState.items.some(n => n.id === want)) {
         if (want !== alreadyId) await openNoteInPanel(want);
+        else applyNotesMode('preview');
       } else if (notesState.items[0]) {
         if (notesState.items[0].id !== alreadyId) await openNoteInPanel(notesState.items[0].id);
+        else applyNotesMode('preview');
       } else if (notesState.loaded && !notesState.items.length) await newNoteInPanel();
       persistNotesId(notesState.id);
     }
 
     async function closeNotesPanel() {
+      await flushNoteTrailingTrim();
       if (notesState.dirty) await saveNoteNow();
       const panel = document.getElementById('notesPanel');
       if (!panel || !panel.classList.contains('open')) return;

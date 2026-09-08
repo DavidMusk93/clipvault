@@ -13,10 +13,13 @@ enum ComposeNotes {
         var parentHash: String?
     }
 
+    /// Title lives as a markdown H1 plus one separator blank line.
+    /// The editor body is stored as-is (including trailing blank lines) so autosave
+    /// does not yank empty lines out from under the caret. Trailing blanks are
+    /// trimmed by the client when the notes panel closes.
     static func normalizedBody(title: String?, body: String) -> String {
         let t = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let b = body.replacingOccurrences(of: "\r\n", with: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
         if t.isEmpty { return b }
         if b.hasPrefix("# ") { return b }
         if b.isEmpty { return "# \(t)" }

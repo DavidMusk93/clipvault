@@ -33,6 +33,12 @@ test('compose images go to CAS sha URLs', () => {
   assert.match(html, /ClipNotesEditor/);
 });
 
+test('compose autosave keeps trailing blank lines in the stored body', () => {
+  assert.match(auth, /replacingOccurrences\(of: "\\r\\n", with: "\\n"\)/);
+  assert.doesNotMatch(auth, /replacingOccurrences\(of: "\\r\\n", with: "\\n"\)\s*\.trimmingCharacters/);
+  assert.match(auth, /trimmed by the client when the notes panel closes/);
+});
+
 test('compose concurrent edits use parentHash + diff3, not last apply wins', () => {
   assert.match(db, /planComposeWrite/);
   assert.match(db, /ComposeMerge\.threeWay/);
@@ -50,7 +56,8 @@ test('notes list load failure must not open a blank new note', () => {
   assert.match(html, /clipvault-sessions-pause/);
   assert.match(html, /clipvault-sessions-resume/);
   assert.match(html, /clipvault-ui-metrics/);
-  assert.match(html, /setTimeout\(\(\) => \{ once\(\); resolve\(\); \}, 800\)/);
+  assert.match(html, /function animateSheetProgress/);
+  assert.match(html, /if \(v === toP\) once\(\)/);
 });
 
 test('idle notes resync without a full page refresh', () => {

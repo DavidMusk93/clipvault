@@ -92,6 +92,47 @@ test('panel is source + preview split', () => {
   assert.match(entry, /dataset\.mode/);
 });
 
+test('opening a note defaults to preview; new note is source', () => {
+  assert.match(entry, /function loadMode\(\) \{\n  return 'preview'\n\}/);
+  assert.match(entry, /opts\.mode && MODES\.includes\(opts\.mode\)/);
+  assert.doesNotMatch(entry, /localStorage\.getItem\(MODE_KEY\)/);
+  assert.match(html, /ensureNotesEditor\(noteStripTitle\(item\.textContent \|\| '', t\), 'preview'\)/);
+  assert.match(html, /ensureNotesEditor\('', 'source'\)/);
+  assert.match(html, /applyNotesMode\('preview'\)/);
+  assert.match(html, /tools\.hidden = mode === 'preview'/);
+  assert.match(html, /\.notes-tools\[hidden\] \{ display: none; \}/);
+});
+
+function noteStripTitle(md, title) {
+  const t = (title || '').trim();
+  const raw = String(md || '');
+  if (!t) return raw;
+  const esc = t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
+  return raw.replace(new RegExp('^#\\s+' + esc + '(?:\\n\\n|\\n)?'), '');
+}
+function trimNoteTrailingBlanks(md) {
+  return String(md || '').replace(/(?:\r?\n[ \t]*)+$/, '');
+}
+
+test('strip title eats the separator blank line, not an extra body line', () => {
+  assert.match(html, /function noteStripTitle/);
+  assert.ok(html.includes("'(?:\\\\n\\\\n|\\\\n)?'"));
+  assert.equal(noteStripTitle('# T\n\nhello', 'T'), 'hello');
+  assert.equal(noteStripTitle('# T\nhello', 'T'), 'hello');
+  assert.equal(noteStripTitle('# T\n\n\nhello', 'T'), '\nhello');
+  assert.equal(noteStripTitle('# T\n\nhello\n\n', 'T'), 'hello\n\n');
+});
+
+test('trailing blanks trim only on close, not on autosave', () => {
+  assert.match(html, /function trimNoteTrailingBlanks/);
+  assert.match(html, /function flushNoteTrailingTrim/);
+  assert.match(html, /async function closeNotesPanel\(\) \{\n      await flushNoteTrailingTrim\(\);/);
+  assert.doesNotMatch(html, /function saveNoteNow[\s\S]{0,400}trimNoteTrailingBlanks/);
+  assert.equal(trimNoteTrailingBlanks('hello\n\n'), 'hello');
+  assert.equal(trimNoteTrailingBlanks('hello\n  \n\t\n'), 'hello');
+  assert.equal(trimNoteTrailingBlanks('hello'), 'hello');
+});
+
 test('compose save does not broadcast wall update', () => {
   const start = swift.indexOf('func handleComposeSave');
   const slice = swift.slice(start, start + 1800);
@@ -106,7 +147,7 @@ test('notes panel open does not translate the chrome', () => {
   assert.match(html, /id="wallScene"/);
   assert.match(html, /function playSheet/);
   assert.match(html, /assets\/motion\.js/);
-  assert.match(html, /type: 'spring'/);
+  assert.match(html, /function animateSheetProgress/);
   assert.doesNotMatch(html, /notesOpenBtn'\)\?\.classList\.add\('is-on'\)/);
   assert.doesNotMatch(html, /\.notes-panel \{[\s\S]{0,200}translateY\(18px\)/);
 });
@@ -133,7 +174,7 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n15/);
+  assert.match(html, /notes-editor\.js\?v=n16/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {

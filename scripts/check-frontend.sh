@@ -12,4 +12,7 @@ swiftc -parse-as-library -O tests/x_article_main.swift ClipFlow/XArticleHTML.swi
 echo "[check-frontend] swiftc compose merge"
 swiftc -parse-as-library -O tests/compose_merge_main.swift ClipFlow/ComposeMerge.swift -o /tmp/clipvault-compose-merge-test
 /tmp/clipvault-compose-merge-test
+echo "[check-frontend] swiftc compose notes normalize"
+swiftc -parse-as-library -O tests/compose_notes_main.swift ClipFlow/ComposeNotes.swift -o /tmp/clipvault-compose-notes-test
+/tmp/clipvault-compose-notes-test
 echo "[check-frontend] OK"
