@@ -57,7 +57,7 @@ test('notes list load failure must not open a blank new note', () => {
   assert.match(html, /clipvault-sessions-resume/);
   assert.match(html, /clipvault-ui-metrics/);
   assert.match(html, /function animateSheetProgress/);
-  assert.match(html, /if \(v === toP\) once\(\)/);
+  assert.match(html, /if \(v === toP \|\| Math\.abs\(v - toP\) < 0\.002\) once\(\)/);
 });
 
 test('idle notes resync without a full page refresh', () => {
