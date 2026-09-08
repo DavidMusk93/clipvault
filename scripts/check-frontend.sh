@@ -9,4 +9,7 @@ node --test tests/frontend-smoke.test.mjs tests/notes-render.test.mjs tests/maso
 echo "[check-frontend] swiftc x-article coverage"
 swiftc -parse-as-library -O tests/x_article_main.swift ClipFlow/XArticleHTML.swift -o /tmp/clipvault-x-article-html-test
 /tmp/clipvault-x-article-html-test
+echo "[check-frontend] swiftc compose merge"
+swiftc -parse-as-library -O tests/compose_merge_main.swift ClipFlow/ComposeMerge.swift -o /tmp/clipvault-compose-merge-test
+/tmp/clipvault-compose-merge-test
 echo "[check-frontend] OK"

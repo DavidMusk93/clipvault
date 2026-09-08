@@ -33,6 +33,18 @@ test('compose images go to CAS sha URLs', () => {
   assert.match(html, /ClipNotesEditor/);
 });
 
+test('compose concurrent edits use parentHash + diff3, not last apply wins', () => {
+  assert.match(db, /planComposeWrite/);
+  assert.match(db, /ComposeMerge\.threeWay/);
+  assert.match(db, /parent_hash/);
+  assert.match(web, /parentHash/);
+  assert.match(sync, /parentHash = "parent_hash"/);
+  assert.match(html, /parentHash/);
+  assert.match(html, /notesMergeHint/);
+  assert.match(html, /<<<<<<< /);
+  assert.match(taste, /三路合并/);
+});
+
 test('idle notes resync without a full page refresh', () => {
   assert.match(html, /function mergeNotesHead/);
   assert.match(html, /await mergeNotesHead\(\)/);

@@ -1987,6 +1987,16 @@
     .notes-status[data-state="error"] .notes-status-label { color: #D70015; }
     .notes-status[data-state="error"] .notes-status-dot { background: #D70015; }
     .notes-status-label { white-space: nowrap; }
+    .notes-merge-hint {
+      display: none;
+      margin: 0 16px 8px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(196, 122, 44, 0.14);
+      color: #C47A2C;
+      font: 600 12px/1.35 var(--font-ui);
+    }
+    .notes-merge-hint.is-on { display: block; }
     #notesEditor { flex: 1; min-height: 0; overflow: hidden; }
     .notes-close {
       position: absolute; top: 14px; right: 16px; z-index: 2;
@@ -2504,6 +2514,7 @@
           <span class="notes-status-label" id="notesStatusLabel"></span>
         </span>
       </div>
+      <div id="notesMergeHint" class="notes-merge-hint" hidden></div>
       <div id="notesEditor" class="notes-work"></div>
     </section>
     </div>
@@ -3330,7 +3341,7 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0 };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0, baseHash: '' };
     const NOTE_ID_KEY = 'clipvault.notes.id';
 
     function noteExcerpt(md) {
@@ -3650,6 +3661,17 @@ window.ClipViewMasonry = Masonry;
       return j.url;
     }
 
+    function paintNotesMergeHint(text) {
+      const el = document.getElementById('notesMergeHint');
+      if (!el) return;
+      const msg = String(text || '');
+      el.textContent = msg;
+      el.hidden = !msg;
+      el.classList.toggle('is-on', !!msg);
+    }
+    function noteContentHash(item) {
+      return String((item && (item.contentHash || item.content_hash)) || '');
+    }
     function notesStatus(state, detail) {
       const el = document.getElementById('notesStatus');
       const label = document.getElementById('notesStatusLabel');
@@ -3733,6 +3755,7 @@ window.ClipViewMasonry = Masonry;
       }
       const payload = { body, title: title || null };
       if (notesState.id) payload.id = notesState.id;
+      if (notesState.baseHash) payload.parentHash = notesState.baseHash;
       notesState.saving = true;
       notesState.dirty = false;
       notesStatus('saving');
@@ -3754,11 +3777,25 @@ window.ClipViewMasonry = Masonry;
         notesState.id = j.item.id;
         persistNotesId(notesState.id);
         notesState.lastLocalSaveAt = Date.now() / 1000;
+        notesState.baseHash = noteContentHash(j.item) || notesState.baseHash;
         const idx = notesState.items.findIndex(n => n.id === notesState.id);
         if (idx >= 0) notesState.items[idx] = j.item;
         else notesState.items.unshift(j.item);
         notesState.saveAttempts = 0;
         notesStatus('saved');
+        const t = noteTitleOf(j.item);
+        const nextBody = noteStripTitle(j.item.textContent || '', t);
+        if (j.merged || j.conflict || nextBody !== body) {
+          const titleEl = document.getElementById('notesTitle');
+          if (titleEl) titleEl.value = t;
+          paintNotesTitleView();
+          await ensureNotesEditor(nextBody);
+        }
+        if (j.conflict || String(j.item.textContent || '').includes('<<<<<<< ')) {
+          paintNotesMergeHint('这篇有两处改动已并入，请看源码里的标记');
+        } else {
+          paintNotesMergeHint('');
+        }
         nm('note_save', { dur_ms: dur, ok: true, payload: { bytes: body.length } });
         paintNotesList();
         if (notesState.dirty) scheduleNoteSave();
@@ -3778,6 +3815,7 @@ window.ClipViewMasonry = Masonry;
       const switching = notesState.id && notesState.id !== id;
       notesState.id = id;
       persistNotesId(id);
+      notesState.baseHash = noteContentHash(item);
       const t = noteTitleOf(item);
       const titleEl = document.getElementById('notesTitle');
       if (titleEl) titleEl.value = t;
@@ -3787,12 +3825,19 @@ window.ClipViewMasonry = Masonry;
       paintNotesList();
       paintNotesTagBar();
       paintShareControls(id);
+      if (String(item.textContent || '').includes('<<<<<<< ')) {
+        paintNotesMergeHint('这篇有两处改动已并入，请看源码里的标记');
+      } else {
+        paintNotesMergeHint('');
+      }
       if (switching) nm('note_switch');
     }
 
     async function newNoteInPanel() {
       if (notesState.dirty) await saveNoteNow();
       notesState.id = null;
+      notesState.baseHash = '';
+      paintNotesMergeHint('');
       const titleEl = document.getElementById('notesTitle');
       if (titleEl) titleEl.value = '';
       paintNotesTitleView();
@@ -4385,9 +4430,16 @@ window.ClipViewMasonry = Masonry;
       const panelOpen = document.getElementById('notesPanel')?.classList.contains('open');
       if (!notesState.loaded && !panelOpen) return;
       try { await loadNotesList(); } catch (_) { return; }
-      if (!panelOpen || !notesState.id || notesState.dirty || notesState.saving) return;
+      if (!panelOpen || !notesState.id || notesState.saving) return;
       const item = notesState.items.find((n) => n.id === notesState.id);
       if (!item) return;
+      const remoteHash = noteContentHash(item);
+      if (notesState.dirty) {
+        if (remoteHash && remoteHash !== notesState.baseHash) {
+          paintNotesMergeHint('远端有新版本，保存时会自动合并');
+        }
+        return;
+      }
       const remoteTs = Number(item.timestamp) || 0;
       if (remoteTs && remoteTs <= (notesState.lastLocalSaveAt || 0) + 0.25) return;
       const t = noteTitleOf(item);
@@ -4398,7 +4450,13 @@ window.ClipViewMasonry = Masonry;
       if (curTitle === t && curBody === body) return;
       if (titleEl) titleEl.value = t;
       paintNotesTitleView();
+      notesState.baseHash = remoteHash || notesState.baseHash;
       await ensureNotesEditor(body);
+      if (String(item.textContent || '').includes('<<<<<<< ')) {
+        paintNotesMergeHint('这篇有两处改动已并入，请看源码里的标记');
+      } else {
+        paintNotesMergeHint('');
+      }
     }
 
     function thumbSrc(item) {

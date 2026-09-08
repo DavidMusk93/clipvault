@@ -6,6 +6,13 @@ enum ComposeNotes {
     static let sourceApp = "ClipVault"
     static let refScheme = "clipvault"
 
+    struct SaveResult {
+        var item: ClipboardItem
+        var conflict: Bool
+        var merged: Bool
+        var parentHash: String?
+    }
+
     static func normalizedBody(title: String?, body: String) -> String {
         let t = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let b = body.replacingOccurrences(of: "\r\n", with: "\n")

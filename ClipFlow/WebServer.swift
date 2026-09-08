@@ -1550,16 +1550,29 @@ class WebServer {
         let body = (obj["body"] as? String) ?? ""
         let title = obj["title"] as? String
         let refId = obj["refId"] as? String
+        let parentHash = obj["parentHash"] as? String
         let id = (obj["id"] as? String).flatMap { UUID(uuidString: $0) }
-        database.saveComposeNote(id: id, title: title, body: body, refId: refId, source: "web") { [weak self] item, err in
+        database.saveComposeNote(
+            id: id,
+            title: title,
+            body: body,
+            refId: refId,
+            parentHash: parentHash,
+            source: "web"
+        ) { [weak self] result, err in
             guard let self else { return }
-            guard let item else {
+            guard let result else {
                 self.sendJSON(["ok": false, "message": err ?? "保存失败"], connection: connection)
                 return
             }
-            CloudDocsSyncService.shared?.recordLocalCompose(item: item)
-            self.broadcastSSE(event: "compose_saved", id: item.id.uuidString)
-            self.sendJSON(["ok": true, "item": self.itemToJSON(item)], connection: connection)
+            CloudDocsSyncService.shared?.recordLocalCompose(item: result.item, parentHash: result.parentHash)
+            self.broadcastSSE(event: "compose_saved", id: result.item.id.uuidString)
+            self.sendJSON([
+                "ok": true,
+                "item": self.itemToJSON(result.item),
+                "conflict": result.conflict,
+                "merged": result.merged,
+            ], connection: connection)
         }
     }
 

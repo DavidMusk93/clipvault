@@ -61,6 +61,7 @@ final class CloudDocsSyncService {
         var copyCount: Int?
         /// CAS keys under backup/blobs (without `.bin` suffix in storage path — keys as DatabaseManager uses).
         var blobKeys: [String]?
+        var parentHash: String?
         var note: String?
         /// User judgment layer (kind == user_context); never mutates capture payload.
         var userNote: String?
@@ -74,7 +75,7 @@ final class CloudDocsSyncService {
             case textContent = "text_content", htmlContent = "html_content"
             case ocrText = "ocr_text", sourceApp = "source_app", url
             case fileUrls = "file_urls", copyCount = "copy_count"
-            case blobKeys = "blob_keys", note
+            case blobKeys = "blob_keys", parentHash = "parent_hash", note
             case userNote = "user_note", userStage = "user_stage", userRating = "user_rating"
         }
     }
@@ -380,7 +381,7 @@ final class CloudDocsSyncService {
         return out
     }
 
-    func recordLocalCompose(item: ClipboardItem) {
+    func recordLocalCompose(item: ClipboardItem, parentHash: String? = nil) {
         guard config.enabled else { return }
         queue.async { [weak self] in
             guard let self else { return }
@@ -394,6 +395,7 @@ final class CloudDocsSyncService {
             op.type = ClipboardType.note.rawValue
             op.sourceApp = ComposeNotes.sourceApp
             op.note = "compose"
+            op.parentHash = parentHash
             self.enqueue(op)
             self.scheduleDrain(reason: "compose")
         }
@@ -984,7 +986,8 @@ final class CloudDocsSyncService {
                     guard let keys = op.blobKeys, let data = try? JSONSerialization.data(withJSONObject: keys) else { return nil }
                     return String(data: data, encoding: .utf8)
                 }(),
-                source: "sync:\(op.host)"
+                source: "sync:\(op.host)",
+                parentHash: op.parentHash
             )
         case "reader_op":
             return database.applySyncReaderOpLocked(

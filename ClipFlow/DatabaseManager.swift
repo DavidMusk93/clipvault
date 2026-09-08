@@ -527,10 +527,18 @@ final class DatabaseManager: ObservableObject {
             body TEXT NOT NULL,
             ref_item_id TEXT,
             blob_keys TEXT,
-            source TEXT NOT NULL DEFAULT 'web'
+            source TEXT NOT NULL DEFAULT 'web',
+            parent_hash TEXT,
+            content_hash TEXT
         );
         """)
         execQuiet("CREATE INDEX IF NOT EXISTS idx_compose_ops_item_ts ON compose_ops(item_id, ts ASC);")
+        if !columnExists("compose_ops", "parent_hash") {
+            execQuiet("ALTER TABLE compose_ops ADD COLUMN parent_hash TEXT;")
+        }
+        if !columnExists("compose_ops", "content_hash") {
+            execQuiet("ALTER TABLE compose_ops ADD COLUMN content_hash TEXT;")
+        }
         // Judgment: clip link ops (true source) + undirected projection. Capture payload unchanged.
         execQuiet("""
         CREATE TABLE IF NOT EXISTS clip_link_ops (
@@ -2526,8 +2534,9 @@ final class DatabaseManager: ObservableObject {
         title: String?,
         body: String,
         refId: String?,
+        parentHash: String? = nil,
         source: String = "web",
-        completion: @escaping (ClipboardItem?, String?) -> Void
+        completion: @escaping (ComposeNotes.SaveResult?, String?) -> Void
     ) {
         dbQueue.async { [weak self] in
             guard let self else {
@@ -2536,7 +2545,7 @@ final class DatabaseManager: ObservableObject {
             }
             do {
                 let item = try self.saveComposeNoteLocked(
-                    id: id, title: title, body: body, refId: refId, source: source
+                    id: id, title: title, body: body, refId: refId, parentHash: parentHash, source: source
                 )
                 DispatchQueue.main.async { completion(item, nil) }
             } catch {
@@ -2564,47 +2573,60 @@ final class DatabaseManager: ObservableObject {
         title: String?,
         body rawBody: String,
         refId: String?,
+        parentHash: String? = nil,
         source: String
-    ) throws -> ClipboardItem {
+    ) throws -> ComposeNotes.SaveResult {
         guard let db = db else { throw ComposeError.missing }
-        let body = ComposeNotes.normalizedBody(title: title, body: rawBody)
-        guard !body.isEmpty else { throw ComposeError.empty }
+        let incoming = ComposeNotes.normalizedBody(title: title, body: rawBody)
+        guard !incoming.isEmpty else { throw ComposeError.empty }
         let now = Date()
         let id: UUID
+        let current: ClipboardItem?
         let isUpdate: Bool
         if let existingId {
-            guard let current = fetchItemByIdLocked(existingId.uuidString, on: db) else {
+            guard let row = fetchItemByIdLocked(existingId.uuidString, on: db) else {
                 throw ComposeError.missing
             }
-            guard current.type == .note else { throw ComposeError.notANote }
+            guard row.type == .note else { throw ComposeError.notANote }
             id = existingId
+            current = row
             isUpdate = true
         } else {
             id = UUID()
+            current = nil
             isUpdate = false
         }
-        let hash = ComposeNotes.contentHash(id: id, body: body)
+        let plan = planComposeWrite(
+            noteId: id,
+            incoming: incoming,
+            parentHash: parentHash,
+            current: current
+        )
+        let body = plan.body
+        let hash = plan.hash
         let refURL = ComposeNotes.refURL(from: refId)
         let keys = ComposeNotes.blobKeys(in: body)
         let keysJSON = (try? JSONSerialization.data(withJSONObject: keys)).flatMap { String(data: $0, encoding: .utf8) }
 
         if isUpdate {
-            let sql = """
-            UPDATE clipboard_items SET
-                timestamp = ?, content_hash = ?, text_content = ?, url = ?, source_app = ?
-            WHERE id = ? AND type = 'note';
-            """
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw ComposeError.missing }
-            sqlite3_bind_double(stmt, 1, now.timeIntervalSince1970)
-            bindText(stmt, 2, hash)
-            bindText(stmt, 3, body)
-            if let refURL { bindText(stmt, 4, refURL.absoluteString) } else { sqlite3_bind_null(stmt, 4) }
-            bindText(stmt, 5, ComposeNotes.sourceApp)
-            bindText(stmt, 6, id.uuidString)
-            let rc = sqlite3_step(stmt)
-            sqlite3_finalize(stmt)
-            guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else { throw ComposeError.missing }
+            if current?.contentHash != hash || current?.textContent != body {
+                let sql = """
+                UPDATE clipboard_items SET
+                    timestamp = ?, content_hash = ?, text_content = ?, url = ?, source_app = ?
+                WHERE id = ? AND type = 'note';
+                """
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw ComposeError.missing }
+                sqlite3_bind_double(stmt, 1, now.timeIntervalSince1970)
+                bindText(stmt, 2, hash)
+                bindText(stmt, 3, body)
+                if let refURL { bindText(stmt, 4, refURL.absoluteString) } else { sqlite3_bind_null(stmt, 4) }
+                bindText(stmt, 5, ComposeNotes.sourceApp)
+                bindText(stmt, 6, id.uuidString)
+                let rc = sqlite3_step(stmt)
+                sqlite3_finalize(stmt)
+                guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else { throw ComposeError.missing }
+            }
         } else {
             let item = ClipboardItem(
                 id: id,
@@ -2630,7 +2652,9 @@ final class DatabaseManager: ObservableObject {
             body: body,
             refItemId: refId,
             blobKeys: keysJSON,
-            source: source
+            source: source,
+            parentHash: plan.parentHash,
+            contentHash: hash
         )
         _ = recordClipboardEvent(
             itemId: id.uuidString,
@@ -2650,7 +2674,94 @@ final class DatabaseManager: ObservableObject {
         )
         touchLinkCountsForItem(id: id.uuidString, hash: hash)
         guard let out = fetchItemByIdLocked(id.uuidString, on: db) else { throw ComposeError.missing }
-        return out
+        return ComposeNotes.SaveResult(
+            item: out,
+            conflict: plan.conflict,
+            merged: plan.merged,
+            parentHash: plan.parentHash
+        )
+    }
+
+    private struct ComposeWritePlan {
+        var body: String
+        var hash: String
+        var parentHash: String?
+        var conflict: Bool
+        var merged: Bool
+    }
+
+    private func planComposeWrite(
+        noteId: UUID,
+        incoming: String,
+        parentHash: String?,
+        current: ClipboardItem?
+    ) -> ComposeWritePlan {
+        let newHash = ComposeNotes.contentHash(id: noteId, body: incoming)
+        guard let current, let currentBody = current.textContent else {
+            return ComposeWritePlan(body: incoming, hash: newHash, parentHash: nil, conflict: false, merged: false)
+        }
+        let currentHash = current.contentHash
+        if newHash == currentHash || incoming == currentBody {
+            return ComposeWritePlan(
+                body: currentBody,
+                hash: currentHash,
+                parentHash: parentHash ?? currentHash,
+                conflict: ComposeMerge.hasConflictMarkers(currentBody),
+                merged: false
+            )
+        }
+        let baseHash = parentHash ?? currentHash
+        if baseHash == currentHash {
+            return ComposeWritePlan(
+                body: incoming,
+                hash: newHash,
+                parentHash: currentHash,
+                conflict: ComposeMerge.hasConflictMarkers(incoming),
+                merged: false
+            )
+        }
+        if let base = lookupComposeBody(itemId: current.id.uuidString, hash: baseHash, noteId: noteId) {
+            let r = ComposeMerge.threeWay(base: base, a: currentBody, b: incoming)
+            return ComposeWritePlan(
+                body: r.body,
+                hash: ComposeNotes.contentHash(id: noteId, body: r.body),
+                parentHash: baseHash,
+                conflict: r.conflict,
+                merged: r.body != incoming
+            )
+        }
+        let r = ComposeMerge.both(currentBody, incoming)
+        return ComposeWritePlan(
+            body: r.body,
+            hash: ComposeNotes.contentHash(id: noteId, body: r.body),
+            parentHash: baseHash,
+            conflict: r.conflict,
+            merged: true
+        )
+    }
+
+    private func lookupComposeBody(itemId: String, hash: String, noteId: UUID) -> String? {
+        if let cur = fetchItemByIdLocked(itemId, on: db), cur.contentHash == hash {
+            return cur.textContent
+        }
+        guard let db else { return nil }
+        let sql = """
+        SELECT body, content_hash FROM compose_ops
+        WHERE item_id = ?
+        ORDER BY ts DESC
+        LIMIT 48;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, itemId)
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let body = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+            let stored = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            if stored == hash { return body }
+            if ComposeNotes.contentHash(id: noteId, body: body) == hash { return body }
+        }
+        return nil
     }
 
     private func insertComposeOpLocked(
@@ -2660,12 +2771,16 @@ final class DatabaseManager: ObservableObject {
         body: String,
         refItemId: String?,
         blobKeys: String?,
-        source: String
+        source: String,
+        parentHash: String? = nil,
+        contentHash: String? = nil
     ) {
         guard let db = db else { return }
         let sql = """
-        INSERT OR IGNORE INTO compose_ops (id, item_id, ts, title, body, ref_item_id, blob_keys, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        INSERT OR IGNORE INTO compose_ops (
+            id, item_id, ts, title, body, ref_item_id, blob_keys, source, parent_hash, content_hash
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
@@ -2677,6 +2792,8 @@ final class DatabaseManager: ObservableObject {
         bindText(stmt, 6, refItemId)
         bindText(stmt, 7, blobKeys)
         bindText(stmt, 8, source)
+        bindText(stmt, 9, parentHash)
+        bindText(stmt, 10, contentHash)
         _ = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
     }
@@ -2690,15 +2807,53 @@ final class DatabaseManager: ObservableObject {
         body: String,
         refURLString: String?,
         blobKeysJSON: String?,
-        source: String
+        source: String,
+        parentHash: String? = nil
     ) -> Bool {
         guard let db = db else { return false }
-        let body = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return false }
+        let incoming = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !incoming.isEmpty else { return false }
         if let existing = fetchItemByIdLocked(id.uuidString, on: db), existing.type != .note {
             return false
         }
+        var body = incoming
+        var contentHash = contentHash
         if rowExists(id: id.uuidString) {
+            let existing = fetchItemByIdLocked(id.uuidString, on: db)
+            let currentBody = existing?.textContent ?? ""
+            let currentHash = existing?.contentHash ?? ""
+            let incomingHash = contentHash.isEmpty
+                ? ComposeNotes.contentHash(id: id, body: incoming)
+                : contentHash
+            if incomingHash != currentHash && incoming != currentBody {
+                let plan: ComposeWritePlan
+                if let parentHash, !parentHash.isEmpty {
+                    plan = planComposeWrite(
+                        noteId: id,
+                        incoming: incoming,
+                        parentHash: parentHash,
+                        current: existing
+                    )
+                } else if timestamp >= (existing?.timestamp ?? .distantPast) {
+                    plan = ComposeWritePlan(
+                        body: incoming,
+                        hash: incomingHash,
+                        parentHash: nil,
+                        conflict: ComposeMerge.hasConflictMarkers(incoming),
+                        merged: false
+                    )
+                } else {
+                    plan = ComposeWritePlan(
+                        body: currentBody,
+                        hash: currentHash,
+                        parentHash: parentHash,
+                        conflict: ComposeMerge.hasConflictMarkers(currentBody),
+                        merged: false
+                    )
+                }
+                body = plan.body
+                contentHash = plan.hash
+            }
             let sql = """
             UPDATE clipboard_items SET
                 timestamp = MAX(timestamp, ?), content_hash = ?, text_content = ?, url = COALESCE(?, url),
@@ -2732,8 +2887,10 @@ final class DatabaseManager: ObservableObject {
         }
         upsertFTS(id: id.uuidString, text: body, ocr: nil, source: ComposeNotes.sourceApp, html: nil)
         let sql = """
-        INSERT OR IGNORE INTO compose_ops (id, item_id, ts, title, body, ref_item_id, blob_keys, source)
-        VALUES (?, ?, ?, NULL, ?, ?, ?, ?);
+        INSERT OR IGNORE INTO compose_ops (
+            id, item_id, ts, title, body, ref_item_id, blob_keys, source, parent_hash, content_hash
+        )
+        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?);
         """
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -2744,6 +2901,8 @@ final class DatabaseManager: ObservableObject {
             bindText(stmt, 5, ComposeNotes.refId(from: refURLString.flatMap { URL(string: $0) }))
             bindText(stmt, 6, blobKeysJSON)
             bindText(stmt, 7, source)
+            bindText(stmt, 8, parentHash)
+            bindText(stmt, 9, contentHash)
             _ = sqlite3_step(stmt)
         }
         sqlite3_finalize(stmt)
