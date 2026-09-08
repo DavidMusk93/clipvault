@@ -229,7 +229,11 @@ test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () =>
   assert.match(html, /end\.id = "threadEnd"/);
   assert.match(html, /overflow-anchor:\s*auto/);
   assert.match(html, /kind === "patch" && grew/);
+  assert.match(html, /function loadThreadPair/);
+  assert.match(html, /takeLatest/);
+  assert.match(html, /if \(!current\) \{/);
   assert.match(html, /loadEvents\("beats", \{ paint: false \}\)/);
+  assert.doesNotMatch(html, /thread\.innerHTML = '<div class="empty">没有匹配事件<\/div>';\n          lastSig/);
   assert.doesNotMatch(html, /requestAnimationFrame\(pinBottom\)/);
   assert.match(html, /trae_sessions_cls/);
   assert.match(html, /phase: layoutReady \? "live" : "boot"/);
@@ -259,7 +263,7 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(html, /clipvault-sessions-settled/);
   assert.match(html, /layoutNarrow/);
   assert.match(html, /paintGateReason/);
-  assert.match(html, /notready/);
+  assert.doesNotMatch(html, /if \(!layoutReady\) return "notready"/);
   assert.match(html, /emitLayout/);
   assert.match(html, /embedded/);
   assert.match(html, /b\.key === \"prompt\"/);

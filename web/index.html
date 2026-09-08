@@ -2036,9 +2036,6 @@
       flex-direction: column;
       contain: layout paint;
     }
-    .sessions-panel[data-boot]:not(.is-settled) .sessions-frame {
-      opacity: 0;
-    }
     .sessions-frame {
       flex: 1;
       min-height: 0;
@@ -4261,10 +4258,9 @@ window.ClipViewMasonry = Masonry;
       if (!panel) return;
       const origin = readSheetRect(sheetTrigger('sessions'));
       const frame = document.getElementById('sessionsFrame');
-      const firstBoot = !!(frame && !frame.getAttribute('src'));
-      if (firstBoot) {
-        panel.dataset.boot = '1';
-        frame.src = '/trae/?embed=1';
+      const embedSrc = '/trae/?embed=1&v=s3';
+      if (frame && frame.getAttribute('src') !== embedSrc) {
+        frame.src = embedSrc;
       } else {
         sessionsFrameCtl('clipvault-sessions-resume');
       }
@@ -4274,7 +4270,6 @@ window.ClipViewMasonry = Masonry;
       setSessionsWallLocked(true);
       emitSessionsLayout('open');
       await playSheet(panel, true, 'sessions', origin);
-      delete panel.dataset.boot;
       sessionsFrameCtl('clipvault-sessions-settled');
       emitSessionsLayout('settled');
       try {

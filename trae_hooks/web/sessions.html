@@ -704,9 +704,8 @@
       const app = document.querySelector(".app");
       return !app || app.getBoundingClientRect().width < 280;
     };
-    let layoutReady = !document.documentElement.classList.contains("embed");
+    let layoutReady = true;
     const paintGateReason = () => {
-      if (!layoutReady) return "notready";
       if (layoutNarrow()) return "narrow";
       return "";
     };
@@ -762,6 +761,10 @@
       }
       if (sessionRows.length) {
         lastListSig = "";
+        if (!current) {
+          const latest = newestSession(sessionRows);
+          if (latest && latest.session_id) current = latest.session_id;
+        }
         try { patchSessionList(sessionRows); } catch (err) {
           emit("trae_sessions_error", { payload: { reason: "list" } });
         }
@@ -1045,7 +1048,7 @@
         $("sessionList").querySelectorAll(".card").forEach((c) => {
           c.classList.toggle("active", c.getAttribute("data-id") === current);
         });
-        loadEvents("beats").then(() => loadEvents("tools"));
+        loadThreadPair();
       });
       el.querySelector(".pin-btn")?.addEventListener("click", (ev) => {
         ev.preventDefault();
@@ -1455,7 +1458,8 @@
           `${s.session_id}:${s.event_count}:${s.last_ts}:${s.pinned_at || ""}:${recencyTone(s.last_ts)}:${volumeBand(s.event_count)}`
         ).join("|");
         const latest = newestSession(sessions);
-        if (followLatest && latest && latest.session_id && latest.session_id !== current) {
+        const takeLatest = latest && latest.session_id && (!current || (followLatest && latest.session_id !== current));
+        if (takeLatest) {
           current = latest.session_id;
           lastSig = "";
           painted = "";
@@ -1488,7 +1492,9 @@
         }
         if (!current) {
           emit("trae_sessions_skip", { payload: { reason: "nocurrent", kind: String(kind || "paint").slice(0, 32) } });
-          thread.innerHTML = '<div class="empty">选择左侧会话</div>';
+          if (!thread.querySelector(":scope > .thread-block, :scope > [data-key]")) {
+            thread.innerHTML = '<div class="empty">选择左侧会话</div>';
+          }
           showSessionHead("");
           liveEvents = [];
           liveIds.clear();
@@ -1497,7 +1503,9 @@
         }
         if (!liveEvents.length) {
           emit("trae_sessions_skip", { payload: { reason: "empty", kind: String(kind || "paint").slice(0, 32) } });
-          thread.innerHTML = '<div class="empty">没有匹配事件</div>';
+          if (!thread.querySelector(":scope > .thread-block, :scope > [data-key]")) {
+            thread.innerHTML = '<div class="empty">没有匹配事件</div>';
+          }
           lastSig = "";
           return;
         }
@@ -1624,7 +1632,9 @@
         return;
       }
       if (!liveEvents.length && kind !== "tools") {
-        thread.innerHTML = '<div class="empty">加载对话…</div>';
+        if (!thread.querySelector(":scope > .thread-block, :scope > [data-key]")) {
+          thread.innerHTML = '<div class="empty">加载对话…</div>';
+        }
       }
       emit("trae_sessions_load", { payload: { kind, phase: "start" } });
       try {
@@ -1633,6 +1643,7 @@
         mergeIncoming(data.events || []);
         if (paint) paintFromLive(kind);
         emit("trae_sessions_load", { payload: { n: liveEvents.length, kind, phase: "end" } });
+        return data;
         if (kind !== "tools") dispatch({ type: "resync_ok" });
       } catch (err) {
         if (err && err.name === "AbortError") return;
@@ -1680,8 +1691,14 @@
       if (added) paintFromLive("patch");
     }
 
+    async function loadThreadPair() {
+      await loadEvents("beats", { paint: false });
+      if (canFetch(load)) await loadEvents("tools");
+      if (current && liveEvents.length) paintFromLive(painted === current ? "tools" : "beats");
+      else if (current) paintFromLive("beats");
+    }
     $("q").addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") loadEvents("beats", { paint: false }).then(() => loadEvents("tools"));
+      if (ev.key === "Enter") loadThreadPair();
     });
     jumpBot.addEventListener("click", () => {
       markFollow(true);
@@ -1695,9 +1712,7 @@
         await loadHealth();
         const r = await loadSessions();
         if ((r && r.switched) || (current && !liveEvents.length)) {
-          await loadEvents("beats", { paint: false });
-          if (canFetch(load)) await loadEvents("tools");
-          else paintFromLive("beats");
+          await loadThreadPair();
         }
       }, 1000);
     };
@@ -1714,9 +1729,7 @@
         loadHealth();
         await loadSessions();
         if (current) {
-          await loadEvents("beats", { paint: false });
-          if (canFetch(load)) await loadEvents("tools");
-          else paintFromLive("beats");
+          await loadThreadPair();
         } else dispatch({ type: "resync_ok" });
       } catch (err) {
         emit("trae_sessions_error", { payload: { reason: "resync" } });
@@ -1791,7 +1804,7 @@
         emitLayout("settled");
         if (current && liveEvents.length) {
           try { paintFromLive("settle"); markTtfp("settle"); } catch (_) {}
-        } else if (canFetch(load) && current) {
+        } else if (canFetch(load)) {
           scheduleResync();
         }
       }
