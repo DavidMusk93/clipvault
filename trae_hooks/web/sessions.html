@@ -602,6 +602,9 @@
       imMessagesFromEvents, isAskTool, layoutKey, localDateTime, localDayKey, prettyJson,
       recencyTone, relLocalTime, renderEventBlocks, renderValue, rowPreview, volumeBand,
     } from "./session-render.mjs";
+    import {
+      canFetch, canIngest, createLoadState, readSnap, reduce, writeSnap,
+    } from "./session-load.mjs";
 
     const TRAE_BASE = location.pathname.startsWith("/trae") ? "/trae" : "";
     const apiUrl = (p) => TRAE_BASE + p;
@@ -626,7 +629,7 @@
     const pendingHookMeta = new Map();
     let railY = 0;
     let es = null;
-    let paused = false;
+    let load = createLoadState();
     let eventsGen = 0;
     let eventsAbort = null;
     let resyncTimer = 0;
@@ -676,6 +679,59 @@
       if (document.visibilityState === "hidden") flushMetrics();
     });
     window.addEventListener("pagehide", flushMetrics);
+    const dispatch = (ev) => {
+      const { state, effects } = reduce(load, ev, Date.now());
+      const prev = load.phase;
+      load = state;
+      if (load.phase !== prev) emit("trae_sessions_fsm", { payload: { phase: load.phase } });
+      for (const fx of effects) applyLoadEffect(fx);
+    };
+    const applySnap = (snap) => {
+      if (!snap) return false;
+      sessionRows = snap.sessions || [];
+      current = snap.current || "";
+      liveEvents = snap.events || [];
+      liveIds.clear();
+      for (const e of liveEvents) {
+        if (e && e.event_id) liveIds.add(e.event_id);
+      }
+      if (sessionRows.length) {
+        lastListSig = "";
+        patchSessionList(sessionRows);
+      }
+      if (current) {
+        const row = sessionRows.find((s) => s.session_id === current);
+        showSessionHead(current, row ? sessionTitle(row) : current);
+        paintFromLive("cache");
+      }
+      dispatch({ type: "cache_hit" });
+      return true;
+    };
+    const saveSnap = () => {
+      writeSnap(window.localStorage, {
+        current,
+        sessions: sessionRows,
+        events: liveEvents,
+      });
+    };
+    const applyLoadEffect = (fx) => {
+      if (fx === "readSnap") {
+        if (!applySnap(readSnap(window.localStorage))) scheduleResync();
+      }
+      if (fx === "setupSSE") setupSSE();
+      if (fx === "runResync") scheduleResync();
+      if (fx === "closeSSE") {
+        if (resyncTimer) { try { clearTimeout(resyncTimer); } catch (_) {} resyncTimer = 0; }
+        if (listTimer) { try { clearTimeout(listTimer); } catch (_) {} listTimer = 0; }
+        if (hookPaintTimer) { try { clearTimeout(hookPaintTimer); } catch (_) {} hookPaintTimer = 0; }
+        try { if (es) es.close(); } catch (_) {}
+        es = null;
+      }
+      if (fx === "abortFetch") {
+        if (eventsAbort) { try { eventsAbort.abort(); } catch (_) {} }
+      }
+      if (fx === "writeSnap") saveSnap();
+    };
     if (typeof PerformanceObserver !== "undefined") {
       try {
         const cls = new PerformanceObserver((list) => {
@@ -1224,6 +1280,7 @@
       }
     }
     async function loadSessions() {
+      if (!canFetch(load)) return { sessions: sessionRows, switched: false };
       const box = $("sessionList");
       let switched = false;
       try {
@@ -1279,6 +1336,10 @@
         const items = focusImRows(rows);
         const sig = rows.map((r) => r.event.event_id).join(",");
         if (sig === lastSig && kind !== "full") return;
+        if (sig === lastSig) {
+          painted = current;
+          return;
+        }
         const grew = lastSig && sig.startsWith(lastSig + ",");
         lastSig = sig;
         const t0 = performance.now();
@@ -1329,6 +1390,7 @@
     }
 
     async function loadEvents() {
+      if (!canFetch(load)) return;
       const gen = ++eventsGen;
       const sid = current;
       if (eventsAbort) {
@@ -1359,15 +1421,18 @@
         }
         paintFromLive("full");
         emit("trae_sessions_load", { payload: { n: liveEvents.length, kind: "full", phase: "end" } });
+        dispatch({ type: "resync_ok" });
         hydrateSlimTools();
       } catch (err) {
         if (err && err.name === "AbortError") return;
         if (gen !== eventsGen) return;
         emit("trae_sessions_error", { payload: { reason: "events" } });
-        liveEvents = [];
-        liveIds.clear();
-        lastSig = "";
-        thread.innerHTML = `<div class="empty">加载对话失败${err && err.message ? " · " + esc(err.message) : ""}</div>`;
+        dispatch({ type: "resync_fail", reason: "events" });
+        if (!liveEvents.length) {
+          liveIds.clear();
+          lastSig = "";
+          thread.innerHTML = `<div class="empty">加载对话失败${err && err.message ? " · " + esc(err.message) : ""}</div>`;
+        }
       }
     }
 
@@ -1379,7 +1444,7 @@
     }
     async function ingestHookIds(ids) {
       const uniq = [...new Set(ids.filter(Boolean))];
-      if (!uniq.length || !current || paused) return;
+      if (!uniq.length || !current || !canIngest(load)) return;
       const batch = uniq.length > 16 ? uniq.slice(-16) : uniq;
       if (uniq.length > 16) {
         emit("trae_sessions_load", { payload: { n: uniq.length, kind: "patch", reason: "overflow" } });
@@ -1426,33 +1491,37 @@
       pinBottomSoon();
     });
     const scheduleList = () => {
-      if (listTimer) return;
+      if (!canFetch(load) || listTimer) return;
       listTimer = setTimeout(async () => {
         listTimer = 0;
+        if (!canFetch(load)) return;
         await loadHealth();
         const r = await loadSessions();
         if ((r && r.switched) || (current && !liveEvents.length)) await loadEvents();
       }, 1000);
     };
     const runResync = async () => {
-      if (paused) return;
+      if (!canFetch(load)) return;
+      dispatch({ type: "resync_start" });
       try {
         await loadHealth();
         await loadSessions();
         if (current) await loadEvents();
+        else dispatch({ type: "resync_ok" });
       } catch (err) {
         emit("trae_sessions_error", { payload: { reason: "resync" } });
+        dispatch({ type: "resync_fail", reason: "resync" });
       }
     };
     const scheduleResync = () => {
-      if (paused || resyncTimer) return;
+      if (!canFetch(load) || resyncTimer) return;
       resyncTimer = setTimeout(async () => {
         resyncTimer = 0;
         await runResync();
       }, 0);
     };
     const scheduleHookPaint = () => {
-      if (hookPaintTimer) return;
+      if (!canIngest(load) || hookPaintTimer) return;
       hookPaintTimer = setTimeout(() => {
         hookPaintTimer = 0;
         const ids = pendingHookIds;
@@ -1462,11 +1531,11 @@
       }, 40);
     };
     const setupSSE = () => {
-      if (paused) return;
+      if (!canFetch(load)) return;
       if (es && es.readyState !== EventSource.CLOSED) return;
       try { if (es) es.close(); } catch (_) {}
       es = new EventSource(apiUrl("/api/stream"));
-      es.onopen = () => scheduleResync();
+      es.onopen = () => dispatch({ type: "stream_open" });
       es.onmessage = (ev) => {
         let d;
         try { d = JSON.parse(ev.data); } catch (_) { return; }
@@ -1475,7 +1544,7 @@
           emit("trae_sessions_resync", { payload: { reason: "overflow" } });
           lastSig = "";
           lastListSig = "";
-          scheduleResync();
+          dispatch({ type: "overflow" });
           return;
         }
         if (d.type === "session_pinned") {
@@ -1484,6 +1553,7 @@
           return;
         }
         if (d.type === "hook_event") {
+          if (!canIngest(load)) return;
           emit("trae_sessions_hook", { payload: { n: 1 } });
           if (d.event_id) {
             pendingHookIds.push(d.event_id);
@@ -1495,45 +1565,29 @@
             painted = "";
             pendingHookIds = [];
             markFollow(true);
-            scheduleResync();
+            dispatch({ type: "overflow" });
             return;
           }
           scheduleHookPaint();
         }
       };
     };
-    const pauseSessions = () => {
-      paused = true;
-      if (resyncTimer) { try { clearTimeout(resyncTimer); } catch (_) {} resyncTimer = 0; }
-      if (listTimer) { try { clearTimeout(listTimer); } catch (_) {} listTimer = 0; }
-      if (hookPaintTimer) { try { clearTimeout(hookPaintTimer); } catch (_) {} hookPaintTimer = 0; }
-      if (eventsAbort) { try { eventsAbort.abort(); } catch (_) {} }
-      try { if (es) es.close(); } catch (_) {}
-      es = null;
-    };
-    const resumeSessions = () => {
-      paused = false;
-      setupSSE();
-      scheduleResync();
-    };
-    const onVisible = () => {
-      if (paused) return;
-      setupSSE();
-      scheduleResync();
-    };
     window.addEventListener("message", (ev) => {
       const t = ev && ev.data && ev.data.type;
-      if (t === "clipvault-sessions-pause") pauseSessions();
-      if (t === "clipvault-sessions-resume") resumeSessions();
+      if (t === "clipvault-sessions-pause") dispatch({ type: "pause" });
+      if (t === "clipvault-sessions-resume") dispatch({ type: "resume" });
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") onVisible();
+      if (document.visibilityState === "visible" && !load.paused) dispatch({ type: "resume" });
     });
-    window.addEventListener("pageshow", onVisible);
-    window.addEventListener("online", onVisible);
+    window.addEventListener("pageshow", () => {
+      if (!load.paused) dispatch({ type: "resume" });
+    });
+    window.addEventListener("online", () => {
+      if (!load.paused) dispatch({ type: "resume" });
+    });
     markFollow(true);
-    setupSSE();
-    runResync();
+    dispatch({ type: "boot" });
   </script>
 </body>
 </html>
