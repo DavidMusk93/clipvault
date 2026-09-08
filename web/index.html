@@ -4029,7 +4029,12 @@ window.ClipViewMasonry = Masonry;
         },
       });
       sheetAnims.push(fin);
-      return Promise.resolve(fin && (fin.finished || fin)).then(finish).catch(finish);
+      let done = false;
+      const once = () => { if (done) return; done = true; finish(); };
+      return Promise.race([
+        Promise.resolve(fin && (fin.finished || fin)).then(once, once),
+        new Promise((resolve) => setTimeout(() => { once(); resolve(); }, 800)),
+      ]);
     }
 
     function notesBackdropEvent(e) {
@@ -4045,6 +4050,10 @@ window.ClipViewMasonry = Masonry;
       e.stopPropagation();
     }
 
+    function sessionsFrameCtl(type) {
+      const frame = document.getElementById('sessionsFrame');
+      try { frame?.contentWindow?.postMessage({ type }, location.origin); } catch (_) {}
+    }
     async function openSessionsPanel() {
       hideTraeAsk();
       if (document.getElementById('notesPanel')?.classList.contains('open')) {
@@ -4056,6 +4065,8 @@ window.ClipViewMasonry = Masonry;
       const frame = document.getElementById('sessionsFrame');
       if (frame && !frame.getAttribute('src')) {
         frame.src = '/trae/?embed=1';
+      } else {
+        sessionsFrameCtl('clipvault-sessions-resume');
       }
       panel.classList.add('open');
       panel.classList.remove('is-settled');
@@ -4070,6 +4081,7 @@ window.ClipViewMasonry = Masonry;
     async function closeSessionsPanel() {
       const panel = document.getElementById('sessionsPanel');
       if (!panel || !panel.classList.contains('open')) return;
+      sessionsFrameCtl('clipvault-sessions-pause');
       await playSheet(panel, false, 'sessions');
       panel.setAttribute('aria-hidden', 'true');
       setSessionsWallLocked(false);
@@ -4102,12 +4114,12 @@ window.ClipViewMasonry = Masonry;
       }
       nm('notes_open');
       try { await loadNotesList(); } catch (e) {
-        if (!notesState.loaded) notesState.items = [];
+        if (!notesState.loaded) notesState.items = notesState.items || [];
       }
       const want = preferredId || lastNotesId();
       if (want && notesState.items.some(n => n.id === want)) await openNoteInPanel(want);
-      else if (!notesState.id && notesState.items[0]) await openNoteInPanel(notesState.items[0].id);
-      else if (!notesState.editor) await newNoteInPanel();
+      else if (notesState.items[0]) await openNoteInPanel(notesState.items[0].id);
+      else if (notesState.loaded && !notesState.items.length) await newNoteInPanel();
       persistNotesId(notesState.id);
     }
 

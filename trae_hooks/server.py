@@ -233,6 +233,7 @@ def sse_hook_payload(row: dict[str, Any]) -> dict[str, Any]:
         "tool_name": row.get("tool_name") or row.get("llm_tool_name") or "",
         "needs_user": needs_user_input(row),
         "preview": preview,
+        "ts": str(row.get("ts") or ""),
     }
 
 

@@ -623,13 +623,16 @@
     let liveEvents = [];
     const liveIds = new Set();
     let pendingHookIds = [];
+    const pendingHookMeta = new Map();
     let railY = 0;
     let es = null;
+    let paused = false;
     let eventsGen = 0;
     let eventsAbort = null;
     let resyncTimer = 0;
     let listTimer = 0;
     let hookPaintTimer = 0;
+    const BUNDLE_SHOW = 32;
     const NEAR = 64;
     const METRICS = "http://127.0.0.1:8080/api/ui-metrics";
     const metricQ = [];
@@ -1114,7 +1117,12 @@
         btn.className = "history-expand-all";
         btn.textContent = "查看全部";
       }
-      const items = (item.rows || []).map((row) => {
+      const all = item.rows || [];
+      wrap._bundleRows = all;
+      const rows = body.dataset.expandAll === "1" || all.length <= BUNDLE_SHOW
+        ? all
+        : all.slice(-BUNDLE_SHOW);
+      const items = rows.map((row) => {
         const eid = String(row.event.event_id || "");
         let it = body.querySelector(`:scope > details.history-item[data-eid="${CSS.escape(eid)}"]`);
         if (!it) it = makeHistoryItem(row);
@@ -1171,7 +1179,11 @@
           const pack = btn.closest(".history-bundle");
           if (!pack) return;
           const host = pack.querySelector(".history-body");
+          const wrap = pack.closest(".thread-block");
           if (host) host.dataset.expandAll = "1";
+          if (wrap && wrap._bundleRows) {
+            updateBundleEl(wrap, { rows: wrap._bundleRows, title: pack.querySelector(":scope > summary")?.textContent });
+          }
           const items = [...pack.querySelectorAll("details.history-item")];
           for (const d of items) {
             d.open = true;
@@ -1231,8 +1243,6 @@
           current = latest.session_id;
           lastSig = "";
           painted = "";
-          liveEvents = [];
-          liveIds.clear();
           markFollow(true);
           showSessionHead(current, sessionTitle(latest));
           switched = true;
@@ -1301,7 +1311,7 @@
         if (e.tool_input != null || e.tool_response != null) continue;
         if (e.event_id) ids.push(e.event_id);
       }
-      const want = ids.slice(-4);
+      const want = ids.slice(-1);
       if (!want.length) return;
       let n = 0;
       for (const id of want) {
@@ -1361,9 +1371,15 @@
       }
     }
 
+    function hookIsBeat(meta) {
+      const h = String((meta && meta.hook_event) || "");
+      const tool = String((meta && meta.tool_name) || "");
+      return h === "UserPromptSubmit" || h === "Stop" || h === "Notification"
+        || tool === "AskUserQuestion";
+    }
     async function ingestHookIds(ids) {
       const uniq = [...new Set(ids.filter(Boolean))];
-      if (!uniq.length || !current) return;
+      if (!uniq.length || !current || paused) return;
       const batch = uniq.length > 16 ? uniq.slice(-16) : uniq;
       if (uniq.length > 16) {
         emit("trae_sessions_load", { payload: { n: uniq.length, kind: "patch", reason: "overflow" } });
@@ -1371,6 +1387,23 @@
       let added = 0;
       for (const id of batch) {
         if (liveIds.has(id)) continue;
+        const meta = pendingHookMeta.get(id) || {};
+        if (meta.session_id && current && meta.session_id !== current) continue;
+        if (!hookIsBeat(meta)) {
+          liveIds.add(id);
+          liveEvents.push({
+            event_id: id,
+            ts: meta.ts || "",
+            session_id: meta.session_id || current,
+            hook_event: meta.hook_event || "PostToolUse",
+            tool_name: meta.tool_name || "",
+            prompt: meta.preview || "",
+            notification_message: meta.notification_message || "",
+            notification_type: meta.notification_type || "",
+          });
+          added += 1;
+          continue;
+        }
         try {
           const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(id)))).json();
           const ev = d.event;
@@ -1401,18 +1434,22 @@
         if ((r && r.switched) || (current && !liveEvents.length)) await loadEvents();
       }, 1000);
     };
+    const runResync = async () => {
+      if (paused) return;
+      try {
+        await loadHealth();
+        await loadSessions();
+        if (current) await loadEvents();
+      } catch (err) {
+        emit("trae_sessions_error", { payload: { reason: "resync" } });
+      }
+    };
     const scheduleResync = () => {
-      if (resyncTimer) return;
+      if (paused || resyncTimer) return;
       resyncTimer = setTimeout(async () => {
         resyncTimer = 0;
-        try {
-          await loadHealth();
-          await loadSessions();
-          if (current) await loadEvents();
-        } catch (err) {
-          emit("trae_sessions_error", { payload: { reason: "resync" } });
-        }
-      }, 50);
+        await runResync();
+      }, 0);
     };
     const scheduleHookPaint = () => {
       if (hookPaintTimer) return;
@@ -1425,6 +1462,7 @@
       }, 40);
     };
     const setupSSE = () => {
+      if (paused) return;
       if (es && es.readyState !== EventSource.CLOSED) return;
       try { if (es) es.close(); } catch (_) {}
       es = new EventSource(apiUrl("/api/stream"));
@@ -1447,26 +1485,47 @@
         }
         if (d.type === "hook_event") {
           emit("trae_sessions_hook", { payload: { n: 1 } });
+          if (d.event_id) {
+            pendingHookIds.push(d.event_id);
+            pendingHookMeta.set(d.event_id, d);
+          }
           if (followLatest && d.session_id && d.session_id !== current) {
             current = d.session_id;
             lastSig = "";
             painted = "";
-            liveEvents = [];
-            liveIds.clear();
             pendingHookIds = [];
             markFollow(true);
             scheduleResync();
             return;
           }
-          if (d.event_id) pendingHookIds.push(d.event_id);
           scheduleHookPaint();
         }
       };
     };
-    const onVisible = () => {
+    const pauseSessions = () => {
+      paused = true;
+      if (resyncTimer) { try { clearTimeout(resyncTimer); } catch (_) {} resyncTimer = 0; }
+      if (listTimer) { try { clearTimeout(listTimer); } catch (_) {} listTimer = 0; }
+      if (hookPaintTimer) { try { clearTimeout(hookPaintTimer); } catch (_) {} hookPaintTimer = 0; }
+      if (eventsAbort) { try { eventsAbort.abort(); } catch (_) {} }
+      try { if (es) es.close(); } catch (_) {}
+      es = null;
+    };
+    const resumeSessions = () => {
+      paused = false;
       setupSSE();
       scheduleResync();
     };
+    const onVisible = () => {
+      if (paused) return;
+      setupSSE();
+      scheduleResync();
+    };
+    window.addEventListener("message", (ev) => {
+      const t = ev && ev.data && ev.data.type;
+      if (t === "clipvault-sessions-pause") pauseSessions();
+      if (t === "clipvault-sessions-resume") resumeSessions();
+    });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") onVisible();
     });
@@ -1474,7 +1533,7 @@
     window.addEventListener("online", onVisible);
     markFollow(true);
     setupSSE();
-    scheduleResync();
+    runResync();
   </script>
 </body>
 </html>

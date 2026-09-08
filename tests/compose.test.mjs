@@ -45,6 +45,13 @@ test('compose concurrent edits use parentHash + diff3, not last apply wins', () 
   assert.match(taste, /三路合并/);
 });
 
+test('notes list load failure must not open a blank new note', () => {
+  assert.match(html, /notesState.loaded && !notesState.items.length/);
+  assert.match(html, /clipvault-sessions-pause/);
+  assert.match(html, /clipvault-sessions-resume/);
+  assert.match(html, /setTimeout\(\(\) => \{ once\(\); resolve\(\); \}, 800\)/);
+});
+
 test('idle notes resync without a full page refresh', () => {
   assert.match(html, /function mergeNotesHead/);
   assert.match(html, /await mergeNotesHead\(\)/);

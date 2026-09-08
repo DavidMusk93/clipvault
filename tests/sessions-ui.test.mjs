@@ -247,6 +247,12 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(html, /hydrateSlimTools/);
   assert.match(html, /加载对话…/);
   assert.match(html, /if \(current\) await loadEvents\(\)/);
+  assert.match(html, /runResync/);
+  assert.match(html, /BUNDLE_SHOW/);
+  assert.match(html, /hookIsBeat/);
+  assert.match(html, /pendingHookMeta/);
+  assert.match(html, /clipvault-sessions-pause/);
+  assert.match(server, /"ts": str\(row.get\("ts"\)/);
   assert.doesNotMatch(html, /loadHealth\(\);\s*loadSessions\(\);\s*ingestHookIds/);
   assert.doesNotMatch(html, /if \(uniq\.length > 16\) \{\s*await loadEvents\(\)/);
   assert.match(taste, /\/api\/events[`']? 列表不含 tool_input/);
