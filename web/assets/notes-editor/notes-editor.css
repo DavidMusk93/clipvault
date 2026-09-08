@@ -13,17 +13,23 @@
   min-height: 0;
   display: grid;
   grid-template-columns: 0.46fr 5px 0.54fr;
+  grid-template-areas: "source split preview";
   contain: strict;
 }
+.notes-source { grid-area: source; }
+.notes-splitter { grid-area: split; }
+.notes-preview { grid-area: preview; }
 .notes-work[data-mode="source"] {
-  grid-template-columns: 1fr 0 0;
+  grid-template-columns: 1fr;
+  grid-template-areas: "source";
 }
 .notes-work[data-mode="source"] .notes-splitter,
 .notes-work[data-mode="source"] .notes-preview {
   display: none;
 }
 .notes-work[data-mode="preview"] {
-  grid-template-columns: 0 0 1fr;
+  grid-template-columns: 1fr;
+  grid-template-areas: "preview";
 }
 .notes-work[data-mode="preview"] .notes-source,
 .notes-work[data-mode="preview"] .notes-splitter {

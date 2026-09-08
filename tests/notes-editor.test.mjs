@@ -92,6 +92,12 @@ test('panel is source + preview split', () => {
   assert.match(entry, /dataset\.mode/);
 });
 
+test('preview mode keeps the preview pane in a 1fr track', () => {
+  assert.match(css, /grid-template-areas:\s*"source split preview"/);
+  assert.match(css, /\[data-mode="preview"\] \{\n  grid-template-columns: 1fr;/);
+  assert.doesNotMatch(css, /\[data-mode="preview"\] \{\s*grid-template-columns:\s*0 0 1fr/);
+});
+
 test('opening a note defaults to preview; new note is source', () => {
   assert.match(entry, /function loadMode\(\) \{\n  return 'preview'\n\}/);
   assert.match(entry, /opts\.mode && MODES\.includes\(opts\.mode\)/);
@@ -174,7 +180,7 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n16/);
+  assert.match(html, /notes-editor\.js\?v=n17/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
