@@ -266,7 +266,13 @@
       overflow-x: hidden;
       overflow-y: auto;
       overscroll-behavior: contain;
+      overflow-anchor: none;
       padding: 18px 22px 72px;
+    }
+    #threadEnd {
+      overflow-anchor: auto;
+      height: 1px;
+      overflow: hidden;
     }
     .day {
       display: flex;
@@ -449,7 +455,7 @@
       font: 600 11px/24px var(--font-ui); cursor: pointer;
     }
     .history-expand-all:active { transform: scale(0.97); }
-    .thread-block { min-width: 0; }
+    .thread-block { min-width: 0; contain: layout; }
     .history-item {
       border-top: 0.5px solid var(--separator);
     }
@@ -879,10 +885,6 @@
     };
     const pinBottomSoon = () => {
       pinBottom();
-      requestAnimationFrame(() => {
-        pinBottom();
-        requestAnimationFrame(pinBottom);
-      });
     };
     const syncFollowBtn = () => {
       jumpBot.hidden = followTail;
@@ -1346,6 +1348,16 @@
       return wrap;
     }
 
+    function threadEndEl() {
+      let end = thread.querySelector("#threadEnd");
+      if (!end) {
+        end = document.createElement("div");
+        end.id = "threadEnd";
+        end.setAttribute("aria-hidden", "true");
+      }
+      return end;
+    }
+
     function patchThread(items) {
       const nextEls = items.map((item, i) => {
         const key = layoutKey(item);
@@ -1354,7 +1366,7 @@
         else if (item.type === "bundle") updateBundleEl(el, item);
         return el;
       });
-      reconcile(thread, nextEls);
+      reconcile(thread, [...nextEls, threadEndEl()]);
     }
 
     function bindBundleExpand(root) {
@@ -1500,12 +1512,38 @@
           return;
         }
         const grew = lastSig && sig.startsWith(lastSig + ",");
-        lastSig = sig;
         const t0 = performance.now();
+        if (kind === "patch" && grew && thread.querySelector(":scope > .thread-block")) {
+          const prevIds = new Set(lastSig.split(",").filter(Boolean));
+          const added = rows.filter((r) => r && r.event && r.event.event_id && !prevIds.has(r.event.event_id));
+          const end = threadEndEl();
+          for (const row of added) {
+            const el = makeFocusEl({ type: "focus", row }, null);
+            thread.insertBefore(el, end);
+          }
+          lastSig = sig;
+          emit("trae_sessions_paint", {
+            dur_ms: performance.now() - t0,
+            payload: {
+              n: added.length,
+              kind: "append",
+              chars: liveEvents.length,
+              bytes: thread.childElementCount,
+              nodes: thread.querySelectorAll("*").length,
+              value: bundles,
+            },
+          });
+          emitLayout(kind || "paint");
+          markTtfp(kind);
+          painted = current;
+          return;
+        }
+        lastSig = sig;
         if (painted !== current || !thread.querySelector(":scope > [data-key]")) {
           thread.replaceChildren();
         }
         patchThread(items);
+        if (painted !== current) pinBottom();
         emit("trae_sessions_paint", {
           dur_ms: performance.now() - t0,
           payload: {
@@ -1519,8 +1557,7 @@
         });
         emitLayout(kind || "paint");
         markTtfp(kind);
-        if (followTail || painted !== current) pinBottomSoon();
-        else if (grew) {
+        if (!(followTail || painted !== current) && grew) {
           pendingNew = true;
           syncFollowBtn();
         }
@@ -1560,7 +1597,8 @@
       if (n && gen === eventsGen) paintFromLive("patch");
     }
 
-    async function loadEvents(view) {
+    async function loadEvents(view, opts) {
+      const paint = !opts || opts.paint !== false;
       if (!canFetch(load)) {
         emit("trae_sessions_skip", {
           ok: false,
@@ -1593,7 +1631,7 @@
         const data = await netJson(kind, apiUrl("/api/events?" + params), { signal: ac.signal });
         if (gen !== eventsGen || current !== sid) return;
         mergeIncoming(data.events || []);
-        paintFromLive(kind);
+        if (paint) paintFromLive(kind);
         emit("trae_sessions_load", { payload: { n: liveEvents.length, kind, phase: "end" } });
         if (kind !== "tools") dispatch({ type: "resync_ok" });
       } catch (err) {
@@ -1643,7 +1681,7 @@
     }
 
     $("q").addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") loadEvents("beats").then(() => loadEvents("tools"));
+      if (ev.key === "Enter") loadEvents("beats", { paint: false }).then(() => loadEvents("tools"));
     });
     jumpBot.addEventListener("click", () => {
       markFollow(true);
@@ -1657,8 +1695,9 @@
         await loadHealth();
         const r = await loadSessions();
         if ((r && r.switched) || (current && !liveEvents.length)) {
-          await loadEvents("beats");
+          await loadEvents("beats", { paint: false });
           if (canFetch(load)) await loadEvents("tools");
+          else paintFromLive("beats");
         }
       }, 1000);
     };
@@ -1675,8 +1714,9 @@
         loadHealth();
         await loadSessions();
         if (current) {
-          await loadEvents("beats");
+          await loadEvents("beats", { paint: false });
           if (canFetch(load)) await loadEvents("tools");
+          else paintFromLive("beats");
         } else dispatch({ type: "resync_ok" });
       } catch (err) {
         emit("trae_sessions_error", { payload: { reason: "resync" } });

@@ -224,6 +224,13 @@ test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () =>
   assert.doesNotMatch(html, /if \(sig === lastSig\) \{\s*if \(followTail\) pinBottomSoon/);
   assert.match(html, /if \(sig === lastSig && kind !== "full" && kind !== "settle"\) return/);
   assert.match(html, /if \(listSig === lastListSig\) return/);
+  assert.match(html, /overflow-anchor:\s*none/);
+  assert.match(html, /#threadEnd/);
+  assert.match(html, /end\.id = "threadEnd"/);
+  assert.match(html, /overflow-anchor:\s*auto/);
+  assert.match(html, /kind === "patch" && grew/);
+  assert.match(html, /loadEvents\("beats", \{ paint: false \}\)/);
+  assert.doesNotMatch(html, /requestAnimationFrame\(pinBottom\)/);
   assert.match(html, /trae_sessions_cls/);
   assert.match(html, /phase: layoutReady \? "live" : "boot"/);
   assert.match(html, /trae_sessions_paint/);
@@ -263,7 +270,7 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(html, /scheduleList/);
   assert.match(html, /hydrateSlimTools/);
   assert.match(html, /加载对话…/);
-  assert.match(html, /await loadEvents\(\"beats\"\)/);
+  assert.match(html, /await loadEvents\(\"beats\", \{ paint: false \}\)/);
   assert.match(html, /runResync/);
   assert.match(html, /BUNDLE_SHOW/);
   assert.match(html, /hookIsBeat/);
