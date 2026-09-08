@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n17" />
   <script src="/assets/notes-editor/notes-editor.js?v=n17"></script>
   <script src="/assets/motion.js?v=m1"></script>
-  <script src="/assets/notes-metrics.js?v=n10"></script>
+  <script src="/assets/notes-metrics.js?v=n11"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -215,7 +215,6 @@
     body.notes-open .wall-scene,
     body.sessions-open .wall-scene {
       pointer-events: none;
-      contain: strict;
     }
     body.notes-open .top-bar,
     body.sessions-open .top-bar,
@@ -2382,7 +2381,7 @@
       <button type="button" class="btn-icon" id="debugCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。墙慢看 wall_*。打开笔记/会话抖看 sheet_morph / sheet_cls / notes_cls / trae_sessions_cls（CLS≥0.1 或 dur≥80 标红）。</p>
+      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。墙慢看 wall_*。打开抖看 sheet_morph / sheet_cls。关笔记顶栏解遮挡看 chrome_shift（phase=close）与长周期 wall_cls（kind=top-bar\|chips）。CLS≥0.1 或 dur≥80 标红。</p>
       <h3 style="font-size:14px;font-weight:600">SSE</h3>
       <div class="debug-kv" id="debugSseKv"></div>
       <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
@@ -3978,16 +3977,102 @@ window.ClipViewMasonry = Masonry;
       nm('note_new');
     }
 
+    function snapshotWallChrome() {
+      const box = (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return { y: -1, h: 0 };
+        const r = el.getBoundingClientRect();
+        return { y: Math.round(r.top), h: Math.round(r.height) };
+      };
+      const bar = box('.top-bar');
+      const chips = box('.chips');
+      const card = box('main .m3-card, main .card, #grid .m3-card');
+      return {
+        barY: bar.y,
+        chipsY: chips.y,
+        cardY: card.y,
+        scroll: Math.round(window.scrollY || document.documentElement.scrollTop || 0),
+      };
+    }
+    function clsSourceKind(entry) {
+      const src = (entry && entry.sources || [])[0];
+      const node = src && src.node;
+      if (!node) return '';
+      const klass = (node.getAttribute && node.getAttribute('class')) || '';
+      const id = node.id || '';
+      if (id === 'wallScene' || /\bwall-scene\b/.test(klass)) return 'wall-scene';
+      if (/\btop-bar\b/.test(klass) || (node.closest && node.closest('.top-bar'))) return 'top-bar';
+      if (/\bchips\b/.test(klass) || (node.closest && node.closest('.chips'))) return 'chips';
+      if (/\bm3-card\b/.test(klass) || (node.closest && node.closest('.m3-card'))) return 'm3-card';
+      return String(id || klass || node.nodeName || '').replace(/\s+/g, '.').slice(0, 32);
+    }
+    function emitChromeShift(kind, phase, apply) {
+      const before = snapshotWallChrome();
+      let cls = 0;
+      let n = 0;
+      let reason = '';
+      let obs;
+      try {
+        obs = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) {
+            if (e.hadRecentInput || !(e.value > 0.001)) continue;
+            cls += e.value;
+            n += 1;
+            if (!reason) reason = clsSourceKind(e);
+          }
+        });
+        obs.observe({ type: 'layout-shift', buffered: false });
+      } catch (_) {}
+      const t0 = performance.now();
+      apply();
+      let sent = false;
+      const finish = () => {
+        if (sent) return;
+        sent = true;
+        try { obs && obs.disconnect(); } catch (_) {}
+        try {
+          const after = snapshotWallChrome();
+          const dy = (Number(after.cardY) || 0) - (Number(before.cardY) || 0);
+          const barDy = (Number(after.barY) || 0) - (Number(before.barY) || 0);
+          const why = reason || (Math.abs(barDy) >= 2 ? 'top-bar' : (Math.abs(dy) >= 2 ? 'm3-card' : 'none'));
+          nm('chrome_shift', {
+            dur_ms: performance.now() - t0,
+            ok: Math.abs(dy) < 2 && Math.abs(barDy) < 2 && cls < 0.01,
+            payload: {
+              kind: String(kind || '').slice(0, 16),
+              phase: String(phase || '').slice(0, 16),
+              value: Math.round(cls * 10000) / 10000,
+              n,
+              dy,
+              w: after.barY,
+              h: after.cardY,
+              reason: String(why).slice(0, 32),
+            },
+          });
+        } catch (_) {
+          nm('chrome_shift', {
+            dur_ms: performance.now() - t0,
+            ok: false,
+            payload: { kind: String(kind || '').slice(0, 16), phase: String(phase || '').slice(0, 16) },
+          });
+        }
+      };
+      setTimeout(finish, 160);
+    }
     function setNotesWallLocked(on) {
-      document.documentElement.classList.toggle('notes-open', on);
-      document.body.classList.toggle('notes-open', on);
-      lockWallChrome(on || document.body.classList.contains('sessions-open'));
+      emitChromeShift('notes', on ? 'open' : 'close', () => {
+        document.documentElement.classList.toggle('notes-open', on);
+        document.body.classList.toggle('notes-open', on);
+        lockWallChrome(on || document.body.classList.contains('sessions-open'));
+      });
     }
 
     function setSessionsWallLocked(on) {
-      document.documentElement.classList.toggle('sessions-open', on);
-      document.body.classList.toggle('sessions-open', on);
-      lockWallChrome(on || document.body.classList.contains('notes-open'));
+      emitChromeShift('sessions', on ? 'open' : 'close', () => {
+        document.documentElement.classList.toggle('sessions-open', on);
+        document.body.classList.toggle('sessions-open', on);
+        lockWallChrome(on || document.body.classList.contains('notes-open'));
+      });
     }
 
     function lockWallChrome(on) {
@@ -8124,7 +8209,7 @@ window.ClipViewMasonry = Masonry;
       const agg = new Map();
       for (const ev of rows) {
         const name = ev.name || '';
-        if (!/^(wall_|sse_|sheet_|notes_cls|notes_longtask|notes_open|notes_editor|trae_sessions_cls|trae_sessions_longtask|trae_sessions_layout|trae_sessions_paint|trae_sessions_ttfp)/.test(name)) continue;
+        if (!/^(wall_|sse_|sheet_|notes_cls|notes_longtask|notes_open|notes_editor|chrome_shift|trae_sessions_cls|trae_sessions_longtask|trae_sessions_layout|trae_sessions_paint|trae_sessions_ttfp)/.test(name)) continue;
         let a = agg.get(name);
         if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0 }; agg.set(name, a); }
         a.n += 1;
@@ -8138,7 +8223,7 @@ window.ClipViewMasonry = Masonry;
       hot.innerHTML = hotRows.length ? hotRows.map((r) => {
         const avg = r.durN ? Math.round(r.sum / r.durN) : '—';
         const mx = r.durN ? Math.round(r.max) : '—';
-        const slow = /_cls$/.test(r.name) ? r.max >= 80 : (r.name === 'sheet_morph' ? (r.max >= 800) : r.max >= 200);
+        const slow = /_cls$/.test(r.name) || r.name === 'chrome_shift' ? r.max >= 80 : (r.name === 'sheet_morph' ? (r.max >= 800) : r.max >= 200);
         return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(r.name)}</td><td>${r.n}</td><td>${avg}</td><td>${mx}</td></tr>`;
       }).join('') : '<tr><td colspan="4">尚无 wall_/sse_/sheet_/cls 打点</td></tr>';
       const latest = rows.slice(-24).reverse();
@@ -8557,6 +8642,42 @@ window.ClipViewMasonry = Masonry;
         }
       });
       lt.observe({ type: 'longtask', buffered: false });
+    } catch (_) {}
+    try {
+      let acc = 0;
+      let n = 0;
+      let kind = '';
+      let flushT = 0;
+      const flushWallCls = () => {
+        flushT = 0;
+        if (acc < 0.01) { acc = 0; n = 0; kind = ''; return; }
+        const phase = document.body.classList.contains('notes-open')
+          ? 'notes'
+          : (document.body.classList.contains('sessions-open') ? 'sessions' : 'wall');
+        nm('wall_cls', {
+          dur_ms: acc * 1000,
+          ok: acc < 0.1,
+          payload: {
+            value: Math.round(acc * 10000) / 10000,
+            n,
+            kind: String(kind || '').slice(0, 32),
+            phase,
+          },
+        });
+        acc = 0;
+        n = 0;
+        kind = '';
+      };
+      const cls = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (e.hadRecentInput || !(e.value > 0.001)) continue;
+          acc += e.value;
+          n += 1;
+          if (!kind) kind = clsSourceKind(e);
+        }
+        if (!flushT) flushT = window.setTimeout(flushWallCls, 400);
+      });
+      cls.observe({ type: 'layout-shift', buffered: false });
     } catch (_) {}
     fetchPage({ reset: true }).then(() => applyAppHash());
     window.addEventListener('hashchange', () => { applyAppHash(); });

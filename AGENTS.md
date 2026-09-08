@@ -6,6 +6,7 @@
 
 1. **改动及时提交并推送。** 一个可独立描述的单元验证完 → `git commit` → `git push origin <branch>`（默认 `master`）。禁止攒脏树、禁止只 commit 不 push、禁止用会话结束当「以后再推」。push 失败必须在回复里写明，不得假装已上远程。细则见下方「改动及时提交并推送」。
 2. **nmem 不是流水账。** 写入的是可复用的经验与知识：一句话结论、机制、边界、下次怎么做。禁止把聊天摘要、逐步操作日志、无结构的「今天做了 A 然后 B」塞进 nmem。设计、流程、模块关系用 **ASCII graph** 画清楚，让下一会话不靠散文还原拓扑。
+3. **开发迭代 = metrics-based optimization。** 交互、卡顿、抖动、白屏先读本机 `ui-metrics.db`（`#debug` / `GET /api/ui-metrics/recent`），用 `name`+`phase`+`kind` 归因再改。归因字段不够：**先补点，再改产品**。禁止让用户去翻红行。未用同一指标对照不得宣称丝滑。细则 §2.3.2。
 
 ```text
   [capture] clipboard payload     immutable
@@ -109,8 +110,9 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | Do | Don't |
 | --- | --- |
 | **Capture payload 不可变**；评价：`user_evaluations` append-only；星级可改；紧凑星在 sheet header；铅笔入口；历史时间线；禁主卡片 body | 阶段芯片；评价 strip 进 masonry；为大星行浪费 sheet 垂直空间 |
+| **Metrics-based 优化**：卡顿/抖动/白屏先扫本机 `ui-metrics` 再改。墙看 `wall_*`；开合 sheet 看 `sheet_morph`/`sheet_cls`；笔记内抖看 `notes_cls`；**关笔记顶栏解遮挡**看 `chrome_shift`（phase=close，kind/reason=top-bar\|chips）+ 长周期 `wall_cls`。字段不够先补 `payload.kind/phase/dy`。禁止问用户找红行。`notes_close.dur_ms` 是开着时长，不是关动画。 | 看一眼截图就改 transform；用 hold 时长当 CLS；没有 `kind` 就猜 DOM |
 | **UI 增量 + lazy**：列表/线程按稳定身份 keyed 调和（笔记预览：lexer 块 hash + React 18；Trae 会话：`event_id` / `layoutKey` patch）。SSE 与保存只补变化。折叠、屏外、未打开的正文 **lazy** 编译或加载。墙卡展开用 overlay / 脱离文档流。会话 bundle 用手风琴**就地**展开，禁止 overlay 盖住后续用户/助手气泡。Trae `/api/events` 列表不含 tool 正文（Ask 除外）；首屏 `view=beats` 只拉用户/助手/Ask，工具 bundle 关闭时 0 子节点；hook 禁止每次拉 `/api/sessions`+全量 events；工具 hook 用 SSE stub；正文点开再拉。`mergeIncoming` 禁止整表覆盖。`trae_sessions_*` 立即 flush（iframe `postMessage` 到父页 `/api/ui-metrics`，禁止 2s 队列）。几何/跳过打 `trae_sessions_layout` / `trae_sessions_skip`（`w`/`h`/`nodes`/`reason`）；排查 `GET /api/ui-metrics/recent?name=`。原始 JSON 截断，禁止 hljs 整份 `raw_json`。embed 会话列与对话左右分栏，禁止窄宽叠成 30vh 把列表挤没。会话面板关闭必须 pause iframe SSE。笔记列表失败禁止开空白新笔记。 | 每次事件/保存整树 `innerHTML`；debounce 冒充增量；关闭 bundle 预渲染全部气泡；会话 item `position:absolute` 盖住对话；每次 SSE hook 全量 2MB `/api/events` |
-| **Compose / 笔记**：同一页 `#notesPanel`，左列表 + 右纸面；纸面 **源码 CodeMirror 6 \| 预览 marked**（默认分栏，本地 `web/assets/notes-editor/`）；空态不写设计意图；`type=note` + `compose_ops`；霜只一层、纸面实心。笔记置顶复用 `pinned_at` + `POST /api/clips/pin` + `recordLocalPin`，排在侧栏顶部，**不进**墙 pin rail。`---` 单独成行 → 下一行本地时间戳 checkpoint。`1+2=` 幽灵结果，Tab 写入、其它键放弃（Tab 有幽灵时优先于列表缩进；禁止 `eval()`）。分栏滚动 = 块锚点+块内进度，头/底钉住；禁止全程 `scrollTop/max`、禁止只钉视口第一行。**预览终局** = `marked.lexer` 块 hash LRU 编译 + React 18 keyed `.notes-md-block` 调和（key=内容 hash，行号在 wrapper）；禁止整页 `innerHTML` 换预览；输入不 `force` remap。打开/关闭用 Motion **数字弹簧**插值 `clip-path inset`（从按钮真实矩形揭到全纸，内容不 scale，墙禁止 `scale`）；禁止让 Motion 直接 tween `clipPath` 字符串（无法插值 `round` 会跳变，会话卡在按钮洞里）。动画结束必须 `clearSheetInline`。抖动打 `sheet_morph` / `sheet_cls` / `notes_cls` / `trae_sessions_cls`（phase=morph|live）；列表与编辑器等 morph 结束后再 paint。禁止 Vditor / Milkdown Crepe WYSIWYG（源码和渲染揉一起会抖）。保存走 `compose_saved`，禁止 `update` 刷墙。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`（`mergeHead` 排除 note 不够）；打开面板总是 `loadNotesList`；`compose_saved` 补列表与当前篇（`dirty`/`saving` 不覆盖；本机刚保存的 timestamp 不回放）。**多机/多 tab 同一篇**：快照 DAG + 行级 diff3（`ComposeMerge`），不是整篇覆盖、不是 Yjs。保存带 `parentHash`；分叉则三路合并，重叠段写入 `<<<<<<< hash` 标记（两侧按正文排序，保证交换律）。无 parent 的旧 trx 才按 wallTs LWW。正在输入时不覆盖，保存时再合并。打点只进本机 `ui-metrics.db`（同步实效 `sync_*` 同样本机、不进 trx） | 另开文档割裂；绑在每张剪贴卡；textarea 玩具编辑器；Vditor / Crepe；整页 `innerHTML` 换预览；每次保存 `innerHTML` 重绘列表；compose 打 SSE `update`；笔记另搞 `note_pin` trx；闲置后笔记只靠整页刷新 |
+| **Compose / 笔记**：同一页 `#notesPanel`，左列表 + 右纸面；纸面 **源码 CodeMirror 6 \| 预览 marked**（打开默认预览、新建源码；本地 `web/assets/notes-editor/`）；空态不写设计意图；`type=note` + `compose_ops`；霜只一层、纸面实心。笔记置顶复用 `pinned_at` + `POST /api/clips/pin` + `recordLocalPin`，排在侧栏顶部，**不进**墙 pin rail。`---` 单独成行 → 下一行本地时间戳 checkpoint。`1+2=` 幽灵结果，Tab 写入、其它键放弃（Tab 有幽灵时优先于列表缩进；禁止 `eval()`）。分栏滚动 = 块锚点+块内进度，头/底钉住；禁止全程 `scrollTop/max`、禁止只钉视口第一行。**预览终局** = `marked.lexer` 块 hash LRU 编译 + React 18 keyed `.notes-md-block` 调和（key=内容 hash，行号在 wrapper）；禁止整页 `innerHTML` 换预览；输入不 `force` remap。打开/关闭用 Motion **数字弹簧**插值 `clip-path inset`（从按钮真实矩形揭到全纸，内容不 scale，墙禁止 `scale`）；禁止让 Motion 直接 tween `clipPath` 字符串（无法插值 `round` 会跳变，会话卡在按钮洞里）。动画结束必须 `clearSheetInline`。抖动打 `sheet_morph` / `sheet_cls` / `notes_cls` / `trae_sessions_cls`（phase=morph|live）；列表与编辑器等 morph 结束后再 paint。禁止 Vditor / Milkdown Crepe WYSIWYG（源码和渲染揉一起会抖）。保存走 `compose_saved`，禁止 `update` 刷墙。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`（`mergeHead` 排除 note 不够）；打开面板总是 `loadNotesList`；`compose_saved` 补列表与当前篇（`dirty`/`saving` 不覆盖；本机刚保存的 timestamp 不回放）。**多机/多 tab 同一篇**：快照 DAG + 行级 diff3（`ComposeMerge`），不是整篇覆盖、不是 Yjs。保存带 `parentHash`；分叉则三路合并，重叠段写入 `<<<<<<< hash` 标记（两侧按正文排序，保证交换律）。无 parent 的旧 trx 才按 wallTs LWW。正在输入时不覆盖，保存时再合并。打点只进本机 `ui-metrics.db`（同步实效 `sync_*` 同样本机、不进 trx） | 另开文档割裂；绑在每张剪贴卡；textarea 玩具编辑器；Vditor / Crepe；整页 `innerHTML` 换预览；每次保存 `innerHTML` 重绘列表；compose 打 SSE `update`；笔记另搞 `note_pin` trx；闲置后笔记只靠整页刷新 |
 | 一次做对：分页、多档图、备份一致性、CI 对齐生产路径 | P0/P1 菜单式半吊子交付 |
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |
@@ -164,6 +166,38 @@ pull
 代码锚点：`ClipFlow/ArchiveBlobClosure.swift` · `CloudDocsSyncService.enqueueArchive` / `repairArchiveClosures` / `hydrateBlob` · `WebArchiveService.persist` · `WebServer.sendArchiveAsset`。
 
 nmem：`clipvault_archive_closure_sync_20260817`（替换 `clipvault_archive_images_not_in_trx_20260817`）。
+
+### 2.3.2 Metrics-based optimization（交互 / 卡顿）
+
+本仓库的 UI 迭代不是「看一眼再猜」。本机 `ui-metrics.db`（**不同步、不含正文**）是优化输入。
+
+```text
+  交互 / 卡顿 / 白屏
+       |
+       v
+  GET /api/ui-metrics/recent?name=&limit=40
+  GET /api/ui-metrics/summary          # 24h
+  #debug  (Cmd-Shift-M) 本页环缓冲
+       |
+       +-- 能归因 (name+phase+kind+dy) --> 改产品 --> 同一 name 对照
+       +-- 不能归因 --------------------> 先补点，再改
+```
+
+| 症状 | 看哪些 name | 不够时补什么 |
+| --- | --- | --- |
+| 墙刷新慢 / 合并卡 | `wall_fetch` `wall_merge` `wall_paint` `wall_resync` | `phase` `bytes` `reason` |
+| 打开笔记/会话抖 | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` | `phase=morph\|live` `kind`=节点 class |
+| **关闭笔记，顶栏从遮挡里出来、墙不稳** | `chrome_shift` phase=close；长周期 `wall_cls` | `dy`（首卡 y 差）`reason`（top-bar / chips / m3-card） |
+| 笔记内输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` | `interaction` |
+| 会话白屏 | `trae_sessions_skip` vs `trae_sessions_paint` `trae_sessions_layout` | `reason` empty/paused/notready |
+
+**长周期观测**：不必一直盯着复现。`ui-metrics.db` 留 30 天；日常开着页面，关几次笔记后 `recent?name=chrome_shift` 和 `wall_cls` 就能看出顶栏是否在解 inert / 去掉 `contain` 时跳。`#debug` 热表把 `chrome_shift`/`wall_cls` 标红阈值与 CLS 相同（value×1000≥80 或 dy 绝对值大）。
+
+| Do | Don't |
+| --- | --- |
+| Agent 自己拉 metrics；用户只负责「感觉抖」 | 让用户指出哪条红 |
+| `notes_close.dur_ms` = 开着墙钟；关动画看 `sheet_morph` phase=close | 把 hold 时长当 morph 耗时 |
+| 关面板后的墙 CLS 打在 `chrome_shift`（notes 观察根不包含 top-bar） | 以为 `notes_cls` 能看见顶栏 |
 
 ### 2.4 隐私与本机
 

@@ -3,7 +3,7 @@
   const FORBIDDEN = /^(body|title|markdown|text|content|html|query|q|search|note|src|md|excerpt|url)$/i;
   const ALLOW = new Set([
     'mode', 'ratio', 'chars', 'bytes', 'n', 'value', 'interaction', 'q_len',
-    'kind', 'phase', 'reason', 'lag', 'host', 'w', 'h', 'nodes',
+    'kind', 'phase', 'reason', 'lag', 'host', 'w', 'h', 'nodes', 'dy',
   ]);
   const NAME = /^[a-z][a-z0-9_]{1,63}$/;
   const SESSION_KEY = 'clipvault.metrics.session';
@@ -78,7 +78,8 @@
     ring.push(ev);
     if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
     const hot = name.startsWith('trae_') || name.startsWith('wall_') || name.startsWith('sse_')
-      || name.startsWith('sheet_') || name === 'notes_cls' || name === 'notes_longtask' || name === 'notes_open';
+      || name.startsWith('sheet_') || name === 'notes_cls' || name === 'notes_longtask' || name === 'notes_open'
+      || name === 'chrome_shift' || name === 'wall_cls';
     if (hot) flush();
     else if (queue.length >= 20) flush();
     else if (!flushTimer) flushTimer = setTimeout(flush, 2000);

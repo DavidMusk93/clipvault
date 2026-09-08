@@ -18,7 +18,7 @@ final class UiMetrics {
     private static let allowedPayload = Set([
         "mode", "ratio", "chars", "bytes", "n", "value", "interaction", "q_len",
         "kind", "phase", "reason", "lag", "host",
-        "w", "h", "nodes",
+        "w", "h", "nodes", "dy",
     ])
 
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")

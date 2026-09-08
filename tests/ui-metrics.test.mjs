@@ -63,7 +63,24 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(html, /wall_ttfp/);
   assert.match(html, /sheet_morph/);
   assert.match(html, /sheet_cls/);
+  assert.match(html, /chrome_shift/);
+  assert.match(html, /wall_cls/);
+  assert.match(html, /function emitChromeShift/);
+  assert.match(html, /function snapshotWallChrome/);
   assert.match(metricsJs, /phase: morphing \? 'morph' : 'live'/);
+  assert.match(metricsJs, /'dy'/);
+  assert.match(metricsJs, /name === 'chrome_shift'/);
+  assert.match(swift, /"dy"/);
   assert.doesNotMatch(html, /nm\([^)]*title/);
   assert.doesNotMatch(html, /payload:\s*\{[^}]*title/);
+});
+
+test('AGENTS.md requires metrics-based UI iteration', () => {
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+  assert.match(agents, /开发迭代 = metrics-based optimization/);
+  assert.match(agents, /### 2\.3\.2 Metrics-based optimization/);
+  assert.match(agents, /chrome_shift/);
+  assert.match(agents, /wall_cls/);
+  assert.match(agents, /先补点，再改/);
+  assert.match(agents, /notes_close\.dur_ms` = 开着墙钟/);
 });
