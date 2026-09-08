@@ -80,11 +80,11 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 **跟底**：靠近底部时新消息钉住 `#thread` 底部（不动画）。用户上翻则停止跟踪，露出「↓」；有未读时 Accent 底。禁止新进展把人拽回底部。进入页默认打开**最新会话**。
 
-**展开 vs 压缩**：用户输入有限，**每一条用户气泡都展开**（含 AskUserQuestion 的选项答案）。助手结论（`Stop`）同样展开。工具 slog 只在 **助手一侧** 收成 `history-bundle`（左对齐），**每一段操作的最后一条始终展开**。bundle 展开后每条是可点开的 `history-item`，里面是完整工具气泡；「查看全部」一次打开。**展开不得改变其它 item 的几何**：目录行高度始终等于 summary；正文 `.history-item-body` overlay（`position:absolute`，脱离文档流），禁止就地 inflate 把后续行顶走。禁止目录行点不开正文。禁止把用户话术卷进「更早 N 轮」。库 `ts` 是 naive UTC；**每条消息时间戳用本地 `YYYY-MM-DD HH:mm:ss`**，禁止只用「今天」或相对时间当消息时刻。
+**展开 vs 压缩**：用户输入有限，**每一条用户气泡都展开**（含 AskUserQuestion 的选项答案）。助手结论（`Stop`）同样展开。工具 slog 只在 **助手一侧** 收成 `history-bundle`（左对齐），**每一段操作的最后一条始终展开**。bundle 展开后每条是可点开的 `history-item`，里面是完整工具气泡；「查看全部」一次打开。**展开目录项**：默认手风琴（一组里只开一条），正文**就地**出现在该行下面，限高内部滚动。禁止 `position:absolute` overlay 盖住后面的用户/助手气泡。禁止目录行点不开正文。禁止把用户话术卷进「更早 N 轮」。库 `ts` 是 naive UTC；**每条消息时间戳用本地 `YYYY-MM-DD HH:mm:ss`**，禁止只用「今天」或相对时间当消息时刻。
 
 **需要你**：Trae 自己几乎不提示。`permission_prompt` / `ask_user_question` 走 SSE `needs_user` 推到 ClipVault 墙（蜂蜜条 + 会话钮圆点），hook 同时 `osascript` 系统通知。确认动作仍在 Trae 里完成。
 
-**实时**：Trae 页走 nmem SSE 契约（`GET /api/stream`：`retry: 3000`、15s ping、满 32 发 `resync_required`、浏览器原生重连）。禁止 `setInterval` 整页重绘。**线程按 `event_id` keyed 调和**（同笔记预览：禁止每次 SSE `innerHTML` 整页换上）。新事件 `GET /api/event?id=` 追加再 patch。bundle 项 **延迟加载正文**；点开一条不得重绘其它条，也不得改变其它 item 的几何。抖动用本机 `ui-metrics` 的 `trae_sessions_cls` / `trae_sessions_paint` / `trae_sessions_longtask` 追溯。
+**实时**：Trae 页走 nmem SSE 契约（`GET /api/stream`：`retry: 3000`、15s ping、满 32 发 `resync_required`、浏览器原生重连）。禁止 `setInterval` 整页重绘。**线程按 `event_id` keyed 调和**（同笔记预览：禁止每次 SSE `innerHTML` 整页换上）。新事件 `GET /api/event?id=` 追加再 patch。bundle 项 **延迟加载正文**；点开一条不得重绘其它条。目录项就地展开，禁止 overlay 盖住对话。抖动用本机 `ui-metrics` 的 `trae_sessions_cls` / `trae_sessions_paint` / `trae_sessions_longtask` 追溯。
 
 **聊天 chrome**：左栏 `#F2F2F7` 会话行（标题=最近 prompt，不是整段 uuid）；右栏 IM 气泡。工具默认折叠。用户/助手气泡不套第二层 max-height 滚动。
 
@@ -210,7 +210,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 
 时间线 = **多捕获历史** 的二级细节，不是默认噪音。
 
-瀑布流内 **禁止就地 expand**（列高/重排不稳）。多 ref 时间线用 **底部可交互 toast 卡片** （毛玻璃 sheet + scrim，lazy fetch，Esc/遮罩关闭）—— 列表零布局扰动。会话 bundle 的 `history-item` 同样：展开 overlay，不 inflate 行高。
+瀑布流内 **禁止就地 expand**（列高/重排不稳）。多 ref 时间线用 **底部可交互 toast 卡片** （毛玻璃 sheet + scrim，lazy fetch，Esc/遮罩关闭）—— 列表零布局扰动。会话 bundle 的 `history-item` **就地**展开（手风琴），禁止 overlay 盖住后面的对话。
 
 **入口**：不要单独「事件时间线」按钮；用 header 的 **×N 引用徽章** 作为唯一 affordance（单 ref 无徽章、无入口）。
 

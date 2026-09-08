@@ -436,10 +436,7 @@
       user-select: none;
     }
     .history-bundle summary::-webkit-details-marker { display: none; }
-    .history-bundle, .history-body {
-      overflow: visible;
-    }
-    .history-body { padding: 6px 4px 8px; }
+    .history-body { padding: 6px 4px 8px; overflow: visible; }
     .history-expand-all {
       display: inline-flex; align-items: center;
       height: 24px; margin: 2px 6px 8px; padding: 0 10px;
@@ -448,17 +445,9 @@
       font: 600 11px/24px var(--font-ui); cursor: pointer;
     }
     .history-expand-all:active { transform: scale(0.97); }
-    .thread-block { min-width: 0; overflow: visible; }
+    .thread-block { min-width: 0; }
     .history-item {
-      position: relative;
-      z-index: 0;
       border-top: 0.5px solid var(--separator);
-      overflow: visible;
-    }
-    .history-item[open] { z-index: 3; }
-    .history-item:not([open]) {
-      content-visibility: auto;
-      contain-intrinsic-size: auto 32px;
     }
     .history-item:not([open]) .history-item-body { display: none; }
     .history-item > summary {
@@ -487,19 +476,11 @@
     }
     .history-item[open] .history-item-body {
       display: block;
-      position: absolute;
-      top: calc(100% + 4px);
-      left: 0;
-      right: 0;
-      z-index: 1;
+      position: static;
       max-height: min(42vh, 320px);
       overflow: auto;
       overscroll-behavior: contain;
       padding: 8px 8px 10px;
-      background: var(--card);
-      border: 0.5px solid var(--separator);
-      border-radius: 12px;
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14), 0 0 1px rgba(0, 0, 0, 0.08);
     }
     .history-item-body .row { margin: 0; }
     .history-item-body .bubble.tool { max-width: 100%; }
@@ -1053,10 +1034,20 @@
       el.dataset.bound = "1";
       el.addEventListener("toggle", () => {
         if (!el.open) return;
+        const pack = el.closest(".history-body");
+        if (pack && pack.dataset.expandAll !== "1") {
+          pack.querySelectorAll(":scope > details.history-item").forEach((d) => {
+            if (d !== el) d.open = false;
+          });
+        }
         const body = el.querySelector(".history-item-body");
-        if (!body || body.dataset.loaded) return;
+        if (!body) return;
+        if (body.dataset.loaded) return;
         const row = liveById(el.dataset.eid);
-        if (!row) return;
+        if (!row) {
+          body.innerHTML = '<div class="empty">这条还不在当前窗口，请点「查看全部」或刷新</div>';
+          return;
+        }
         body.innerHTML = renderRows([row], { event: row.event, role: "__" });
         body.dataset.loaded = "1";
         bindRaws(body);
@@ -1155,11 +1146,14 @@
           ev.stopPropagation();
           const pack = btn.closest(".history-bundle");
           if (!pack) return;
+          const host = pack.querySelector(".history-body");
+          if (host) host.dataset.expandAll = "1";
           const items = [...pack.querySelectorAll("details.history-item")];
           for (const d of items) {
             d.open = true;
             await new Promise((r) => requestAnimationFrame(r));
           }
+          if (host) delete host.dataset.expandAll;
         });
       });
     }
@@ -1243,10 +1237,15 @@
       const grew = lastSig && sig.startsWith(lastSig + ",");
       lastSig = sig;
       const t0 = performance.now();
-      if (kind === "full" || !thread.querySelector(":scope > [data-key]")) {
-        thread.replaceChildren();
+      try {
+        if (kind === "full" || !thread.querySelector(":scope > [data-key]")) {
+          thread.replaceChildren();
+        }
+        patchThread(items);
+      } catch (err) {
+        thread.innerHTML = `<div class="empty">渲染对话失败${err && err.message ? " · " + esc(err.message) : ""}</div>`;
+        return;
       }
-      patchThread(items);
       emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: items.length, kind } });
       if (followTail || painted !== current) pinBottomSoon();
       else if (grew) {
@@ -1265,13 +1264,20 @@
         paintFromLive("full");
         return;
       }
-      const data = await (await fetch(apiUrl("/api/events?" + params))).json();
-      liveEvents = data.events || [];
-      liveIds.clear();
-      for (const e of liveEvents) {
-        if (e && e.event_id) liveIds.add(e.event_id);
+      try {
+        const data = await (await fetch(apiUrl("/api/events?" + params))).json();
+        liveEvents = data.events || [];
+        liveIds.clear();
+        for (const e of liveEvents) {
+          if (e && e.event_id) liveIds.add(e.event_id);
+        }
+        paintFromLive("full");
+      } catch (err) {
+        liveEvents = [];
+        liveIds.clear();
+        lastSig = "";
+        thread.innerHTML = `<div class="empty">加载对话失败${err && err.message ? " · " + esc(err.message) : ""}</div>`;
       }
-      paintFromLive("full");
     }
 
     async function ingestHookIds(ids) {

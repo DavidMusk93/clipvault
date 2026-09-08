@@ -148,8 +148,9 @@ test('user turns stay open; agent tools compress on the left', () => {
   assert.match(html, /paintFromLive/);
   assert.doesNotMatch(html, /thread\.innerHTML = renderThread/);
   assert.match(html, /history-item-body"><\/div>/);
-  assert.match(html, /\.history-item\[open\] \.history-item-body \{[\s\S]*?position:\s*absolute/);
-  assert.match(html, /\.history-item\[open\] \{ z-index:\s*3/);
+  assert.match(html, /\.history-item\[open\] \.history-item-body \{[^}]*position:\s*static/);
+  assert.match(html, /dataset\.expandAll/);
+  assert.doesNotMatch(html, /\.history-item\[open\] \.history-item-body \{[^}]*position:\s*absolute/);
 });
 
 test('AGENTS.md 2.3 encodes UI incremental + lazy', () => {
@@ -161,8 +162,8 @@ test('AGENTS.md 2.3 encodes UI incremental + lazy', () => {
   assert.match(eng, /脱离文档流/);
   assert.match(eng, /整树 `innerHTML`/);
   assert.match(agents, /bundle 正文 \*\*lazy\*\* 加载/);
-  assert.match(taste, /展开不得改变其它 item 的几何/);
-  assert.match(taste, /position:absolute/);
+  assert.match(taste, /禁止 `position:absolute` overlay/);
+  assert.match(taste, /手风琴/);
 });
 
 test('trae sessions use nmem SSE contract, not interval polling', () => {
