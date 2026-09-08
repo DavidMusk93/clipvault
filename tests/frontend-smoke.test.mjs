@@ -73,6 +73,14 @@ test('product brand is ClipVault in title', () => {
   assert.match(indexHtml, /<title>ClipVault<\/title>/);
 });
 
+test('debug dashboard covers SSE and wall metrics', () => {
+  assert.match(indexHtml, /id="debugDrawer"/);
+  assert.match(indexHtml, /id="debugSseKv"/);
+  assert.match(indexHtml, /id="debugHot"/);
+  assert.match(indexHtml, /id="debugLog"/);
+  assert.match(indexHtml, /kind: 'debug'/);
+});
+
 test('notes are a panel on the same page', () => {
   assert.match(indexHtml, /id="notesPanel"/);
   assert.match(indexHtml, /class="notes-frost"/);

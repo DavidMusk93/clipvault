@@ -45,6 +45,8 @@ test('payload forbids note content keys', () => {
   assert.match(swift, /"lag"/);
   assert.match(metricsJs, /'w'/);
   assert.match(metricsJs, /'nodes'/);
+  assert.match(metricsJs, /recentLocal/);
+  assert.match(metricsJs, /startsWith\('wall_'\)/);
   assert.match(metricsJs, /FORBIDDEN/);
   assert.match(metricsJs, /body\|title\|markdown/);
   assert.doesNotMatch(metricsJs, /textContent|getMarkdown\(\)/);
@@ -55,6 +57,10 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(html, /ClipNotesMetrics/);
   assert.match(html, /nm\('note_save'/);
   assert.match(html, /id="nmList"/);
+  assert.match(html, /id="debugDrawer"/);
+  assert.match(html, /wall_fetch/);
+  assert.match(html, /wall_paint/);
+  assert.match(html, /wall_ttfp/);
   assert.doesNotMatch(html, /nm\([^)]*title/);
   assert.doesNotMatch(html, /payload:\s*\{[^}]*title/);
 });

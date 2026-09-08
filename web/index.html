@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n15" />
   <script src="/assets/notes-editor/notes-editor.js?v=n15"></script>
   <script src="/assets/motion.js?v=m1"></script>
-  <script src="/assets/notes-metrics.js?v=n9"></script>
+  <script src="/assets/notes-metrics.js?v=n10"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -2128,6 +2128,33 @@
     .snap-list .snap-meta { color: var(--muted); font-size: 11px; }
     .snap-list .snap-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
+    .debug-drawer { width: min(460px, 100vw); }
+    .debug-kv {
+      display: grid; grid-template-columns: 92px 1fr; gap: 4px 10px;
+      font-size: 12px; font-variant-numeric: tabular-nums;
+      margin: 8px 0 14px;
+    }
+    .debug-kv span:first-child { color: var(--muted); }
+    .debug-hot {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+      font-variant-numeric: tabular-nums; margin: 8px 0 14px;
+    }
+    .debug-hot th, .debug-hot td {
+      text-align: left; padding: 5px 6px; border-bottom: 0.5px solid var(--separator);
+    }
+    .debug-hot th { color: var(--muted); font-weight: 600; font-size: 11px; }
+    .debug-hot .is-slow { color: var(--danger); font-weight: 650; }
+    .debug-log {
+      list-style: none; margin: 0; padding: 0;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 11px; line-height: 1.45;
+    }
+    .debug-log li {
+      padding: 4px 0; border-bottom: 0.5px solid var(--separator);
+      word-break: break-word;
+    }
+    .debug-log .is-slow { color: var(--danger); }
+
     .switch { position: relative; width: 51px; height: 31px; flex-shrink: 0; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .switch span {
@@ -2237,6 +2264,10 @@
         <span class="material-symbols-outlined" style="font-size:18px">history</span>
         <span>操作</span>
       </button>
+      <button type="button" class="backup-btn" id="debugOpenBtn" title="SSE / 指标">
+        <span class="material-symbols-outlined" style="font-size:18px">monitoring</span>
+        <span>调试</span>
+      </button>
       <button type="button" class="backup-btn" id="backupOpenBtn" title="iCloud Drive 备份">
         <span class="material-symbols-outlined" style="font-size:18px">cloud_upload</span>
         <span id="backupBtnLabel">备份</span>
@@ -2336,6 +2367,27 @@
         <button type="button" id="opsRefresh">刷新</button>
       </div>
       <ul class="ops-list" id="opsList"><li class="backup-label">加载中…</li></ul>
+    </div>
+  </aside>
+
+  <div class="backup-scrim" id="debugScrim"></div>
+  <aside class="backup-drawer debug-drawer" id="debugDrawer" aria-label="SSE 与指标">
+    <header>
+      <h2>调试 · SSE / 指标</h2>
+      <button type="button" class="btn-icon" id="debugCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
+    </header>
+    <div class="backup-body">
+      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。刷新慢先看 wall_fetch / wall_paint / wall_merge。</p>
+      <h3 style="font-size:14px;font-weight:600">SSE</h3>
+      <div class="debug-kv" id="debugSseKv"></div>
+      <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
+      <table class="debug-hot" id="debugHot"><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody></tbody></table>
+      <div class="backup-actions">
+        <button type="button" id="debugReload">重测刷新</button>
+        <button type="button" class="secondary" id="debugPull">拉 recent</button>
+      </div>
+      <h3 style="font-size:14px;font-weight:600">最近事件</h3>
+      <ul class="debug-log" id="debugLog"><li class="backup-label">尚无本页打点</li></ul>
     </div>
   </aside>
 
@@ -2901,6 +2953,7 @@ window.ClipViewMasonry = Masonry;
       let nm = raw.match(/^notes(?:\/([0-9a-fA-F-]{36}))?$/i);
       if (nm) return { kind: 'notes', noteId: nm[1] || null };
       if (/^sessions$/i.test(raw)) return { kind: 'sessions' };
+      if (/^debug$/i.test(raw)) return { kind: 'debug' };
       let m = raw.match(/^h=([0-9a-fA-F]{64})$/);
       if (m) return { kind: 'hash', hash: m[1].toLowerCase() };
       m = raw.match(/^id=([0-9a-fA-F-]{36})$/i);
@@ -3045,6 +3098,10 @@ window.ClipViewMasonry = Masonry;
     async function applyAppHash() {
       const loc = parseAppHash();
       if (!loc.kind) return;
+      if (loc.kind === 'debug') {
+        openDebug();
+        return;
+      }
       await jumpToLocator(loc);
       if (loc.kind !== 'notes') consumeWallLocatorHash();
     }
@@ -3695,6 +3752,29 @@ window.ClipViewMasonry = Masonry;
     function nm(name, extra) {
       const M = globalThis.ClipNotesMetrics;
       if (M) M.emit(name, extra || {});
+      if (debugPaintQueued == null) return;
+      scheduleDebugPaint();
+    }
+    const wallBootAt = performance.now();
+    let wallTtfpSent = false;
+    let lastWallFetchAt = 0;
+    let wallBootInflight = true;
+    let debugPaintQueued = 0;
+    const sseDebug = {
+      wall: { lastAt: 0, lastKind: '', opens: 0, errors: 0, pings: 0, resyncs: 0 },
+      trae: { lastAt: 0, lastKind: '', opens: 0, errors: 0 },
+    };
+    function markWallTtfp(kind) {
+      if (wallTtfpSent) return;
+      wallTtfpSent = true;
+      const lag = Math.round(performance.now() - wallBootAt);
+      nm('wall_ttfp', { dur_ms: lag, payload: { kind: String(kind || 'fetch').slice(0, 32), lag } });
+    }
+    function sseReadyLabel(es) {
+      if (!es) return 'closed';
+      if (es.readyState === EventSource.OPEN) return 'open';
+      if (es.readyState === EventSource.CONNECTING) return 'connecting';
+      return 'closed';
     }
 
     async function ensureNotesEditor(markdown) {
@@ -4045,7 +4125,7 @@ window.ClipViewMasonry = Masonry;
       if (!(t && t.closest)) return;
       if (notes && t.closest('.notes-rail, .notes-paper')) return;
       if (sessions && t.closest('.sessions-shell')) return;
-      if (t.closest('.event-toast.open, .archive-reader.open, .eval-sheet.open, .backup-drawer, .lightbox.open')) return;
+      if (t.closest('.event-toast.open, .archive-reader.open, .eval-sheet.open, .backup-drawer, .lightbox.open, #debugDrawer')) return;
       e.preventDefault();
       e.stopPropagation();
     }
@@ -4299,6 +4379,9 @@ window.ClipViewMasonry = Masonry;
 
       loading = true;
       document.getElementById('loadingMore').hidden = reset;
+      if (reset) wallBootInflight = true;
+      const t0 = performance.now();
+      nm('wall_fetch', { payload: { kind: reset ? 'reset' : 'more', phase: 'start' } });
 
       const params = new URLSearchParams();
       params.set('limit', String(PAGE_SIZE));
@@ -4310,7 +4393,9 @@ window.ClipViewMasonry = Masonry;
       try {
         const res = await fetch(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
         if (!res.ok) throw new Error('API ' + res.status);
-        const data = await res.json();
+        const buf = await res.arrayBuffer();
+        const bytes = buf.byteLength;
+        const data = JSON.parse(new TextDecoder().decode(buf));
         // Support both envelope and legacy array
         const items = Array.isArray(data) ? data : (data.items || []);
         const cursor = Array.isArray(data) ? null : (data.nextCursor || null);
@@ -4318,7 +4403,6 @@ window.ClipViewMasonry = Masonry;
         // Stale response (a newer reset happened while we were in flight)
         if (gen !== fetchGen) return;
 
-        const prevLen = clips.length;
         const prevIds = new Set(clips.map(c => c.id));
         clips = Pagination.mergePage(clips, items, { reset });
         clips = sortClipsForFeed(dedupeClipsById(clips));
@@ -4345,14 +4429,27 @@ window.ClipViewMasonry = Masonry;
           // If nothing new but API returned rows, they were all dups — stay put.
         }
         ensureSentinelObserved();
+        nm('wall_fetch', {
+          dur_ms: performance.now() - t0,
+          ok: true,
+          payload: { kind: reset ? 'reset' : 'more', phase: 'end', n: items.length, bytes },
+        });
+        markWallTtfp(reset ? 'reset' : 'more');
       } catch (e) {
         console.error(e);
+        nm('wall_fetch', {
+          dur_ms: performance.now() - t0,
+          ok: false,
+          payload: { kind: reset ? 'reset' : 'more', phase: 'error' },
+        });
         if (reset && gen === fetchGen) {
           document.getElementById('grid').innerHTML =
             `<div class="empty"><p>加载失败，请刷新</p></div>`;
         }
       } finally {
         loading = false;
+        lastWallFetchAt = performance.now();
+        if (reset) wallBootInflight = false;
         if (gen === fetchGen) {
           document.getElementById('loadingMore').hidden = true;
         }
@@ -4418,16 +4515,24 @@ window.ClipViewMasonry = Masonry;
 
     /** SSE: only pull the newest page and merge by id — no full history reload */
     async function mergeHead() {
+      const t0 = performance.now();
+      nm('wall_merge', { payload: { kind: 'head', phase: 'start' } });
       try {
         const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
         if (searchQuery) params.set('q', searchQuery);
         if (currentView === 'trash') params.set('view', 'trash');
         params.set('exclude', 'note');
         const res = await fetch(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'head', phase: 'error', reason: 'http' } });
+          return;
+        }
         const data = await res.json();
         const items = Array.isArray(data) ? data : (data.items || []);
-        if (!items.length) return;
+        if (!items.length) {
+          nm('wall_merge', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'head', phase: 'end', n: 0, reason: 'empty' } });
+          return;
+        }
         const seen = new Set(clips.map(c => c.id));
         const fresh = items.filter(i => !seen.has(i.id));
         // Refresh archived flags on existing rows (list JSON has no article HTML).
@@ -4462,6 +4567,11 @@ window.ClipViewMasonry = Masonry;
           } else {
             flagDirty.forEach((c) => replaceCardInPlace(c));
           }
+          nm('wall_merge', {
+            dur_ms: performance.now() - t0,
+            ok: true,
+            payload: { kind: 'head', phase: 'end', n: 0, reason: pinChanged ? 'pin' : 'noop' },
+          });
           return;
         }
         clips = sortClipsForFeed(dedupeClipsById([...fresh, ...clips]));
@@ -4472,7 +4582,14 @@ window.ClipViewMasonry = Masonry;
         // Head insert changes order — full rebuild with scroll anchor.
         colHeights = null;
         rebuildFromData({ preserveScroll: true });
-      } catch (_) {}
+        nm('wall_merge', {
+          dur_ms: performance.now() - t0,
+          ok: true,
+          payload: { kind: 'head', phase: 'end', n: fresh.length, reason: 'insert' },
+        });
+      } catch (_) {
+        nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'head', phase: 'error' } });
+      }
     }
 
     /** Notes are excluded from mergeHead. Idle/visibility resync must still snapshot them. */
@@ -6959,6 +7076,7 @@ window.ClipViewMasonry = Masonry;
      * Delete/restore must use removeCardFromMasonry (differential) — not this.
      */
     function rebuildFromData({ preserveScroll = true } = {}) {
+      const t0 = performance.now();
       const host = document.getElementById('grid');
       const pinRail = document.getElementById('pinRail');
       const pinHost = document.getElementById('gridPinned');
@@ -6975,6 +7093,7 @@ window.ClipViewMasonry = Masonry;
         host.innerHTML = `<div class="empty"><span class="material-symbols-outlined" style="font-size:48px;opacity:.5">inbox</span>
           <p style="margin-top:12px">${loading ? '加载中…' : '没有匹配的记录'}</p></div>`;
         lastColCount = 0;
+        nm('wall_paint', { dur_ms: performance.now() - t0, payload: { kind: 'empty', n: 0 } });
         return;
       }
 
@@ -7049,6 +7168,10 @@ window.ClipViewMasonry = Masonry;
           }
         });
       }
+      nm('wall_paint', {
+        dur_ms: performance.now() - t0,
+        payload: { kind: preserveScroll ? 'keep' : 'reset', n: view.length, nodes: host.querySelectorAll('.m3-card').length },
+      });
     }
 
     /**
@@ -7485,9 +7608,15 @@ window.ClipViewMasonry = Masonry;
       resyncTimer = setTimeout(async () => {
         resyncTimer = 0;
         resyncing = true;
+        const t0 = performance.now();
+        sseDebug.wall.resyncs += 1;
+        nm('wall_resync', { payload: { kind: 'run', phase: 'start', n: sseDebug.wall.resyncs } });
         try {
           await mergeHead();
           await mergeNotesHead();
+          nm('wall_resync', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'run', phase: 'end' } });
+        } catch (_) {
+          nm('wall_resync', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'run', phase: 'error' } });
         } finally {
           resyncing = false;
           if (resyncQueued) { resyncQueued = false; scheduleResync(); }
@@ -7527,13 +7656,24 @@ window.ClipViewMasonry = Masonry;
       try { if (traeAskES) traeAskES.close(); } catch (_) {}
       const es = new EventSource('/trae/api/stream');
       traeAskES = es;
+      es.onopen = () => {
+        sseDebug.trae.opens += 1;
+        sseDebug.trae.lastAt = Date.now();
+        sseDebug.trae.lastKind = 'open';
+        nm('sse_trae', { payload: { phase: 'open', kind: 'trae', n: sseDebug.trae.opens } });
+      };
       es.onmessage = (ev) => {
         let d;
         try { d = JSON.parse(ev.data); } catch (_) { return; }
+        sseDebug.trae.lastAt = Date.now();
+        sseDebug.trae.lastKind = String((d && d.type) || 'msg').slice(0, 32);
         if (!d || !d.needs_user) return;
         showTraeAsk(d);
       };
       es.onerror = () => {
+        sseDebug.trae.errors += 1;
+        sseDebug.trae.lastKind = 'error';
+        nm('sse_trae', { ok: false, payload: { phase: 'error', kind: 'trae' } });
         if (es.readyState !== EventSource.CLOSED) return;
         if (traeAskES === es) traeAskES = null;
         try { es.close(); } catch (_) {}
@@ -7554,17 +7694,43 @@ window.ClipViewMasonry = Masonry;
       }
       const es = new EventSource(API + '/api/events');
       liveSSE = es;
-      es.onopen = () => { noteSSEEvent(); scheduleResync(); };
+      es.onopen = () => {
+        noteSSEEvent();
+        sseDebug.wall.opens += 1;
+        sseDebug.wall.lastAt = Date.now();
+        sseDebug.wall.lastKind = 'open';
+        nm('sse_wall', { payload: { phase: 'open', kind: 'wall', n: sseDebug.wall.opens } });
+        if (wallBootInflight || (lastWallFetchAt && performance.now() - lastWallFetchAt < 2500)) {
+          nm('wall_resync', { payload: { reason: 'skip_boot', kind: 'open' } });
+          return;
+        }
+        scheduleResync();
+      };
       es.onmessage = e => {
         noteSSEEvent();
+        sseDebug.wall.lastAt = Date.now();
         try {
           const d = JSON.parse(e.data);
-          if (d.type === 'ping') return;
+          const typ = String(d && d.type || '');
+          sseDebug.wall.lastKind = typ.slice(0, 32);
+          if (d.type === 'ping') {
+            sseDebug.wall.pings += 1;
+            return;
+          }
+          nm('sse_wall', { payload: { phase: 'msg', kind: typ.slice(0, 32) } });
           if (d.type === 'compose_saved') {
             mergeNotesHead().catch(() => {});
             return;
           }
-          if (d.type === 'connected' || d.type === 'resync_required'
+          if (d.type === 'connected') {
+            if (wallBootInflight || (lastWallFetchAt && performance.now() - lastWallFetchAt < 2500)) {
+              nm('wall_resync', { payload: { reason: 'skip_boot', kind: 'connected' } });
+              return;
+            }
+            scheduleResync();
+            return;
+          }
+          if (d.type === 'resync_required'
               || d.type === 'control.resync_required' || d.type === 'sync.resync_required'
               || d.type === 'update') {
             scheduleResync();
@@ -7603,6 +7769,9 @@ window.ClipViewMasonry = Masonry;
       };
       es.onerror = () => {
         // Native EventSource reconnects via `retry:`. Only reopen if the browser gave up.
+        sseDebug.wall.errors += 1;
+        sseDebug.wall.lastKind = 'error';
+        nm('sse_wall', { ok: false, payload: { phase: 'error', kind: 'wall', n: sseDebug.wall.errors } });
         if (es.readyState !== EventSource.CLOSED) return;
         if (liveSSE === es) liveSSE = null;
         try { es.close(); } catch (_) {}
@@ -7665,6 +7834,108 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('opsCloseBtn')?.addEventListener('click', closeOps);
     opsScrim?.addEventListener('click', closeOps);
     document.getElementById('opsRefresh')?.addEventListener('click', refreshOpLogs);
+
+    const debugOpen = document.getElementById('debugOpenBtn');
+    const debugDrawer = document.getElementById('debugDrawer');
+    const debugScrim = document.getElementById('debugScrim');
+    function scheduleDebugPaint() {
+      if (!debugDrawer?.classList.contains('open')) return;
+      if (debugPaintQueued) return;
+      debugPaintQueued = window.setTimeout(() => {
+        debugPaintQueued = 0;
+        paintDebugPanel();
+      }, 80);
+    }
+    function ageLabel(ts) {
+      if (!ts) return '—';
+      const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+      if (s < 60) return s + 's';
+      return Math.round(s / 60) + 'm';
+    }
+    function paintDebugPanel() {
+      const kv = document.getElementById('debugSseKv');
+      const hot = document.getElementById('debugHot')?.querySelector('tbody');
+      const log = document.getElementById('debugLog');
+      if (!kv || !hot || !log) return;
+      const w = sseDebug.wall;
+      const t = sseDebug.trae;
+      kv.innerHTML =
+        `<span>墙 SSE</span><span>${esc(sseReadyLabel(liveSSE))} · ${esc(w.lastKind || '—')} · ${esc(ageLabel(w.lastAt))} · open ${w.opens} · err ${w.errors} · ping ${w.pings} · resync ${w.resyncs}</span>` +
+        `<span>会话 SSE</span><span>${esc(sseReadyLabel(traeAskES))} · ${esc(t.lastKind || '—')} · ${esc(ageLabel(t.lastAt))} · open ${t.opens} · err ${t.errors}</span>` +
+        `<span>本页 ttfp</span><span>${wallTtfpSent ? '已报' : '未报'} · boot ${Math.round(performance.now() - wallBootAt)}ms</span>`;
+      const rows = (globalThis.ClipNotesMetrics?.recentLocal?.() || []).slice();
+      const agg = new Map();
+      for (const ev of rows) {
+        const name = ev.name || '';
+        if (!name.startsWith('wall_') && !name.startsWith('sse_')) continue;
+        let a = agg.get(name);
+        if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0 }; agg.set(name, a); }
+        a.n += 1;
+        if (ev.dur_ms != null && Number.isFinite(ev.dur_ms)) {
+          a.sum += ev.dur_ms;
+          a.durN += 1;
+          if (ev.dur_ms > a.max) a.max = ev.dur_ms;
+        }
+      }
+      const hotRows = [...agg.values()].sort((a, b) => b.max - a.max || b.n - a.n);
+      hot.innerHTML = hotRows.length ? hotRows.map((r) => {
+        const avg = r.durN ? Math.round(r.sum / r.durN) : '—';
+        const mx = r.durN ? Math.round(r.max) : '—';
+        const slow = r.max >= 200;
+        return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(r.name)}</td><td>${r.n}</td><td>${avg}</td><td>${mx}</td></tr>`;
+      }).join('') : '<tr><td colspan="4">尚无 wall_/sse_ 打点</td></tr>';
+      const latest = rows.slice(-24).reverse();
+      log.innerHTML = latest.length ? latest.map((ev) => {
+        const tms = new Date(ev.ts || Date.now()).toLocaleTimeString();
+        const dur = ev.dur_ms != null ? ` ${Math.round(ev.dur_ms)}ms` : '';
+        const p = ev.payload ? ' ' + JSON.stringify(ev.payload) : '';
+        const slow = ev.dur_ms != null && ev.dur_ms >= 200;
+        return `<li class="${slow ? 'is-slow' : ''}">${esc(tms)} ${esc(ev.name)}${esc(dur)}${esc(p)}</li>`;
+      }).join('') : '<li class="backup-label">尚无本页打点</li>';
+    }
+    function openDebug() {
+      debugDrawer?.classList.add('open');
+      debugScrim?.classList.add('open');
+      paintDebugPanel();
+      try { if (parseAppHash().kind !== 'debug') history.replaceState(null, '', '#debug'); } catch (_) {}
+    }
+    function closeDebug() {
+      debugDrawer?.classList.remove('open');
+      debugScrim?.classList.remove('open');
+      if (parseAppHash().kind === 'debug') {
+        try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+      }
+    }
+    debugOpen?.addEventListener('click', openDebug);
+    document.getElementById('debugCloseBtn')?.addEventListener('click', closeDebug);
+    debugScrim?.addEventListener('click', closeDebug);
+    document.getElementById('debugReload')?.addEventListener('click', () => {
+      location.reload();
+    });
+    document.getElementById('debugPull')?.addEventListener('click', async () => {
+      try {
+        const r = await fetch(API + '/api/ui-metrics/recent?limit=40');
+        const j = await r.json();
+        const log = document.getElementById('debugLog');
+        const evs = (j && j.events) || [];
+        if (log) {
+          log.innerHTML = evs.map((ev) => {
+            const tms = new Date(ev.ts || Date.now()).toLocaleTimeString();
+            const dur = ev.dur_ms != null ? ` ${Math.round(ev.dur_ms)}ms` : '';
+            const p = ev.payload ? ' ' + JSON.stringify(ev.payload) : '';
+            return `<li>${esc(tms)} ${esc(ev.name || '')}${esc(dur)}${esc(p)}</li>`;
+          }).join('') || '<li class="backup-label">recent 为空</li>';
+        }
+      } catch (_) {}
+    });
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'M' || e.key === 'm')) {
+        e.preventDefault();
+        if (debugDrawer?.classList.contains('open')) closeDebug();
+        else openDebug();
+      }
+      if (e.key === 'Escape' && debugDrawer?.classList.contains('open')) closeDebug();
+    });
 
     function opsSourceKey(source) {
       const s = String(source || 'system').toLowerCase().trim();
@@ -7757,6 +8028,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     async function refreshBackupStatus() {
+      const t0 = performance.now();
       try {
         const res = await fetch(API + '/api/backup/status');
         if (!res.ok) throw new Error('status ' + res.status);
@@ -7890,8 +8162,10 @@ window.ClipViewMasonry = Masonry;
             ul.appendChild(li);
           });
         }
+        nm('wall_backup', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'status', phase: 'end' } });
       } catch (e) {
         console.error(e);
+        nm('wall_backup', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'status', phase: 'error' } });
         document.getElementById('backupBtnLabel').textContent = '备份?';
       }
     }
@@ -8008,8 +8282,18 @@ window.ClipViewMasonry = Masonry;
         refreshBackupStatus();
       }
     }, 30000);
-    refreshBackupStatus();
+    setTimeout(() => refreshBackupStatus(), 800);
 
+    nm('wall_boot', { payload: { phase: 'start' } });
+    try {
+      const lt = new PerformanceObserver((list) => {
+        if (document.body.classList.contains('notes-open')) return;
+        for (const e of list.getEntries()) {
+          if (e.duration >= 50) nm('wall_longtask', { dur_ms: e.duration });
+        }
+      });
+      lt.observe({ type: 'longtask', buffered: false });
+    } catch (_) {}
     fetchPage({ reset: true }).then(() => applyAppHash());
     window.addEventListener('hashchange', () => { applyAppHash(); });
     setupSSE();

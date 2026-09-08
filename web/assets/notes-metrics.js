@@ -40,6 +40,8 @@
   }
 
   const queue = [];
+  const RING_MAX = 80;
+  const ring = [];
   let flushTimer = 0;
   let panelOpen = false;
   let lastInputAt = 0;
@@ -73,7 +75,11 @@
     if (extra && typeof extra.ok === 'boolean') ev.ok = extra.ok;
     if (payload && Object.keys(payload).length) ev.payload = payload;
     queue.push(ev);
-    if (queue.length >= 20) flush();
+    ring.push(ev);
+    if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
+    const hot = name.startsWith('trae_') || name.startsWith('wall_') || name.startsWith('sse_');
+    if (hot) flush();
+    else if (queue.length >= 20) flush();
     else if (!flushTimer) flushTimer = setTimeout(flush, 2000);
   }
 
@@ -152,5 +158,6 @@
     startObservers,
     stopObservers,
     sessionId,
+    recentLocal() { return ring.slice(); },
   };
 })();

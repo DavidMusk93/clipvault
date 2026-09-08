@@ -56,6 +56,11 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   const setup = indexHtml.slice(start, end);
   assert.match(indexHtml, /function scheduleResync/);
   assert.match(indexHtml, /await mergeNotesHead\(\)/);
+  assert.match(indexHtml, /wall_resync/);
+  assert.match(indexHtml, /skip_boot/);
+  assert.match(indexHtml, /kind: 'connected'/);
+  assert.match(indexHtml, /sse_wall/);
+  assert.match(indexHtml, /id="debugDrawer"/);
   assert.match(indexHtml, /visibilitychange/);
   assert.match(indexHtml, /pageshow/);
   assert.match(setup, /EventSource\.CLOSED/);
