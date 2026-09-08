@@ -105,8 +105,10 @@ test('opening a note defaults to preview; new note is source', () => {
   assert.match(html, /ensureNotesEditor\(noteStripTitle\(item\.textContent \|\| '', t\), 'preview'\)/);
   assert.match(html, /ensureNotesEditor\('', 'source'\)/);
   assert.match(html, /applyNotesMode\('preview'\)/);
-  assert.match(html, /tools\.hidden = mode === 'preview'/);
-  assert.match(html, /\.notes-tools\[hidden\] \{ display: none; \}/);
+  assert.match(html, /notes-chrome'\)\?\.classList\.toggle\('is-preview'/);
+  assert.match(html, /\.notes-chrome\.is-preview \.notes-tools \{[\s\S]{0,80}visibility:\s*hidden/);
+  assert.match(html, /\.notes-chrome\.is-preview \.notes-status \{[\s\S]{0,40}visibility:\s*hidden/);
+  assert.doesNotMatch(html, /tools\.hidden = mode === 'preview'/);
 });
 
 function noteStripTitle(md, title) {

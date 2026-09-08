@@ -1958,7 +1958,13 @@
       display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0;
       overflow: hidden;
     }
-    .notes-tools[hidden] { display: none; }
+    .notes-chrome.is-preview .notes-tools {
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .notes-chrome.is-preview .notes-status {
+      visibility: hidden;
+    }
     .notes-tools button {
       width: 28px; height: 26px; border: 0; border-radius: 6px;
       background: transparent; color: var(--ink); cursor: pointer;
@@ -3784,8 +3790,15 @@ window.ClipViewMasonry = Masonry;
       document.querySelectorAll('#notesModes [data-mode]').forEach((b) => {
         b.classList.toggle('is-on', b.dataset.mode === mode);
       });
+      const preview = mode === 'preview';
+      document.querySelector('.notes-chrome')?.classList.toggle('is-preview', preview);
       const tools = document.getElementById('notesTools');
-      if (tools) tools.hidden = mode === 'preview';
+      if (tools) {
+        tools.hidden = false;
+        tools.setAttribute('aria-hidden', preview ? 'true' : 'false');
+      }
+      const status = document.getElementById('notesStatus');
+      if (status) status.setAttribute('aria-hidden', preview ? 'true' : 'false');
     }
     function nm(name, extra) {
       const M = globalThis.ClipNotesMetrics;
