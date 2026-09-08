@@ -630,6 +630,8 @@
     let railY = 0;
     let es = null;
     let load = createLoadState();
+    const bootAt = performance.now();
+    let ttfpSent = false;
     let eventsGen = 0;
     let eventsAbort = null;
     let resyncTimer = 0;
@@ -654,7 +656,9 @@
         if (Object.keys(p).length) ev.payload = p;
       }
       metricQ.push(ev);
-      if (metricQ.length >= 20) flushMetrics();
+      if (name.startsWith("trae_")) {
+        if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 0);
+      } else if (metricQ.length >= 20) flushMetrics();
       else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 2000);
     };
     const flushMetrics = () => {
@@ -703,6 +707,7 @@
         const row = sessionRows.find((s) => s.session_id === current);
         showSessionHead(current, row ? sessionTitle(row) : current);
         paintFromLive("cache");
+        markTtfp("cache");
       }
       dispatch({ type: "cache_hit" });
       return true;
@@ -711,8 +716,43 @@
       writeSnap(window.localStorage, {
         current,
         sessions: sessionRows,
-        events: liveEvents,
+        events: liveEvents.filter((e) => hookIsBeat(e)),
       });
+    };
+    const markTtfp = (kind) => {
+      if (ttfpSent) return;
+      ttfpSent = true;
+      const lag = Math.round(performance.now() - bootAt);
+      emit("trae_sessions_ttfp", { dur_ms: lag, payload: { kind: String(kind || "full").slice(0, 32), lag } });
+    };
+    const netJson = async (kind, url, opts) => {
+      const t0 = performance.now();
+      emit("trae_sessions_net", { payload: { kind, phase: "start" } });
+      const res = await fetch(url, opts);
+      const buf = await res.arrayBuffer();
+      const bytes = buf.byteLength;
+      const data = JSON.parse(new TextDecoder().decode(buf));
+      const n = Array.isArray(data.events) ? data.events.length
+        : Array.isArray(data.sessions) ? data.sessions.length
+        : 1;
+      emit("trae_sessions_net", { dur_ms: performance.now() - t0, payload: { kind, phase: "end", bytes, n } });
+      return data;
+    };
+    const mergeIncoming = (incoming) => {
+      const map = new Map();
+      for (const e of liveEvents) {
+        if (e && e.event_id) map.set(e.event_id, e);
+      }
+      for (const e of incoming || []) {
+        if (!e || !e.event_id) continue;
+        const prev = map.get(e.event_id);
+        map.set(e.event_id, prev ? { ...prev, ...e } : e);
+      }
+      liveEvents = [...map.values()];
+      liveIds.clear();
+      for (const e of liveEvents) {
+        if (e && e.event_id) liveIds.add(e.event_id);
+      }
     };
     const applyLoadEffect = (fx) => {
       if (fx === "readSnap") {
@@ -917,12 +957,14 @@
         current = id;
         lastSig = "";
         painted = "";
+        liveEvents = [];
+        liveIds.clear();
         markFollow(true);
         showSessionHead(current, el.getAttribute("data-title") || current);
         $("sessionList").querySelectorAll(".card").forEach((c) => {
           c.classList.toggle("active", c.getAttribute("data-id") === current);
         });
-        loadEvents();
+        loadEvents("beats").then(() => loadEvents("tools"));
       });
       el.querySelector(".pin-btn")?.addEventListener("click", (ev) => {
         ev.preventDefault();
@@ -1175,6 +1217,17 @@
       }
       const all = item.rows || [];
       wrap._bundleRows = all;
+      if (!pack.open && body.dataset.expandAll !== "1") {
+        reconcile(body, [btn]);
+        bindBundleExpand(wrap);
+        if (!pack.dataset.toggleBound) {
+          pack.dataset.toggleBound = "1";
+          pack.addEventListener("toggle", () => {
+            if (pack.open) updateBundleEl(wrap, { rows: wrap._bundleRows, title });
+          });
+        }
+        return;
+      }
       const rows = body.dataset.expandAll === "1" || all.length <= BUNDLE_SHOW
         ? all
         : all.slice(-BUNDLE_SHOW);
@@ -1284,7 +1337,7 @@
       const box = $("sessionList");
       let switched = false;
       try {
-        const data = await (await fetch(apiUrl("/api/sessions?limit=80"))).json();
+        const data = await netJson("list", apiUrl("/api/sessions?limit=80"));
         const sessions = data.sessions || [];
         sessionRows = sessions;
         if (!sessions.length) {
@@ -1300,6 +1353,8 @@
           current = latest.session_id;
           lastSig = "";
           painted = "";
+          liveEvents = [];
+          liveIds.clear();
           markFollow(true);
           showSessionHead(current, sessionTitle(latest));
           switched = true;
@@ -1343,11 +1398,12 @@
         const grew = lastSig && sig.startsWith(lastSig + ",");
         lastSig = sig;
         const t0 = performance.now();
-        if (kind === "full" || !thread.querySelector(":scope > [data-key]")) {
+        if (painted !== current || !thread.querySelector(":scope > [data-key]")) {
           thread.replaceChildren();
         }
         patchThread(items);
         emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: items.length, kind } });
+        markTtfp(kind);
         if (followTail || painted !== current) pinBottomSoon();
         else if (grew) {
           pendingNew = true;
@@ -1389,47 +1445,42 @@
       if (n && gen === eventsGen) paintFromLive("patch");
     }
 
-    async function loadEvents() {
+    async function loadEvents(view) {
       if (!canFetch(load)) return;
       const gen = ++eventsGen;
       const sid = current;
-      if (eventsAbort) {
+      const kind = view === "tools" ? "tools" : view === "beats" ? "beats" : "full";
+      if (eventsAbort && kind !== "tools") {
         try { eventsAbort.abort(); } catch (_) {}
       }
       const ac = new AbortController();
-      eventsAbort = ac;
+      if (kind !== "tools") eventsAbort = ac;
       const q = (document.getElementById("q") || {}).value || "";
       const params = new URLSearchParams({ limit: "200" });
       if (sid) params.set("session_id", sid);
       if (String(q).trim()) params.set("q", String(q).trim());
+      else if (kind === "beats" || kind === "tools") params.set("view", kind);
       if (!sid) {
         paintFromLive("full");
         return;
       }
-      if (!liveEvents.length) {
+      if (!liveEvents.length && kind !== "tools") {
         thread.innerHTML = '<div class="empty">加载对话…</div>';
       }
-      emit("trae_sessions_load", { payload: { kind: "full", phase: "start" } });
+      emit("trae_sessions_load", { payload: { kind, phase: "start" } });
       try {
-        const res = await fetch(apiUrl("/api/events?" + params), { signal: ac.signal });
-        const data = await res.json();
+        const data = await netJson(kind, apiUrl("/api/events?" + params), { signal: ac.signal });
         if (gen !== eventsGen || current !== sid) return;
-        liveEvents = data.events || [];
-        liveIds.clear();
-        for (const e of liveEvents) {
-          if (e && e.event_id) liveIds.add(e.event_id);
-        }
-        paintFromLive("full");
-        emit("trae_sessions_load", { payload: { n: liveEvents.length, kind: "full", phase: "end" } });
-        dispatch({ type: "resync_ok" });
-        hydrateSlimTools();
+        mergeIncoming(data.events || []);
+        paintFromLive(kind);
+        emit("trae_sessions_load", { payload: { n: liveEvents.length, kind, phase: "end" } });
+        if (kind !== "tools") dispatch({ type: "resync_ok" });
       } catch (err) {
         if (err && err.name === "AbortError") return;
         if (gen !== eventsGen) return;
         emit("trae_sessions_error", { payload: { reason: "events" } });
         dispatch({ type: "resync_fail", reason: "events" });
         if (!liveEvents.length) {
-          liveIds.clear();
           lastSig = "";
           thread.innerHTML = `<div class="empty">加载对话失败${err && err.message ? " · " + esc(err.message) : ""}</div>`;
         }
@@ -1484,7 +1535,7 @@
     }
 
     $("q").addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") loadEvents();
+      if (ev.key === "Enter") loadEvents("beats").then(() => loadEvents("tools"));
     });
     jumpBot.addEventListener("click", () => {
       markFollow(true);
@@ -1497,17 +1548,22 @@
         if (!canFetch(load)) return;
         await loadHealth();
         const r = await loadSessions();
-        if ((r && r.switched) || (current && !liveEvents.length)) await loadEvents();
+        if ((r && r.switched) || (current && !liveEvents.length)) {
+          await loadEvents("beats");
+          if (canFetch(load)) await loadEvents("tools");
+        }
       }, 1000);
     };
     const runResync = async () => {
       if (!canFetch(load)) return;
       dispatch({ type: "resync_start" });
       try {
-        await loadHealth();
+        loadHealth();
         await loadSessions();
-        if (current) await loadEvents();
-        else dispatch({ type: "resync_ok" });
+        if (current) {
+          await loadEvents("beats");
+          if (canFetch(load)) await loadEvents("tools");
+        } else dispatch({ type: "resync_ok" });
       } catch (err) {
         emit("trae_sessions_error", { payload: { reason: "resync" } });
         dispatch({ type: "resync_fail", reason: "resync" });
@@ -1587,6 +1643,7 @@
       if (!load.paused) dispatch({ type: "resume" });
     });
     markFollow(true);
+    emit("trae_sessions_boot", { payload: { phase: "start" } });
     dispatch({ type: "boot" });
   </script>
 </body>

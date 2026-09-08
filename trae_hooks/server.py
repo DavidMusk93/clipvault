@@ -494,34 +494,39 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                     "last_assistant_message, notification_type, notification_message, "
                     "loop_count, tool_input, tool_response, raw_hash"
                 )
+                view = (qs.get("view") or [""])[0]
                 if session_id and not hook_event and not q:
-                    beats = store.query(
-                        f"""
-                        SELECT {beat_cols}
-                        FROM hook_events
-                        WHERE session_id = ?
-                          AND (
-                            hook_event IN ('UserPromptSubmit', 'Stop', 'Notification')
-                            OR tool_name = 'AskUserQuestion'
-                            OR llm_tool_name = 'AskUserQuestion'
-                          )
-                        ORDER BY ts ASC
-                        """,
-                        [session_id],
-                    )
-                    tools = store.query(
-                        f"""
-                        SELECT {list_cols}
-                        FROM hook_events
-                        WHERE session_id = ?
-                          AND hook_event IN ('PreToolUse', 'PostToolUse')
-                          AND coalesce(tool_name, '') != 'AskUserQuestion'
-                          AND coalesce(llm_tool_name, '') != 'AskUserQuestion'
-                        ORDER BY ts DESC
-                        LIMIT ?
-                        """,
-                        [session_id, limit],
-                    )
+                    beats: list[dict[str, Any]] = []
+                    tools: list[dict[str, Any]] = []
+                    if view != "tools":
+                        beats = store.query(
+                            f"""
+                            SELECT {beat_cols}
+                            FROM hook_events
+                            WHERE session_id = ?
+                              AND (
+                                hook_event IN ('UserPromptSubmit', 'Stop', 'Notification')
+                                OR tool_name = 'AskUserQuestion'
+                                OR llm_tool_name = 'AskUserQuestion'
+                              )
+                            ORDER BY ts ASC
+                            """,
+                            [session_id],
+                        )
+                    if view != "beats":
+                        tools = store.query(
+                            f"""
+                            SELECT {list_cols}
+                            FROM hook_events
+                            WHERE session_id = ?
+                              AND hook_event IN ('PreToolUse', 'PostToolUse')
+                              AND coalesce(tool_name, '') != 'AskUserQuestion'
+                              AND coalesce(llm_tool_name, '') != 'AskUserQuestion'
+                            ORDER BY ts DESC
+                            LIMIT ?
+                            """,
+                            [session_id, limit],
+                        )
                     seen: set[str] = set()
                     rows: list[dict[str, Any]] = []
                     for item in list(beats) + list(tools):
@@ -530,7 +535,7 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                             continue
                         seen.add(eid)
                         rows.append(item)
-                    self._json(200, {"events": rows})
+                    self._json(200, {"events": rows, "view": view or "full"})
                     return
                 where = ["1=1"]
                 params: list[Any] = []

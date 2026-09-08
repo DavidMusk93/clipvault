@@ -234,6 +234,7 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
   const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
   const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
+  assert.match(server, /view != \"beats\"/);
   assert.match(server, /list_cols =/);
   assert.match(server, /beat_cols =/);
   assert.match(server, /SELECT \{list_cols\}/);
@@ -243,10 +244,16 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(html, /trae_sessions_load/);
   assert.match(html, /trae_sessions_error/);
   assert.match(html, /trae_sessions_list/);
+  assert.match(html, /trae_sessions_ttfp/);
+  assert.match(html, /trae_sessions_net/);
+  assert.match(html, /name.startsWith\(\"trae_\"\)/);
+  assert.match(html, /mergeIncoming/);
+  assert.match(html, /params.set\(\"view\", kind\)/);
+  assert.match(html, /if \(!pack.open && body.dataset.expandAll !== \"1\"\)/);
   assert.match(html, /scheduleList/);
   assert.match(html, /hydrateSlimTools/);
   assert.match(html, /加载对话…/);
-  assert.match(html, /if \(current\) await loadEvents\(\)/);
+  assert.match(html, /await loadEvents\(\"beats\"\)/);
   assert.match(html, /runResync/);
   assert.match(html, /BUNDLE_SHOW/);
   assert.match(html, /hookIsBeat/);
