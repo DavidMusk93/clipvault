@@ -493,6 +493,8 @@ class WebServer {
             handleSSEEvents(connection: connection)
         } else if pathOnly == "/api/ui-metrics/summary" {
             handleUiMetricsSummary(path: path, connection: connection)
+        } else if pathOnly == "/api/ui-metrics/recent" {
+            handleUiMetricsRecent(path: path, connection: connection)
         } else if pathOnly == "/api/backup/status" {
             sendBackupStatus(connection: connection)
         } else if pathOnly == "/api/backup/snapshots" {
@@ -1539,6 +1541,20 @@ class WebServer {
             return n
         }
         sendJSON(UiMetrics.shared.summary(fromMs: ms("from"), toMs: ms("to")), connection: connection)
+    }
+
+    /// GET /api/ui-metrics/recent?name=&limit=&from=&to=  last N local rows. No content.
+    private func handleUiMetricsRecent(path: String, connection: NWConnection) {
+        func ms(_ name: String) -> Int64? {
+            guard let s = Self.formQueryValue(path: path, name: name), let n = Int64(s) else { return nil }
+            return n
+        }
+        let name = Self.formQueryValue(path: path, name: "name")
+        let limit = Int(Self.formQueryValue(path: path, name: "limit") ?? "") ?? 80
+        sendJSON(
+            UiMetrics.shared.recent(name: name, limit: limit, fromMs: ms("from"), toMs: ms("to")),
+            connection: connection
+        )
     }
 
     /// POST /api/compose  { id?, title?, body, refId? }

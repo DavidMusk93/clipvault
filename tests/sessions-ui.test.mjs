@@ -222,7 +222,7 @@ test('sessions UI is prefix-aware so ClipVault :8080 can proxy /trae', () => {
 
 test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () => {
   assert.doesNotMatch(html, /if \(sig === lastSig\) \{\s*if \(followTail\) pinBottomSoon/);
-  assert.match(html, /if \(sig === lastSig && kind !== "full"\) return/);
+  assert.match(html, /if \(sig === lastSig && kind !== "full" && kind !== "settle"\) return/);
   assert.match(html, /if \(listSig === lastListSig\) return/);
   assert.match(html, /trae_sessions_cls/);
   assert.match(html, /trae_sessions_paint/);
@@ -246,6 +246,15 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(html, /trae_sessions_list/);
   assert.match(html, /trae_sessions_ttfp/);
   assert.match(html, /trae_sessions_net/);
+  assert.match(html, /trae_sessions_layout/);
+  assert.match(html, /trae_sessions_skip/);
+  assert.match(html, /clipvault-sessions-settled/);
+  assert.match(html, /layoutNarrow/);
+  assert.match(html, /paintGateReason/);
+  assert.match(html, /notready/);
+  assert.match(html, /emitLayout/);
+  assert.match(html, /embedded/);
+  assert.match(html, /b\.key === \"prompt\"/);
   assert.match(html, /name.startsWith\(\"trae_\"\)/);
   assert.match(html, /mergeIncoming/);
   assert.match(html, /params.set\(\"view\", kind\)/);
@@ -265,6 +274,9 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(server, /raw_truncated/);
   const indexHtml = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
   assert.match(indexHtml, /clipvault-ui-metrics/);
+  assert.match(indexHtml, /clipvault-sessions-settled/);
+  assert.match(indexHtml, /emitSessionsLayout/);
+  assert.match(indexHtml, /trae_sessions_layout/);
   assert.match(server, /"ts": str\(row.get\("ts"\)/);
   assert.doesNotMatch(html, /loadHealth\(\);\s*loadSessions\(\);\s*ingestHookIds/);
   assert.doesNotMatch(html, /if \(uniq\.length > 16\) \{\s*await loadEvents\(\)/);

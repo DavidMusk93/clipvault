@@ -650,10 +650,11 @@
       if (!/^[a-z][a-z0-9_]{1,63}$/.test(name)) return;
       const ev = { name, ts: Date.now() };
       if (extra && extra.dur_ms != null && Number.isFinite(extra.dur_ms)) ev.dur_ms = extra.dur_ms;
+      if (extra && typeof extra.ok === "boolean") ev.ok = extra.ok;
       if (extra && extra.payload && typeof extra.payload === "object") {
         const p = {};
         for (const [k, v] of Object.entries(extra.payload)) {
-          if (!/^(mode|ratio|chars|bytes|n|value|interaction|q_len|kind|phase|reason|lag|host)$/.test(k)) continue;
+          if (!/^(mode|ratio|chars|bytes|n|value|interaction|q_len|kind|phase|reason|lag|host|w|h|nodes)$/.test(k)) continue;
           if (typeof v === "number" && Number.isFinite(v)) p[k] = v;
           else if (typeof v === "string" && v.length <= 32) p[k] = v;
         }
@@ -664,14 +665,55 @@
       else if (metricQ.length >= 20) flushMetrics();
       else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 2000);
     };
+    const rectSize = (el) => {
+      if (!el || !el.getBoundingClientRect) return { w: 0, h: 0 };
+      const r = el.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    };
+    const emitLayout = (phase) => {
+      const app = document.querySelector(".app");
+      const rail = document.querySelector(".rail");
+      const a = rectSize(app);
+      const r = rectSize(rail);
+      const t = rectSize(thread);
+      const stacked = a.w > 0 && r.w >= a.w - 8;
+      const embed = document.documentElement.classList.contains("embed");
+      emit("trae_sessions_layout", {
+        payload: {
+          phase: String(phase || "paint").slice(0, 32),
+          kind: stacked ? "stack" : (embed ? "embed" : "page"),
+          n: r.w,
+          value: t.w,
+          chars: a.w,
+          bytes: a.h,
+          w: r.w,
+          h: t.h,
+          nodes: thread ? thread.querySelectorAll("*").length : 0,
+          ratio: a.w ? Math.round((r.w / a.w) * 100) / 100 : 0,
+          reason: a.w < 280 ? "narrow" : (a.w < 800 ? "mid" : "wide"),
+        },
+      });
+    };
+    const layoutNarrow = () => {
+      const app = document.querySelector(".app");
+      return !app || app.getBoundingClientRect().width < 280;
+    };
+    let layoutReady = !document.documentElement.classList.contains("embed");
+    const paintGateReason = () => {
+      if (!layoutReady) return "notready";
+      if (layoutNarrow()) return "narrow";
+      return "";
+    };
     const flushMetrics = () => {
       metricFlush = 0;
       if (!metricQ.length) return;
       const events = metricQ.splice(0, 100);
       const body = JSON.stringify({ events, session: "trae-sessions" });
+      const embedded = window.parent && window.parent !== window;
       try {
-        if (window.parent && window.parent !== window) {
+        if (embedded) {
           window.parent.postMessage({ type: "clipvault-ui-metrics", events, session: "trae-sessions" }, location.origin);
+          return;
         }
       } catch (_) {}
       try {
@@ -695,7 +737,12 @@
       const { state, effects } = reduce(load, ev, Date.now());
       const prev = load.phase;
       load = state;
-      if (load.phase !== prev) emit("trae_sessions_fsm", { payload: { phase: load.phase } });
+      if (load.phase !== prev) {
+        const payload = { phase: load.phase };
+        const why = ev && (ev.reason || ev.type);
+        if (why) payload.reason = String(why).slice(0, 32);
+        emit("trae_sessions_fsm", { payload });
+      }
       for (const fx of effects) applyLoadEffect(fx);
     };
     const applySnap = (snap) => {
@@ -721,6 +768,12 @@
       dispatch({ type: "cache_hit" });
       if (current && liveEvents.length) {
         requestAnimationFrame(() => {
+          emitLayout("cache");
+          const gate = paintGateReason();
+          if (gate) {
+            emit("trae_sessions_skip", { payload: { reason: gate, kind: "cache", n: liveEvents.length } });
+            return;
+          }
           try { paintFromLive("cache"); markTtfp("cache"); } catch (_) {}
         });
       }
@@ -1087,7 +1140,7 @@
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
         const meta = [localDateTime(e.ts), tools].filter(Boolean).join(" · ");
         const body = row.role === "tool" ? "" : renderEventBlocks(e, engines()).map((b) =>
-          `<div class="kv">${b.key === "result" ? "" : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`
+          `<div class="kv">${(b.key === "result" || b.key === "prompt") ? "" : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`
         ).join("");
         const who = grouped ? "" : `<div class="who">${esc(row.label)}</div>`;
         let inner;
@@ -1354,7 +1407,13 @@
       }
     }
     async function loadSessions() {
-      if (!canFetch(load)) return { sessions: sessionRows, switched: false };
+      if (!canFetch(load)) {
+        emit("trae_sessions_skip", {
+          ok: false,
+          payload: { reason: load.paused ? "paused" : "nofetch", kind: "list", n: sessionRows.length, phase: load.phase },
+        });
+        return { sessions: sessionRows, switched: false };
+      }
       const box = $("sessionList");
       let switched = false;
       try {
@@ -1395,7 +1454,14 @@
     }
     function paintFromLive(kind) {
       try {
+        const gate = paintGateReason();
+        if (gate) {
+          emitLayout(kind || "paint");
+          emit("trae_sessions_skip", { ok: false, payload: { reason: gate, kind: String(kind || "paint").slice(0, 32), n: liveEvents.length } });
+          return;
+        }
         if (!current) {
+          emit("trae_sessions_skip", { payload: { reason: "nocurrent", kind: String(kind || "paint").slice(0, 32) } });
           thread.innerHTML = '<div class="empty">选择左侧会话</div>';
           showSessionHead("");
           liveEvents = [];
@@ -1404,16 +1470,19 @@
           return;
         }
         if (!liveEvents.length) {
+          emit("trae_sessions_skip", { payload: { reason: "empty", kind: String(kind || "paint").slice(0, 32) } });
           thread.innerHTML = '<div class="empty">没有匹配事件</div>';
           lastSig = "";
           return;
         }
         const rows = imMessagesFromEvents(liveEvents);
         const items = focusImRows(rows);
+        const bundles = items.filter((it) => it.type === "bundle").length;
         const sig = rows.map((r) => r.event.event_id).join(",");
-        if (sig === lastSig && kind !== "full") return;
+        if (sig === lastSig && kind !== "full" && kind !== "settle") return;
         if (sig === lastSig) {
           painted = current;
+          emitLayout(kind || "paint");
           return;
         }
         const grew = lastSig && sig.startsWith(lastSig + ",");
@@ -1423,7 +1492,18 @@
           thread.replaceChildren();
         }
         patchThread(items);
-        emit("trae_sessions_paint", { dur_ms: performance.now() - t0, payload: { n: items.length, kind } });
+        emit("trae_sessions_paint", {
+          dur_ms: performance.now() - t0,
+          payload: {
+            n: items.length,
+            kind: String(kind || "full").slice(0, 32),
+            chars: liveEvents.length,
+            bytes: thread.childElementCount,
+            nodes: thread.querySelectorAll("*").length,
+            value: bundles,
+          },
+        });
+        emitLayout(kind || "paint");
         markTtfp(kind);
         if (followTail || painted !== current) pinBottomSoon();
         else if (grew) {
@@ -1432,7 +1512,7 @@
         }
         painted = current;
       } catch (err) {
-        emit("trae_sessions_error", { payload: { reason: "paint" } });
+        emit("trae_sessions_error", { ok: false, payload: { reason: "paint" } });
         thread.innerHTML = `<div class="empty">渲染对话失败${err && err.message ? " · " + esc(err.message) : ""}</div>`;
       }
     }
@@ -1467,7 +1547,13 @@
     }
 
     async function loadEvents(view) {
-      if (!canFetch(load)) return;
+      if (!canFetch(load)) {
+        emit("trae_sessions_skip", {
+          ok: false,
+          payload: { reason: load.paused ? "paused" : "nofetch", kind: String(view || "full").slice(0, 32), n: liveEvents.length, phase: load.phase },
+        });
+        return;
+      }
       const gen = ++eventsGen;
       const sid = current;
       const kind = view === "tools" ? "tools" : view === "beats" ? "beats" : "full";
@@ -1563,7 +1649,13 @@
       }, 1000);
     };
     const runResync = async () => {
-      if (!canFetch(load)) return;
+      if (!canFetch(load)) {
+        emit("trae_sessions_skip", {
+          ok: false,
+          payload: { reason: load.paused ? "paused" : "nofetch", kind: "resync", phase: load.phase },
+        });
+        return;
+      }
       dispatch({ type: "resync_start" });
       try {
         loadHealth();
@@ -1638,9 +1730,36 @@
     };
     window.addEventListener("message", (ev) => {
       const t = ev && ev.data && ev.data.type;
-      if (t === "clipvault-sessions-pause") dispatch({ type: "pause" });
-      if (t === "clipvault-sessions-resume") dispatch({ type: "resume" });
+      if (t === "clipvault-sessions-pause") dispatch({ type: "pause", reason: "parent" });
+      if (t === "clipvault-sessions-resume") dispatch({ type: "resume", reason: "parent" });
+      if (t === "clipvault-sessions-settled") {
+        layoutReady = true;
+        emitLayout("settled");
+        if (current && liveEvents.length) {
+          try { paintFromLive("settle"); markTtfp("settle"); } catch (_) {}
+        } else if (canFetch(load) && current) {
+          scheduleResync();
+        }
+      }
     });
+    if (typeof ResizeObserver !== "undefined") {
+      try {
+        let layoutTick = 0;
+        const ro = new ResizeObserver(() => {
+          if (layoutTick) return;
+          layoutTick = window.setTimeout(() => {
+            layoutTick = 0;
+            emitLayout("resize");
+            if (layoutReady && current && liveEvents.length && !thread.querySelector(":scope > [data-key]")) {
+              try { paintFromLive("resize"); } catch (_) {}
+            }
+          }, 120);
+        });
+        const app = document.querySelector(".app");
+        if (app) ro.observe(app);
+        if (thread) ro.observe(thread);
+      } catch (_) {}
+    }
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && !load.paused) dispatch({ type: "resume" });
     });
@@ -1652,6 +1771,7 @@
     });
     markFollow(true);
     emit("trae_sessions_boot", { payload: { phase: "start" } });
+    emitLayout("boot");
     dispatch({ type: "boot" });
   </script>
 </body>

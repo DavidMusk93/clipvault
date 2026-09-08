@@ -18,6 +18,7 @@ final class UiMetrics {
     private static let allowedPayload = Set([
         "mode", "ratio", "chars", "bytes", "n", "value", "interaction", "q_len",
         "kind", "phase", "reason", "lag", "host",
+        "w", "h", "nodes",
     ])
 
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")
@@ -175,6 +176,73 @@ final class UiMetrics {
             "to": Int(to),
             "total": Int(total),
             "names": names,
+        ]
+    }
+
+    /// Last N rows for local debugging. No note body. name must match the ingest regex.
+    func recent(name: String?, limit: Int, fromMs: Int64?, toMs: Int64?) -> [String: Any] {
+        let cap = min(max(limit, 1), 200)
+        let to = toMs ?? Int64(Date().timeIntervalSince1970 * 1000)
+        let from = fromMs ?? (to - 24 * 3600 * 1000)
+        var want: String? = nil
+        if let name, !name.isEmpty {
+            let range = NSRange(location: 0, length: name.utf16.count)
+            if Self.nameRe.firstMatch(in: name, range: range) != nil {
+                want = name
+            } else {
+                return ["ok": false, "message": "bad name"]
+            }
+        }
+        var events: [[String: Any]] = []
+        queue.sync {
+            var sql = """
+            SELECT ts, name, dur_ms, ok, payload, session
+            FROM ui_events
+            WHERE ts >= ? AND ts <= ?
+            """
+            if want != nil { sql += " AND name = ?" }
+            sql += " ORDER BY ts DESC LIMIT ?;"
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+                var i: Int32 = 1
+                sqlite3_bind_int64(stmt, i, from); i += 1
+                sqlite3_bind_int64(stmt, i, to); i += 1
+                if let want {
+                    sqlite3_bind_text(stmt, i, (want as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    i += 1
+                }
+                sqlite3_bind_int(stmt, i, Int32(cap))
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    var row: [String: Any] = [
+                        "ts": Int(sqlite3_column_int64(stmt, 0)),
+                        "name": sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "",
+                        "session": sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "",
+                    ]
+                    if sqlite3_column_type(stmt, 2) != SQLITE_NULL {
+                        row["dur_ms"] = sqlite3_column_double(stmt, 2)
+                    }
+                    if sqlite3_column_type(stmt, 3) != SQLITE_NULL {
+                        row["ok"] = sqlite3_column_int(stmt, 3) != 0
+                    }
+                    if sqlite3_column_type(stmt, 4) != SQLITE_NULL,
+                       let p = sqlite3_column_text(stmt, 4) {
+                        let raw = String(cString: p)
+                        if let data = raw.data(using: .utf8),
+                           let obj = try? JSONSerialization.jsonObject(with: data) {
+                            row["payload"] = obj
+                        }
+                    }
+                    events.append(row)
+                }
+                sqlite3_finalize(stmt)
+            }
+        }
+        return [
+            "ok": true,
+            "from": Int(from),
+            "to": Int(to),
+            "n": events.count,
+            "events": events,
         ]
     }
 

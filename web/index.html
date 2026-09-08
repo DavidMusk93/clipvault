@@ -4065,6 +4065,29 @@ window.ClipViewMasonry = Masonry;
         keepalive: true,
       }).catch(() => {});
     });
+    function emitSessionsLayout(phase) {
+      const frame = document.getElementById('sessionsFrame');
+      const panel = document.getElementById('sessionsPanel');
+      const shell = panel && panel.querySelector('.sessions-shell');
+      const r = frame ? frame.getBoundingClientRect() : { width: 0, height: 0 };
+      const p = panel ? panel.getBoundingClientRect() : { width: 0, height: 0 };
+      let op = 0;
+      try { if (shell) op = Number(getComputedStyle(shell).opacity) || 0; } catch (_) {}
+      nm('trae_sessions_layout', {
+        payload: {
+          phase: String(phase || 'parent').slice(0, 32),
+          kind: 'parent',
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+          chars: Math.round(p.width),
+          bytes: Math.round(p.height),
+          n: panel && panel.classList.contains('open') ? 1 : 0,
+          ratio: op,
+          reason: r.width < 280 ? 'narrow' : (r.width < 800 ? 'mid' : 'wide'),
+        },
+      });
+      globalThis.ClipNotesMetrics?.flush?.();
+    }
     async function openSessionsPanel() {
       hideTraeAsk();
       if (document.getElementById('notesPanel')?.classList.contains('open')) {
@@ -4083,7 +4106,10 @@ window.ClipViewMasonry = Masonry;
       panel.classList.remove('is-settled');
       panel.setAttribute('aria-hidden', 'false');
       setSessionsWallLocked(true);
-      playSheet(panel, true, 'sessions', origin);
+      emitSessionsLayout('open');
+      await playSheet(panel, true, 'sessions', origin);
+      sessionsFrameCtl('clipvault-sessions-settled');
+      emitSessionsLayout('settled');
       try {
         if (parseAppHash().kind !== 'sessions') history.replaceState(null, '', '#sessions');
       } catch (_) {}
@@ -4092,6 +4118,7 @@ window.ClipViewMasonry = Masonry;
     async function closeSessionsPanel() {
       const panel = document.getElementById('sessionsPanel');
       if (!panel || !panel.classList.contains('open')) return;
+      emitSessionsLayout('close');
       sessionsFrameCtl('clipvault-sessions-pause');
       await playSheet(panel, false, 'sessions');
       panel.setAttribute('aria-hidden', 'true');

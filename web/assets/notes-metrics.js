@@ -1,7 +1,10 @@
 /* ClipVault notes metrics — local POST /api/ui-metrics only. No content. */
 (function () {
   const FORBIDDEN = /^(body|title|markdown|text|content|html|query|q|search|note|src|md|excerpt|url)$/i;
-  const ALLOW = new Set(['mode', 'ratio', 'chars', 'bytes', 'n', 'value', 'interaction', 'q_len']);
+  const ALLOW = new Set([
+    'mode', 'ratio', 'chars', 'bytes', 'n', 'value', 'interaction', 'q_len',
+    'kind', 'phase', 'reason', 'lag', 'host', 'w', 'h', 'nodes',
+  ]);
   const NAME = /^[a-z][a-z0-9_]{1,63}$/;
   const SESSION_KEY = 'clipvault.metrics.session';
 

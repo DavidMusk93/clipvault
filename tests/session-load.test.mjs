@@ -102,7 +102,7 @@ test('resume from pause reconnects', () => {
   const { state, effects } = reduce(cur, { type: 'resume' });
   assert.equal(state.phase, 'connecting');
   assert.equal(state.paused, false);
-  assert.deepEqual(effects, ['setupSSE']);
+  assert.deepEqual(effects, ['setupSSE', 'runResync']);
 });
 
 test('overflow forces resync; fail lands in error', () => {
