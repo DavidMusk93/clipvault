@@ -284,6 +284,21 @@ class WebServer {
             return
         }
 
+        if pathOnly == "/trae" || pathOnly.hasPrefix("/trae/") {
+            if !loopback {
+                sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+                return
+            }
+            handleTraeProxy(
+                path: path,
+                connection: connection,
+                method: method,
+                data: data,
+                headers: headers
+            )
+            return
+        }
+
         if method == "GET" || method == "HEAD" {
             if pathOnly.hasPrefix("/s/") {
                 handleSharePage(pathOnly: pathOnly, connection: connection)
@@ -295,14 +310,6 @@ class WebServer {
             }
             if pathOnly.hasPrefix("/assets/") {
                 sendStaticAsset(pathOnly: pathOnly, connection: connection)
-                return
-            }
-            if pathOnly == "/trae" || pathOnly.hasPrefix("/trae/") {
-                if !loopback {
-                    sendErrorResponse(connection: connection, status: 404, message: "Not Found")
-                    return
-                }
-                handleTraeProxy(path: path, connection: connection)
                 return
             }
         }
@@ -513,7 +520,7 @@ class WebServer {
         } else if pathOnly.hasPrefix("/assets/") {
             sendStaticAsset(pathOnly: pathOnly, connection: connection)
         } else if pathOnly == "/trae" || pathOnly.hasPrefix("/trae/") {
-            handleTraeProxy(path: path, connection: connection)
+            handleTraeProxy(path: path, connection: connection, method: "GET")
         } else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
         }
@@ -538,7 +545,23 @@ class WebServer {
         return URL(string: "http://127.0.0.1:\(port)\(backend)\(query)")
     }
 
-    private func handleTraeProxy(path: String, connection: NWConnection) {
+    static func httpBody(from data: Data) -> Data {
+        if let range = data.range(of: Data("\r\n\r\n".utf8)) {
+            return data.subdata(in: range.upperBound..<data.endIndex)
+        }
+        if let range = data.range(of: Data("\n\n".utf8)) {
+            return data.subdata(in: range.upperBound..<data.endIndex)
+        }
+        return Data()
+    }
+
+    private func handleTraeProxy(
+        path: String,
+        connection: NWConnection,
+        method: String = "GET",
+        data: Data = Data(),
+        headers: [String: String] = [:]
+    ) {
         guard let url = Self.traeBackendURL(from: path) else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
@@ -549,8 +572,13 @@ class WebServer {
             return
         }
         var req = URLRequest(url: url)
+        req.httpMethod = method
         req.timeoutInterval = 20
         req.cachePolicy = .reloadIgnoringLocalCacheData
+        if method == "POST" || method == "PUT" || method == "PATCH" {
+            req.httpBody = Self.httpBody(from: data)
+            req.setValue(headers["content-type"] ?? "application/json", forHTTPHeaderField: "Content-Type")
+        }
         URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
             guard let self else { return }
             if err != nil {

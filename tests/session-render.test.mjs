@@ -14,6 +14,8 @@ import {
   imMessagesFromEvents,
   parseHookTs,
   relLocalTime,
+  recencyTone,
+  volumeBand,
   localDateTime,
   bundleTitle,
   focusImRows,
@@ -175,4 +177,16 @@ test('IM overview hides SessionStart cwd pills', () => {
     { hook_event: 'Notification', ts: '2', event_id: 'n' },
   ]);
   assert.deepEqual(rows.map((r) => r.event.hook_event), ['UserPromptSubmit']);
+});
+
+test('recencyTone and volumeBand bucket session list attributes', () => {
+  const now = Date.parse('2026-09-08T12:00:00Z');
+  assert.equal(recencyTone('2026-09-08 11:30:00', now), 'fresh');
+  assert.equal(recencyTone('2026-09-08 02:00:00', now), 'today');
+  assert.equal(recencyTone('2026-09-03 12:00:00', now), 'week');
+  assert.equal(recencyTone('2026-08-01 12:00:00', now), 'old');
+  assert.equal(volumeBand(3), 'xs');
+  assert.equal(volumeBand(20), 's');
+  assert.equal(volumeBand(80), 'm');
+  assert.equal(volumeBand(200), 'l');
 });

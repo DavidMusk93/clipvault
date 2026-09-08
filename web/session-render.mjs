@@ -120,6 +120,26 @@ export function relLocalTime(ts, nowMs = Date.now()) {
   return `${d.getMonth() + 1}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** Session list recency tone: honey warmth fading to mist. */
+export function recencyTone(ts, nowMs = Date.now()) {
+  const d = parseHookTs(ts);
+  if (!d) return 'old';
+  const sec = (nowMs - d.getTime()) / 1000;
+  if (sec < 3600) return 'fresh';
+  if (sec < 86400) return 'today';
+  if (sec < 86400 * 7) return 'week';
+  return 'old';
+}
+
+/** Session list volume band from hook event_count. */
+export function volumeBand(n) {
+  const c = Number(n) || 0;
+  if (c >= 200) return 'l';
+  if (c >= 80) return 'm';
+  if (c >= 20) return 's';
+  return 'xs';
+}
+
 function firstLine(text) {
   return String(text || '').trim().split(/\n/)[0] || '';
 }

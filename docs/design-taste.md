@@ -88,6 +88,16 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 **聊天 chrome**：左栏 `#F2F2F7` 会话行（标题=最近 prompt，不是整段 uuid）；右栏 IM 气泡。工具默认折叠。用户/助手气泡不套第二层 max-height 滚动。
 
+**会话列属性色**：每张卡用柔和语义色表达两个独立属性，禁止彩虹装饰。色 = 信息通道。
+
+| 属性 | 通道 | 档位 |
+| --- | --- | --- |
+| 更新时间 | 暖度（Honey 家族 → 雾） | `fresh` &lt;1h 蜂蜜 `#C47A2C`；`today` &lt;24h 浅蜜 `#C9955A`；`week` &lt;7d 鼠尾绿 `#5B8A72`；`old` 雾灰 `#8E8E93`。卡底 `color-mix` 约 11%，时间 chip 同色 16% 软底 |
+| 消息量级 | 工具蓝浓度 | 左 3px 轨 + 「N 条」chip。`xs` &lt;20 / `s` ≥20 / `m` ≥80 / `l` ≥200，α 约 16%→64% |
+| 置顶 | Accent 图钉 + 蜂蜜实底 | 钉在列顶。本机 DuckDB `session_pins`。**不进**墙 pin rail，不走 `POST /api/clips/pin` |
+
+禁止灰底灰字一锅炖；禁止用位移/scale 表达量级。跟最新会话仍按 `last_ts` 最大，不按置顶后的第一张。
+
 **溢出**：气泡 `min-width:0`；等宽覆盖 highlight.js 的 `white-space:pre`，必须 `pre-wrap !important` + `overflow-wrap:anywhere`。工具输出才限高。
 
 ## 源码绑定

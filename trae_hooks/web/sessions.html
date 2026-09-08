@@ -108,16 +108,42 @@
     }
     input:focus { outline: none; background: #fff; }
     .card {
-      padding: 10px 12px;
+      --tone: var(--system);
+      --vol-a: 0.14;
+      position: relative;
+      padding: 10px 10px 10px 14px;
       border-radius: 12px;
       cursor: pointer;
       min-width: 0;
+      background: color-mix(in srgb, var(--tone) 11%, transparent);
+      box-shadow: inset 3px 0 0 color-mix(in srgb, var(--tool) calc(var(--vol-a) * 100%), transparent);
+      transition: background 160ms ease, box-shadow 160ms ease;
     }
-    .card.active { background: rgba(0, 0, 0, 0.06); }
+    .card.tone-fresh { --tone: var(--honey); }
+    .card.tone-today { --tone: #c9955a; }
+    .card.tone-week { --tone: #5b8a72; }
+    .card.tone-old { --tone: var(--system); }
+    .card.vol-xs { --vol-a: 0.16; }
+    .card.vol-s { --vol-a: 0.30; }
+    .card.vol-m { --vol-a: 0.46; }
+    .card.vol-l { --vol-a: 0.64; }
+    .card.is-pinned {
+      background: color-mix(in srgb, var(--honey) 16%, var(--card));
+    }
+    .card.active {
+      background: color-mix(in srgb, var(--tone) 20%, rgba(0, 0, 0, 0.05));
+    }
     @media (hover: hover) and (pointer: fine) {
-      .card:hover { background: rgba(0, 0, 0, 0.04); }
+      .card:hover {
+        background: color-mix(in srgb, var(--tone) 16%, rgba(0, 0, 0, 0.03));
+      }
+      .card.is-pinned:hover {
+        background: color-mix(in srgb, var(--honey) 20%, var(--card));
+      }
     }
     .card .title {
+      flex: 1;
+      min-width: 0;
       font-size: 14px;
       font-weight: 590;
       letter-spacing: -0.015em;
@@ -126,12 +152,54 @@
       white-space: nowrap;
     }
     .card .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+      overflow: visible;
+      white-space: normal;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      height: 18px;
+      padding: 0 7px;
+      border-radius: 6px;
+      font-size: 10.5px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+    }
+    .chip.time {
+      color: var(--tone);
+      background: color-mix(in srgb, var(--tone) 16%, transparent);
+    }
+    .chip.vol {
+      color: var(--tool);
+      background: color-mix(in srgb, var(--tool) calc(var(--vol-a) * 70%), transparent);
+    }
+    .pin-btn {
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
       color: var(--muted);
-      font-size: 11px;
-      margin-top: 3px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 100ms ease-out, background 100ms ease-out, transform 100ms ease-out;
+    }
+    .pin-btn .pin-on { display: none; }
+    .card.is-pinned .pin-btn { color: var(--accent); }
+    .card.is-pinned .pin-btn .pin-on { display: block; }
+    .card.is-pinned .pin-btn .pin-off { display: none; }
+    .pin-btn:active { transform: scale(0.94); }
+    @media (hover: hover) and (pointer: fine) {
+      .pin-btn:hover { background: rgba(120, 120, 128, 0.12); color: var(--ink); }
+      .card.is-pinned .pin-btn:hover { background: rgba(0, 113, 227, 0.12); color: var(--accent); }
     }
     .id-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
     .stage {
@@ -521,7 +589,7 @@
       .rail { border-right: 0; border-bottom: 0.5px solid var(--separator); }
     }
     @media (prefers-reduced-motion: reduce) {
-      .card:active, .copy-id:active, .follow:active { transform: none; }
+      .card:active, .copy-id:active, .pin-btn:active, .follow:active { transform: none; }
     }
   </style>
 </head>
@@ -551,7 +619,7 @@
     import {
       asObj, askAnswers, askQuestions, blocksFromEvent, bundleTitle, focusImRows,
       imMessagesFromEvents, isAskTool, layoutKey, localDateTime, localDayKey, prettyJson,
-      relLocalTime, renderEventBlocks, renderValue, rowPreview,
+      recencyTone, relLocalTime, renderEventBlocks, renderValue, rowPreview, volumeBand,
     } from "./session-render.mjs";
 
     const TRAE_BASE = location.pathname.startsWith("/trae") ? "/trae" : "";
@@ -570,7 +638,7 @@
     let pendingNew = false;
     let lastSig = "";
     let lastListSig = "";
-    let lastListIds = "";
+    let sessionRows = [];
     let liveEvents = [];
     const liveIds = new Set();
     let pendingHookIds = [];
@@ -754,6 +822,109 @@
       const id = String(s.session_id || "");
       return id ? `${id.slice(0, 10)}…` : "无会话";
     };
+    const sessionPinned = (s) => !!(s && s.pinned_at);
+    const newestSession = (sessions) => {
+      let best = null;
+      for (const row of sessions || []) {
+        if (!best || String(row.last_ts || "") > String(best.last_ts || "")) best = row;
+      }
+      return best;
+    };
+    const cardClass = (s) => [
+      "card",
+      `tone-${recencyTone(s.last_ts)}`,
+      `vol-${volumeBand(s.event_count)}`,
+      sessionPinned(s) ? "is-pinned" : "",
+      s.session_id === current ? "active" : "",
+    ].filter(Boolean).join(" ");
+    const PIN_ICON = `<svg class="pin-off" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M14.5 4.5v7.2l1.7 1.7V15h-3.4v5.5h-1.6V15H8v-1.6l1.7-1.7V4.5H8V3h8v1.5h-1.5z" opacity=".55"/></svg><svg class="pin-on" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M16 3H8v1.7h1.2V11l-2 2.2V15h4.2v6h1.2v-6H18v-1.8L16 11V4.7H17.2V3H16z"/></svg>`;
+    const fillSessionCard = (el, s) => {
+      const title = sessionTitle(s);
+      const pinned = sessionPinned(s);
+      el.className = cardClass(s);
+      el.dataset.id = s.session_id || "";
+      el.setAttribute("data-title", title);
+      const t = el.querySelector(".title");
+      if (t) {
+        t.textContent = title;
+        t.title = s.session_id || "";
+      }
+      const time = el.querySelector(".chip.time");
+      if (time) time.textContent = relTime(s.last_ts) || "—";
+      const vol = el.querySelector(".chip.vol");
+      if (vol) vol.textContent = `${s.event_count ?? 0} 条`;
+      const pin = el.querySelector(".pin-btn");
+      if (pin) {
+        pin.setAttribute("aria-pressed", pinned ? "true" : "false");
+        pin.title = pinned ? "取消置顶" : "置顶";
+        pin.setAttribute("aria-label", pinned ? "取消置顶" : "置顶");
+      }
+      const copy = el.querySelector(".copy-id");
+      if (copy && s.session_id) copy.setAttribute("data-copy-sid", s.session_id);
+    };
+    const bindSessionCard = (el) => {
+      if (el.dataset.bound) return;
+      el.dataset.bound = "1";
+      el.addEventListener("click", () => {
+        const id = el.getAttribute("data-id") || "";
+        const newest = newestSession(sessionRows);
+        followLatest = !!(newest && newest.session_id === id);
+        current = id;
+        lastSig = "";
+        painted = "";
+        markFollow(true);
+        showSessionHead(current, el.getAttribute("data-title") || current);
+        $("sessionList").querySelectorAll(".card").forEach((c) => {
+          c.classList.toggle("active", c.getAttribute("data-id") === current);
+        });
+        loadEvents();
+      });
+      el.querySelector(".pin-btn")?.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const id = el.getAttribute("data-id") || "";
+        if (!id) return;
+        const next = !el.classList.contains("is-pinned");
+        el.classList.toggle("is-pinned", next);
+        toggleSessionPin(id, next);
+      });
+    };
+    const makeSessionCard = (s) => {
+      const el = document.createElement("div");
+      const sid = esc(s.session_id || "");
+      el.innerHTML = `<div class="id-row">
+            <div class="title"></div>
+            <button type="button" class="pin-btn" title="置顶" aria-label="置顶">${PIN_ICON}</button>
+            ${s.session_id ? `<button type="button" class="copy-id" data-copy-sid="${sid}" title="复制 session id" aria-label="复制 session id">复制</button>` : ""}
+          </div>
+          <div class="meta"><span class="chip time"></span><span class="chip vol"></span></div>`;
+      fillSessionCard(el, s);
+      bindSessionCard(el);
+      bindCopyButtons(el);
+      return el;
+    };
+    const patchSessionList = (sessions) => {
+      const box = $("sessionList");
+      const nextEls = sessions.map((s) => {
+        const id = String(s.session_id || "");
+        let el = id ? box.querySelector(`:scope > .card[data-id="${CSS.escape(id)}"]`) : null;
+        if (!el) el = makeSessionCard(s);
+        else fillSessionCard(el, s);
+        return el;
+      });
+      reconcile(box, nextEls);
+    };
+    async function toggleSessionPin(sid, pinned) {
+      try {
+        await fetch(apiUrl("/api/sessions/pin"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sid, pinned }),
+        });
+      } catch (_) {}
+      lastListSig = "";
+      await loadSessions();
+    }
     const toolBits = (e) => {
       const resp = asObj(e.tool_response) || {};
       const bits = [];
@@ -1025,14 +1196,17 @@
     async function loadSessions() {
       const data = await (await fetch(apiUrl("/api/sessions?limit=80"))).json();
       const box = $("sessionList");
-      if (!data.sessions || !data.sessions.length) {
+      const sessions = data.sessions || [];
+      sessionRows = sessions;
+      if (!sessions.length) {
         lastListSig = "";
-        lastListIds = "";
         box.innerHTML = '<div class="empty">还没有 hook 事件。装好 hooks 后硬重启 Trae，再发一条真实消息。</div>';
-        return data.sessions || [];
+        return sessions;
       }
-      const listSig = data.sessions.map((s) => `${s.session_id}:${s.event_count}:${s.last_ts}`).join("|");
-      const latest = data.sessions[0];
+      const listSig = sessions.map((s) =>
+        `${s.session_id}:${s.event_count}:${s.last_ts}:${s.pinned_at || ""}:${recencyTone(s.last_ts)}:${volumeBand(s.event_count)}`
+      ).join("|");
+      const latest = newestSession(sessions);
       if (followLatest && latest && latest.session_id && latest.session_id !== current) {
         current = latest.session_id;
         lastSig = "";
@@ -1041,54 +1215,12 @@
         showSessionHead(current, sessionTitle(latest));
         loadEvents();
       }
-      if (listSig === lastListSig) return data.sessions;
-      const listIds = data.sessions.map((s) => s.session_id || "").join("|");
-      if (listIds === lastListIds) {
-        lastListSig = listSig;
-        for (const s of data.sessions) {
-          const card = box.querySelector(`[data-id="${CSS.escape(s.session_id || "")}"]`);
-          if (!card) continue;
-          const title = sessionTitle(s);
-          card.setAttribute("data-title", title);
-          const t = card.querySelector(".title");
-          if (t) t.textContent = title;
-          const meta = card.querySelector(".meta");
-          if (meta) meta.textContent = `${relTime(s.last_ts)} · ${s.event_count} 条`;
-        }
-        return data.sessions;
-      }
+      if (listSig === lastListSig) return sessions;
       lastListSig = listSig;
-      lastListIds = listIds;
       railY = box.scrollTop;
-      box.innerHTML = data.sessions.map((s) => {
-        const title = sessionTitle(s);
-        return `
-        <div class="card${s.session_id === current ? " active" : ""}" data-id="${esc(s.session_id || "")}" data-title="${esc(title)}">
-          <div class="id-row">
-            <div class="title" title="${esc(s.session_id || "")}">${esc(title)}</div>
-            ${s.session_id ? `<button type="button" class="copy-id" data-copy-sid="${esc(s.session_id)}" title="复制 session id" aria-label="复制 session id">复制</button>` : ""}
-          </div>
-          <div class="meta">${relTime(s.last_ts)} · ${s.event_count} 条</div>
-        </div>`;
-      }).join("");
-      box.querySelectorAll(".card").forEach((el) => {
-        el.addEventListener("click", () => {
-          const id = el.getAttribute("data-id") || "";
-          followLatest = !!(data.sessions[0] && data.sessions[0].session_id === id);
-          current = id;
-          lastSig = "";
-          painted = "";
-          markFollow(true);
-          showSessionHead(current, el.getAttribute("data-title") || current);
-          box.querySelectorAll(".card").forEach((c) => {
-            c.classList.toggle("active", c.getAttribute("data-id") === current);
-          });
-          loadEvents();
-        });
-      });
-      bindCopyButtons(box);
+      patchSessionList(sessions);
       box.scrollTop = railY;
-      return data.sessions;
+      return sessions;
     }
     function paintFromLive(kind) {
       if (!current) {
@@ -1204,6 +1336,11 @@
           lastSig = "";
           lastListSig = "";
           scheduleResync();
+          return;
+        }
+        if (d.type === "session_pinned") {
+          lastListSig = "";
+          loadSessions();
           return;
         }
         if (d.type === "hook_event") {

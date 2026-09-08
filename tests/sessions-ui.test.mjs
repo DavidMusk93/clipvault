@@ -42,7 +42,7 @@ test('list cards copy session id; thread header does not duplicate it', () => {
   assert.match(html, /const copySessionId = async/);
   assert.match(html, /navigator\.clipboard\.writeText/);
   assert.match(html, /ev\.stopPropagation\(\)/);
-  assert.match(html, /bindCopyButtons\(box\)/);
+  assert.match(html, /bindCopyButtons\(el\)/);
   assert.doesNotMatch(html, /id="copySid"/);
   assert.match(html, /html\.embed \.session-head \{ display: none/);
 });
@@ -87,6 +87,38 @@ test('session list asks the store for last_prompt', () => {
   const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
   assert.match(server, /last_prompt/);
   assert.match(html, /s\.last_prompt/);
+});
+
+test('session list pins locally and paints recency/volume in soft color', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
+  const schema = fs.readFileSync(path.join(__dirname, '../trae_hooks/schema.sql'), 'utf8');
+  const swift = fs.readFileSync(path.join(__dirname, '../ClipFlow/WebServer.swift'), 'utf8');
+  const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
+  const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS session_pins/);
+  assert.match(server, /path == \"\/api\/sessions\/pin\"/);
+  assert.match(server, /def set_session_pin/);
+  assert.match(server, /session_pinned/);
+  assert.match(server, /LEFT JOIN session_pins/);
+  assert.match(server, /\(p\.pinned_at IS NULL\) ASC/);
+  assert.match(html, /const patchSessionList/);
+  assert.match(html, /toggleSessionPin/);
+  assert.match(html, /recencyTone/);
+  assert.match(html, /volumeBand/);
+  assert.match(html, /chip time/);
+  assert.match(html, /chip vol/);
+  assert.match(html, /tone-fresh/);
+  assert.match(html, /\.card\.vol-l/);
+  assert.match(html, /class="pin-btn"/);
+  assert.match(html, /api\/sessions\/pin/);
+  assert.doesNotMatch(html, /\/api\/clips\/pin/);
+  assert.match(html, /newestSession/);
+  assert.match(swift, /req\.httpMethod = method/);
+  assert.match(swift, /static func httpBody\(from/);
+  assert.match(taste, /会话列属性色/);
+  assert.match(taste, /session_pins/);
+  assert.match(agents, /POST \/api\/sessions\/pin/);
+  assert.match(agents, /蜂蜜暖度/);
 });
 
 test('opens the latest session and shows tool command without folding it away', () => {

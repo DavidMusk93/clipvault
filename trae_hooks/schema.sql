@@ -31,3 +31,9 @@ CREATE TABLE IF NOT EXISTS hook_events (
 CREATE INDEX IF NOT EXISTS idx_hook_session_ts ON hook_events(session_id, ts);
 CREATE INDEX IF NOT EXISTS idx_hook_event_ts ON hook_events(hook_event, ts);
 CREATE INDEX IF NOT EXISTS idx_hook_ts ON hook_events(ts DESC);
+
+-- Local session pins. Trae-only; not clip pinned_at / wall pin rail.
+CREATE TABLE IF NOT EXISTS session_pins (
+    session_id VARCHAR PRIMARY KEY,
+    pinned_at TIMESTAMP NOT NULL
+);

@@ -145,6 +145,41 @@ class Store:
             rows = rel.fetchall()
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
+    def execute(self, sql: str, params: list[Any] | None = None) -> None:
+        with self.lock:
+            self.con.execute(sql, params or [])
+
+    def set_session_pin(self, session_id: str, pinned: bool | None) -> dict[str, Any]:
+        sid = str(session_id or "").strip()[:200]
+        if not sid:
+            return {"ok": False, "error": "session_id required"}
+        want = pinned
+        if want is None:
+            have = self.query(
+                "SELECT 1 AS n FROM session_pins WHERE session_id = ? LIMIT 1",
+                [sid],
+            )
+            want = not have
+        if want:
+            self.execute(
+                "INSERT INTO session_pins (session_id, pinned_at) VALUES (?, ?) "
+                "ON CONFLICT (session_id) DO UPDATE SET pinned_at = excluded.pinned_at",
+                [sid, utc_now()],
+            )
+        else:
+            self.execute("DELETE FROM session_pins WHERE session_id = ?", [sid])
+        rows = self.query(
+            "SELECT pinned_at FROM session_pins WHERE session_id = ?",
+            [sid],
+        )
+        at = rows[0]["pinned_at"] if rows else None
+        return {
+            "ok": True,
+            "session_id": sid,
+            "pinned": bool(at),
+            "pinned_at": json_default(at) if at else None,
+        }
+
     def health(self) -> dict[str, Any]:
         rows = self.query(
             "SELECT count(*) AS n, max(ts) AS last_ts FROM hook_events"
@@ -334,11 +369,7 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.end_headers()
 
-        def do_POST(self) -> None:  # noqa: N802
-            parsed = urlparse(self.path)
-            if parsed.path != "/api/notify":
-                self._json(404, {"error": "not found"})
-                return
+        def _read_json_object(self) -> dict[str, Any] | None:
             try:
                 length = int(self.headers.get("Content-Length") or "0")
             except ValueError:
@@ -348,9 +379,41 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 payload = json.loads(raw.decode("utf-8") or "{}")
             except json.JSONDecodeError:
                 self._json(400, {"error": "bad json"})
-                return
+                return None
             if not isinstance(payload, dict):
                 self._json(400, {"error": "object required"})
+                return None
+            return payload
+
+        def do_POST(self) -> None:  # noqa: N802
+            parsed = urlparse(self.path)
+            if parsed.path == "/api/sessions/pin":
+                payload = self._read_json_object()
+                if payload is None:
+                    return
+                pinned = payload.get("pinned")
+                if pinned is not None and not isinstance(pinned, bool):
+                    self._json(400, {"error": "pinned must be bool"})
+                    return
+                result = store.set_session_pin(str(payload.get("session_id") or ""), pinned)
+                if not result.get("ok"):
+                    self._json(400, result)
+                    return
+                hub.publish(
+                    {
+                        "type": "session_pinned",
+                        "session_id": result["session_id"],
+                        "pinned": result["pinned"],
+                        "pinned_at": result.get("pinned_at"),
+                    }
+                )
+                self._json(200, result)
+                return
+            if parsed.path != "/api/notify":
+                self._json(404, {"error": "not found"})
+                return
+            payload = self._read_json_object()
+            if payload is None:
                 return
             payload.setdefault("type", "hook_event")
             payload["needs_user"] = bool(
@@ -382,17 +445,29 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 limit = _int(qs.get("limit", ["50"])[0], 50, 1, 200)
                 rows = store.query(
                     """
-                    SELECT session_id,
-                           min(ts) AS first_ts,
-                           max(ts) AS last_ts,
-                           count(*) AS event_count,
-                           count(DISTINCT hook_event) AS hook_kinds,
-                           arg_max(cwd, ts) AS cwd,
-                           arg_max(instance_id, ts) AS instance_id,
-                           arg_max(prompt, CASE WHEN coalesce(prompt, '') = '' THEN NULL ELSE ts END) AS last_prompt
-                    FROM hook_events
-                    GROUP BY session_id
-                    ORDER BY last_ts DESC
+                    SELECT s.session_id,
+                           s.first_ts,
+                           s.last_ts,
+                           s.event_count,
+                           s.hook_kinds,
+                           s.cwd,
+                           s.instance_id,
+                           s.last_prompt,
+                           p.pinned_at AS pinned_at
+                    FROM (
+                        SELECT session_id,
+                               min(ts) AS first_ts,
+                               max(ts) AS last_ts,
+                               count(*) AS event_count,
+                               count(DISTINCT hook_event) AS hook_kinds,
+                               arg_max(cwd, ts) AS cwd,
+                               arg_max(instance_id, ts) AS instance_id,
+                               arg_max(prompt, CASE WHEN coalesce(prompt, '') = '' THEN NULL ELSE ts END) AS last_prompt
+                        FROM hook_events
+                        GROUP BY session_id
+                    ) s
+                    LEFT JOIN session_pins p ON p.session_id = s.session_id
+                    ORDER BY (p.pinned_at IS NULL) ASC, p.pinned_at DESC, s.last_ts DESC
                     LIMIT ?
                     """,
                     [limit],
