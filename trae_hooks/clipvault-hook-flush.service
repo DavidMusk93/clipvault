@@ -1,5 +1,5 @@
 [Unit]
-Description=ClipVault Trae hook spool flush (Quack to Mac via 127.0.0.1:19494)
+Description=ClipVault Trae hook spool flush (Quack to Mac; URI in trae-hooks.env)
 After=network-online.target
 
 [Service]

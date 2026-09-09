@@ -240,6 +240,8 @@ Capture 禁止就地改成笔记。Compose 禁止写成第二套剪贴板。
   置顶  DuckDB session_pins + POST /api/sessions/pin   不进墙 pin rail
 ```
 
+采集是 **Mac 一份 DuckDB + 多机 Quack 写入**，不是 clip 的 trx 同步。远端只装 hook/spool/quack client，禁止每机再起 `server.py`。部署：`docs/trae-hooks.md`。
+
 **hook 禁止每次拉 `/api/sessions`+全量 events。** bundle 正文 **lazy** 加载。
 
 列语义色：蜂蜜暖度=`fresh/today/week/old`；工具蓝=`xs/s/m/l`。禁止彩虹。默认打开 `last_ts` 最大的会话。用户气泡全展开；工具只在助手侧压缩，最后一条操作始终展开。
@@ -456,5 +458,6 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | SQLite 运维 | `.trae/skills/sqlite-runtime-tricks/` |
 | clip-link | `docs/feature-clip-link.md` |
 | 归档功能 | `docs/feature-url-archive.md` |
+| Trae 会话采集 | `docs/trae-hooks.md` |
 
 一句话：**ClipVault = 个人剪贴板记忆。** 终局、像产品、本机优先。历史文件夹名不定义品牌。
