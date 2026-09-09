@@ -87,11 +87,36 @@ function loadSplit() {
 }
 
 function wrapSelection(view, left, right) {
+  const r = right ?? left
   const sel = view.state.selection.main
   const text = view.state.sliceDoc(sel.from, sel.to)
-  const insert = left + text + (right ?? left)
-  view.dispatch(view.state.replaceSelection(insert))
+  const aroundLeft = view.state.sliceDoc(Math.max(0, sel.from - left.length), sel.from)
+  const aroundRight = view.state.sliceDoc(sel.to, Math.min(view.state.doc.length, sel.to + r.length))
+  if (aroundLeft === left && aroundRight === r) {
+    view.dispatch({
+      changes: { from: sel.from - left.length, to: sel.to + r.length, insert: text },
+      selection: { anchor: sel.from - left.length, head: sel.from - left.length + text.length },
+    })
+    view.focus()
+    return true
+  }
+  if (text.startsWith(left) && text.endsWith(r) && text.length >= left.length + r.length) {
+    const inner = text.slice(left.length, text.length - r.length)
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: inner },
+      selection: { anchor: sel.from, head: sel.from + inner.length },
+    })
+    view.focus()
+    return true
+  }
+  const insert = left + text + r
+  const innerFrom = sel.from + left.length
+  view.dispatch({
+    changes: { from: sel.from, to: sel.to, insert },
+    selection: { anchor: innerFrom, head: innerFrom + text.length },
+  })
   view.focus()
+  return true
 }
 
 function prefixLines(view, prefix) {
@@ -600,6 +625,7 @@ async function mount(root, opts) {
         { key: 'Mod-b', run: (v) => { wrapSelection(v, '**'); return true } },
         { key: 'Mod-i', run: (v) => { wrapSelection(v, '*'); return true } },
         { key: 'Mod-e', run: (v) => { wrapSelection(v, '`'); return true } },
+        { key: 'Mod-Shift-x', run: (v) => { wrapSelection(v, '~~'); return true } },
       ])),
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       EditorView.updateListener.of((update) => {
@@ -787,6 +813,7 @@ async function mount(root, opts) {
         case 'h3': prefixLines(view, '### '); break
         case 'bold': wrapSelection(view, '**'); break
         case 'italic': wrapSelection(view, '*'); break
+        case 'strike': wrapSelection(view, '~~'); break
         case 'code': wrapSelection(view, '`'); break
         case 'ul': prefixLines(view, '- '); break
         case 'ol': prefixLines(view, '1. '); break

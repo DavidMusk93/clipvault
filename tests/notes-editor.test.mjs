@@ -188,7 +188,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n17/);
+  assert.match(html, /notes-editor\.js\?v=n18/);
+  assert.match(html, /notes-editor\.css\?v=n18/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
@@ -220,6 +221,20 @@ test('preview compiles blocks incrementally and React reconciles by hash', () =>
   assert.match(vendor, /react@18/);
   assert.match(vendor, /react-dom@18/);
   assert.match(vendor, /notes-preview\.mjs/);
+});
+
+test('notes tools include GFM strikethrough and do not clip the bar', () => {
+  assert.match(html, /data-cmd="strike"/);
+  assert.match(html, /format_strikethrough/);
+  assert.match(html, /data-cmd="h3"/);
+  assert.match(html, /data-cmd="hr"/);
+  assert.match(html, /\.notes-tools \{[\s\S]{0,160}overflow-x:\s*auto/);
+  assert.doesNotMatch(html, /\.notes-tools \{[\s\S]{0,120}overflow:\s*hidden/);
+  assert.match(entry, /case 'strike': wrapSelection\(view, '~~'\)/);
+  assert.match(entry, /Mod-Shift-x/);
+  assert.match(entry, /aroundLeft === left && aroundRight === r/);
+  assert.match(css, /\.notes-preview-inner del/);
+  assert.match(js, /case"strike"/);
 });
 
 test('open notes lock the wall so chips and format toolbar cannot drag', () => {

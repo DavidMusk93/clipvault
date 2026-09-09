@@ -148,6 +148,11 @@
 .notes-preview-inner a:hover { text-decoration: underline; }
 .notes-preview-inner strong { font-weight: 650; }
 .notes-preview-inner em { font-style: italic; }
+.notes-preview-inner del,
+.notes-preview-inner s {
+  text-decoration: line-through;
+  color: #86868b;
+}
 
 .notes-preview-inner :not(pre) > code {
   font-family: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
