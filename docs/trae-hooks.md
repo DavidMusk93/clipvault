@@ -133,7 +133,9 @@ ssh -fN -o ExitOnForwardFailure=yes -o BatchMode=yes \
   -R 127.0.0.1:19495:127.0.0.1:9494 sg_d
 ```
 
-**Trae 必须硬重启** 才会加载新 `hooks.json`（和本机一样）。只 reload 不够。
+**Trae 必须硬重启远端 server** 才会加载新 `hooks.json`。Remote SSH 只重连窗口会复用已有 `server-main.js`，hook 不会生效。
+
+在 sg_d 上停掉旧 server 再从 Mac 连一次，或 Trae 设置里对远程窗口启用全局 Hooks + 自动运行。
 
 ---
 
@@ -160,6 +162,8 @@ nc -z 127.0.0.1 19495 && echo quack_tunnel_ok
 # 库里按机看
 # instance_id in ('mac-work','d2','sg_d')
 ```
+
+`trae-hooks.env` 必须是 systemd `KEY=value`（不要 `export`）。包装器 `set -a` 后再 source。
 
 hook 失败必须 **exit 0**。排障看远端 `/var/tmp/clipvault-hooks/wrapper.err`、`quack.err`、`spool/flush.err`。
 

@@ -7,8 +7,11 @@ umask 077
 HOOKS_ENV="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 ENV_FILE="${CLIPVAULT_HOOK_ENV:-$HOOKS_ENV/trae-hooks.env}"
 if [ -f "$ENV_FILE" ]; then
+  # systemd EnvironmentFile rejects `export KEY=`; KEY=value + set -a works for both.
   # shellcheck disable=SC1090
+  set -a
   . "$ENV_FILE"
+  set +a
 fi
 
 VENV_PY="${CLIPVAULT_HOOK_PYTHON:-$HOOKS_ENV/venv/bin/python}"

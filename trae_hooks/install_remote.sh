@@ -134,14 +134,14 @@ PY
 
 umask 077
 cat > "$ENV/trae-hooks.env" <<EOF
-export CLIPVAULT_INSTANCE_ID="${INSTANCE}"
-export CLIPVAULT_HOOK_SOURCE="trae"
-export CLIPVAULT_QUACK_URI="quack:127.0.0.1:${RPORT}"
-export CLIPVAULT_QUACK_TOKEN_FILE="${ENV}/quack.token"
-export CLIPVAULT_HOOK_SPOOL="/var/tmp/clipvault-hooks/spool"
-export CLIPVAULT_HOOK_PYTHON="${ENV}/venv/bin/python"
-export CLIPVAULT_HOOK_CLIENT="${ENV}/hook_client.py"
-export CLIPVAULT_QUACK_PROBE_SEC="0.25"
+CLIPVAULT_INSTANCE_ID=${INSTANCE}
+CLIPVAULT_HOOK_SOURCE=trae
+CLIPVAULT_QUACK_URI=quack:127.0.0.1:${RPORT}
+CLIPVAULT_QUACK_TOKEN_FILE=${ENV}/quack.token
+CLIPVAULT_HOOK_SPOOL=/var/tmp/clipvault-hooks/spool
+CLIPVAULT_HOOK_PYTHON=${ENV}/venv/bin/python
+CLIPVAULT_HOOK_CLIENT=${ENV}/hook_client.py
+CLIPVAULT_QUACK_PROBE_SEC=0.25
 EOF
 chmod 600 "$ENV/trae-hooks.env"
 
