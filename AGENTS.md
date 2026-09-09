@@ -358,6 +358,8 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
   禁止 onerror 里 close()+setTimeout 当唯一重连
   HTTP/2 下 EventSource 占一条 stream
+  origin SSE = HTTP/1.1 chunked；drop 必须 close unix fd
+  clipvault-http 在 body drop 时 abort origin 连接（禁止泄漏 UDS）
   needs_user：TraeAskFanIn 并进墙 SSE，禁止每页再挂 /trae/api/stream
 ```
 

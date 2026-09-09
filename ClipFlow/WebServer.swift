@@ -611,6 +611,11 @@ class WebServer {
 
     private func attachSSELocked(_ connection: HTTPByteSink) {
         pruneDeadSSELocked()
+        if sseSessions.count >= 64 {
+            if let oldest = sseSessions.values.first {
+                dropSSELocked(oldest)
+            }
+        }
         let session = SSESession(connection)
         sseSessions[ObjectIdentifier(connection)] = session
         let id = ObjectIdentifier(connection)
@@ -623,12 +628,12 @@ class WebServer {
         let headers: [(String, String)] = [
             ("Content-Type", "text/event-stream; charset=utf-8"),
             ("Cache-Control", "no-cache, no-transform"),
-            ("Connection", "keep-alive"),
+            ("Transfer-Encoding", "chunked"),
             ("X-Accel-Buffering", "no"),
             ("Access-Control-Allow-Origin", "*")
         ]
         var hello = httpHeader(status: 200, reason: "OK", headers: headers)
-        hello.append(contentsOf: Data("retry: 3000\n\n: connected\n\ndata: {\"type\":\"connected\"}\n\n".utf8))
+        hello.append(Self.httpChunk(Data("retry: 3000\n\n: connected\n\ndata: {\"type\":\"connected\"}\n\n".utf8)))
         session.queue.append(hello)
         flushSSELocked(session)
         ensureSSEHeartbeatLocked()
@@ -647,11 +652,11 @@ class WebServer {
         if session.queue.count >= Self.sseMaxBuffered {
             session.queue.removeAll(keepingCapacity: true)
             session.resyncRequired = true
-            session.queue.append(Self.sseResyncFrame)
+            session.queue.append(Self.httpChunk(Self.sseResyncFrame))
             flushSSELocked(session)
             return
         }
-        session.queue.append(payload)
+        session.queue.append(Self.httpChunk(payload))
         flushSSELocked(session)
     }
 
@@ -698,7 +703,7 @@ class WebServer {
         for session in sseSessions.values {
             if session.resyncRequired { continue }
             if session.queue.count >= Self.sseMaxBuffered { continue }
-            session.queue.append(Self.ssePingFrame)
+            session.queue.append(Self.httpChunk(Self.ssePingFrame))
             flushSSELocked(session)
         }
     }
@@ -714,10 +719,21 @@ class WebServer {
         session.dead = true
         session.queue.removeAll()
         sseSessions.removeValue(forKey: ObjectIdentifier(session.connection))
+        session.connection.cancel()
         if sseSessions.isEmpty {
             sseHeartbeat?.cancel()
             sseHeartbeat = nil
         }
+    }
+
+    /// HTTP/1.1 chunk so clipvault-http (hyper) treats SSE as a streaming body,
+    /// not a keep-alive message with no length.
+    static func httpChunk(_ data: Data) -> Data {
+        var out = Data(String(data.count, radix: 16).utf8)
+        out.append(contentsOf: Data("\r\n".utf8))
+        out.append(data)
+        out.append(contentsOf: Data("\r\n".utf8))
+        return out
     }
 
     private func teardownSSELocked() {

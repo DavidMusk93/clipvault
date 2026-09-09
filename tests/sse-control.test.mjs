@@ -86,6 +86,18 @@ test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
   assert.match(attach, /retry: 3000/);
   assert.match(attach, /X-Accel-Buffering/, 'proxy must not buffer the stream');
   assert.match(attach, /text\/event-stream/);
+  assert.match(attach, /Transfer-Encoding", "chunked"/);
+  assert.match(web, /static func httpChunk/);
+  const drop = sliceFrom(web, 'func dropSSELocked', 500);
+  assert.match(drop, /connection\.cancel\(\)/, 'SSE drop must close the unix fd');
+  const sink = readFileSync(join(root, 'ClipFlow/HTTPByteSink.swift'), 'utf8');
+  assert.match(sink, /O_NONBLOCK/);
+  assert.match(sink, /MSG_PEEK/);
+  assert.match(sink, /EAGAIN/);
+  const rust = readFileSync(join(root, 'http-front/src/main.rs'), 'utf8');
+  assert.match(rust, /struct ProxyBody/);
+  assert.match(rust, /oneshot::channel/);
+  assert.match(rust, /keep_alive_interval/);
   assert.match(web, /sseResyncFrame/);
   assert.match(web, /resync_required/);
   assert.match(web, /ssePingFrame/);

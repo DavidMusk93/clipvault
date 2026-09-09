@@ -6,15 +6,20 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::header::{HOST, HeaderName};
+use http_body::Body as HttpBody;
+use http_body::Frame;
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode, Uri};
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto::Builder as ConnBuilder;
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -64,9 +69,44 @@ fn full_io(msg: &'static str) -> RespBody {
         .boxed()
 }
 
-fn boxed_incoming(body: Incoming) -> RespBody {
-    body.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-        .boxed()
+/// Forwards origin bytes and, on drop, aborts the origin HTTP/1 connection so
+/// the unix socket closes. Otherwise SSE/client cancel leaks origin fds.
+struct ProxyBody {
+    inner: Incoming,
+    _sender: Option<hyper::client::conn::http1::SendRequest<Incoming>>,
+    abort: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl Drop for ProxyBody {
+    fn drop(&mut self) {
+        self._sender.take();
+        if let Some(tx) = self.abort.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
+impl HttpBody for ProxyBody {
+    type Data = Bytes;
+    type Error = std::io::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, Self::Error>>> {
+        let this = self.get_mut();
+        Pin::new(&mut this.inner).poll_frame(cx).map(|opt| {
+            opt.map(|r| r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
+        })
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 fn ensure_identity(dir: &Path) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), String> {
@@ -226,16 +266,26 @@ async fn proxy(mut req: Request<Incoming>, sock: PathBuf) -> Result<Response<Res
             return Ok(r);
         }
     };
+    let (abort_tx, abort_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
-        let _ = conn.await;
+        tokio::select! {
+            _ = conn => {}
+            _ = abort_rx => {}
+        }
     });
     match sender.send_request(req).await {
         Ok(res) => {
             let (mut parts, body) = res.into_parts();
             strip_hop_headers(&mut parts.headers);
-            Ok(Response::from_parts(parts, boxed_incoming(body)))
+            let proxy_body = ProxyBody {
+                inner: body,
+                _sender: Some(sender),
+                abort: Some(abort_tx),
+            };
+            Ok(Response::from_parts(parts, proxy_body.boxed()))
         }
         Err(e) => {
+            let _ = abort_tx.send(());
             eprintln!("[http2] origin request: {e}");
             let mut r = Response::new(full_io("origin request failed"));
             *r.status_mut() = StatusCode::BAD_GATEWAY;
@@ -265,7 +315,12 @@ async fn serve_listener(listener: TcpListener, acceptor: TlsAcceptor, sock: Path
             };
             let io = TokioIo::new(tls);
             let svc = service_fn(move |req| proxy(req, sock.clone()));
-            let builder = ConnBuilder::new(TokioExecutor::new());
+            let mut builder = ConnBuilder::new(TokioExecutor::new());
+            builder
+                .http2()
+                .timer(TokioTimer::default())
+                .keep_alive_interval(Some(Duration::from_secs(10)))
+                .keep_alive_timeout(Duration::from_secs(20));
             if let Err(e) = builder.serve_connection(io, svc).await {
                 eprintln!("[http2] conn {peer}: {e}");
             }

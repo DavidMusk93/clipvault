@@ -14,7 +14,10 @@ final class HTTPByteSink {
         self.fd = fd
         var yes: Int32 = 1
         _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, socklen_t(MemoryLayout<Int32>.size))
+        Self.setNonBlocking(fd)
     }
+
+    deinit { cancel() }
 
     var isClosed: Bool {
         lock.lock()
@@ -27,18 +30,29 @@ final class HTTPByteSink {
             completion(nil)
             return
         }
-        DispatchQueue.global(qos: .userInitiated).async { [fd] in
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let fd = self.fd
             var offset = 0
             var sendErr: Error?
             content.withUnsafeBytes { raw in
                 guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
                 while offset < content.count {
                     let n = Darwin.send(fd, base + offset, content.count - offset, 0)
-                    if n <= 0 {
-                        sendErr = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-                        break
+                    if n > 0 {
+                        offset += Int(n)
+                        continue
                     }
-                    offset += Int(n)
+                    if n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        var pfd = pollfd(fd: fd, events: Int16(POLLOUT | POLLERR | POLLHUP), revents: 0)
+                        let pr = poll(&pfd, 1, 2000)
+                        if pr <= 0 || (pfd.revents & Int16(POLLERR | POLLHUP | POLLNVAL)) != 0 {
+                            sendErr = POSIXError(.EPIPE)
+                            break
+                        }
+                        continue
+                    }
+                    sendErr = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                    break
                 }
             }
             completion(sendErr)
@@ -50,19 +64,41 @@ final class HTTPByteSink {
         maximumLength: Int,
         completion: @escaping (Data?, Bool, Error?) -> Void
     ) {
-        DispatchQueue.global(qos: .userInitiated).async { [fd] in
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let fd = self.fd
+            _ = minimumIncompleteLength
             var buf = [UInt8](repeating: 0, count: max(1, maximumLength))
-            let n = Darwin.recv(fd, &buf, buf.count, 0)
-            if n == 0 {
-                completion(nil, true, nil)
-                return
-            }
-            if n < 0 {
+            while true {
+                let n = Darwin.recv(fd, &buf, buf.count, 0)
+                if n > 0 {
+                    completion(Data(buf.prefix(Int(n))), false, nil)
+                    return
+                }
+                if n == 0 {
+                    completion(nil, true, nil)
+                    return
+                }
+                if errno == EAGAIN || errno == EWOULDBLOCK {
+                    var pfd = pollfd(fd: fd, events: Int16(POLLIN | POLLHUP | POLLERR), revents: 0)
+                    let pr = poll(&pfd, 1, 30_000)
+                    if pr <= 0 {
+                        completion(nil, true, POSIXError(.ETIMEDOUT))
+                        return
+                    }
+                    if (pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL)) != 0 {
+                        let again = Darwin.recv(fd, &buf, buf.count, 0)
+                        if again > 0 {
+                            completion(Data(buf.prefix(Int(again))), false, nil)
+                            return
+                        }
+                        completion(nil, true, nil)
+                        return
+                    }
+                    continue
+                }
                 completion(nil, true, POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO))
                 return
             }
-            _ = minimumIncompleteLength
-            completion(Data(buf.prefix(Int(n))), false, nil)
         }
     }
 
@@ -80,7 +116,15 @@ final class HTTPByteSink {
                 guard let self else { return }
                 var b: UInt8 = 0
                 let n = Darwin.recv(self.fd, &b, 1, Int32(MSG_PEEK))
-                if n <= 0 { self.cancel() }
+                if n == 0 {
+                    self.cancel()
+                    return
+                }
+                if n < 0 {
+                    let e = errno
+                    if e == EAGAIN || e == EWOULDBLOCK { return }
+                    self.cancel()
+                }
             }
             src.resume()
             readSource = src
@@ -103,6 +147,12 @@ final class HTTPByteSink {
         Darwin.close(fd)
         for h in handlers { h() }
     }
+
+    static func setNonBlocking(_ fd: Int32) {
+        let flags = fcntl(fd, F_GETFL)
+        guard flags >= 0 else { return }
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+    }
 }
 
 final class OriginUnixServer {
@@ -121,6 +171,7 @@ final class OriginUnixServer {
             print("[Origin] socket failed errno=\(errno)")
             return
         }
+        HTTPByteSink.setNonBlocking(fd)
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         path.withCString { cstr in
@@ -151,8 +202,13 @@ final class OriginUnixServer {
         listenFd = fd
         let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: DispatchQueue.global(qos: .userInitiated))
         src.setEventHandler {
-            let cfd = accept(fd, nil, nil)
-            if cfd >= 0 {
+            while true {
+                let cfd = accept(fd, nil, nil)
+                if cfd < 0 {
+                    if errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR { break }
+                    print("[Origin] accept errno=\(errno)")
+                    break
+                }
                 onAccept(HTTPByteSink(fd: cfd))
             }
         }
