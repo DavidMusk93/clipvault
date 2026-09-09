@@ -19,6 +19,7 @@ final class UiMetrics {
         "mode", "ratio", "chars", "bytes", "n", "value", "interaction", "q_len",
         "kind", "phase", "reason", "lag", "host",
         "w", "h", "nodes", "dy",
+        "fds", "rss", "unix", "sse", "rlim",
     ])
 
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")

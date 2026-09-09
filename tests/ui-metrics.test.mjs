@@ -74,6 +74,17 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(metricsJs, /over\$\|out\$\|enter\$\|leave\$/);
   assert.match(html, /ok: value < 0\.1 && ltMax < 50 && dur < 2000/);
   assert.match(swift, /"dy"/);
+  assert.match(swift, /"fds"/);
+  assert.match(swift, /"rss"/);
+  assert.match(swift, /"unix"/);
+  assert.match(swift, /"rlim"/);
+  assert.match(web, /\/api\/ui-metrics\/proc/);
+  assert.match(web, /handleProcMetrics/);
+  assert.match(web, /proc_sample/);
+  assert.match(html, /debugProcKv/);
+  assert.match(html, /d\.fds/);
+  assert.match(metricsJs, /'fds'/);
+  assert.match(metricsJs, /proc_sample/);
   assert.doesNotMatch(html, /nm\([^)]*title/);
   assert.doesNotMatch(html, /payload:\s*\{[^}]*title/);
 });

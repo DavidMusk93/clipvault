@@ -2146,11 +2146,12 @@
 
     .debug-drawer { width: min(460px, 100vw); }
     .debug-kv {
-      display: grid; grid-template-columns: 92px 1fr; gap: 4px 10px;
+      display: grid; grid-template-columns: 108px 1fr; gap: 4px 10px;
       font-size: 12px; font-variant-numeric: tabular-nums;
       margin: 8px 0 14px;
     }
-    .debug-kv span:first-child { color: var(--muted); }
+    .debug-kv span:nth-child(odd) { color: var(--muted); }
+    .debug-kv .is-slow { color: var(--danger); font-weight: 650; }
     .debug-hot {
       width: 100%; border-collapse: collapse; font-size: 12px;
       font-variant-numeric: tabular-nums; margin: 8px 0 14px;
@@ -2393,9 +2394,11 @@
       <button type="button" class="btn-icon" id="debugCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。墙慢看 wall_*。打开抖看 sheet_morph / sheet_cls。关笔记顶栏解遮挡看 chrome_shift（phase=close）与长周期 wall_cls（kind=top-bar\|chips）。CLS≥0.1 或 dur≥80 标红。</p>
+      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。墙慢看 wall_*。打开抖看 sheet_morph / sheet_cls。关笔记顶栏解遮挡看 chrome_shift（phase=close）与长周期 wall_cls（kind=top-bar\|chips）。CLS≥0.1 或 dur≥80 标红。fd/sock 走 SSE ping，不轮询。</p>
       <h3 style="font-size:14px;font-weight:600">SSE</h3>
       <div class="debug-kv" id="debugSseKv"></div>
+      <h3 style="font-size:14px;font-weight:600">进程资源</h3>
+      <div class="debug-kv" id="debugProcKv"></div>
       <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
       <table class="debug-hot" id="debugHot"><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody></tbody></table>
       <div class="backup-actions">
@@ -3820,6 +3823,7 @@ window.ClipViewMasonry = Masonry;
     const sseDebug = {
       wall: { lastAt: 0, lastKind: '', opens: 0, errors: 0, pings: 0, resyncs: 0, role: '—' },
       trae: { lastAt: 0, lastKind: '', opens: 0, errors: 0 },
+      proc: null,
     };
     function markWallTtfp(kind) {
       if (wallTtfpSent) return;
@@ -8039,9 +8043,15 @@ window.ClipViewMasonry = Masonry;
       const typ = String(d.type || '');
       sseDebug.wall.lastKind = typ.slice(0, 32);
       sseDebug.wall.lastAt = Date.now();
-      if (d.type === 'ping') {
-        sseDebug.wall.pings += 1;
-        return;
+      if (d.type === 'ping' || d.type === 'connected') {
+        if (d.type === 'ping') sseDebug.wall.pings += 1;
+        if (d.fds != null || d.rss != null) {
+          sseDebug.proc = {
+            fds: d.fds, rss: d.rss, unix: d.unix, sse: d.sse, rlim: d.rlim, at: Date.now(),
+          };
+          scheduleDebugPaint();
+        }
+        if (d.type === 'ping') return;
       }
       if (d.type === 'trae_ask' || d.needs_user) {
         sseDebug.trae.lastAt = Date.now();
@@ -8315,6 +8325,7 @@ window.ClipViewMasonry = Masonry;
     }
     function paintDebugPanel() {
       const kv = document.getElementById('debugSseKv');
+      const procKv = document.getElementById('debugProcKv');
       const hot = document.getElementById('debugHot')?.querySelector('tbody');
       const log = document.getElementById('debugLog');
       if (!kv || !hot || !log) return;
@@ -8324,11 +8335,23 @@ window.ClipViewMasonry = Masonry;
         `<span>墙 SSE</span><span>${esc(w.role || '—')} · ${esc(sseReadyLabel(liveSSE))} · ${esc(w.lastKind || '—')} · ${esc(ageLabel(w.lastAt))} · open ${w.opens} · err ${w.errors} · ping ${w.pings} · resync ${w.resyncs}</span>` +
         `<span>会话 ask</span><span>mux→wall · ${esc(t.lastKind || '—')} · ${esc(ageLabel(t.lastAt))}</span>` +
         `<span>本页 ttfp</span><span>${wallTtfpSent ? '已报' : '未报'} · boot ${Math.round(performance.now() - wallBootAt)}ms</span>`;
+      if (procKv) {
+        const p = sseDebug.proc || {};
+        const fdWarn = p.rlim && p.fds >= p.rlim / 2;
+        const unixWarn = (p.unix || 0) >= 64;
+        const sseWarn = (p.sse || 0) >= 16;
+        const warn = fdWarn || unixWarn || sseWarn;
+        procKv.innerHTML =
+          `<span>fd</span><span class="${fdWarn ? 'is-slow' : ''}">${p.fds ?? '—'} / ${p.rlim ?? '—'}</span>` +
+          `<span>sock / sse</span><span class="${unixWarn || sseWarn ? 'is-slow' : ''}">${p.unix ?? '—'} · ${p.sse ?? '—'}</span>` +
+          `<span>rss</span><span>${p.rss != null ? p.rss + ' MB' : '—'}</span>` +
+          `<span>采样</span><span class="${warn ? 'is-slow' : ''}">SSE ping · ${esc(ageLabel(p.at))}</span>`;
+      }
       const rows = (globalThis.ClipNotesMetrics?.recentLocal?.() || []).slice();
       const agg = new Map();
       for (const ev of rows) {
         const name = ev.name || '';
-        if (!/^(wall_|sse_|sheet_|notes_cls|notes_longtask|notes_open|notes_editor|chrome_shift|trae_sessions_cls|trae_sessions_longtask|trae_sessions_layout|trae_sessions_paint|trae_sessions_ttfp)/.test(name)) continue;
+        if (!/^(wall_|sse_|sheet_|notes_cls|notes_longtask|notes_open|notes_editor|chrome_shift|trae_sessions_cls|trae_sessions_longtask|trae_sessions_layout|trae_sessions_paint|trae_sessions_ttfp|proc_sample)/.test(name)) continue;
         let a = agg.get(name);
         if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0 }; agg.set(name, a); }
         a.n += 1;
@@ -8354,10 +8377,23 @@ window.ClipViewMasonry = Masonry;
         return `<li class="${slow ? 'is-slow' : ''}">${esc(tms)} ${esc(ev.name)}${esc(dur)}${esc(p)}</li>`;
       }).join('') : '<li class="backup-label">尚无本页打点</li>';
     }
+    async function refreshProcOnce() {
+      try {
+        const r = await fetch(API + '/api/ui-metrics/proc');
+        const j = await r.json();
+        if (j && j.ok) {
+          sseDebug.proc = {
+            fds: j.fds, rss: j.rss, unix: j.unix, sse: j.sse, rlim: j.rlim, at: Date.now(),
+          };
+          scheduleDebugPaint();
+        }
+      } catch (_) {}
+    }
     function openDebug() {
       debugDrawer?.classList.add('open');
       debugScrim?.classList.add('open');
       paintDebugPanel();
+      refreshProcOnce();
       try { if (parseAppHash().kind !== 'debug') history.replaceState(null, '', '#debug'); } catch (_) {}
     }
     function closeDebug() {

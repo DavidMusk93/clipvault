@@ -4,6 +4,7 @@
   const ALLOW = new Set([
     'mode', 'ratio', 'chars', 'bytes', 'n', 'value', 'interaction', 'q_len',
     'kind', 'phase', 'reason', 'lag', 'host', 'w', 'h', 'nodes', 'dy',
+    'fds', 'rss', 'unix', 'sse', 'rlim',
   ]);
   const NAME = /^[a-z][a-z0-9_]{1,63}$/;
   const SESSION_KEY = 'clipvault.metrics.session';
@@ -79,7 +80,7 @@
     if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
     const hot = name.startsWith('trae_') || name.startsWith('wall_') || name.startsWith('sse_')
       || name.startsWith('sheet_') || name === 'notes_cls' || name === 'notes_longtask' || name === 'notes_open'
-      || name === 'chrome_shift' || name === 'wall_cls';
+      || name === 'chrome_shift' || name === 'wall_cls' || name === 'proc_sample';
     if (hot) flush();
     else if (queue.length >= 20) flush();
     else if (!flushTimer) flushTimer = setTimeout(flush, 2000);

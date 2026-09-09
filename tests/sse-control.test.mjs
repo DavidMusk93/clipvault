@@ -83,7 +83,8 @@ test('browser edge is Rust HTTPS/2 on the only TCP port', () => {
 
 test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
   const attach = sliceFrom(web, 'func attachSSELocked', 4000);
-  assert.match(attach, /retry: 3000/);
+  assert.match(web, /retry: 3000/);
+  assert.match(attach, /sseHelloBodyLocked/);
   assert.match(attach, /X-Accel-Buffering/, 'proxy must not buffer the stream');
   assert.match(attach, /text\/event-stream/);
   assert.match(attach, /Transfer-Encoding", "chunked"/);
@@ -101,6 +102,11 @@ test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
   assert.match(web, /sseResyncFrame/);
   assert.match(web, /resync_required/);
   assert.match(web, /ssePingFrame/);
+  assert.match(web, /ssePingFrameLocked/);
+  assert.match(web, /sseHelloBodyLocked/);
+  assert.match(web, /tickProcLocked/);
+  assert.match(web, /ProcMetrics/);
+  assert.match(web, /\/api\/ui-metrics\/proc/);
   assert.match(web, /: ping/);
   assert.match(web, /sseMaxBuffered = 32/);
   assert.match(web, /sseHeartbeatSeconds: Int = 15/);
@@ -127,6 +133,8 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   assert.match(indexHtml, /pageshow/);
   assert.match(setup, /EventSource\.CLOSED/);
   assert.match(indexHtml, /d\.type === 'ping'/);
+  assert.match(indexHtml, /sseDebug\.proc/);
+  assert.match(indexHtml, /id="debugProcKv"/);
   assert.match(indexHtml, /resync_required/);
   assert.match(setup, /scheduleResync\(\)/);
   assert.match(indexHtml, /backup_status/);

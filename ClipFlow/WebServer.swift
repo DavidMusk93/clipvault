@@ -78,6 +78,8 @@ class WebServer {
     private let sseQueue = DispatchQueue(label: "clipvault.sse")
     private var sseSessions: [ObjectIdentifier: SSESession] = [:]
     private var sseHeartbeat: DispatchSourceTimer?
+    private var procTimer: DispatchSourceTimer?
+    private var lastProc: [String: Int] = [:]
     private static let sseMaxBuffered = 32
     private static let sseHeartbeatSeconds: Int = 15
     private static let sseResyncFrame = Data("data: {\"type\":\"resync_required\"}\n\n".utf8)
@@ -134,6 +136,9 @@ class WebServer {
         HttpFrontProcess.shared.start(originSock: sock.path, listen: "127.0.0.1:\(port),[::1]:\(port)")
         TraeAskFanIn.shared.attach(self)
         print("Web origin unix \(sock.path); browser https://127.0.0.1:\(port) (HTTP/2)")
+        sseQueue.async { [weak self] in
+            self?.startProcSamplerLocked()
+        }
 
         NotificationCenter.default.addObserver(
             forName: Notification.Name("ClipFlowItemAdded"),
@@ -170,6 +175,8 @@ class WebServer {
         OriginUnixServer.shared.stop()
         originStarted = false
         sseQueue.async { [weak self] in
+            self?.procTimer?.cancel()
+            self?.procTimer = nil
             self?.teardownSSELocked()
         }
     }
@@ -476,6 +483,8 @@ class WebServer {
             handleUiMetricsSummary(path: path, connection: connection)
         } else if pathOnly == "/api/ui-metrics/recent" {
             handleUiMetricsRecent(path: path, connection: connection)
+        } else if pathOnly == "/api/ui-metrics/proc" {
+            handleProcMetrics(connection: connection)
         } else if pathOnly == "/api/backup/status" {
             sendBackupStatus(path: path, connection: connection)
         } else if pathOnly == "/api/backup/snapshots" {
@@ -633,7 +642,7 @@ class WebServer {
             ("Access-Control-Allow-Origin", "*")
         ]
         var hello = httpHeader(status: 200, reason: "OK", headers: headers)
-        hello.append(Self.httpChunk(Data("retry: 3000\n\n: connected\n\ndata: {\"type\":\"connected\"}\n\n".utf8)))
+        hello.append(Self.httpChunk(sseHelloBodyLocked()))
         session.queue.append(hello)
         flushSSELocked(session)
         ensureSSEHeartbeatLocked()
@@ -693,6 +702,58 @@ class WebServer {
         sseHeartbeat = timer
     }
 
+    private func startProcSamplerLocked() {
+        if procTimer != nil { return }
+        let timer = DispatchSource.makeTimerSource(queue: sseQueue)
+        timer.schedule(deadline: .now() + .milliseconds(400), repeating: .seconds(15))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            if self.sseSessions.isEmpty {
+                self.tickProcLocked()
+            }
+        }
+        timer.resume()
+        procTimer = timer
+        tickProcLocked()
+    }
+
+    private func tickProcLocked() {
+        let s = ProcMetrics.sample(sse: sseSessions.count)
+        lastProc = s.asDict()
+        UiMetrics.shared.emit(
+            "proc_sample",
+            ok: !s.strained,
+            payload: [
+                "fds": s.fds,
+                "rss": s.rssMb,
+                "unix": s.sockets,
+                "sse": s.sse,
+                "rlim": s.rlim,
+            ]
+        )
+    }
+
+    private func sseHelloBodyLocked() -> Data {
+        tickProcLocked()
+        var obj: [String: Any] = ["type": "connected"]
+        for (k, v) in lastProc { obj[k] = v }
+        guard let json = try? JSONSerialization.data(withJSONObject: obj),
+              let text = String(data: json, encoding: .utf8) else {
+            return Data("retry: 3000\n\n: connected\n\ndata: {\"type\":\"connected\"}\n\n".utf8)
+        }
+        return Data("retry: 3000\n\n: connected\n\ndata: \(text)\n\n".utf8)
+    }
+
+    private func ssePingFrameLocked() -> Data {
+        var obj: [String: Any] = ["type": "ping"]
+        for (k, v) in lastProc { obj[k] = v }
+        guard let json = try? JSONSerialization.data(withJSONObject: obj),
+              let text = String(data: json, encoding: .utf8) else {
+            return Self.ssePingFrame
+        }
+        return Data(": ping\n\ndata: \(text)\n\n".utf8)
+    }
+
     private func sseHeartbeatTickLocked() {
         pruneDeadSSELocked()
         if sseSessions.isEmpty {
@@ -700,10 +761,12 @@ class WebServer {
             sseHeartbeat = nil
             return
         }
+        tickProcLocked()
+        let ping = ssePingFrameLocked()
         for session in sseSessions.values {
             if session.resyncRequired { continue }
             if session.queue.count >= Self.sseMaxBuffered { continue }
-            session.queue.append(Self.httpChunk(Self.ssePingFrame))
+            session.queue.append(Self.httpChunk(ping))
             flushSSELocked(session)
         }
     }
@@ -1529,6 +1592,16 @@ class WebServer {
             return n
         }
         sendJSON(UiMetrics.shared.summary(fromMs: ms("from"), toMs: ms("to")), connection: connection)
+    }
+
+    /// GET /api/ui-metrics/proc  live fd/rss/sse snapshot. No content.
+    private func handleProcMetrics(connection: HTTPByteSink) {
+        sseQueue.async { [weak self] in
+            guard let self else { return }
+            let s = ProcMetrics.sample(sse: self.sseSessions.count)
+            self.lastProc = s.asDict()
+            self.sendJSON(s.asJSON(ok: true), connection: connection)
+        }
     }
 
     /// GET /api/ui-metrics/recent?name=&limit=&from=&to=  last N local rows. No content.

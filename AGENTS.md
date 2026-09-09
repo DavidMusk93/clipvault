@@ -339,6 +339,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 关笔记顶栏解遮挡 | `chrome_shift` phase=close；长周期 `wall_cls` |
 | 笔记输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` |
 | 会话白屏 | `trae_sessions_skip` vs `trae_sessions_paint` `trae_sessions_layout` |
+| 资源泄漏 / 502 | `proc_sample`（fds/rss/unix/sse/rlim）；SSE `ping` 同字段；`GET /api/ui-metrics/proc` |
 
 `notes_close.dur_ms` = 开着墙钟，不是关动画。关动画看 `sheet_morph` phase=close。Agent 自己拉 metrics。
 
