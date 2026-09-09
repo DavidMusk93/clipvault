@@ -605,7 +605,7 @@ final class CloudDocsBackupService {
                                     try self.ensureCloudDir(blobs)
                                     self.scrubLatestTmpFiles(in: latest)
 
-                                    // AGENTS.md §7：增量是核心。forceFull 全目标禁止（含 quark）。
+                                    // AGENTS.md · 备份：增量是核心。forceFull 全目标禁止（含 quark）。
                                     // size-match skip；只修 missing / sizeMismatch / 空占位。
                                     let forceFull = false
                                     let cas = self.syncBlobsToCAS(
@@ -827,7 +827,7 @@ final class CloudDocsBackupService {
     }
 
     /// Mirror local CAS into destination `blobs/` **incrementally**.
-    /// - forceFullCopy: **must stay false** (AGENTS §7). Parameter kept only for call-site clarity / tests.
+    /// - forceFullCopy: **must stay false** (AGENTS.md · 备份). Parameter kept only for call-site clarity / tests.
     /// - cloudSafe: stream write + long backoff; never bulk delete+copyItem (EDEADLK).
     private func syncBlobsToCAS(destRoot: URL, forceFullCopy: Bool = false, cloudSafe: Bool = false) -> CASSyncResult {
         try? fm.createDirectory(at: destRoot, withIntermediateDirectories: true)
@@ -843,7 +843,7 @@ final class CloudDocsBackupService {
         // Absolute ban: never rewrite the whole CAS tree in one pass (quark included).
         var forceFullCopy = forceFullCopy
         if forceFullCopy {
-            print("[Backup] REFUSED forceFullCopy=true (AGENTS §7); downgrading to incremental")
+            print("[Backup] REFUSED forceFullCopy=true (AGENTS.md · 备份); downgrading to incremental")
             forceFullCopy = false
         }
         var total = 0

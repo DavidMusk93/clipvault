@@ -160,10 +160,9 @@ test('AGENTS.md requires recordLocalClipLink; check-frontend lists this file', (
   assert.match(agents, /recordLocalClipLink/);
   assert.match(agents, /clip_link/);
   assert.match(agents, /硬编码/);
-  assert.doesNotMatch(
-    agents.split('### 前端部署门禁')[1]?.slice(0, 800) ?? '',
-    /或: node --test tests\/\*\.test\.mjs/,
-  );
+  const gate = agents.split('### 前端门禁')[1]?.split('### ')[0] ?? '';
+  assert.ok(gate.length > 0, 'missing ### 前端门禁');
+  assert.doesNotMatch(gate, /或: node --test tests\/\*\.test\.mjs/);
   assert.match(check, /tests\/clip-link\.test\.mjs/);
   assert.doesNotMatch(check, /node --test tests\/\*\.test\.mjs/);
 });

@@ -4,7 +4,7 @@
  * Sanitize: DOMPurify (https://github.com/cure53/DOMPurify)
  * No home-grown markdown grammar. Copy path always uses raw source.
  *
- * AGENTS §8: after sanitize, neutralize <a href> → inert spans (no mis-clicks).
+ * AGENTS.md · 墙: after sanitize, neutralize <a href> → inert spans (no mis-clicks).
  */
 
 /**
@@ -434,7 +434,7 @@ export function mapScrollTopToLine(y, anchors, docLines, maxY) {
   return lastLine;
 }
 
-/** AGENTS §8: display only — no navigable links in card. */
+/** AGENTS.md · 墙: display only — no navigable links in card. */
 export function neutralizeAnchorsHtml(html) {
   if (typeof DOMParser === 'undefined') {
     return String(html || '')

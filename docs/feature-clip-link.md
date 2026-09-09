@@ -95,7 +95,7 @@ nmem `clipvault_design_philosophy_layered_memory_20260814` 五层里，clip link
 | Notion 式双向链接面板、属性数据库 | 不是团队笔记产品 |
 | 自动把正文里 SHA 状字符串当链接 | 误伤 git commit / 镜像摘要 |
 | 多种 kind（`cites` / `follows` / `duplicate`） | 词汇从 `related` 起 |
-| 改 capture 正文、在 HTML 里插入 `<a href="#h=">` | 不可变 + §8 预览禁可点链 |
+| 改 capture 正文、在 HTML 里插入 `<a href="#h=">` | 不可变 + 墙 · URL 双面：预览禁可点链 |
 | 用 `text_hash` 当关联目标 **或 locator 回落** | 可见正文去重 ≠ 用户点的那份 payload；`#h=` / hash-only POST  miss → 「库里没有这份内容」 |
 | Android 写关联 / 野外记事本互链 | 备份阅读器；P3 只读可跟 |
 | 把笔记编进瀑布流 | 已有 `exclude=note` + `#notesPanel` |
@@ -427,7 +427,7 @@ N 条 · 手动
 **禁止**
 
 - 卡片 body 里渲染关联列表
-- 预览区可点 `<a href="#h=">`（§8）
+- 预览区可点 `<a href="#h=">`（墙 · URL 双面）
 - hover 位移 / 图可视化
 
 ### 同机可选后期：整段 payload 等于 hash
@@ -812,7 +812,7 @@ quarantine / ignore 返回 true **会**触发 `ClipFlowItemAdded`。接受（K13
 
 ### C. 把关联写进 `html_content` / 笔记 markdown
 
-否决。破坏 Capture 不可变、§8、同步审计。
+否决。破坏 Capture 不可变、墙 · URL 双面、同步审计。
 
 ### D. 图数据库 / 力导向可视化
 
@@ -946,7 +946,7 @@ swift build --product ClipFlowServer
 
 | 文档 / 符号 | 用途 |
 | --- | --- |
-| `AGENTS.md` §2 / §2.3.1 / §8 | 产品法 |
+| `AGENTS.md` · 身份 / 捕获与判断 / 墙 | 产品法 |
 | `docs/design-taste.md` | ×N popover、exact content_hash、评价不上主卡 |
 | `docs/feature-url-archive.md` | 同目录体例 |
 | nmem `clipvault_sync_judgment_layers_20260814` | 判断层必须 `recordLocal*` |
@@ -993,7 +993,7 @@ swift build --product ClipFlowServer
 - `ClipFlow/ClipboardItem.swift` — `linkCount`
 - `ClipFlow/CloudDocsSyncService.swift` — `recordLocalClipLink`、`case "clip_link"`、`applyIsIdempotentSuccess` 含 `clip_link`、`replayDiskClipLinks`
 - `ClipFlow/WebServer.swift` — `POST /api/clips/link`、`GET /api/items/{id}/links`、`itemToJSON.linkCount`；不 SSE `update`
-- `AGENTS.md` — 判断层 `clip_link` 必须 `recordLocalClipLink`；§前端部署门禁：门禁是 `check-frontend.sh` 的硬编码列表，**不要**把 `node --test tests/*.test.mjs` 写成与脚本等价
+- `AGENTS.md` — 判断层 `clip_link` 必须 `recordLocalClipLink`；运维 · 前端门禁：门禁是 `check-frontend.sh` 的硬编码列表，**不要**把 `node --test tests/*.test.mjs` 写成与脚本等价
 - `tests/clip-link.test.mjs` — **新**，字符串门禁（无 XCTest target）：`case "clip_link"`、`applyIsIdempotentSuccess` 含 `clip_link`、`replayDiskClipLinks`、`recordLocalClipLink`、`foldPairKeyIntoLinks` 或 `ORDER BY ts DESC`、`COALESCE(c.link_count` / `listTailSQL`、五处函数名仍在且 SELECT 尾含 `link_count`、apply 五步顺序（`from` 检查在 `INSERT OR IGNORE` 之前）。并读 `scripts/check-frontend.sh` 断言其 `node --test` 行含 `tests/clip-link.test.mjs`
 - `scripts/check-frontend.sh` — **必改**：在现有硬编码 `node --test …` 参数列表 **追加** `tests/clip-link.test.mjs`（今日是 `frontend-smoke` / `notes-render` / `masonry` / `pagination` / `archive-view` / `archive-reader`）。脚本 **不 glob**；`deploy-server.sh` 只跑这一列表。禁止只加测试文件却不改脚本
 
@@ -1034,7 +1034,7 @@ swift build --product ClipFlowServer
 
 **Depends on:** PR3（或同 PR）
 
-**Files:** `docs/feature-clip-link.md`、`AGENTS.md` §2.2 一行、`README.md` 若有能力清单
+**Files:** `docs/feature-clip-link.md`、`AGENTS.md` · 捕获与判断 一行、`README.md` 若有能力清单
 
 ### PR5 — 热更新与笔记反链（P2，非阻塞）
 

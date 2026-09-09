@@ -1,554 +1,458 @@
 # ClipVault · AGENTS.md
 
-给 **人类协作者与编码 agent** 的仓库约定。改产品前先读本节；与全局 `~/.grok/AGENTS.md` / nmem 冲突时：**本仓库产品层以本文为准**。
+给人类协作者和编码 agent 的**仓库法**。改产品前读本文。与 `~/.grok/AGENTS.md` / nmem 冲突时：**本仓库产品层以本文为准**。
 
-## 0. 硬约束（未做完不算交付）
-
-1. **改动及时提交并推送。** 一个可独立描述的单元验证完 → `git commit` → `git push origin <branch>`（默认 `master`）。禁止攒脏树、禁止只 commit 不 push、禁止用会话结束当「以后再推」。push 失败必须在回复里写明，不得假装已上远程。细则见下方「改动及时提交并推送」。
-2. **nmem 不是流水账。** 写入的是可复用的经验与知识：一句话结论、机制、边界、下次怎么做。禁止把聊天摘要、逐步操作日志、无结构的「今天做了 A 然后 B」塞进 nmem。设计、流程、模块关系用 **ASCII graph** 画清楚，让下一会话不靠散文还原拓扑。
-3. **开发迭代 = metrics-based optimization。** 交互、卡顿、抖动、白屏先读本机 `ui-metrics.db`（`#debug` / `GET /api/ui-metrics/recent`），用 `name`+`phase`+`kind` 归因再改。归因字段不够：**先补点，再改产品**。禁止让用户去翻红行。未用同一指标对照不得宣称丝滑。细则 §2.3.2。
+本文是契约，不是会话流水账。引用用**章节名**，禁止 `§2.3.1` 这类会随插入而漂移的编号。
 
 ```text
-  [capture] clipboard payload     immutable
-       |
-       v
-  [judgment] pin / eval / clip_link     append-only ops
-       |
-       v
-  [archive]  WKWebView + Readability --> CAS sha
-       |
-       +-- browser tab (cookies, v2raya in-browser)
-       +-- archive WKWebView (own store; SOCKS :2080 if system proxy off)
+                    ClipVault 仓库法
+                           |
+          +----------------+----------------+
+          |                |                |
+       硬约束            总图              领域
+     没做完不算        先对层再写        一节一块
+          |                |                |
+          |         分层 / 端口 /          |
+          |         三平面 / 模块          |
+          |                                |
+          +------------+-------------------+
+                       |
+        捕获  墙  笔记  会话  归档  同步  备份  Metrics  HTTP
+                       |
+                    运维 / 附录
+              启动 · 门禁 · commit · 指针
+
+事故叙事 → docs/incident-*     token → design-taste.md
+机制/误判 → nmem               本文只留不变式 + 拓扑 + 禁止
+```
+
+每节形状固定：**不变式 → ASCII 拓扑 → 短禁止 → 去哪改**。细节不进本节。
+
+```text
+改本文
+  新能力      先对「记忆分层」，再写入对应领域节
+  新不变式    改该节 ASCII 或加一行禁止
+  新指标      ## Metrics 表加 name
+  新事故      docs/incident-YYYYMMDD-*.md + 附录一行
+  禁止        往硬约束堆 Do/Don't；同一段复制到多节；恢复 § 编号
 ```
 
 ---
 
-## 1. 产品身份
+## 硬约束
+
+1. **改动及时提交并推送。** 可独立描述的单元验证完 → `git commit` → `git push origin <branch>`（默认 `master`）。禁止攒脏树、只 commit 不 push、用会话结束当「以后再推」。push 失败必须写明。
+2. **nmem 不是流水账。** 写可复用机制：一句话结论 + ASCII + 证据。禁止聊天摘要。
+3. **开发迭代 = metrics-based optimization。** 卡顿/抖动/白屏先读本机 `ui-metrics.db`（`#debug` / `GET /api/ui-metrics/recent`）。归因不够：**先补点，再改**。禁止让用户翻红行。未用同一指标对照不得宣称丝滑。
+
+---
+
+## 身份
 
 | 项 | 值 |
 | --- | --- |
-| **产品名** | **ClipVault** |
-| **一句话** | 遇到的留下，想到的写下 |
-| **定位** | 个人记忆：静默捕获世界 + 主动写下自己。Mac 源站 · 本机/公网 Web · 手机当野外记事本。检索 · OCR · 归档 · Compose |
-| **不是** | 企业协同剪贴板、Notion/备忘录替代品、又一个 `ClipXxx` 工具箱皮肤 |
-| **仓库历史名** | GitHub / 目录可能仍叫 `ClipView`；二进制/模块可能仍叫 `ClipFlow*` |
-| **品牌规则** | **对外文案、README、窗口标题、用户可见 UI 字符串 → ClipVault**。内部 SPM target / LaunchAgent label / 数据目录可仍为 ClipFlow* 或历史 Keepsake 路径；禁止把 ClipView/ClipFlow 当产品品牌回潮 |
+| 产品名 | **ClipVault** |
+| 一句话 | 遇到的留下，想到的写下 |
+| 是 | 个人记忆：静默捕获世界 + 主动写下自己 |
+| 不是 | 企业协同剪贴板、Notion 替代、又一个 `ClipXxx` 工具箱 |
+| 对外品牌 | 文案 / README / 窗口标题 / UI 字符串 → **ClipVault** |
+| 对内可残留 | 目录 `ClipView`、二进制 `ClipFlow*`、数据路径 Keepsake |
+| 视觉真源 | [`docs/design-taste.md`](docs/design-taste.md)（改色先改它，再 Web + Android） |
 
-命名否决过的方向（不要回潮）：
+否决回潮：`Keepsake` 当现行品牌、`ClipView`/`ClipFlow` 当对外品牌、`XxxView` 组件腔。
 
-- `Keepsake` 当**现行品牌**（历史文案/路径可残留；新用户可见字符串一律 ClipVault）  
-- `ClipView` / `ClipFlow` 当**品牌**（可用作遗留路径/进程名）  
-- `XxxView` / `ClipManager` 等组件腔  
-- 为「一眼功能」牺牲独立产品感  
+品味落点：可执行 token → `docs/design-taste.md`；跨会话裁决 → nmem。禁止只改一处颜色却不回写真源。
 
 ---
 
-## 2. 产品 taste（Owner）
+## 总图
 
-Owner 要的是 **独立产品气质 + 终局工程**，不是 demo 合集。
-
-**可执行视觉真源**：[`docs/design-taste.md`](docs/design-taste.md)（类型标签色、ops 来源色、品牌 Honey）。
-改 badge / 来源色必须先改该文档，再同步 Web + Android，禁止一端私调。
-
-### 2.0 作者 taste → 个性化设计语言（持续沉淀）
-
-Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原材料**。Agent / 协作者必须双写沉淀：
-
-| 落点 | 写什么 | 何时写 |
-| --- | --- | --- |
-| **本仓库** | `AGENTS.md` §2（叙事/体验/工程原则）；可执行 token 进 [`docs/design-taste.md`](docs/design-taste.md) | 用户明确偏好、否决某风格、锁定色/动效/文案气质时 |
-| **nmem** | 结构化知识（见 §0.2）：结论 + ASCII 关系图 + 证据 + 下次动作。不是会话流水账 | 同上；跨会话优先 `memory_search` ClipVault/taste |
-
-| Do | Don't |
-| --- | --- |
-| 每次可复用的 taste 判断写进文档或 nmem（或两者） | 只改一处 UI 颜色却不回写真源 |
-| 冲突时：**更新文档/nmem 为新裁决**，旧记忆 supersede 或标注过时 | 靠「我记得上次好像…」口头延续 |
-| 逐渐收敛为稳定语言：色板、密度、动效禁区、文案语气、跨端一致性 | 每轮按 agent 默认审美重开一盘 |
-
-**目标**：随着批评与取舍累积，ClipVault 形成 **Owner 个性化的设计语言**，而不是通用 Material/工具腔皮肤。
-
-**产品哲学（演进新能力前必读）**：nmem `clipvault_design_philosophy_layered_memory_20260814`（身份/分层）+ `clipvault_reader_learning_layer_sqlite_20260814`（阅读态进 SQLite）+ `c2c20497-bc52-4204-99fc-34191bb98a99`（Compose 野外记事本）  
-一句话：私人游乐场 + 学习工具。正确性交给引擎，陪伴感留在产品里。**Capture 不可变**；**Compose 可变**（投影 + append-only `compose_ops`）。禁止就地改剪贴板正文当笔记。
-
-**评论 header 对齐（修前必搜 nmem，不靠会话记忆）**：`clipvault_reader_comment_header_strut_20260814`（怎么修）+ `clipvault_reader_header_align_fail_loop_20260814`（为何翻车）+ `owner_nmem_only_not_grok_session_memory_20260814`（Owner：依据只认 nmem）。
-
-### 2.1 品牌与叙事
-
-| Do | Don't |
-| --- | --- |
-| 像 Paste / Raycast：短名 + 副标题解释能力 | 用模块名当产品名（`ClipboardMonitor UI`） |
-| 中文说明可以暖而克制（「记忆」「留存」） | 堆 emoji 营销号文案、假「AI 驱动」 |
-| 一个主品牌贯穿 daemon / Web / 备份 | 双品牌分裂（UI 一个名、服务另一个名当对外品牌） |
-
-### 2.2 体验
-
-| Do | Don't |
-| --- | --- |
-| 静默捕获；打开 Web 即用 | 强迫先配一堆才能看历史 |
-| 列表轻（thumb）；预览重（lightbox full） | 列表直接灌原图 |
-| 交互不抖：hover 不做几何位移；展开不重排整墙 | `translateY` hover + 全量 remount |
-| OCR 限高可滚动，不靠 `<details>` 撑布局 | 点一下 OCR 整页 masonry 重排 |
-| 备份/恢复有状态、可点、路径说人话 | 只有日志里才知道备份成败 |
-| **列表变更差分渲染 + 保持 scroll/cursor**（删/恢复卡片） | 删一条就 `innerHTML=''` 全量 rebuild 回顶 |
-| **滚动丝滑**：图框锁高；禁止 `img.onload → rebuildFromData`；append 离屏量高 | 滑动中瀑布流全量 rebalance（社交流不会这么做） |
-| **URL 归档（save useful）**：手动「归档网页」→ WKWebView+Readability；预览消毒不可点 | 前端 CORS fetch 当归档；自动爬每一个链接 |
-| **分享链接**：owner **同一槽同一按钮**：未分享=「分享」（复制 `/s/<token>`），已分享=「取消分享」。禁止并排两颗。公网放行仅 `/s/` + `/api/share/asset?t=`。笔记快照当时正文。token 不进 trx | 把 TOTP 当分享；`/api/clips` 免登录；活读可改笔记；分享/取消分享拆成两颗按钮 |
-| **View**：弹层 iframe `src=/api/archive/view?embed=1`（真文档，浏览器引擎排版）；可再开新标签 | srcdoc / Turndown 自绘；毛玻璃+transform 包 iframe；只弹出孤立 tab |
-| **归档后同一按钮变「查看」**（同槽同尺寸）；已归档禁止再点「归档网页」 | 另塞一颗小「查看」；归档按钮归档后仍可点 |
-| **置顶**：`pinned_at` 投影；钉在列表最前；翻页 cursor 只走未置顶；**跨机必须走 op-log `pin`/`unpin`**。取消置顶必须立刻清 `pinnedAt`、丢卡片缓存、移出 pin rail；JSON 未置顶发 `pinnedAt: null`；SSE `clip_pinned`。禁止 `{...old, ...item}` 留下旧 `pinnedAt` | 改 timestamp 冒充置顶；钉子混进下一页重复出现；只写本机列不同步；取消置顶要刷新才消失 |
-| **关联 clip_link**：判断层；append-only `clip_link_ops` + 投影 `clip_links`/`link_count`；跨机必须 `recordLocalClipLink`；捕获目标 exact `content_hash`，笔记目标 UUID；禁止改 capture 正文、禁止跳转 `fetchPage(reset)` | 把 hash 当行 PK；只写本机表不同步；用 `text_hash` 当 locator |
-| **归档 / 阅读态跨机**：`web_archive` 的 `blob_keys` = HTML **闭包**（root + 文内 `/api/archive/asset` CAS）+ `reader_op` | 只传 html sha；图只躺在对端 `hosts/*/blobs` 灾备里 |
-| **View 阅读壳**：TOC 运行时派生；划线/评论/续读进 SQLite（投影列 + append-only ops） | 阅读态只放 IndexedDB；把标注写进 capture HTML |
-| **View 技术介质**：白纸正文；代码炭黑表面 + JetBrains Mono（自托管 OFL）+ 语言/复制 + View 时重高亮；图/流程图默认浅纸画板 + 题注 + 点击放大；嵌套 `<article>` 还原为 info 标注框。只有整体偏暗的不透明图才用墨井。CSS 在 `archive-view.css`。不改 CAS | Pico 灰底；黑井吞掉深色箭头/标注；正文用等宽体排中文；CDN 拉字体；把高亮写回 archive HTML |
-| **归档抽取**：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」的列表。部署时 `Readability.js` 必须拷到二进制同目录。X Article 完整性 = `media_entities` / atomic 覆盖率，未解析必须 `cv-x-dropped` 占位；禁止只凭 `cv-x-article` 当成功 | 技术文 `ul>li>文案+图+figcaption` 会被当成图库删掉（Swap needs either 两条）；atomic `return nil` 静默丢图 |
-| **阅读选区菜单**：macOS 浅玻璃小条（28px），黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**；评论 header 单行 28px（评论/摘录与取消/提交同一 strut）；底部「记录」= `reader_ops` | 评论卡里放大号「删除划线」；菜单压在高亮上；header 左右不共线 |
-| 删/恢复后 **SSE 差分**（`applyRemoteClipRemoval`）；禁止 `clip_deleted → fetchPage(reset)` | SSE 全量 reset 把 scroll 打回顶部（真因） |
-| **本地入口 = 一端口 HTTPS/2**：浏览器只打 `https://127.0.0.1:8080`。Rust `clipvault-http`（hyper + rustls，ALPN `h2`）是唯一 TCP 监听；Swift origin 在 `$KEEPSAKE_HOME/run/http.sock`。TLS 用本机 CA（`tls/ca.pem`）签叶子，CA 进 login keychain `trustRoot`（`scripts/trust-local-https.sh`）。禁止第二浏览器端口、禁止明文 HTTP/1.1、禁止 SwiftNIO/BoringSSL。 | 8080 HTTP/1.1 + 8443 双口；自签叶子不进信任链让 Chrome 红页；NIOSSL `@rpath/libc++` |
-| **SSE 控制面**：15s heartbeat（`: ping` + `{"type":"ping"}`）；每连接 bounded 32；满则 coalesce `resync_required`，禁止静默踢客户端；`retry: 3000`；前端 `onopen` / `visibilitychange` / `online` → `scheduleResync`→`mergeHead`。禁止 `onerror` 里 `close()+setTimeout` 当唯一重连。HTTP/2 下 EventSource 只占一条 stream。禁止每页再挂 `/trae/api/stream`（`needs_user` 由本机 `TraeAskFanIn` 并进墙 SSE）。会话 iframe 仅面板打开时占用第二条 stream。**Trae 会话加载必须走显式 FSM** `web/session-load.mjs` `reduce`（boot/cached/connecting/resync/live/paused/error）；paused 禁止 fetch；`onopen` 在 live 且 15s 内禁止全量 resync；首屏 `cv.trae.snap.v1` stale-while-revalidate（禁止当真相、禁止 cache `tool_response`）。新加载 bug：先补 `tests/session-load.test.mjs` 再改 fetch。变迁打 `trae_sessions_fsm`。墙刷新打 `wall_fetch` / `wall_paint` / `wall_merge` / `wall_resync` / `sse_wall`；看板 `#debug`。SSE `update` 带 id 则单条 prepend；`mergeHead` 走 `/api/clips?fields=head`（无正文），sig 不变不 rebuild。备份徽章走 SSE `backup_status` + `?lite=1`，禁止 30s 轮询 `/api/backup/status`（夸克 IndexedDB 扫描不得进请求路径）。 | 空闲被 Cloudflare/后台标签掐流后不补数；连接活着但永远收不到事件；每次 EventSource `onopen` 全量 `/api/events`；boolean+timer 冒充状态；localStorage 当真源；每页第二条 EventSource |
-
-### 2.3 工程（always SOTA / 终局）
-
-| Do | Don't |
-| --- | --- |
-| **Capture payload 不可变**；评价：`user_evaluations` append-only；星级可改；紧凑星在 sheet header；铅笔入口；历史时间线；禁主卡片 body | 阶段芯片；评价 strip 进 masonry；为大星行浪费 sheet 垂直空间 |
-| **Metrics-based 优化**：卡顿/抖动/白屏先扫本机 `ui-metrics` 再改。墙看 `wall_*`；开合 sheet 看 `sheet_morph`/`sheet_cls`；笔记内抖看 `notes_cls`；**关笔记顶栏解遮挡**看 `chrome_shift`（phase=close，kind/reason=top-bar\|chips）+ 长周期 `wall_cls`。字段不够先补 `payload.kind/phase/dy`。禁止问用户找红行。`notes_close.dur_ms` 是开着时长，不是关动画。 | 看一眼截图就改 transform；用 hold 时长当 CLS；没有 `kind` 就猜 DOM |
-| **UI 增量 + lazy**：列表/线程按稳定身份 keyed 调和（笔记预览：lexer 块 hash + React 18；Trae 会话：`event_id` / `layoutKey` patch）。SSE 与保存只补变化。折叠、屏外、未打开的正文 **lazy** 编译或加载。墙卡展开用 overlay / 脱离文档流。会话 bundle 用手风琴**就地**展开，禁止 overlay 盖住后续用户/助手气泡。Trae `/api/events` 列表不含 tool 正文（Ask 除外）；首屏 `view=beats` 只拉用户/助手/Ask，工具 bundle 关闭时 0 子节点；hook 禁止每次拉 `/api/sessions`+全量 events；工具 hook 用 SSE stub；正文点开再拉。`mergeIncoming` 禁止整表覆盖。`trae_sessions_*` 立即 flush（iframe `postMessage` 到父页 `/api/ui-metrics`，禁止 2s 队列）。几何/跳过打 `trae_sessions_layout` / `trae_sessions_skip`（`w`/`h`/`nodes`/`reason`）；排查 `GET /api/ui-metrics/recent?name=`。原始 JSON 截断，禁止 hljs 整份 `raw_json`。embed 会话列与对话左右分栏，禁止窄宽叠成 30vh 把列表挤没。会话面板关闭必须 pause iframe SSE。笔记列表失败禁止开空白新笔记。 | 每次事件/保存整树 `innerHTML`；debounce 冒充增量；关闭 bundle 预渲染全部气泡；会话 item `position:absolute` 盖住对话；每次 SSE hook 全量 2MB `/api/events` |
-| **Compose / 笔记**：同一页 `#notesPanel`，左列表 + 右纸面；纸面 **源码 CodeMirror 6 \| 预览 marked**（打开默认预览、新建源码；本地 `web/assets/notes-editor/`）；空态不写设计意图；`type=note` + `compose_ops`；霜只一层、纸面实心。笔记置顶复用 `pinned_at` + `POST /api/clips/pin` + `recordLocalPin`，排在侧栏顶部，**不进**墙 pin rail。`---` 单独成行 → 下一行本地时间戳 checkpoint。`1+2=` 幽灵结果，Tab 写入、其它键放弃（Tab 有幽灵时优先于列表缩进；禁止 `eval()`）。分栏滚动 = 块锚点+块内进度，头/底钉住；禁止全程 `scrollTop/max`、禁止只钉视口第一行。**预览终局** = `marked.lexer` 块 hash LRU 编译 + React 18 keyed `.notes-md-block` 调和（key=内容 hash，行号在 wrapper）；禁止整页 `innerHTML` 换预览；输入不 `force` remap。打开/关闭用 Motion **数字弹簧**插值 `clip-path inset`（从按钮真实矩形揭到全纸，内容不 scale，墙禁止 `scale`）；禁止让 Motion 直接 tween `clipPath` 字符串（无法插值 `round` 会跳变，会话卡在按钮洞里）。动画结束必须 `clearSheetInline`。抖动打 `sheet_morph` / `sheet_cls` / `notes_cls` / `trae_sessions_cls`（phase=morph|live）；列表与编辑器等 morph 结束后再 paint。禁止 Vditor / Milkdown Crepe WYSIWYG（源码和渲染揉一起会抖）。保存走 `compose_saved`，禁止 `update` 刷墙。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`（`mergeHead` 排除 note 不够）；打开面板总是 `loadNotesList`；`compose_saved` 补列表与当前篇（`dirty`/`saving` 不覆盖；本机刚保存的 timestamp 不回放）。**多机/多 tab 同一篇**：快照 DAG + 行级 diff3（`ComposeMerge`），不是整篇覆盖、不是 Yjs。保存带 `parentHash`；分叉则三路合并，重叠段写入 `<<<<<<< hash` 标记（两侧按正文排序，保证交换律）。无 parent 的旧 trx 才按 wallTs LWW。正在输入时不覆盖，保存时再合并。打点只进本机 `ui-metrics.db`（同步实效 `sync_*` 同样本机、不进 trx） | 另开文档割裂；绑在每张剪贴卡；textarea 玩具编辑器；Vditor / Crepe；整页 `innerHTML` 换预览；每次保存 `innerHTML` 重绘列表；compose 打 SSE `update`；笔记另搞 `note_pin` trx；闲置后笔记只靠整页刷新 |
-| 一次做对：分页、多档图、备份一致性、CI 对齐生产路径 | P0/P1 菜单式半吊子交付 |
-| 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
-| 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |
-| SQLite 备份用 `sqlite3_backup`；**按机器**写 `backup/hosts/{hostId}/` | 热 copy 开着的 db；双机写同一 `latest/` 互盖 |
-| **同步 = 每机 `trx/` 事务 + 云盘运输**；事务点名的 CAS 全部进 `blob_keys` → `live/attach/`。**OCR 是派生字段**：捕获 trx 时图还在识字（`ocr_text` 为空）；识别完成后必须再发一条 `upsert`（`note=ocr`，只带 `ocr_text`，不改 `content_hash`）。启动若尚未 `sync.ocr_replay_v1`，把本机已有 `ocr_text` 一次性打成 follow-up trx（禁止只修 going-forward 留下历史空洞）。对端 `refreshRemoteFields` 按更长文本写入。禁止假定对端会自己再跑 Vision。 | 用 `ops/` 当事务目录；共享 CAS / 整库覆盖当同步；备份切片当同步总线；OCR 只写本机 SQLite；历史 OCR 不回放 |
-| **备份增量是核心**：本机切片里 size-match skip；只补 missing/partial | **每轮 forceFull 重拷全部 blob**（GDrive File Provider 会 EDEADLK） |
-| SQLite 按 `.trae/skills/sqlite-runtime-tricks`：WAL 读写分离、busy_timeout、ANALYZE、FTS5、分批清理；检索先 FTS | 写读同一条队列；全表 `LIKE html_content`；维护 tick 里 `VACUUM` |
-| **检索含用户评论**：FTS `judgment_text` = 评价备注 + View 划线摘录/评论（`reader_ops` fold）；写评论/评价后 `refreshJudgmentTextLocked` + `reindexFTSRowLocked`。禁止 `LIKE reader_ops.payload` | 评论只躺在 JSON ops 里搜不到；把评论写进 capture `text_content`/`html_content` |
-| CI = 能绿的真构建（`swift build` + 单测） | 为旧 xcodeproj+DuckDB 殉葬 |
-
-**SQLite 运维 skill（agent 必读）**：本机 `~/.trae-cn/skills/sqlite-runtime-tricks/` 与仓库 `.trae/skills/sqlite-runtime-tricks/`（同源）；源文 [jvns 2026-07](https://jvns.ca/blog/2026/07/17/learning-about-running-sqlite/)。改 `DatabaseManager` / 备份 / 搜索前先加载。
-
-### 2.3.1 归档文档闭包（同步终局，2026-08-17）
-
-离线归档不是「一篇 HTML sha」。它是 **根文档 + 文档点名的全部 CAS 对象**（闭包）。微信图空白若 HTML 已是 `/api/archive/asset?sha=`，先查闭包有没有进 `trx.blob_keys`，不要先怪 CDN / CSP / `data-src`。
-
-三平面不可混：
-
-| 平面 | 职责 | 不是 |
-| --- | --- | --- |
-| **CAS** | 内容寻址：本机 `blobs/{sha}.bin` | 同步协议 |
-| **同步** | 每机 `trx/{host}/{seq}.json`；`blob_keys` = 闭包；文件走 `live/attach/{sha}.bin` | 整库覆盖；用 `ops/` 写新事务 |
-| **备份** | `backup/hosts/{hostId}/` 灾备；可当 hydrate 副本 | 同步总线；对端去扫别人的 host 切片当协议 |
+### 记忆分层（新能力先对层，再写代码）
 
 ```text
-归档 / 首次改写 HTML
-  → ArchiveBlobClosure.keys(root, html)
-  → meta.closure = {v:1, root, blobs:[root, …deps]}
-  → web_archive.blob_keys = blobs
-  → push 每个 key → live/attach
-
-pull
-  → blob_keys 齐了才 apply（新事务缺图则 cursor 不推进）
-  → 旧事务只列了 root：apply 后再扫 HTML 补 hydrate
-
-启动 repair + GET /api/archive/asset 404
-  → hydrateBlob：live/attach ∪ backup/hosts/*/blobs ∪ backup/blobs
-  → 齐了再发一条完整 web_archive（对端不再依赖灾备）
+  世界 ──复制──► [capture]  clipboard payload     不可变  content_hash
+                      │
+                      ├── [judgment]  pin / eval / clip_link     append-only ops
+                      │
+                      ├── [archive]   WKWebView+Readability      CAS 闭包
+                      │                 ├─ 用户浏览器 tab（cookie / 系统或扩展代理）
+                      │                 └─ 归档 WKWebView（独立 store；无系统代理则 SOCKS :2080）
+                      │
+                      └── [compose]   type=note + compose_ops    可变投影
 ```
 
-| Do | Don't |
-| --- | --- |
-| `recordLocalArchive` 传完整 `blobKeys`（root + 文内 asset sha） | `blobKeys: [htmlSHA]` 了事 |
-| 新资产种类只加 `ArchiveBlobClosure.patterns` 正则 | 为图/字体/srcset 各开一个 trx kind |
-| `imagesOffline` = HTML **不再指向出版商 CDN** | 用它表示「对端磁盘一定有图」 |
-| View `img-src 'self' data: blob:`；图只走 `/api/archive/asset` | 给微信/qpic 开 `img-src *` 当「同步」 |
-| 旧库靠 repair + hydrate 自愈，再补发完整 trx | 只在 View 里临时回源 CDN 糊过去 |
+Capture 禁止就地改成笔记。Compose 禁止写成第二套剪贴板。
 
-样本（已修）：`mp.weixin.qq.com/s/ZloR4kbXacxpcEkIEv3oUQ` / `8314752F-…` — 26 张 asset，旧 trx 只带 HTML sha，对端 404。闭包进 trx 后 `blob_keys=27`。
-
-代码锚点：`ClipFlow/ArchiveBlobClosure.swift` · `CloudDocsSyncService.enqueueArchive` / `repairArchiveClosures` / `hydrateBlob` · `WebArchiveService.persist` · `WebServer.sendArchiveAsset`。
-
-nmem：`clipvault_archive_closure_sync_20260817`（替换 `clipvault_archive_images_not_in_trx_20260817`）。
-
-### 2.3.2 Metrics-based optimization（交互 / 卡顿）
-
-本仓库的 UI 迭代不是「看一眼再猜」。本机 `ui-metrics.db`（**不同步、不含正文**）是优化输入。
+### 进程与端口（浏览器只认一个 TCP 口）
 
 ```text
-  交互 / 卡顿 / 白屏
-       |
+  Chrome / Safari
+       │  HTTPS  ALPN h2
+       v
+  https://127.0.0.1:8080          clipvault-http   Rust  hyper+rustls
+       │                          唯一 TCP 监听
+       │  HTTP/1.1 流式（非浏览器口）
+       v
+  $KEEPSAKE_HOME/run/http.sock    ClipFlowServer   Swift
+       │                            ├─ 剪贴板 / Vision OCR / SQLite
+       │                            ├─ CloudDocs 同步 + 备份
+       │                            └─ loopback 反代 /trae → :9488
+       │
+       ├─ 本机 CA  tls/ca.pem  → login keychain trustRoot
+       │                         scripts/trust-local-https.sh
+       │
+       └─ GET /trae/?embed=1 ──► 127.0.0.1:9488   trae_hooks（DuckDB）
+                                 浏览器禁止直开 :9488
+```
+
+禁止：第二浏览器端口、明文 HTTP/1.1 对外、SwiftNIO/BoringSSL 当边车、自签叶子不进信任链。
+
+### 三平面（不可混）
+
+```text
+  [CAS]     blobs/{sha}.bin              内容寻址，不是协议
+  [同步]    trx/{host}/{seq}.json        blob_keys = 闭包；附件 live/attach/
+  [备份]    backup/hosts/{hostId}/       灾备 / hydrate 副本，不是同步总线
+```
+
+禁止：用 `ops/` 写新事务；整库覆盖当同步；对端去扫别人的 host 切片当协议。
+
+### 模块
+
+```text
+  ClipboardMonitor    捕获 + OCR，不写 HTTP
+  DatabaseManager     SQLite 原语（含 sqlite3_backup）
+  clipvault-http      浏览器 TLS/h2 边
+  WebServer           UDS 上的协议与静态面
+  CloudDocsSyncService    每机 trx + blob_keys
+  CloudDocsBackupService  快照生命周期，增量 CAS
+  ArchiveBlobClosure      HTML → CAS 闭包（新资产加正则，不加 trx kind）
+```
+
+生产真源：`Package.swift` → `ClipFlowServer` + `http-front/` + `web/index.html`。文档禁止再把 DuckDB / 仅 Xcode 当唯一路径。
+
+---
+
+## 捕获与判断
+
+**不变式：** capture payload 不可变；判断层 append-only。
+
+```text
+  复制瞬间
+    → clipboard_items  (hash 锚定)
+    → 图：CAS blob + trx upsert（ocr_text 当时为空）
+    → StripOCR 成功
+         → SQLite updateOCR
+         → trx upsert note=ocr   只带 ocr_text，不改 content_hash
+    → 启动若无 sync.ocr_replay_v1
+         → 回放本机已有 ocr_text（禁止只修 going-forward）
+
+  评价 / 星          user_evaluations  append-only；星在 sheet header
+  置顶               pinned_at 投影 + trx pin/unpin；JSON 未置顶 pinnedAt:null
+  关联               clip_link_ops → clip_links / link_count
+                     捕获目标 exact content_hash；笔记目标 UUID
+                     跨机必须 recordLocalClipLink
+```
+
+**OCR 是派生字段。** 对端 `refreshRemoteFields` 按更长文本写入。禁止假定对端会自己再跑 Vision。
+
+禁止：改 timestamp 冒充置顶；`{...old,...item}` 留下旧 `pinnedAt`；判断写进 capture 正文；`text_hash` 当 locator。
+
+检索：FTS `judgment_text` = 评价备注 + View 划线/评论。写完必须 `refreshJudgmentTextLocked`。禁止 `LIKE reader_ops.payload`。
+
+---
+
+## 墙
+
+**不变式：** 列表轻、预览重；变更差分；滚动不重建瀑布流。
+
+```text
+  SSE /api/events
+    ping / connected / update(id) / clip_deleted / clip_pinned / compose_saved
+         │
+         ├─ update+id  → ingestClipById  单条 prepend
+         ├─ 删除/恢复  → applyRemoteClipRemoval   禁止 fetchPage(reset)
+         └─ 其它       → mergeHead  /api/clips?fields=head
+                          sig 不变不 rebuild
+```
+
+**UI 增量 + lazy：** 列表按稳定身份 keyed 调和。墙卡展开用 overlay / 脱离文档流。禁止每次事件整树 `innerHTML`。
+
+| 做 | 禁止 |
+| --- | --- |
+| hover 不改几何 | `translateY` hover + 全量 remount |
+| 图框锁高；禁止 `img.onload → rebuildFromData` | 滑动中全量 rebalance |
+| 置顶排最前；翻页 cursor 只走未置顶 | 钉子混进下一页 |
+| 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
+
+### URL 双面（只在这里写一遍）
+
+| 面 | 行为 |
+| --- | --- |
+| canonical | `openHref` 整链单行（`.url-display` nowrap 横滑） |
+| parse | pretty 多行：`host/path` + `# query` + `# hash` |
+| 打开 | 仅按钮 → `requestOpenExternalUrl`（确认 / 成人门禁） |
+
+禁止可点 `<a href>` / `url-canonical`；禁止信任剪贴板 `style`/`bgcolor`。改展示必须跑 `tests/text-format.test.mjs`。真源 `web/url-safety.mjs`：成人检测只匹配 host labels + path segments，禁止扫 `search`/`hash`。
+
+---
+
+## 笔记
+
+**不变式：** 同一页霜层；源码 \| 预览；保存走 `compose_saved`，禁止 SSE `update` 刷墙。
+
+```text
+  #notesPanel
+    ├─ 左列表     type=note  置顶复用 pinned_at（不进墙 pin rail）
+    └─ 右纸面
+         ├─ 打开 → 预览     新建 → 源码
+         ├─ CodeMirror 6  |  marked 块 hash LRU + React 18 keyed
+         └─ 弹簧揭纸  clip-path inset（数字插值，禁止 tween 字符串）
+              结束必须 clearSheetInline
+
+  多机同一篇
+    保存带 parentHash → 快照 DAG → 行级 diff3（ComposeMerge）
+    分叉重叠段 <<<<<<< hash（两侧排序，交换律）
+    正在输入不覆盖；无 parent 的旧 trx 才 wallTs LWW
+```
+
+禁止：Vditor / Crepe WYSIWYG；textarea 玩具编辑器；另开文档页；笔记另搞 `note_pin` trx。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`。列表失败禁止开空白新笔记。
+
+---
+
+## 会话
+
+**不变式：** 入口与笔记同一套霜层；加载是 `web/session-load.mjs` 的显式 FSM，不是一堆 timer。
+
+```text
+  顶栏「会话」→ #sessionsPanel iframe /trae/?embed=1
+                      │
+                      v
+  reduce: boot → cached → connecting → resync → live
+          paused 禁止 fetch；关面板 pause iframe SSE
+
+  首屏  cv.trae.snap.v1   stale-while-revalidate（禁止当真相，禁止 cache tool 正文）
+  列表  GET /api/events?view=beats    无 tool_input/tool_response（Ask 除外）
+  hook  SSE stub → GET /api/event?id=  追加；列表 1s 合并
+  线程  event_id keyed patch；bundle 就地手风琴
+  置顶  DuckDB session_pins + POST /api/sessions/pin   不进墙 pin rail
+```
+
+**hook 禁止每次拉 `/api/sessions`+全量 events。** bundle 正文 **lazy** 加载。
+
+列语义色：蜂蜜暖度=`fresh/today/week/old`；工具蓝=`xs/s/m/l`。禁止彩虹。默认打开 `last_ts` 最大的会话。用户气泡全展开；工具只在助手侧压缩，最后一条操作始终展开。
+
+禁止：`setInterval` 刷 DOM；每次 hook 整页 `innerHTML`；overlay 盖住后续气泡；embed 窄宽叠成 30vh。
+
+新加载 bug：先补 `tests/session-load.test.mjs` 再改 fetch。
+
+---
+
+## 归档与阅读
+
+**不变式：** 离线归档 = 根 HTML + 它点名的全部 CAS（闭包），不是「一篇 sha」。
+
+```text
+  手动「归档网页」
+    → WKWebView + Readability.js（必须在二进制同目录）
+    → ArchiveBlobClosure.keys(root, html)
+    → meta.closure = {v:1, root, blobs:[root, …deps]}
+    → web_archive.blob_keys = blobs
+    → 每个 key → live/attach
+
+  pull：blob_keys 齐了才 apply（缺图 cursor 不推进）
+  404 / 启动 repair
+    hydrateBlob: live/attach ∪ backup/hosts/*/blobs ∪ backup/blobs
+    齐了再发一条完整 web_archive
+```
+
+View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 `/api/archive/asset`。阅读态（划线/评论/续读）进 SQLite，不进 capture HTML，不进 IndexedDB。
+
+抽取：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」。X Article 未解析必须 `cv-x-dropped`，禁止只凭 `cv-x-article` 当成功。
+
+选区条：28px 浅玻璃；黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**。
+
+代码：`ArchiveBlobClosure.swift` · `enqueueArchive` / `repairArchiveClosures` / `hydrateBlob`。nmem `clipvault_archive_closure_sync_20260817`。
+
+---
+
+## 同步
+
+```text
+  本机事件
+    → CloudDocsSyncService.recordLocal*
+    → outbox → trx/{host}/{seq}.json
+    → blob_keys 点名的对象 → live/attach/{sha}.bin
+    → iCloud Drive 运输
+    → 对端 pull apply（grow-only 字段：ocr_text 更长才写）
+```
+
+禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite。
+
+---
+
+## 备份
+
+**不变式：** 增量是核心。任何目标每轮 forceFull = 非法。零例外（含 quark）。
+
+```text
+  sqlite3_backup ──► backup/hosts/{hostId}/latest/
+  blobs CAS
+    目标已有且 size>0 且一致 → skip
+    missing / size0 / mismatch → 单文件 rewrite + 退避
+
+  gdrive / icloud
+    cloudSafe：禁 F_FULLFSYNC；禁紧循环 mass copyItem
+    根优先 My Drive/ClipVault/cvbak（避开 wedged backup/）
+```
+
+禁止：热 copy 开着的 db；双机写同一 `latest/`；把 bulk full 当默认。自检：`rg -n 'forceFullCopy:\s*true' ClipFlow/` 应无匹配（或仅拒绝分支）。
+
+事故：`docs/incident-20260813` 叙事已迁出；nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813`。
+
+---
+
+## Metrics
+
+本机 `ui-metrics.db`（**不同步、不含正文**）是 UI 优化输入。
+
+```text
+  感觉抖 / 白屏 / 慢
+       │
        v
   GET /api/ui-metrics/recent?name=&limit=40
-  GET /api/ui-metrics/summary          # 24h
-  #debug  (Cmd-Shift-M) 本页环缓冲
-       |
-       +-- 能归因 (name+phase+kind+dy) --> 改产品 --> 同一 name 对照
-       +-- 不能归因 --------------------> 先补点，再改
+  GET /api/ui-metrics/summary
+  #debug  Cmd-Shift-M
+       │
+       ├─ 能归因 (name+phase+kind+dy) → 改产品 → 同一 name 对照
+       └─ 不能归因                   → 先补点，再改
 ```
 
-| 症状 | 看哪些 name | 不够时补什么 |
-| --- | --- | --- |
-| 墙刷新慢 / 合并卡 | `wall_fetch` `wall_merge` `wall_paint` `wall_resync` | `phase` `bytes` `reason` |
-| 打开笔记/会话抖 | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` | `phase=morph\|live` `kind`=节点 class |
-| **关闭笔记，顶栏从遮挡里出来、墙不稳** | `chrome_shift` phase=close；长周期 `wall_cls` | `dy`（首卡 y 差）`reason`（top-bar / chips / m3-card） |
-| 笔记内输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` | `interaction` |
-| 会话白屏 | `trae_sessions_skip` vs `trae_sessions_paint` `trae_sessions_layout` | `reason` empty/paused/notready |
-
-**长周期观测**：不必一直盯着复现。`ui-metrics.db` 留 30 天；日常开着页面，关几次笔记后 `recent?name=chrome_shift` 和 `wall_cls` 就能看出顶栏是否在解 inert / 去掉 `contain` 时跳。`#debug` 热表把 `chrome_shift`/`wall_cls` 标红阈值与 CLS 相同（value×1000≥80 或 dy 绝对值大）。
-
-| Do | Don't |
+| 症状 | name |
 | --- | --- |
-| Agent 自己拉 metrics；用户只负责「感觉抖」 | 让用户指出哪条红 |
-| `notes_close.dur_ms` = 开着墙钟；关动画看 `sheet_morph` phase=close | 把 hold 时长当 morph 耗时 |
-| 关面板后的墙 CLS 打在 `chrome_shift`（notes 观察根不包含 top-bar） | 以为 `notes_cls` 能看见顶栏 |
+| 墙刷新 | `wall_fetch` `wall_merge` `wall_paint` `wall_resync` |
+| 开合 sheet | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` |
+| 关笔记顶栏解遮挡 | `chrome_shift` phase=close；长周期 `wall_cls` |
+| 笔记输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` |
+| 会话白屏 | `trae_sessions_skip` vs `trae_sessions_paint` `trae_sessions_layout` |
 
-### 2.4 隐私与本机
+`notes_close.dur_ms` = 开着墙钟，不是关动画。关动画看 `sheet_morph` phase=close。Agent 自己拉 metrics。
 
-| Do | Don't |
-| --- | --- |
-| 默认数据在用户目录；备份在用户自己的 iCloud Drive | 未说明就上传第三方 |
-| 剪贴板当敏感数据：日志脱敏、不写 nmem 密钥 | 把 db 路径+密钥贴进 chat/nmem |
-| 个人本机优先：能 CloudDocs 就别为签名折腾 | 为「正式容器」阻塞个人可用备份 |
-
-### 2.5 协作与 agent 行为（本仓库）
-
-| Do | Don't |
-| --- | --- |
-| 可写可执行：直接改、构建、验证、**及时 commit + push**（用户已授权类任务时） | 用 Ask 模式推脱简单修复；列半成品选项让用户挑 |
-| 非琐碎改动：先对齐架构再动手 | 边想边堆、只改表面文案假装品牌迁移完成 |
-| 用户可见字符串优先中文（UI）；标识符可英文 | UI 英文硬编码一堆无必要 |
-| 改完更新 README / 本 AGENTS 若触及产品边界 | 架构已 SQLite 却 README 仍 DuckDB |
-| 可独立描述的单元完成后立刻入库并推远程 | 长时间本地脏树 / 只 stash 不提交 / 攒大批再推 |
-
-#### 改动及时提交并推送（硬约束 · 与 §0.1 同一条）
-
-任务在 **origin 上可见** 之前不算完成。本机验证、LaunchAgent 部署、口头「已修好」都不能代替 push。
-
-| 规则 | 说明 |
-| --- | --- |
-| **及时 commit** | 完成一个可独立描述的单元（修 UI / 同步 / 单 API / 一批 docs）后 **立即** `git commit`，不要攒大批未提交改动。 |
-| **及时 push** | commit 后 **立刻** `git push origin <branch>`（默认 `master`），不要等用户问「推了吗」。推送失败须在回复里说明，不得假装已推送。 |
-| **粒度** | 一步一提交；message = short subject + 空行 + 完整句子说明 why。 |
-| **不混装** | 无关重构、无关文件不要塞进同一 commit。 |
-| **禁止** | 用长期 `git stash` 代替提交；同步 remote 前若必须 stash，pull 后应恢复或明确丢弃，**不得**留下「忘记提交的本地 WIP」。 |
-| **回复必带** | 本地 HEAD、是否已 `push`、远程范围（例如 `e6f7a81..1db2470 master`）。 |
-
-推荐节奏：
-
-```text
-改完一个单元 → 验证 → git status/diff → commit → push → 再开下一单元
-```
-
-#### nmem：结构化知识，不是流水账（硬约束 · 与 §0.2 同一条）
-
-nmem 是跨会话的 **知识库**，不是日记、不是 git log、不是「本回合做了什么」的副本。
-
-| 写 | 不写 |
-| --- | --- |
-| 可复用的机制、约束、误判根因、拓扑 | 逐步操作（先 grep 再改文件再重启） |
-| 一句话结论 + 证据（commit / 日志 / 命令结果） | 无结论的聊天压缩 |
-| 下次怎么判断、禁止什么 | 已过期的临时端口/一次性 PID |
-| ASCII graph：层、数据流、谁依赖谁 | 只有散文、读完仍画不出图 |
-
-**每条记忆最低结构：**
-
-1. 一句话结论  
-2. ASCII graph（设计 / 流程 / 关系，至少一张）  
-3. 证据（commit、路径、观测）  
-4. 下次：怎么做 / 不要做什么  
-
-```text
-  Safari/Chrome tab
-       |  cookies + (browser SOCKS / extension)
-       v
-  medium.com  OK
-       .
-  ClipVault UI  --POST /api/archive-->  ClipFlowServer
-                                            |
-                                            v
-                                      offscreen WKWebView
-                                            |
-                         system proxy off --+--> direct  ==> timeout
-                         :2080 listening --+--> SOCKS    ==> article
-```
-
-关系用 `evolves_from` / `memory_relation_add` 连已有条目，禁止平行再写一篇同题流水账。密钥、token、完整 JWT **永不**进 nmem。
+备份徽章走 SSE `backup_status` + `?lite=1`，禁止 30s 轮询 `/api/backup/status`。
 
 ---
 
+## HTTP / SSE 控制面
 
-### 前端部署门禁（必过）
+```text
+  EventSource /api/events
+    retry: 3000
+    15s  : ping  + {"type":"ping"}
+    每连接队列 32；满 → coalesce resync_required（禁止静默踢）
+    onopen / visibility / online → scheduleResync → mergeHead
+                                   必须同时 mergeNotesHead
 
-改 `web/index.html` 后、**push / 同步到本机 :8080 前**必须：
+  禁止 onerror 里 close()+setTimeout 当唯一重连
+  HTTP/2 下 EventSource 占一条 stream
+  needs_user：TraeAskFanIn 并进墙 SSE，禁止每页再挂 /trae/api/stream
+```
+
+---
+
+## 隐私
+
+默认数据在用户目录；备份在用户自己的云盘。剪贴板当敏感数据：日志脱敏；密钥/token **永不**进 nmem / chat / commit。
+
+---
+
+## Android
+
+路径 `android/`。备份阅读器 + 前台粘贴/分享；**不做**后台剪贴板监听。SAF 优先 `ClipVault/cvbak`。发布 `.github/workflows/android-apk.yml`。
+
+---
+
+## 运维
+
+### 数据目录（incident 2026-08-11）
+
+```text
+  LaunchAgent env  KEEPSAKE_HOME / CLIPVAULT_HOME
+       │
+       ├─ 真库（本机当前）  ~/Library/Application Support/Keepsake
+       └─ 历史/文档约定    ~/Documents/ClipFlow
+  无 env 裸启 → 空库 → UI 像「历史全丢」
+```
+
+禁止：`nohup ClipFlowServer &`；重启后不跑校验；未确认路径就删/覆盖 db。
+
+「历史丢失」30 秒：
+
+```text
+  对比两处 clipflow.db 体积与 COUNT(*)
+  Documents 大而 API 空 → 错 home → ./scripts/restart-clipflow.sh
+  两边都空 → 再查备份 snapshots
+```
+
+完整复盘：`docs/incident-20260811-wrong-data-home.md`。
+
+### 唯一重启路径
+
+```bash
+./scripts/deploy-server.sh        # swift + cargo clipvault-http + launchctl + verify
+./scripts/restart-clipflow.sh     # 已有二进制
+./scripts/verify-data-home.sh     # 失败 = 禁止说「已恢复」
+# HTTPS 自检走 --noproxy '*'；浏览器 https://127.0.0.1:8080
+```
+
+### 前端门禁
+
+改 `web/index.html` 后、push / 部署前：
 
 ```bash
 ./scripts/check-frontend.sh
 ```
 
-门禁是 `scripts/check-frontend.sh` 的**硬编码** `node --test` 文件列表（不 glob）。`deploy-server.sh` 只跑这一列表。**不要**把 `node --test tests/*.test.mjs` 写成与脚本等价——新测试文件必须追加进脚本才会进部署门禁。
+门禁是 `check-frontend.sh` 的**硬编码** `node --test` 文件列表（不 glob）。新测试必须追加进脚本。`node --check` 不过禁止上线。
 
-`tests/frontend-smoke.test.mjs` 会用 `node --check` 校验主脚本语法，并回归 `anyAvail` 等易被注入截断的表达式。**语法不过禁止上线。**
-
-## 3. 技术真源（防过时）
-
-| 层 | 真源 |
-| --- | --- |
-| 构建 | `swift build --product ClipFlowServer` |
-| UI | `web/index.html`（由 daemon 读盘提供） |
-| 库 | `~/Documents/ClipFlow/clipflow.db` |
-| 备份 | CloudDocs `…/ClipFlow/backup/` + `CloudDocsBackupService` |
-| CI | `.github/workflows/xcode-build.yml`（现为 SPM + Node tests，文件名历史遗留） |
-| 废弃叙述 | DuckDB 主存储、仅靠 `ClipFlow.xcodeproj`+`libDuckDB.a` 的安装说明 |
-
-模块深度约定（仍适用）：
-
-- **Monitor**：捕获与 OCR，不写 HTTP  
-- **DatabaseManager**：存储与备份原语（含 `sqlite3_backup`）  
-- **WebServer**：协议与静态面，不塞业务特例  
-- **CloudDocsBackupService**：备份策略与快照生命周期  
-- **CloudDocsSyncService**：每机 trx + 闭包 `blob_keys`；附件只走 `live/attach`  
-- **ArchiveBlobClosure**：归档 HTML → CAS 闭包（新资产种类加正则，不加 trx kind）  
-
----
-
-## 4. 改品牌时的检查清单
-
-改 ClipVault 相关呈现时至少碰：
-
-- [ ] `README.md` 标题与叙事  
-- [ ] `web/index.html` 标题、顶栏、备份侧栏文案  
-- [ ] 用户可见 toast / 空状态  
-- [ ] 本 `AGENTS.md` 若规则变化  
-- [ ] **不必**强行一次改完 LaunchAgent label / 可执行文件名（可跟版本做）  
-
----
-
-## 5. 一句话给 agent
-
-**ClipVault = 个人剪贴板记忆产品。**  
-做终局、像产品、本机优先、列表轻预览重、备份可恢复。  
-历史文件夹名 `ClipView` 不定义品牌。
-
----
-
-## Android 客户端
-
-| 项 | 值 |
-| --- | --- |
-| 路径 | `android/` |
-| 定位 | 备份阅读器 + 前台粘贴/分享；**不做**后台剪贴板监听 |
-| 数据 | SAF 读优先 `ClipVault/cvbak`，兼容 `ClipVault/backup` / `Keepsake/backup`（与 Mac GDrive fan-out 一致） |
-| 发布 | `.github/workflows/android-apk.yml` → artifact / tag Release |
-
----
-
-## 6. 数据目录铁律（incident 2026-08-11）
-
-**真库默认：`KEEPSAKE_HOME=~/Documents/ClipFlow`（`clipflow.db` + `blobs/`）。**  
-`~/Library/Application Support/Keepsake` 只是历史/回落路径；**无 env 裸启会打开空库，UI 像「历史全丢」。**
-
-### 禁止
-
-- `nohup ClipFlowServer &` / 直接跑二进制替代 LaunchAgent  
-- `launchctl` 重启后不跑校验  
-- 未确认路径就对 db 做删除、覆盖、migration「修复」  
-
-### URL 双面展示（禁止再拆丢）
-
-| 面 | 行为 |
-| --- | --- |
-| **canonical** | `openHref` 整链 **单行**（`.url-display` nowrap 横滑） |
-| **parse** | pretty 正文多行：`host/path` + `# query` 键值 + `# hash` |
-| **打开** | 仅按钮 → `requestOpenExternalUrl`（确认 / 成人门禁） |
-
-**禁止**只留单行不要解析，或只展开参数却做成可点 `<a>`。改 URL 展示必须同时跑 `tests/text-format.test.mjs` 的 dual surface 用例。
-
-### 必须
-
-```bash
-# 唯一支持的重启 / 换二进制
-./scripts/deploy-server.sh          # build release + install + launchctl + verify
-# 或已装好二进制时：
-./scripts/restart-clipflow.sh
-./scripts/verify-data-home.sh       # 失败 = 禁止告诉用户「已恢复」
-```
-
-### 用户报「历史丢失」时 30 秒分流
+### commit / push
 
 ```text
-对比:
-  ~/Documents/ClipFlow/clipflow.db          体积 / sqlite COUNT(*)
-  ~/Library/Application Support/Keepsake/clipflow.db
-若 Documents 大而 API 空 → 错 home → restart-clipflow.sh
-若两边都空 → 再查 ~/ClipVault-Backups/Quark/backup/snapshots/
+改完一个单元 → 验证 → git status/diff → commit → push → 再开下一单元
 ```
 
-完整复盘：`docs/incident-20260811-wrong-data-home.md`
+粒度：一步一提交；message = subject + 空行 + why。不混装。回复带 HEAD、是否已 push、远程范围。
+
+### nmem
+
+写：机制、约束、误判根因、拓扑。不写：逐步操作、聊天压缩、一次性 PID。
+
+每条最低：结论 · ASCII · 证据 · 下次怎么做。用 `evolves_from` 连旧条，禁止平行再写同题流水账。
 
 ---
 
-## 7. 备份增量铁律（incident 2026-08-13 · GDrive EDEADLK）
+## 协作
 
-**增量是核心能力。对任何目标（含 quark / 本地 staging）每周期全量重拷 = 偷懒 / 无能，禁止。零例外。**
+可写可执行：直接改、构建、验证、及时入库。非琐碎改动先对齐架构。用户可见字符串优先中文。改完若触及产品边界，更新 README / 本文。交叉引用写章节名（`AGENTS.md · 墙`），禁止 `§n`。
 
-### 背景（必须记住）
-
-| 项 | 事实 |
-| --- | --- |
-| 表象 | `blobs 校验失败 missing=N` + `Resource deadlock avoided`（EDEADLK） |
-| 真因 | File Provider（`~/Library/CloudStorage/GoogleDrive-*`）不是块设备；高频 create/unlink + `F_FULLFSYNC` 把域楔死 |
-| 直接触发 | 旧逻辑对 **gdrive/icloud 每轮 `forceFullCopy=true`**（为修 clonefile 假成功而矫枉过正） |
-| 对照 | iCloud 增量正常；夸克本地 APFS 暂存可 full；GDrive 旧路径 `ClipVault/backup` 楔死后连 mkdir 也 EDEADLK |
-| 修复 | commit `3cb4d9a`：size-match 增量 + cloudSafe + 新根 `ClipVault/cvbak` |
-
-### 禁止（agent / 代码 / 运维）
-
-| 禁止 | 说明 |
-| --- | --- |
-| **任何目标每轮 forceFull** | `forceFullCopy=true` **一律非法**（**含 quark / 本地 staging**；无白名单） |
-| **CloudStorage 路径 `F_FULLFSYNC`** | 无磁盘 barrier 语义，只会加压 File Provider 协调路径 |
-| **为「保险」重写全部 CAS** | 完整度靠 **verify + 只修 missing/sizeMismatch**，不靠全量重拷 |
-| **把 bulk full 当默认** | 「简单粗暴全拷」在 PR/review 直接打回 |
-
-### URL 双面展示（禁止再拆丢）
-
-| 面 | 行为 |
-| --- | --- |
-| **canonical** | `openHref` 整链 **单行**（`.url-display` nowrap 横滑） |
-| **parse** | pretty 正文多行：`host/path` + `# query` 键值 + `# hash` |
-| **打开** | 仅按钮 → `requestOpenExternalUrl`（确认 / 成人门禁） |
-
-**禁止**只留单行不要解析，或只展开参数却做成可点 `<a>`。改 URL 展示必须同时跑 `tests/text-format.test.mjs` 的 dual surface 用例。
-
-### 必须
-
-| 必须 | 说明 |
-| --- | --- |
-| **增量 CAS 镜像** | 目标已存在且 `size` 一致且 `size > 0` → **skip** |
-| **只修坏的** | missing / size 0 占位 / sizeMismatch → 单文件 rewrite + 退避 |
-| **forceFull 零例外** | 代码里若传入 true 必须拒绝/降级为增量；**quark 也不例外** |
-| **cloudSafe 写路径** | gdrive/icloud：禁 FULLFSYNC；流式写或等价；EDEADLK 退避；禁止紧循环 mass `copyItem` |
-| **最新快照面** | 灾备主面是 `latest/` + `blobs/` CAS；named snapshot 可 best-effort，**不得**为 snap 失败否定已成功的增量 latest |
-| **路径楔死** | 换干净子树（如 `cvbak`）或本地暂存 + 诚实 `ok:local_staging`；**禁止**对 wedged 树死磕全量 |
-
-### 代码锚点
-
-```text
-CloudDocsBackupService.syncBlobsToCAS
-  forceFullCopy: false  → 全目标强制（含 quark）；true 会 log 拒绝并降级
-  cloudSafe: true       → gdrive + icloud
-  size-match continue   → 增量核心
-
-BackupDestinations.backupRoot(gdrive)
-  优先 My Drive/ClipVault/cvbak   # 避开 wedged backup/
-```
-
-### 自检（改备份相关代码后）
-
-```bash
-# 1) 源码不得再出现 forceFullCopy: true（任何目标，含 quark）
-rg -n 'forceFullCopy:\s*true|forceFull\s*=\s*\(dest' ClipFlow/
-# 期望：无匹配；或仅有「REFUSED forceFullCopy」拒绝分支
-
-# 2) 跑一次备份：各 dest 日志应为 +0/repairK 或小增量，不是 +N 全量
-# [Backup] dest=gdrive|quark|icloud ok … blobs=N +0/repair0   ← 稳态
-# +N 仅允许「目标几乎为空、首次灌库」的一次，禁止周期性全量
-```
-
-### 错误心态（写进复盘）
-
-| 错误 | 正确 |
-| --- | --- |
-| 「全量最稳」 | 全量最稳的是 **语义**（sqlite3_backup 快照 + CAS 校验），不是 **每轮字节重传** |
-| 「File Provider 不靠谱所以狂写」 | 越狂写越楔死；靠增量 + 校验 + 退避 |
-| 「clonefile 假成功 → 永远 full copy」 | clonefile 禁用于云目标即可；**增量 full-byte 只针对缺失文件** |
-| 「quark 是本地盘可以全量」 | **不行**。本地也增量；full 浪费 IO，且会把「全量习惯」带回云目标 |
-
-相关 nmem：`clipvault_research_gdrive_fileprovider_edeadlk_20260813` · `clipvault_fix_gdrive_edeadlk_cvbak_20260813`
+品牌检查：README 标题、`web/index.html` 顶栏、toast/空状态。不必一次改完 LaunchAgent label。
 
 ---
 
-## 8. 链接与 HTML 安全门禁（公开场合 · 成人内容）
+## 附录：指针
 
-**卡片是预览，不是浏览器。禁止把剪贴板 HTML/URL 渲染成可误触的可点击链接。**
-
-### 问题（incident 2026-08-13）
-
-| 问题 | 原因 / 风险 |
+| 主题 | 去哪 |
 | --- | --- |
-| HTML 卡片黑底白字 | Chrome 暗色页 / 选区复制带 `style=background:#000;color:#fff` 或 `bgcolor`，旧 sanitize 只清部分标签 |
-| 成人 URL 误触 | 公开场合一点即 `window.open` 伤风败俗 |
-| 可点击 `<a href>` / `url-canonical` | 预览区像网页，误触即外跳 |
+| 视觉 token | `docs/design-taste.md` |
+| 归档闭包 | nmem `clipvault_archive_closure_sync_20260817` |
+| 分层哲学 | nmem `clipvault_design_philosophy_layered_memory_20260814` |
+| 阅读态 SQLite | nmem `clipvault_reader_learning_layer_sqlite_20260814` |
+| Compose | nmem `c2c20497-bc52-4204-99fc-34191bb98a99` |
+| 评论 header | nmem `clipvault_reader_comment_header_strut_20260814` |
+| 错 home | `docs/incident-20260811-wrong-data-home.md` |
+| GDrive EDEADLK | nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813` |
+| URL/HTML 安全 | nmem `clipvault_gate_url_html_safety_20260813` |
+| SQLite 运维 | `.trae/skills/sqlite-runtime-tricks/` |
+| clip-link | `docs/feature-clip-link.md` |
+| 归档功能 | `docs/feature-url-archive.md` |
 
-### 禁止
-
-| 禁止 | 说明 |
-| --- | --- |
-| 卡片内可导航 `<a href>` | 富文本 / pretty URL / 任意 innerHTML 注入 |
-| 无确认 `window.open` 外链 | 尤其成人/敏感域名 |
-| 信任剪贴板 `style`/`bgcolor`/`color` | 一律剥离后再渲染 |
-| 用「方便」恢复一键裸开链接 | PR 直接打回 |
-
-### URL 双面展示（禁止再拆丢）
-
-| 面 | 行为 |
-| --- | --- |
-| **canonical** | `openHref` 整链 **单行**（`.url-display` nowrap 横滑） |
-| **parse** | pretty 正文多行：`host/path` + `# query` 键值 + `# hash` |
-| **打开** | 仅按钮 → `requestOpenExternalUrl`（确认 / 成人门禁） |
-
-**禁止**只留单行不要解析，或只展开参数却做成可点 `<a>`。改 URL 展示必须同时跑 `tests/text-format.test.mjs` 的 dual surface 用例。
-
-### 必须
-
-| 必须 | 说明 |
-| --- | --- |
-| **presentation sanitize** | 对 DOM **全部元素**去 style/bgcolor/color/face…；CSS 再 `background:transparent !important` |
-| **neutralize anchors** | `<a>` → 不可点 `span.url-inert`（文案保留） |
-| **URL 展示** | `div.url-display` 纯文本，**不是** `<a>` |
-| **打开路径唯一** | `requestOpenExternalUrl(href)`；仅 http(s) |
-| **成人/敏感确认** | `isAdultRiskUrl` 命中 → 强确认文案后再 open；未命中也要 confirm（显式按钮意图） |
-| **检测范围** | 只匹配 **host labels** + **path segments**；**禁止**扫 `search`/`hash`（JWT/`#id_token` 会误中 `xxx`）。`medium.com` 等出版站 allowlist。真源 `web/url-safety.mjs`，与 `index.html` 同步 |
-| **刷新不跟 locator** | 墙跳转（`#h=` / `#id=`）落地后 `consumeWallLocatorHash`；禁止把 hash 留给下一次 F5 再 `jumpToLocator` |
-| **事件兜底** | capture 阶段拦截 `.m3-card a[href]` 误点 |
-
-### 自检
-
-```bash
-rg -n 'url-canonical|window\.open\(' web/index.html
-# 期望：无 url-canonical；window.open 仅出现在 requestOpenExternalUrl 内
-rg -n 'requestOpenExternalUrl|isAdultRiskUrl|url-display|transparent !important' web/index.html
-node --test tests/notes-render.test.mjs tests/frontend-smoke.test.mjs
-```
-
-### 代码锚点
-
-```text
-web/notes-render.mjs     sanitizePresentation · neutralizeAnchors
-web/index.html           renderNotesFragment · requestOpenExternalUrl · url-display
-AGENTS.md §8             本门禁
-```
-
-相关 nmem：`clipvault_gate_url_html_safety_20260813`
-
----
-
-## 9. Trae hook 过程库（独立 DuckDB，不动 clipflow.db）
-
-Hook 事件进 **单独 DuckDB**，禁止写入 `clipboard_items`。
-
-| 项 | 值 |
-| --- | --- |
-| 代码 | `trae_hooks/` |
-| 库 | `$CLIPVAULT_HOME/trae/hook_events.duckdb` |
-| Quack | `127.0.0.1:9494`（单写者） |
-| HTTP / UI | ClipVault `:8080` 弹出 `#sessionsPanel`（`GET /trae/` 反代）；`:9488` 只给 DuckDB 进程，浏览器不直开 |
-| LaunchAgent | `com.davidmusk.clipvault-trae` |
-| Trae 配置 | `~/.trae-cn/hooks.json`（官方 `{version,hooks}`） |
-| wrapper | `~/.trae-cn/hooks_env/clipvault_hook.sh`（**禁止空格路径**，Trae 不引号） |
-| d2 | `ssh d2` 同套 hook；Quack 经 **Tunnel Manager** `clipvault-quack-d2`（`127.0.0.1:19494`，勿占 d2 `:9494` metrics） |
-| spool | `/var/tmp/clipvault-hooks/spool`（Quack 不通只落盘，flush 重试） |
-
-安装：`bash trae_hooks/install.sh`。改配置后 **硬重启 Trae** 才加载 hook。采集脚本必须永远 exit 0。
-
-会话时间线是长期前端，**入口与笔记同一套**：ClipVault 顶栏「会话」弹出霜层面板，iframe 同源 `/trae/?embed=1`。禁止再让用户去 `:9488`。进程仍听 `127.0.0.1:9488`，Swift 只对 loopback 反代 `/trae`（含 `/trae/api/stream` SSE）。按 **IM 俯瞰**：用户右 / 助手左 / 工具与系统分色。会话列与消息列 **分两个 overflow**，禁止共用页面滚动。新消息在跟底时钉住 thread 底部。进入默认打开最新会话（`last_ts` 最大，不是置顶后的第一张）。会话可 **置顶**：本机 DuckDB `session_pins` + `POST /api/sessions/pin`，钉在列顶；**不进**墙 pin rail，不复用 clip `POST /api/clips/pin`。列上用柔和语义色表达属性：蜂蜜暖度=更新时间（`fresh/today/week/old`），工具蓝浓度=消息量级（`xs/s/m/l` + 「N 条」）。禁止彩虹装饰。Swift `/trae` 反代必须转发 POST（置顶），不得只 GET。时间按 **本地 `YYYY-MM-DD HH:mm:ss`**（库 ts 为 naive UTC）。bundle 内每条可展开看全文。**所有用户输入展开**；工具压缩只在助手侧，**最后一条操作始终展开**。hook 每条事件 `POST /api/notify` 推 SSE（Quack INSERT 不会发 SSE）。`permission_prompt` / `ask_user_question` 经 SSE `needs_user` 推墙，hook 可 `osascript` 通知。实时走 **nmem SSE 契约** `GET /api/stream`（heartbeat + bounded resync），禁止 `setInterval` 刷 DOM。线程 **keyed patch**（`event_id`），禁止每次 hook 整页 `innerHTML`；bundle 正文 **lazy** 加载。`/api/events` 列表不含 `tool_input`/`tool_response`（Ask 除外）；hook 只 `GET /api/event?id=` 追加，列表 1s 合并，禁止每次 hook 重拉 sessions+全量 events。目录项就地展开（一组只开一条），禁止 overlay 盖住对话。JSON / Markdown 走 `web/session-render.mjs` + `markdown-render.mjs` / `text-format.mjs`。角色色与 chrome 真源：`docs/design-taste.md`。禁止 DIY markdown 语法。气泡内等宽必须换行，禁止撑破卡片。
-
-
+一句话：**ClipVault = 个人剪贴板记忆。** 终局、像产品、本机优先。历史文件夹名不定义品牌。

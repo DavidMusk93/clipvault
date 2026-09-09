@@ -81,7 +81,7 @@ test('frontend wires metrics without sending titles', () => {
 test('AGENTS.md requires metrics-based UI iteration', () => {
   const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   assert.match(agents, /开发迭代 = metrics-based optimization/);
-  assert.match(agents, /### 2\.3\.2 Metrics-based optimization/);
+  assert.match(agents, /^## Metrics$/m);
   assert.match(agents, /chrome_shift/);
   assert.match(agents, /wall_cls/);
   assert.match(agents, /先补点，再改/);

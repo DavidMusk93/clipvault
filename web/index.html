@@ -819,7 +819,7 @@
     .format-toolbar .fmt-btn.is-active {
       background: var(--ink); color: #fff; border-color: transparent;
     }
-    /* URL display — never an <a href> (AGENTS §8 链接安全) */
+    /* URL display — never an <a href> (AGENTS.md · 墙 · URL 双面) */
     .url-display {
       display: block;
       margin: 0 0 8px;
@@ -5125,7 +5125,7 @@ window.ClipViewMasonry = Masonry;
           if (!removed) break;
         }
 
-        // AGENTS §8: strip ALL presentation (Chrome dark paint → black cards)
+        // AGENTS.md · 墙: strip ALL presentation (Chrome dark paint → black cards)
         root.querySelectorAll('*').forEach(el => {
           el.removeAttribute('style');
           el.removeAttribute('bgcolor');
@@ -6007,7 +6007,7 @@ window.ClipViewMasonry = Masonry;
         FORBID_ATTR: ['style'],
         ALLOW_DATA_ATTR: false,
       });
-      // AGENTS §8: no clickable links in card
+      // AGENTS.md · 墙: no clickable links in card
       try {
         const doc = new DOMParser().parseFromString('<!doctype html><body>' + safe, 'text/html');
         const root = doc.body || doc;
@@ -6369,7 +6369,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     /**
-     * AGENTS §8 链接安全门禁
+     * AGENTS.md · 墙 · URL 双面 链接安全门禁
      * - 卡片内禁止可点击 <a href>
      * - 打开外链须显式按钮
      * - 成人/敏感：只看 host labels + path segments（keep in sync with web/url-safety.mjs）
@@ -6459,7 +6459,7 @@ window.ClipViewMasonry = Masonry;
         ? '<span class="url-risk-badge" title="成人/敏感内容风险"><span class="material-symbols-outlined" style="font-size:14px">warning</span>敏感 · 打开需确认</span>'
         : '';
       const cls = risky ? 'url-display is-adult-risk' : 'url-display';
-      // Never use <a href> — text only (AGENTS §8)
+      // Never use <a href> — text only (AGENTS.md · 墙 · URL 双面)
       return `${badge}<div class="${cls}" role="text" title="不可点击；请用「打开」按钮">${esc(text)}</div>`;
     }
 

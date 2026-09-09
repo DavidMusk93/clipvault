@@ -2,8 +2,8 @@
 
 > **长期产品**：跨 Mac Web / Android / 未来端共用同一套视觉身份。  
 > 改颜色、标签、来源色前先改本文，再改实现。  
-> 与 `AGENTS.md` §2 产品 taste 配套：叙事气质 + 本文件 = 可执行 token。  
-> **沉淀规则**：Owner 的审美裁决必须写入 **本文件和/或 nmem**（见 `AGENTS.md` §2.0），逐渐形成个性化设计语言——禁止只改实现、不回写真源。
+> 与 `AGENTS.md` · 身份 配套：叙事气质 + 本文件 = 可执行 token。  
+> **沉淀规则**：Owner 的审美裁决必须写入 **本文件和/或 nmem**（见 `AGENTS.md` · 身份），逐渐形成个性化设计语言——禁止只改实现、不回写真源。
 
 ## 一句话
 
@@ -107,7 +107,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | Web | `web/index.html` — `:root` type tokens、`.badge.type-*`、`typeMeta()` |
 | 归档 View | `web/assets/archive-view.css` + `archive-reader.js` `enhanceTechnicalMedia` |
 | Android | `ui/ContentRender.kt` `typeStyle()`；`MainActivity.kt` `opsSourceStyle()` |
-| 产品约定 | `AGENTS.md` §2 + **本文** |
+| 产品约定 | `AGENTS.md` · 身份 + **本文** |
 
 ## 数据语义（与视觉配套）
 

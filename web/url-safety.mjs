@@ -1,5 +1,5 @@
 /**
- * ClipVault §8 adult-risk URL gate.
+ * ClipVault URL 双面 / 成人门禁（AGENTS.md · 墙）。
  *
  * Scan host labels + path segments only. Never query/hash: OAuth/JWT fragments
  * (e.g. Medium `#id_token=…CSkbxxx…`) are dense base64 and false-positive on

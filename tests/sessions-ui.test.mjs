@@ -153,14 +153,15 @@ test('user turns stay open; agent tools compress on the left', () => {
   assert.doesNotMatch(html, /\.history-item\[open\] \.history-item-body \{[^}]*position:\s*absolute/);
 });
 
-test('AGENTS.md 2.3 encodes UI incremental + lazy', () => {
+test('AGENTS.md 墙 encodes UI incremental + lazy', () => {
   const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
   const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
-  const eng = agents.split('### 2.3 工程')[1]?.split('### 2.3.1')[0] ?? '';
-  assert.match(eng, /UI 增量 \+ lazy/);
-  assert.match(eng, /lazy/);
-  assert.match(eng, /脱离文档流/);
-  assert.match(eng, /整树 `innerHTML`/);
+  const wall = agents.split('## 墙')[1]?.split('## 笔记')[0] ?? '';
+  assert.ok(wall.length > 0, 'missing ## 墙 … ## 笔记');
+  assert.match(wall, /UI 增量 \+ lazy/);
+  assert.match(wall, /lazy/);
+  assert.match(wall, /脱离文档流/);
+  assert.match(wall, /整树 `innerHTML`/);
   assert.match(agents, /bundle 正文 \*\*lazy\*\* 加载/);
   assert.match(taste, /禁止 `position:absolute` overlay/);
   assert.match(taste, /手风琴/);
