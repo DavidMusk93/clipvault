@@ -71,6 +71,9 @@ test('browser edge is Rust HTTPS/2 on the only TCP port', () => {
   assert.match(cargo, /name = "clipvault-http"/);
   assert.match(rust, /alpn_protocols = vec!\[b"h2"\.to_vec\(\), b"http\/1\.1"\.to_vec\(\)\]/);
   assert.match(rust, /UnixStream::connect/);
+  assert.match(rust, /ClipVault Local CA/);
+  assert.match(rust, /write_local_ca/);
+  assert.match(rust, /ca\.pem/);
   assert.match(front, /clipvault-http/);
   assert.match(origin, /OriginUnixServer/);
   assert.match(web, /HttpFrontProcess/);

@@ -71,30 +71,19 @@ fn boxed_incoming(body: Incoming) -> RespBody {
 
 fn ensure_identity(dir: &Path) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let ca_path = dir.join("ca.pem");
     let cert_path = dir.join("cert.pem");
     let key_path = dir.join("key.pem");
-    if !cert_path.exists() || !key_path.exists() {
-        let mut params = rcgen::CertificateParams::new(vec![
-            "localhost".into(),
-            "127.0.0.1".into(),
-        ])
-        .map_err(|e| e.to_string())?;
-        params.subject_alt_names = vec![
-            rcgen::SanType::DnsName("localhost".try_into().map_err(|e: rcgen::Error| e.to_string())?),
-            rcgen::SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
-            rcgen::SanType::IpAddress(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)),
-        ];
-        let key = rcgen::KeyPair::generate().map_err(|e| e.to_string())?;
-        let cert = params.self_signed(&key).map_err(|e| e.to_string())?;
-        std::fs::write(&cert_path, cert.pem()).map_err(|e| e.to_string())?;
-        std::fs::write(&key_path, key.serialize_pem()).map_err(|e| e.to_string())?;
-        eprintln!("[http2] wrote {}", cert_path.display());
-        try_trust(&cert_path);
+    if !ca_path.exists() || !cert_path.exists() || !key_path.exists() {
+        write_local_ca(dir)?;
     }
-    let cert_pem = std::fs::read(&cert_path).map_err(|e| e.to_string())?;
+    // Leaf first, then issuing CA (Chrome needs the chain).
+    let mut pem = std::fs::read(&cert_path).map_err(|e| e.to_string())?;
+    pem.extend_from_slice(&std::fs::read(&ca_path).map_err(|e| e.to_string())?);
     let key_pem = std::fs::read(&key_path).map_err(|e| e.to_string())?;
     let mut certs = Vec::new();
-    for item in rustls_pemfile::certs(&mut cert_pem.as_slice()) {
+    let mut cert_slice = pem.as_slice();
+    for item in rustls_pemfile::certs(&mut cert_slice) {
         certs.push(item.map_err(|e| e.to_string())?);
     }
     let mut key_slice = key_pem.as_slice();
@@ -106,15 +95,48 @@ fn ensure_identity(dir: &Path) -> Result<(Vec<CertificateDer<'static>>, PrivateK
     Ok((certs, PrivateKeyDer::Pkcs8(key)))
 }
 
-fn try_trust(cert: &Path) {
-    // Never wait: `security add-trusted-cert` can hang on a GUI auth prompt
-    // and would block the only TCP bind.
-    eprintln!(
-        "[http2] local cert {} — trust with: security add-trusted-cert -d -r trustRoot {}",
-        cert.display(),
-        cert.display()
-    );
-    let _ = cert;
+fn write_local_ca(dir: &Path) -> Result<(), String> {
+    use rcgen::{
+        BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
+        IsCa, KeyPair, KeyUsagePurpose, SanType,
+    };
+    let mut ca_params = CertificateParams::default();
+    ca_params.distinguished_name = DistinguishedName::new();
+    ca_params
+        .distinguished_name
+        .push(DnType::CommonName, "ClipVault Local CA");
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+    let ca_key = KeyPair::generate().map_err(|e| e.to_string())?;
+    let ca_cert = ca_params.self_signed(&ca_key).map_err(|e| e.to_string())?;
+
+    let mut leaf = CertificateParams::new(vec!["localhost".into(), "127.0.0.1".into()])
+        .map_err(|e| e.to_string())?;
+    leaf.distinguished_name = DistinguishedName::new();
+    leaf.distinguished_name
+        .push(DnType::CommonName, "127.0.0.1");
+    leaf.subject_alt_names = vec![
+        SanType::DnsName("localhost".try_into().map_err(|e: rcgen::Error| e.to_string())?),
+        SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+        SanType::IpAddress(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)),
+    ];
+    leaf.is_ca = IsCa::NoCa;
+    leaf.key_usages = vec![
+        KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyEncipherment,
+    ];
+    leaf.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    let leaf_key = KeyPair::generate().map_err(|e| e.to_string())?;
+    let leaf_cert = leaf
+        .signed_by(&leaf_key, &ca_cert, &ca_key)
+        .map_err(|e| e.to_string())?;
+
+    std::fs::write(dir.join("ca.pem"), ca_cert.pem()).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("ca-key.pem"), ca_key.serialize_pem()).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("cert.pem"), leaf_cert.pem()).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("key.pem"), leaf_key.serialize_pem()).map_err(|e| e.to_string())?;
+    eprintln!("[http2] wrote local CA {}", dir.join("ca.pem").display());
+    Ok(())
 }
 
 fn tls_acceptor(dir: &Path) -> Result<TlsAcceptor, String> {
