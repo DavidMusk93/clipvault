@@ -2949,6 +2949,45 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    struct OCRSyncPayload {
+        let id: UUID
+        let hash: String
+        let ocr: String
+        let typeRaw: String
+        let sourceApp: String?
+    }
+
+    /// Sync-queue helper: every alive row that already has OCR text. Call on `dbQueue`.
+    func listOCRPayloadsForSyncLocked() -> [OCRSyncPayload] {
+        guard let db = db else { return [] }
+        let sql = """
+        SELECT id, content_hash, ocr_text, type, source_app
+        FROM clipboard_items
+        WHERE deleted_at IS NULL
+          AND ocr_text IS NOT NULL AND length(ocr_text) > 0
+          AND content_hash IS NOT NULL AND length(content_hash) > 0
+        ORDER BY timestamp ASC;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var out: [OCRSyncPayload] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let idStr = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+            let hash = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+            let ocr = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+            let typeRaw = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ClipboardType.image.rawValue
+            let sourceApp = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+            guard let idStr, let uuid = UUID(uuidString: idStr),
+                  let hash, !hash.isEmpty,
+                  let ocr else { continue }
+            let text = ocr.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            out.append(OCRSyncPayload(id: uuid, hash: hash, ocr: text, typeRaw: typeRaw, sourceApp: sourceApp))
+        }
+        return out
+    }
+
     func listImageHashes(limit: Int = 40, completion: @escaping ([(id: UUID, hash: String)]) -> Void) {
         dbQueue.async { [weak self] in
             guard let self, let db = self.db else {

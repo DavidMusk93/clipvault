@@ -160,6 +160,7 @@ final class CloudDocsSyncService {
             self.replayDiskReaderOps()
             self.replayDiskClipLinks()
             self.repairArchiveClosures()
+            self.replayLocalOCRIfNeeded()
             self.startPollTimer()
             if self.config.enabled {
                 self.queue.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -221,21 +222,87 @@ final class CloudDocsSyncService {
         guard !text.isEmpty, !contentHash.isEmpty else { return }
         queue.async { [weak self] in
             guard let self else { return }
-            var op = self.makeOp(
-                kind: "upsert",
+            self.enqueueOCROp(
                 itemId: itemId.uuidString,
-                item: nil,
-                blobKeys: nil
+                contentHash: contentHash,
+                ocrText: text,
+                typeRaw: typeRaw,
+                sourceApp: sourceApp,
+                drain: true
             )
-            op.contentHash = contentHash
-            op.type = typeRaw
-            op.ocrText = text
-            op.textContent = nil
-            op.htmlContent = nil
-            op.sourceApp = sourceApp
-            op.note = "ocr"
-            self.enqueue(op)
-            self.scheduleDrain(reason: "ocr")
+        }
+    }
+
+    /// Sync-queue only. `drain: false` when the caller will schedule one drain for a batch.
+    @discardableResult
+    private func enqueueOCROp(
+        itemId: String,
+        contentHash: String,
+        ocrText: String,
+        typeRaw: String,
+        sourceApp: String?,
+        drain: Bool
+    ) -> Int {
+        var op = makeOp(
+            kind: "upsert",
+            itemId: itemId,
+            item: nil,
+            blobKeys: nil
+        )
+        op.contentHash = contentHash
+        op.type = typeRaw
+        op.ocrText = ocrText
+        op.textContent = nil
+        op.htmlContent = nil
+        op.sourceApp = sourceApp
+        op.note = "ocr"
+        enqueue(op)
+        if drain {
+            scheduleDrain(reason: "ocr")
+            print("[Sync] ocr pack seq=\(op.seq) id=\(itemId.prefix(8)) chars=\(ocrText.count)")
+        }
+        return op.seq
+    }
+
+    /// One-shot: historical `ocr_text` lived only in local SQLite (capture trx raced Vision).
+    /// Meta `sync.ocr_replay_v1` prevents re-emitting hundreds of follow-ups every launch.
+    private func replayLocalOCRIfNeeded() {
+        guard config.enabled else { return }
+        let flag = "sync.ocr_replay_v1"
+        let sem = DispatchSemaphore(value: 0)
+        var already = false
+        database.performSyncWork {
+            already = self.database.metaGetSync(flag) == "1"
+            sem.signal()
+        }
+        sem.wait()
+        guard !already else { return }
+        var rows: [DatabaseManager.OCRSyncPayload] = []
+        database.performSyncWork {
+            rows = self.database.listOCRPayloadsForSyncLocked()
+            sem.signal()
+        }
+        sem.wait()
+        var n = 0
+        for row in rows {
+            _ = enqueueOCROp(
+                itemId: row.id.uuidString,
+                contentHash: row.hash,
+                ocrText: row.ocr,
+                typeRaw: row.typeRaw,
+                sourceApp: row.sourceApp,
+                drain: false
+            )
+            n += 1
+        }
+        database.performSyncWork {
+            self.database.metaSetSync(flag, "1")
+            sem.signal()
+        }
+        sem.wait()
+        print("[Sync] ocr replay packed n=\(n)")
+        if n > 0 {
+            scheduleDrain(reason: "ocr-replay")
         }
     }
 

@@ -38,10 +38,14 @@ test('OCR follow-up upsert is packed into trx after capture', () => {
   assert.match(sync, /func recordLocalOCR/);
   assert.match(sync, /scheduleDrain\(reason: "ocr"\)/);
   assert.match(sync, /op\.note = "ocr"/);
+  assert.match(sync, /replayLocalOCRIfNeeded/);
+  assert.match(sync, /sync\.ocr_replay_v1/);
   assert.match(monitor, /recordLocalOCR\(/);
   assert.match(monitor, /contentHash: hash/);
+  assert.match(db, /func listOCRPayloadsForSyncLocked/);
   assert.match(db, /ocr_text = CASE WHEN \? IS NOT NULL AND length\(\?\) > length\(COALESCE\(ocr_text/);
   assert.match(agents, /OCR 是派生字段/);
+  assert.match(agents, /sync\.ocr_replay_v1/);
 });
 
 test('unpin JSON nulls pinnedAt and SSE clip_pinned', () => {

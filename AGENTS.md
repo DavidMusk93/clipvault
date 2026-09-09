@@ -117,7 +117,7 @@ Owner 的审美与取舍不是会话闲聊，而是 **产品设计语言的原�
 | 生产真源：`Package.swift` → `ClipFlowServer` + `web/index.html` | 文档还写 DuckDB/Xcode 当唯一路径却不维护 |
 | 万级可想：cursor、无列表 BLOB、虚拟化/content-visibility | `LIMIT 10000` 一次塞 DOM |
 | SQLite 备份用 `sqlite3_backup`；**按机器**写 `backup/hosts/{hostId}/` | 热 copy 开着的 db；双机写同一 `latest/` 互盖 |
-| **同步 = 每机 `trx/` 事务 + 云盘运输**；事务点名的 CAS 全部进 `blob_keys` → `live/attach/`。**OCR 是派生字段**：捕获 trx 时图还在识字（`ocr_text` 为空）；识别完成后必须再发一条 `upsert`（`note=ocr`，只带 `ocr_text`，不改 `content_hash`）。对端 `refreshRemoteFields` 按更长文本写入。禁止假定对端会自己再跑 Vision。 | 用 `ops/` 当事务目录；共享 CAS / 整库覆盖当同步；备份切片当同步总线；OCR 只写本机 SQLite |
+| **同步 = 每机 `trx/` 事务 + 云盘运输**；事务点名的 CAS 全部进 `blob_keys` → `live/attach/`。**OCR 是派生字段**：捕获 trx 时图还在识字（`ocr_text` 为空）；识别完成后必须再发一条 `upsert`（`note=ocr`，只带 `ocr_text`，不改 `content_hash`）。启动若尚未 `sync.ocr_replay_v1`，把本机已有 `ocr_text` 一次性打成 follow-up trx（禁止只修 going-forward 留下历史空洞）。对端 `refreshRemoteFields` 按更长文本写入。禁止假定对端会自己再跑 Vision。 | 用 `ops/` 当事务目录；共享 CAS / 整库覆盖当同步；备份切片当同步总线；OCR 只写本机 SQLite；历史 OCR 不回放 |
 | **备份增量是核心**：本机切片里 size-match skip；只补 missing/partial | **每轮 forceFull 重拷全部 blob**（GDrive File Provider 会 EDEADLK） |
 | SQLite 按 `.trae/skills/sqlite-runtime-tricks`：WAL 读写分离、busy_timeout、ANALYZE、FTS5、分批清理；检索先 FTS | 写读同一条队列；全表 `LIKE html_content`；维护 tick 里 `VACUUM` |
 | **检索含用户评论**：FTS `judgment_text` = 评价备注 + View 划线摘录/评论（`reader_ops` fold）；写评论/评价后 `refreshJudgmentTextLocked` + `reindexFTSRowLocked`。禁止 `LIKE reader_ops.payload` | 评论只躺在 JSON ops 里搜不到；把评论写进 capture `text_content`/`html_content` |
