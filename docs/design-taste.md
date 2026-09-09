@@ -167,7 +167,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 纸 | `#fff` 实心 | 阅读/预览面。禁止再叠 blur |
 | 源码栏 | `#FBFBFD` | 比预览略灰，像 macOS 分栏 |
 | 标题 | 28px / 700 / -0.03em / 高 52 | 高度锁死 |
-| 工具条 | min 36px · 12px 字 · 28px 钮 · `#F6F6F8` | 与评论 header 同密度。GFM 行内：粗 / 斜 / **删除线 `~~`** / 代码。H1–H3、列表、引用、围栏、链、表、分割线都要有钮。禁止 `overflow:hidden` 裁掉标记 |
+| 工具条 | min 36px · 可换行 · 28px 钮 · `#F6F6F8` | 预览也露出标记钮。删除线钮面是「删」加删除线，不靠 Material 图标。点击预览态工具条先切源码再插入。禁止 `visibility:hidden` 藏工具条；禁止 `overflow:hidden` 裁标记 |
 | 源码 | JetBrains Mono 14.5 / 1.62 · Xcode Light token | `web/assets/fonts/`，禁止 CDN |
 | 预览正文 | SF / PingFang 17 / 1.65 · 最大 38rem | Apple Notes 纸面 |
 | 预览代码 | 浅板 `#F5F5F7` + 11px 语言条 + Xcode Light | **不是** View 的炭黑井 |

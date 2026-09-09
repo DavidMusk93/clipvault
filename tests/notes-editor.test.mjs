@@ -110,7 +110,7 @@ test('opening a note defaults to preview; new note is source', () => {
   assert.match(html, /ensureNotesEditor\('', 'source'\)/);
   assert.match(html, /applyNotesMode\('preview'\)/);
   assert.match(html, /notes-chrome'\)\?\.classList\.toggle\('is-preview'/);
-  assert.match(html, /\.notes-chrome\.is-preview \.notes-tools \{[\s\S]{0,80}visibility:\s*hidden/);
+  assert.doesNotMatch(html, /\.notes-chrome\.is-preview \.notes-tools \{[\s\S]{0,80}visibility:\s*hidden/);
   assert.match(html, /\.notes-chrome\.is-preview \.notes-status \{[\s\S]{0,40}visibility:\s*hidden/);
   assert.doesNotMatch(html, /tools\.hidden = mode === 'preview'/);
 });
@@ -188,8 +188,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n18/);
-  assert.match(html, /notes-editor\.css\?v=n18/);
+  assert.match(html, /notes-editor\.js\?v=n19/);
+  assert.match(html, /notes-editor\.css\?v=n19/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
@@ -224,13 +224,15 @@ test('preview compiles blocks incrementally and React reconciles by hash', () =>
 });
 
 test('notes tools include GFM strikethrough and do not clip the bar', () => {
-  assert.match(html, /data-cmd="strike"/);
-  assert.match(html, /format_strikethrough/);
+  assert.match(html, /data-cmd="strike"[^>]*>删</);
+  assert.match(html, /aria-label="删除线"/);
+  assert.match(html, /button\[data-cmd="strike"\]/);
   assert.match(html, /data-cmd="h3"/);
   assert.match(html, /data-cmd="hr"/);
-  assert.match(html, /\.notes-tools \{[\s\S]{0,160}overflow-x:\s*auto/);
-  assert.doesNotMatch(html, /\.notes-tools \{[\s\S]{0,120}overflow:\s*hidden/);
+  assert.match(html, /\.notes-tools \{[\s\S]{0,160}flex-wrap:\s*wrap/);
+  assert.doesNotMatch(html, /\.notes-tools \{[\s\S]{0,160}overflow:\s*hidden/);
   assert.match(entry, /case 'strike': wrapSelection\(view, '~~'\)/);
+  assert.match(entry, /if \(mode === 'preview'\) api\.setMode\('source'\)/);
   assert.match(entry, /Mod-Shift-x/);
   assert.match(entry, /aroundLeft === left && aroundRight === r/);
   assert.match(css, /\.notes-preview-inner del/);
