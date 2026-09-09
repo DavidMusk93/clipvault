@@ -806,7 +806,7 @@ async function mount(root, opts) {
       api.setMode(MODES[(i + 1) % MODES.length])
     },
     command(name) {
-      if (mode === 'preview') api.setMode('source')
+      if (mode === 'preview') return
       switch (name) {
         case 'h1': prefixLines(view, '# '); break
         case 'h2': prefixLines(view, '## '); break

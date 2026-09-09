@@ -17,8 +17,8 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n19" />
-  <script src="/assets/notes-editor/notes-editor.js?v=n19"></script>
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n20" />
+  <script src="/assets/notes-editor/notes-editor.js?v=n20"></script>
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n12"></script>
   <style>
@@ -1964,6 +1964,10 @@
       flex-wrap: wrap;
       overflow: visible;
     }
+    .notes-chrome.is-preview .notes-tools {
+      visibility: hidden;
+      pointer-events: none;
+    }
     .notes-chrome.is-preview .notes-status {
       visibility: hidden;
     }
@@ -1972,6 +1976,11 @@
       background: transparent; color: var(--ink); cursor: pointer;
       font: 650 12px/26px var(--font-ui);
       display: inline-flex; align-items: center; justify-content: center;
+    }
+    .notes-tools button[data-cmd="strike"] {
+      font: 700 15px/26px var(--font-ui);
+      text-decoration: line-through;
+      text-decoration-thickness: 1.5px;
     }
     .notes-tools button:hover { background: rgba(60, 60, 67, 0.08); }
     .notes-tools button:active { transform: scale(0.96); }
@@ -2558,7 +2567,7 @@
           <button type="button" data-cmd="h3" title="三级标题">H3</button>
           <button type="button" data-cmd="bold" title="粗体"><span class="material-symbols-outlined">format_bold</span></button>
           <button type="button" data-cmd="italic" title="斜体"><span class="material-symbols-outlined">format_italic</span></button>
-          <button type="button" data-cmd="strike" title="Strikethrough"><span class="material-symbols-outlined">format_strikethrough</span></button>
+          <button type="button" data-cmd="strike" title="Strikethrough">S</button>
           <button type="button" data-cmd="ul" title="列表"><span class="material-symbols-outlined">format_list_bulleted</span></button>
           <button type="button" data-cmd="ol" title="编号"><span class="material-symbols-outlined">format_list_numbered</span></button>
           <button type="button" data-cmd="quote" title="引用"><span class="material-symbols-outlined">format_quote</span></button>
@@ -3792,7 +3801,7 @@ window.ClipViewMasonry = Masonry;
       const tools = document.getElementById('notesTools');
       if (tools) {
         tools.hidden = false;
-        tools.setAttribute('aria-hidden', 'false');
+        tools.setAttribute('aria-hidden', preview ? 'true' : 'false');
       }
       const status = document.getElementById('notesStatus');
       if (status) status.setAttribute('aria-hidden', preview ? 'true' : 'false');
