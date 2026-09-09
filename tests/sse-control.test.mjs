@@ -30,6 +30,20 @@ test('sync capture posts ClipFlowItemAdded with itemId', () => {
   assert.match(slice, /kind == "upsert"/);
 });
 
+test('OCR follow-up upsert is packed into trx after capture', () => {
+  const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
+  const monitor = readFileSync(join(root, 'ClipFlow/ClipboardMonitor.swift'), 'utf8');
+  const db = readFileSync(join(root, 'ClipFlow/DatabaseManager.swift'), 'utf8');
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+  assert.match(sync, /func recordLocalOCR/);
+  assert.match(sync, /scheduleDrain\(reason: "ocr"\)/);
+  assert.match(sync, /op\.note = "ocr"/);
+  assert.match(monitor, /recordLocalOCR\(/);
+  assert.match(monitor, /contentHash: hash/);
+  assert.match(db, /ocr_text = CASE WHEN \? IS NOT NULL AND length\(\?\) > length\(COALESCE\(ocr_text/);
+  assert.match(agents, /OCR 是派生字段/);
+});
+
 test('unpin JSON nulls pinnedAt and SSE clip_pinned', () => {
   const json = sliceFrom(web, 'dict["pinned"] = true', 400);
   assert.match(json, /pinnedAt"\] = NSNull\(\)/);

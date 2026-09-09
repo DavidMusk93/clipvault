@@ -213,6 +213,32 @@ final class CloudDocsSyncService {
         }
     }
 
+    /// OCR is derived after capture (image CAS is already on the wire). Follow-up
+    /// upsert carries `ocr_text` only; `content_hash` stays the image blob.
+    func recordLocalOCR(itemId: UUID, contentHash: String, ocrText: String, typeRaw: String = ClipboardType.image.rawValue, sourceApp: String? = nil) {
+        guard config.enabled else { return }
+        let text = ocrText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !contentHash.isEmpty else { return }
+        queue.async { [weak self] in
+            guard let self else { return }
+            var op = self.makeOp(
+                kind: "upsert",
+                itemId: itemId.uuidString,
+                item: nil,
+                blobKeys: nil
+            )
+            op.contentHash = contentHash
+            op.type = typeRaw
+            op.ocrText = text
+            op.textContent = nil
+            op.htmlContent = nil
+            op.sourceApp = sourceApp
+            op.note = "ocr"
+            self.enqueue(op)
+            self.scheduleDrain(reason: "ocr")
+        }
+    }
+
     func recordLocalTombstone(id: UUID) {
         guard config.enabled else { return }
         queue.async { [weak self] in

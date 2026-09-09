@@ -141,6 +141,15 @@ class ClipboardViewModel: ObservableObject {
             }
             self.database.saveItem(updated) { success in
                 if !success { self.errorMessage = "Failed to save OCR result" }
+                if success {
+                    CloudDocsSyncService.shared?.recordLocalOCR(
+                        itemId: item.id,
+                        contentHash: item.contentHash,
+                        ocrText: text,
+                        typeRaw: item.type.rawValue,
+                        sourceApp: item.sourceApp
+                    )
+                }
                 if success, UserDefaults.standard.bool(forKey: "clipflow.backup.icloud") {
                     self.backupManager.backupDatabase(dbURL: self.database.dbFileURL)
                 }

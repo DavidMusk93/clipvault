@@ -173,6 +173,11 @@ class ClipboardMonitor: ObservableObject {
             print("[OCR] id=\(persistId.uuidString.prefix(8)) \(pages.map { "\($0.0)x\($0.1)" } ?? "?") chars=\(n) \(String(format: "%.0f", ms))ms")
             if let text {
                 self.database?.updateOCR(id: persistId, text: text)
+                CloudDocsSyncService.shared?.recordLocalOCR(
+                    itemId: persistId,
+                    contentHash: hash,
+                    ocrText: text
+                )
                 NotificationCenter.default.post(name: .clipFlowOCRReady, object: persistId)
             }
         }
@@ -196,6 +201,11 @@ class ClipboardMonitor: ObservableObject {
                         let ms = Date().timeIntervalSince(t0) * 1000
                         print("[OCR] backfill id=\(ref.id.uuidString.prefix(8)) \(size.0)x\(size.1) chars=\(text.count) \(String(format: "%.0f", ms))ms")
                         self.database?.updateOCR(id: ref.id, text: text)
+                        CloudDocsSyncService.shared?.recordLocalOCR(
+                            itemId: ref.id,
+                            contentHash: ref.hash,
+                            ocrText: text
+                        )
                         NotificationCenter.default.post(name: .clipFlowOCRReady, object: ref.id)
                         n += 1
                     }
