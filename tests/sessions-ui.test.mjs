@@ -217,6 +217,7 @@ test('sessions UI is prefix-aware so ClipVault :8080 can proxy /trae', () => {
   assert.match(server, /func handleTraeProxy/);
   assert.match(server, /func traeBackendURL/);
   assert.match(server, /class TraeStreamPipe/);
+  assert.match(server, /class TraeAskFanIn/);
   assert.match(server, /pathOnly == \"\/trae\"/);
 });
 

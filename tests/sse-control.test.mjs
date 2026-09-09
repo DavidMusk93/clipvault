@@ -95,11 +95,11 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   assert.match(indexHtml, /visibilitychange/);
   assert.match(indexHtml, /pageshow/);
   assert.match(setup, /EventSource\.CLOSED/);
-  assert.match(setup, /d\.type === 'ping'/);
-  assert.match(setup, /resync_required/);
+  assert.match(indexHtml, /d\.type === 'ping'/);
+  assert.match(indexHtml, /resync_required/);
   assert.match(setup, /scheduleResync\(\)/);
-  assert.match(setup, /backup_status/);
-  assert.match(setup, /ingestClipById/);
+  assert.match(indexHtml, /backup_status/);
+  assert.match(indexHtml, /ingestClipById/);
   assert.match(indexHtml, /prependCardsIncremental/);
   assert.match(indexHtml, /clipHeadSig/);
   assert.match(indexHtml, /reason: 'sig'/);
@@ -108,6 +108,13 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   assert.match(indexHtml, /scheduleBackupLite/);
   assert.match(indexHtml, /\/api\/backup\/status/);
   assert.match(indexHtml, /\?lite=1/);
+  assert.match(indexHtml, /BroadcastChannel\('cv\.sse\.v1'\)/);
+  assert.match(indexHtml, /function considerElect/);
+  assert.match(indexHtml, /function teardownSSE/);
+  assert.match(indexHtml, /trae_ask/);
+  assert.match(web, /class TraeAskFanIn/);
+  assert.doesNotMatch(indexHtml, /setupTraeAskSSE/);
+  assert.doesNotMatch(indexHtml, /EventSource\('\/trae\/api\/stream'\)/);
   assert.doesNotMatch(
     indexHtml,
     /setInterval\(\(\) => \{\s*if \(!document\.getElementById\('backupDrawer'\)/,
@@ -119,7 +126,9 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
     /es\.close\(\);\s*setTimeout\(setupSSE/,
     'must not close+timer on every onerror (background tabs throttle setTimeout)',
   );
-  const vis = sliceFrom(indexHtml, 'function onFeedVisible()', 400);
+  const vis = sliceFrom(indexHtml, 'function onFeedVisible()', 500);
+  assert.match(vis, /considerElect/);
   assert.match(vis, /setupSSE\(\)/);
   assert.match(vis, /scheduleResync\(\)/);
+  assert.match(vis, /visibilityState === 'hidden'/);
 });

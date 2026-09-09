@@ -3808,7 +3808,7 @@ window.ClipViewMasonry = Masonry;
     let wallBootInflight = true;
     let debugPaintQueued = 0;
     const sseDebug = {
-      wall: { lastAt: 0, lastKind: '', opens: 0, errors: 0, pings: 0, resyncs: 0 },
+      wall: { lastAt: 0, lastKind: '', opens: 0, errors: 0, pings: 0, resyncs: 0, role: '—' },
       trae: { lastAt: 0, lastKind: '', opens: 0, errors: 0 },
     };
     function markWallTtfp(kind) {
@@ -7987,7 +7987,6 @@ window.ClipViewMasonry = Masonry;
         && (Date.now() - sseLastEventAt) <= SSE_STALE_MS;
     }
 
-    let traeAskES = null;
     let traeAskSeen = '';
     function hideTraeAsk() {
       const ban = document.getElementById('traeAskBanner');
@@ -7996,7 +7995,7 @@ window.ClipViewMasonry = Masonry;
       if (dot) dot.hidden = true;
     }
     function showTraeAsk(d) {
-      const id = String(d && d.event_id || '');
+      const id = String((d && (d.event_id || d.id)) || '');
       if (id && id === traeAskSeen) return;
       if (id) traeAskSeen = id;
       if (document.getElementById('sessionsPanel')?.classList.contains('open')) return;
@@ -8008,42 +8007,107 @@ window.ClipViewMasonry = Masonry;
       if (ban) ban.hidden = false;
       if (dot) dot.hidden = false;
     }
-    function setupTraeAskSSE() {
-      if (traeAskES && traeAskES.readyState !== EventSource.CLOSED) return;
-      try { if (traeAskES) traeAskES.close(); } catch (_) {}
-      const es = new EventSource('/trae/api/stream');
-      traeAskES = es;
-      es.onopen = () => {
-        sseDebug.trae.opens += 1;
-        sseDebug.trae.lastAt = Date.now();
-        sseDebug.trae.lastKind = 'open';
-        nm('sse_trae', { payload: { phase: 'open', kind: 'trae', n: sseDebug.trae.opens } });
-      };
-      es.onmessage = (ev) => {
-        let d;
-        try { d = JSON.parse(ev.data); } catch (_) { return; }
-        sseDebug.trae.lastAt = Date.now();
-        sseDebug.trae.lastKind = String((d && d.type) || 'msg').slice(0, 32);
-        if (!d || !d.needs_user) return;
-        showTraeAsk(d);
-      };
-      es.onerror = () => {
-        sseDebug.trae.errors += 1;
-        sseDebug.trae.lastKind = 'error';
-        nm('sse_trae', { ok: false, payload: { phase: 'error', kind: 'trae' } });
-        if (es.readyState !== EventSource.CLOSED) return;
-        if (traeAskES === es) traeAskES = null;
-        try { es.close(); } catch (_) {}
-        setTimeout(setupTraeAskSSE, 4000);
-      };
-    }
     document.getElementById('traeAskOpen')?.addEventListener('click', () => {
       hideTraeAsk();
       openSessionsPanel();
     });
     document.getElementById('traeAskDismiss')?.addEventListener('click', hideTraeAsk);
 
+    // HTTP/1.1 ≈ 6 connections/host. One EventSource per origin, shared across
+    // tabs via BroadcastChannel. Trae needs_user is fan-in on the wall stream.
+    const sseTabId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    let sseLeader = false;
+    let sseLeadAt = 0;
+    let sseElectTimer = 0;
+    let sseBeatTimer = 0;
+    let sseBc = null;
+    try { sseBc = new BroadcastChannel('cv.sse.v1'); } catch (_) { sseBc = null; }
+
+    function ingestSSEPayload(d) {
+      if (!d || typeof d !== 'object') return;
+      const typ = String(d.type || '');
+      sseDebug.wall.lastKind = typ.slice(0, 32);
+      sseDebug.wall.lastAt = Date.now();
+      if (d.type === 'ping') {
+        sseDebug.wall.pings += 1;
+        return;
+      }
+      if (d.type === 'trae_ask' || d.needs_user) {
+        sseDebug.trae.lastAt = Date.now();
+        sseDebug.trae.lastKind = 'ask';
+        showTraeAsk(d);
+        return;
+      }
+      nm('sse_wall', { payload: { phase: 'msg', kind: typ.slice(0, 32) } });
+      if (d.type === 'compose_saved') {
+        mergeNotesHead().catch(() => {});
+        return;
+      }
+      if (d.type === 'connected') {
+        if (wallBootInflight || (lastWallFetchAt && performance.now() - lastWallFetchAt < 2500)) {
+          nm('wall_resync', { payload: { reason: 'skip_boot', kind: 'connected' } });
+          return;
+        }
+        scheduleResync();
+        return;
+      }
+      if (d.type === 'update') {
+        if (d.id && !searchQuery && currentView !== 'trash') {
+          ingestClipById(d.id);
+          return;
+        }
+        scheduleResync();
+        return;
+      }
+      if (d.type === 'resync_required'
+          || d.type === 'control.resync_required' || d.type === 'sync.resync_required') {
+        scheduleResync();
+        return;
+      }
+      if (d.type === 'clip_deleted' || d.type === 'clip_restored') {
+        applyRemoteClipRemoval(d);
+        return;
+      }
+      if (d.type === 'clip_pinned' && d.id) {
+        if (clips.some((c) => c.id === d.id)) applyLocalPin(d.id, !!d.pinned, d.pinnedAt);
+        if (notesState.items.some((n) => n.id === d.id)) {
+          applyNotePin(d.id, !!d.pinned, d.pinnedAt);
+          paintNotesList();
+        } else if (d.pinned && !clips.some((c) => c.id === d.id)) {
+          scheduleResync();
+        }
+        return;
+      }
+      if (d.type === 'ocr_ready' && d.id) {
+        refreshClipInPlace(d.id);
+        return;
+      }
+      if (d.type === 'archive_ok' && d.id) {
+        refreshClipInPlace(d.id);
+        return;
+      }
+      if (d.type === 'archive_error' && d.id) {
+        return;
+      }
+      if (d.type === 'archive_cleared' && d.id) {
+        refreshClipInPlace(d.id);
+        return;
+      }
+      if (d.type === 'backup_status') {
+        scheduleBackupLite();
+      }
+    }
+
+    function teardownSSE() {
+      clearTimeout(sseReconnectTimer);
+      sseReconnectTimer = 0;
+      if (!liveSSE) return;
+      try { liveSSE.close(); } catch (_) {}
+      liveSSE = null;
+    }
+
     function setupSSE() {
+      if (!sseLeader && sseBc) return;
       if (sseIsFresh()) return;
       if (liveSSE) {
         try { liveSSE.close(); } catch (_) {}
@@ -8057,6 +8121,7 @@ window.ClipViewMasonry = Masonry;
         sseDebug.wall.lastAt = Date.now();
         sseDebug.wall.lastKind = 'open';
         nm('sse_wall', { payload: { phase: 'open', kind: 'wall', n: sseDebug.wall.opens } });
+        try { sseBc && sseBc.postMessage({ t: 'open', id: sseTabId }); } catch (_) {}
         if (wallBootInflight || (lastWallFetchAt && performance.now() - lastWallFetchAt < 2500)) {
           nm('wall_resync', { payload: { reason: 'skip_boot', kind: 'open' } });
           return;
@@ -8065,75 +8130,11 @@ window.ClipViewMasonry = Masonry;
       };
       es.onmessage = e => {
         noteSSEEvent();
-        sseDebug.wall.lastAt = Date.now();
-        try {
-          const d = JSON.parse(e.data);
-          const typ = String(d && d.type || '');
-          sseDebug.wall.lastKind = typ.slice(0, 32);
-          if (d.type === 'ping') {
-            sseDebug.wall.pings += 1;
-            return;
-          }
-          nm('sse_wall', { payload: { phase: 'msg', kind: typ.slice(0, 32) } });
-          if (d.type === 'compose_saved') {
-            mergeNotesHead().catch(() => {});
-            return;
-          }
-          if (d.type === 'connected') {
-            if (wallBootInflight || (lastWallFetchAt && performance.now() - lastWallFetchAt < 2500)) {
-              nm('wall_resync', { payload: { reason: 'skip_boot', kind: 'connected' } });
-              return;
-            }
-            scheduleResync();
-            return;
-          }
-          if (d.type === 'update') {
-            if (d.id && !searchQuery && currentView !== 'trash') {
-              ingestClipById(d.id);
-              return;
-            }
-            scheduleResync();
-            return;
-          }
-          if (d.type === 'resync_required'
-              || d.type === 'control.resync_required' || d.type === 'sync.resync_required') {
-            scheduleResync();
-            return;
-          }
-          if (d.type === 'clip_deleted' || d.type === 'clip_restored') {
-            applyRemoteClipRemoval(d);
-            return;
-          }
-          if (d.type === 'clip_pinned' && d.id) {
-            if (clips.some((c) => c.id === d.id)) applyLocalPin(d.id, !!d.pinned, d.pinnedAt);
-            if (notesState.items.some((n) => n.id === d.id)) {
-              applyNotePin(d.id, !!d.pinned, d.pinnedAt);
-              paintNotesList();
-            } else if (d.pinned && !clips.some((c) => c.id === d.id)) {
-              scheduleResync();
-            }
-            return;
-          }
-          if (d.type === 'ocr_ready' && d.id) {
-            refreshClipInPlace(d.id);
-            return;
-          }
-          if (d.type === 'archive_ok' && d.id) {
-            refreshClipInPlace(d.id);
-            return;
-          }
-          if (d.type === 'archive_error' && d.id) {
-            return;
-          }
-          if (d.type === 'archive_cleared' && d.id) {
-            refreshClipInPlace(d.id);
-            return;
-          }
-          if (d.type === 'backup_status') {
-            scheduleBackupLite();
-            return;
-          }
-        } catch (_) {}
+        let d;
+        try { d = JSON.parse(e.data); } catch (_) { return; }
+        ingestSSEPayload(d);
+        if (d && d.type === 'ping') return;
+        try { sseBc && sseBc.postMessage({ t: 'sse', id: sseTabId, d }); } catch (_) {}
       };
       es.onerror = () => {
         // Native EventSource reconnects via `retry:`. Only reopen if the browser gave up.
@@ -8148,8 +8149,82 @@ window.ClipViewMasonry = Masonry;
       };
     }
 
+    function sseBeat() {
+      if (!sseLeader || !sseBc) return;
+      try { sseBc.postMessage({ t: 'lead', id: sseTabId }); } catch (_) {}
+    }
+
+    function setSseLeader(on) {
+      if (sseLeader === on) {
+        if (on && !sseIsFresh()) setupSSE();
+        return;
+      }
+      sseLeader = on;
+      sseDebug.wall.role = on ? 'leader' : (sseBc ? 'follow' : 'solo');
+      nm('sse_wall', { payload: { phase: 'role', kind: sseDebug.wall.role } });
+      if (on) {
+        setupSSE();
+        sseBeat();
+        if (!sseBeatTimer) sseBeatTimer = window.setInterval(sseBeat, 1000);
+      } else {
+        teardownSSE();
+        if (sseBeatTimer) { clearInterval(sseBeatTimer); sseBeatTimer = 0; }
+      }
+    }
+
+    function considerElect() {
+      if (document.visibilityState === 'hidden') {
+        if (sseLeader) {
+          try { sseBc && sseBc.postMessage({ t: 'bye', id: sseTabId }); } catch (_) {}
+        }
+        setSseLeader(false);
+        sseDebug.wall.role = 'hidden';
+        teardownSSE();
+        return;
+      }
+      if (!sseBc) {
+        setSseLeader(true);
+        return;
+      }
+      const stale = !sseLeadAt || (Date.now() - sseLeadAt > 2500);
+      if (sseLeader && !stale) return;
+      if (!stale && !sseLeader) {
+        setSseLeader(false);
+        return;
+      }
+      setSseLeader(true);
+    }
+
+    if (sseBc) {
+      sseBc.onmessage = (ev) => {
+        const m = ev && ev.data;
+        if (!m || m.id === sseTabId) return;
+        if (m.t === 'lead') {
+          sseLeadAt = Date.now();
+          if (sseLeader && String(m.id) < sseTabId) setSseLeader(false);
+        } else if (m.t === 'bye') {
+          sseLeadAt = 0;
+          if (document.visibilityState !== 'hidden') {
+            clearTimeout(sseElectTimer);
+            sseElectTimer = window.setTimeout(considerElect, 80);
+          }
+        } else if (m.t === 'sse' && !sseLeader) {
+          noteSSEEvent();
+          ingestSSEPayload(m.d);
+        } else if (m.t === 'open' && !sseLeader) {
+          if (wallBootInflight || (lastWallFetchAt && performance.now() - lastWallFetchAt < 2500)) return;
+          scheduleResync();
+        }
+      };
+    }
+
     function onFeedVisible() {
-      if (document.visibilityState === 'hidden') return;
+      if (document.visibilityState === 'hidden') {
+        considerElect();
+        return;
+      }
+      clearTimeout(sseElectTimer);
+      sseElectTimer = window.setTimeout(considerElect, sseBc ? 100 : 0);
       if (!sseIsFresh()) setupSSE();
       scheduleResync();
       scheduleBackupLite();
@@ -8157,6 +8232,12 @@ window.ClipViewMasonry = Masonry;
     document.addEventListener('visibilitychange', onFeedVisible);
     window.addEventListener('pageshow', (ev) => { if (ev.persisted) onFeedVisible(); });
     window.addEventListener('online', onFeedVisible);
+    window.addEventListener('beforeunload', () => {
+      if (sseLeader) {
+        try { sseBc && sseBc.postMessage({ t: 'bye', id: sseTabId }); } catch (_) {}
+      }
+      teardownSSE();
+    });
 
     /**
      * Remote/local-echo delete·restore via SSE.
@@ -8229,8 +8310,8 @@ window.ClipViewMasonry = Masonry;
       const w = sseDebug.wall;
       const t = sseDebug.trae;
       kv.innerHTML =
-        `<span>墙 SSE</span><span>${esc(sseReadyLabel(liveSSE))} · ${esc(w.lastKind || '—')} · ${esc(ageLabel(w.lastAt))} · open ${w.opens} · err ${w.errors} · ping ${w.pings} · resync ${w.resyncs}</span>` +
-        `<span>会话 SSE</span><span>${esc(sseReadyLabel(traeAskES))} · ${esc(t.lastKind || '—')} · ${esc(ageLabel(t.lastAt))} · open ${t.opens} · err ${t.errors}</span>` +
+        `<span>墙 SSE</span><span>${esc(w.role || '—')} · ${esc(sseReadyLabel(liveSSE))} · ${esc(w.lastKind || '—')} · ${esc(ageLabel(w.lastAt))} · open ${w.opens} · err ${w.errors} · ping ${w.pings} · resync ${w.resyncs}</span>` +
+        `<span>会话 ask</span><span>mux→wall · ${esc(t.lastKind || '—')} · ${esc(ageLabel(t.lastAt))}</span>` +
         `<span>本页 ttfp</span><span>${wallTtfpSent ? '已报' : '未报'} · boot ${Math.round(performance.now() - wallBootAt)}ms</span>`;
       const rows = (globalThis.ClipNotesMetrics?.recentLocal?.() || []).slice();
       const agg = new Map();
@@ -8708,8 +8789,7 @@ window.ClipViewMasonry = Masonry;
     } catch (_) {}
     fetchPage({ reset: true }).then(() => applyAppHash());
     window.addEventListener('hashchange', () => { applyAppHash(); });
-    setupSSE();
-    setupTraeAskSSE();
+    onFeedVisible();
   </script>
 </body>
 </html>

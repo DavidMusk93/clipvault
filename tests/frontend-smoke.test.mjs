@@ -140,8 +140,9 @@ test('sessions reuse ClipVault port as a notes-like panel', () => {
   assert.doesNotMatch(indexHtml, /href="http:\/\/127\.0\.0\.1:9488/);
   assert.match(indexHtml, /<button type="button" class="backup-btn" id="traeSessionsBtn"/);
   assert.match(indexHtml, /id="traeAskBanner"/);
-  assert.match(indexHtml, /setupTraeAskSSE/);
+  assert.match(indexHtml, /trae_ask/);
   assert.match(indexHtml, /needs_user/);
+  assert.doesNotMatch(indexHtml, /setupTraeAskSSE/);
 });
 
 test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {

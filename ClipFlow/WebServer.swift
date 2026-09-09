@@ -140,6 +140,7 @@ class WebServer {
                 self?.handleNewConnection(connection)
             }
             listener?.start(queue: DispatchQueue.global(qos: .userInitiated))
+            TraeAskFanIn.shared.attach(self)
 
             // 剪贴板新增时推送 SSE，驱动前端实时刷新
             NotificationCenter.default.addObserver(
@@ -2697,6 +2698,96 @@ class WebServer {
     
     deinit {
         stop()
+    }
+}
+
+/// One loopback Trae `/api/stream` fan-in onto wall `/api/events`.
+/// Browser HTTP/1.1 allows ~6 connections per host; a second EventSource
+/// per tab (`/trae/api/stream`) starves notes/sessions fetches on later windows.
+final class TraeAskFanIn: NSObject, URLSessionDataDelegate {
+    static let shared = TraeAskFanIn()
+    private weak var server: WebServer?
+    private let lock = NSLock()
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+    private var buf = Data()
+    private var retryWork: DispatchWorkItem?
+    private var retrySec: Double = 2
+
+    func attach(_ server: WebServer) {
+        self.server = server
+        start()
+    }
+
+    private func start() {
+        lock.lock()
+        retryWork?.cancel()
+        task?.cancel()
+        session?.invalidateAndCancel()
+        session = nil
+        task = nil
+        buf.removeAll(keepingCapacity: true)
+        lock.unlock()
+        guard let url = WebServer.traeBackendURL(from: "/trae/api/stream") else { return }
+        let config = URLSessionConfiguration.default
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 86400
+        config.timeoutIntervalForResource = 86400
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        self.session = session
+        var req = URLRequest(url: url)
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let task = session.dataTask(with: req)
+        self.task = task
+        task.resume()
+        print("[SSE] trae ask fan-in \(url.absoluteString)")
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        buf.append(data)
+        retrySec = 2
+        var frames: [Data] = []
+        let sep = Data("\n\n".utf8)
+        while let range = buf.range(of: sep) {
+            frames.append(buf.subdata(in: buf.startIndex..<range.lowerBound))
+            buf.removeSubrange(buf.startIndex..<range.upperBound)
+        }
+        lock.unlock()
+        for frame in frames { emitIfAsk(frame) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        scheduleRetry()
+    }
+
+    private func emitIfAsk(_ frame: Data) {
+        guard let text = String(data: frame, encoding: .utf8) else { return }
+        var payload = ""
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("data:") else { continue }
+            let rest = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if !payload.isEmpty { payload += "\n" }
+            payload += rest
+        }
+        guard !payload.isEmpty,
+              let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
+              obj["needs_user"] as? Bool == true else { return }
+        var extra = obj
+        extra.removeValue(forKey: "type")
+        server?.broadcastSSE(event: "trae_ask", id: obj["event_id"] as? String, extra: extra)
+    }
+
+    private func scheduleRetry() {
+        lock.lock()
+        let wait = retrySec
+        retrySec = min(15, retrySec * 1.6)
+        lock.unlock()
+        let work = DispatchWorkItem { [weak self] in self?.start() }
+        retryWork = work
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + wait, execute: work)
     }
 }
 
