@@ -53,7 +53,7 @@ ClipVault (product)
 | --- | --- |
 | 语言 | Swift 5.9 · macOS 13+ |
 | 存储 | 原生 SQLite3（**非** DuckDB） |
-| 网络 | Network.framework · 自研 HTTP/1.1 |
+| 网络 | 浏览器口 `https://127.0.0.1:8080` HTTP/2（Rust `clipvault-http`）；Swift origin 在 Unix socket |
 | OCR | Vision |
 | 备份 | iCloud Drive CloudDocs（**无** App iCloud entitlement） |
 | CI | `swift build` + `node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.test.mjs` |
@@ -79,7 +79,7 @@ swift build -c release --product ClipFlowServer
 ./.build/release/ClipFlowServer
 ```
 
-浏览器打开：**http://localhost:8080**
+浏览器打开：**https://127.0.0.1:8080**（HTTP/2）。
 
 ### 登录自启（可选）
 

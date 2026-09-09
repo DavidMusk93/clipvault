@@ -59,7 +59,7 @@ class WebServer {
         return path
     }
 
-    private var listener: NWListener?
+    private var originStarted = false
     private let port: UInt16
     private let database: DatabaseManager
     private let backup: CloudDocsBackupService?
@@ -68,12 +68,12 @@ class WebServer {
     /// Control-plane SSE: one EventSource, comment+data heartbeat, bounded
     /// per-client buffer. Overflow coalesces to `resync_required` (never silent drop).
     private final class SSESession {
-        let connection: NWConnection
+        let connection: HTTPByteSink
         var queue: [Data] = []
         var inflight = false
         var resyncRequired = false
         var dead = false
-        init(_ connection: NWConnection) { self.connection = connection }
+        init(_ connection: HTTPByteSink) { self.connection = connection }
     }
     private let sseQueue = DispatchQueue(label: "clipvault.sse")
     private var sseSessions: [ObjectIdentifier: SSESession] = [:]
@@ -83,9 +83,7 @@ class WebServer {
     private static let sseResyncFrame = Data("data: {\"type\":\"resync_required\"}\n\n".utf8)
     private static let ssePingFrame = Data(": ping\n\ndata: {\"type\":\"ping\"}\n\n".utf8)
     
-    var isRunning: Bool {
-        listener != nil
-    }
+    var isRunning: Bool { originStarted }
 
     init(
         port: UInt16 = 8080,
@@ -125,96 +123,65 @@ class WebServer {
     }
 
     func start() {
-        guard listener == nil else { return }
-        
-        let parameters = NWParameters.tcp
-        parameters.includePeerToPeer = true
-        
-        do {
-            guard let port = NWEndpoint.Port(rawValue: port) else { return }
-            listener = try NWListener(using: parameters, on: port)
-            listener?.stateUpdateHandler = { [weak self] state in
-                self?.handleStateUpdate(state)
-            }
-            listener?.newConnectionHandler = { [weak self] connection in
-                self?.handleNewConnection(connection)
-            }
-            listener?.start(queue: DispatchQueue.global(qos: .userInitiated))
-            TraeAskFanIn.shared.attach(self)
+        guard !originStarted else { return }
+        originStarted = true
+        let sock = DatabaseManager.resolveDataRoot()
+            .appendingPathComponent("run", isDirectory: true)
+            .appendingPathComponent("http.sock")
+        OriginUnixServer.shared.start(path: sock.path) { [weak self] sink in
+            self?.receiveRequest(from: sink)
+        }
+        HttpFrontProcess.shared.start(originSock: sock.path, listen: "127.0.0.1:\(port),[::1]:\(port)")
+        TraeAskFanIn.shared.attach(self)
+        print("Web origin unix \(sock.path); browser https://127.0.0.1:\(port) (HTTP/2)")
 
-            // 剪贴板新增时推送 SSE，驱动前端实时刷新
-            NotificationCenter.default.addObserver(
-                forName: Notification.Name("ClipFlowItemAdded"),
-                object: nil,
-                queue: nil
-            ) { [weak self] note in
-                let id: String? = {
-                    if let item = note.object as? ClipboardItem { return item.id.uuidString }
-                    if let uuid = note.object as? UUID { return uuid.uuidString }
-                    if let s = note.object as? String, !s.isEmpty { return s }
-                    return nil
-                }()
-                self?.broadcastSSE(event: "update", id: id)
-            }
-            NotificationCenter.default.addObserver(
-                forName: .clipFlowOCRReady,
-                object: nil,
-                queue: nil
-            ) { [weak self] note in
-                let id = (note.object as? UUID)?.uuidString
-                self?.broadcastSSE(event: "ocr_ready", id: id)
-            }
-            NotificationCenter.default.addObserver(
-                forName: CloudDocsBackupService.statusChangedNotification,
-                object: nil,
-                queue: nil
-            ) { [weak self] _ in
-                self?.broadcastSSE(event: "backup_status")
-            }
-        } catch {
-            print("Failed to start server: \(error)")
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("ClipFlowItemAdded"),
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            let id: String? = {
+                if let item = note.object as? ClipboardItem { return item.id.uuidString }
+                if let uuid = note.object as? UUID { return uuid.uuidString }
+                if let s = note.object as? String, !s.isEmpty { return s }
+                return nil
+            }()
+            self?.broadcastSSE(event: "update", id: id)
+        }
+        NotificationCenter.default.addObserver(
+            forName: .clipFlowOCRReady,
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            let id = (note.object as? UUID)?.uuidString
+            self?.broadcastSSE(event: "ocr_ready", id: id)
+        }
+        NotificationCenter.default.addObserver(
+            forName: CloudDocsBackupService.statusChangedNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.broadcastSSE(event: "backup_status")
         }
     }
     
     func stop() {
-        listener?.cancel()
-        listener = nil
+        HttpFrontProcess.shared.stop()
+        OriginUnixServer.shared.stop()
+        originStarted = false
         sseQueue.async { [weak self] in
             self?.teardownSSELocked()
         }
     }
     
-    private func handleStateUpdate(_ state: NWListener.State) {
-        switch state {
-        case .ready:
-            print("Web server started on port \(port)")
-        case .failed(let error):
-            print("Server failed: \(error)")
-        case .cancelled:
-            print("Server stopped")
-        default:
-            break
-        }
-    }
-    
-    private func handleNewConnection(_ connection: NWConnection) {
-        connection.stateUpdateHandler = { [weak self] state in
-            guard let self = self else { return }
-            if state == .ready {
-                self.receiveRequest(from: connection)
-            }
-        }
-        connection.start(queue: DispatchQueue.global())
-    }
-    
-    private func receiveRequest(from connection: NWConnection) {
+    private func receiveRequest(from connection: HTTPByteSink) {
         accumulateRequest(from: connection, buffer: Data())
     }
 
     private static let maxRequestBytes = 8 * 1024 * 1024
 
-    private func accumulateRequest(from connection: NWConnection, buffer: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, _, isComplete, error in
+    private func accumulateRequest(from connection: HTTPByteSink, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, isComplete, error in
             guard let self else {
                 connection.cancel()
                 return
@@ -260,7 +227,7 @@ class WebServer {
             || first.hasPrefix("OPTIONS ") || first.hasPrefix("DELETE ")
     }
     
-    private func handleRequest(data: Data, connection: NWConnection) {
+    private func handleRequest(data: Data, connection: HTTPByteSink) {
         let requestString = String(data: data, encoding: .utf8) ?? ""
         let lines = requestString.components(separatedBy: "\r\n")
         
@@ -382,7 +349,7 @@ class WebServer {
         }
     }
     
-    private func sendUnauthorized(connection: NWConnection, path: String) {
+    private func sendUnauthorized(connection: HTTPByteSink, path: String) {
         if path.hasPrefix("/api/") {
             let body = Data(#"{"error":"unauthorized"}"#.utf8)
             sendBinary(
@@ -408,7 +375,7 @@ class WebServer {
         )
     }
 
-    private func sendLoginHTML(_ html: String, connection: NWConnection) {
+    private func sendLoginHTML(_ html: String, connection: HTTPByteSink) {
         sendBinary(
             status: 200,
             reason: "OK",
@@ -419,7 +386,7 @@ class WebServer {
         )
     }
 
-    private func handleLogin(method: String, data: Data, connection: NWConnection) {
+    private func handleLogin(method: String, data: Data, connection: HTTPByteSink) {
         if method == "GET" || method == "HEAD" {
             sendLoginHTML(ClipVaultAuth.shared.loginPageHTML(error: nil), connection: connection)
             return
@@ -449,7 +416,7 @@ class WebServer {
         sendLoginHTML(ClipVaultAuth.shared.loginPageHTML(error: "验证码不对或尝试太多次，请再试。"), connection: connection)
     }
 
-    private func handleLogout(connection: NWConnection) {
+    private func handleLogout(connection: HTTPByteSink) {
         let clear = "\(ClipVaultAuth.cookieName)=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"
         sendBinary(
             status: 302,
@@ -465,7 +432,7 @@ class WebServer {
         )
     }
 
-    private func handleOptionsRequest(connection: NWConnection) {
+    private func handleOptionsRequest(connection: HTTPByteSink) {
         let response = """
         HTTP/1.1 204 No Content
         Access-Control-Allow-Origin: *
@@ -492,7 +459,7 @@ class WebServer {
         return nil
     }
 
-    private func handleGetRequest(path: String, connection: NWConnection) {
+    private func handleGetRequest(path: String, connection: HTTPByteSink) {
         // path may include query string, e.g. /api/clips?cursor=...
         let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
         if pathOnly == "/" || pathOnly == "/index.html" {
@@ -573,7 +540,7 @@ class WebServer {
 
     private func handleTraeProxy(
         path: String,
-        connection: NWConnection,
+        connection: HTTPByteSink,
         method: String = "GET",
         data: Data = Data(),
         headers: [String: String] = [:]
@@ -624,7 +591,7 @@ class WebServer {
         }.resume()
     }
 
-    private func handleSSEEvents(connection: NWConnection) {
+    private func handleSSEEvents(connection: HTTPByteSink) {
         sseQueue.async { [weak self] in
             self?.attachSSELocked(connection)
         }
@@ -642,20 +609,15 @@ class WebServer {
         }
     }
 
-    private func attachSSELocked(_ connection: NWConnection) {
+    private func attachSSELocked(_ connection: HTTPByteSink) {
         pruneDeadSSELocked()
         let session = SSESession(connection)
         sseSessions[ObjectIdentifier(connection)] = session
         let id = ObjectIdentifier(connection)
-        connection.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .failed(_), .cancelled:
-                self?.sseQueue.async {
-                    guard let session = self?.sseSessions[id] else { return }
-                    self?.dropSSELocked(session)
-                }
-            default:
-                break
+        connection.watchPeerClose { [weak self] in
+            self?.sseQueue.async {
+                guard let session = self?.sseSessions[id] else { return }
+                self?.dropSSELocked(session)
             }
         }
         let headers: [(String, String)] = [
@@ -669,26 +631,7 @@ class WebServer {
         hello.append(contentsOf: Data("retry: 3000\n\n: connected\n\ndata: {\"type\":\"connected\"}\n\n".utf8))
         session.queue.append(hello)
         flushSSELocked(session)
-        watchSSEDisconnect(session)
         ensureSSEHeartbeatLocked()
-    }
-
-    private func watchSSEDisconnect(_ session: SSESession) {
-        let id = ObjectIdentifier(session.connection)
-        session.connection.receive(minimumIncompleteLength: 1, maximumLength: 4) { [weak self] _, _, isComplete, error in
-            guard let self else { return }
-            if isComplete || error != nil {
-                self.sseQueue.async {
-                    guard let session = self.sseSessions[id] else { return }
-                    self.dropSSELocked(session)
-                }
-                return
-            }
-            self.sseQueue.async {
-                guard let session = self.sseSessions[id] else { return }
-                self.watchSSEDisconnect(session)
-            }
-        }
     }
 
     private func publishSSELocked(_ payload: Data) {
@@ -717,7 +660,7 @@ class WebServer {
         guard let next = session.queue.first else { return }
         session.queue.removeFirst()
         session.inflight = true
-        session.connection.send(content: next, completion: .contentProcessed { [weak self, weak session] error in
+        session.connection.send(content: next) { [weak self, weak session] error in
             guard let self, let session else { return }
             self.sseQueue.async {
                 session.inflight = false
@@ -730,7 +673,7 @@ class WebServer {
                 }
                 self.flushSSELocked(session)
             }
-        })
+        }
     }
 
     private func ensureSSEHeartbeatLocked() {
@@ -762,11 +705,7 @@ class WebServer {
 
     private func pruneDeadSSELocked() {
         let stale = sseSessions.values.filter { session in
-            if session.dead { return true }
-            switch session.connection.state {
-            case .cancelled, .failed(_): return true
-            default: return false
-            }
+            session.dead || session.connection.isClosed
         }
         stale.forEach { dropSSELocked($0) }
     }
@@ -791,7 +730,7 @@ class WebServer {
         sseSessions.removeAll()
     }
 
-    private func handlePostClip(data: Data, connection: NWConnection) {
+    private func handlePostClip(data: Data, connection: HTTPByteSink) {
         guard let json = jsonBody(from: data) else {
             sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
             return
@@ -828,7 +767,7 @@ class WebServer {
 
     /// Put the stored CAS image on NSPasteboard (not OCR). Do not attach
     /// `public.utf8-plain-text` — many paste targets prefer text over image.
-    private func copyStoredImageToPasteboard(id: UUID, connection: NWConnection) {
+    private func copyStoredImageToPasteboard(id: UUID, connection: HTTPByteSink) {
         database.fetchImageData(id: id) { [weak self] data in
             guard let self else { return }
             guard let data, !data.isEmpty else {
@@ -870,7 +809,7 @@ class WebServer {
         pb.setData(payload, forType: type)
     }
 
-    private func handleDeleteClip(path: String, connection: NWConnection) {
+    private func handleDeleteClip(path: String, connection: HTTPByteSink) {
         guard let comps = URLComponents(string: "http://localhost\(path)"),
               let idValue = comps.queryItems?.first(where: { $0.name == "id" })?.value,
               let uuid = UUID(uuidString: idValue) else {
@@ -897,7 +836,7 @@ class WebServer {
     }
 
     
-    private func handleRestoreClip(data: Data, connection: NWConnection) {
+    private func handleRestoreClip(data: Data, connection: HTTPByteSink) {
         let requestString = String(data: data, encoding: .utf8) ?? ""
         guard let bodyRange = requestString.range(of: "\r\n\r\n") else {
             sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
@@ -929,7 +868,7 @@ class WebServer {
         }
     }
 
-    private func sendOpLogs(path: String, connection: NWConnection) {
+    private func sendOpLogs(path: String, connection: HTTPByteSink) {
         let comps = URLComponents(string: "http://localhost" + path)
         let limit = comps?.queryItems?.first(where: { $0.name == "limit" }).flatMap { Int($0.value ?? "") } ?? 100
         database.fetchOperationLogs(limit: limit) { [weak self] rows in
@@ -938,7 +877,7 @@ class WebServer {
         }
     }
 
-    private func sendItemEvents(path: String, connection: NWConnection) {
+    private func sendItemEvents(path: String, connection: HTTPByteSink) {
         let pathOnly = path.split(separator: "?").map(String.init).first ?? path
         let parts = pathOnly.split(separator: "/").map(String.init)
         // api items {uuid} events
@@ -955,7 +894,7 @@ class WebServer {
         }
     }
 
-    private func sendItemFrequency(path: String, connection: NWConnection) {
+    private func sendItemFrequency(path: String, connection: HTTPByteSink) {
         let comps = URLComponents(string: "http://localhost" + path)
         if let hash = comps?.queryItems?.first(where: { $0.name == "hash" })?.value, !hash.isEmpty {
             database.contentFrequency(contentHash: hash) { [weak self] freq in
@@ -966,7 +905,7 @@ class WebServer {
         sendErrorResponse(connection: connection, status: 400, message: "hash query required")
     }
 
-    private func sendSyncStatus(connection: NWConnection) {
+    private func sendSyncStatus(connection: HTTPByteSink) {
         guard let sync = sync else {
             sendJSON(["enabled": false, "error": "sync not configured"], connection: connection)
             return
@@ -1003,7 +942,7 @@ class WebServer {
         }
     }
 
-    private func handleSyncNow(connection: NWConnection) {
+    private func handleSyncNow(connection: HTTPByteSink) {
         guard let sync = sync else {
             sendErrorResponse(connection: connection, status: 503, message: "sync not configured")
             return
@@ -1014,7 +953,7 @@ class WebServer {
         }
     }
 
-    private func handleSyncConfig(data: Data, connection: NWConnection) {
+    private func handleSyncConfig(data: Data, connection: HTTPByteSink) {
         guard let sync = sync else {
             sendErrorResponse(connection: connection, status: 503, message: "sync not configured")
             return
@@ -1037,7 +976,7 @@ class WebServer {
         }
     }
 
-    private func sendJSON(_ object: [String: Any], connection: NWConnection) {
+    private func sendJSON(_ object: [String: Any], connection: HTTPByteSink) {
         guard let body = try? JSONSerialization.data(withJSONObject: object),
               let bodyStr = String(data: body, encoding: .utf8) else {
             sendErrorResponse(connection: connection, status: 500, message: "JSON encode failed")
@@ -1055,7 +994,7 @@ class WebServer {
     }
     
     /// Serve files from ./web/assets (logo, favicon, etc.)
-    private func sendStaticAsset(pathOnly: String, connection: NWConnection) {
+    private func sendStaticAsset(pathOnly: String, connection: HTTPByteSink) {
         // pathOnly like /assets/keepsake-logo.jpg — prevent path traversal
         let name = pathOnly
             .replacingOccurrences(of: "/assets/", with: "")
@@ -1103,7 +1042,7 @@ class WebServer {
         )
     }
 
-    private func sendWebFile(_ name: String, connection: NWConnection) {
+    private func sendWebFile(_ name: String, connection: HTTPByteSink) {
         guard let webRoot = projectWebDirectory() else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
@@ -1126,7 +1065,7 @@ class WebServer {
         )
     }
 
-    private func sendHTMLResponse(connection: NWConnection) {
+    private func sendHTMLResponse(connection: HTTPByteSink) {
         var html = WebServer.indexHTML
         if let webRoot = projectWebDirectory() {
             let webPath = webRoot + "/index.html"
@@ -1552,7 +1491,7 @@ class WebServer {
 
     /// POST /api/ui-metrics  { events:[{name, ts?, dur_ms?, ok?, payload?}], session? }
     /// Local diagnostics only. Never synced. Payload must not contain note content.
-    private func handleUiMetricsIngest(data: Data, connection: NWConnection) {
+    private func handleUiMetricsIngest(data: Data, connection: HTTPByteSink) {
         guard let obj = jsonBody(from: data),
               let events = obj["events"] as? [[String: Any]] else {
             sendJSON(["ok": false, "message": "expected {events:[]}"], connection: connection)
@@ -1568,7 +1507,7 @@ class WebServer {
     }
 
     /// GET /api/ui-metrics/summary?from=&to=  unix ms. Default last 24h.
-    private func handleUiMetricsSummary(path: String, connection: NWConnection) {
+    private func handleUiMetricsSummary(path: String, connection: HTTPByteSink) {
         func ms(_ name: String) -> Int64? {
             guard let s = Self.formQueryValue(path: path, name: name), let n = Int64(s) else { return nil }
             return n
@@ -1577,7 +1516,7 @@ class WebServer {
     }
 
     /// GET /api/ui-metrics/recent?name=&limit=&from=&to=  last N local rows. No content.
-    private func handleUiMetricsRecent(path: String, connection: NWConnection) {
+    private func handleUiMetricsRecent(path: String, connection: HTTPByteSink) {
         func ms(_ name: String) -> Int64? {
             guard let s = Self.formQueryValue(path: path, name: name), let n = Int64(s) else { return nil }
             return n
@@ -1591,7 +1530,7 @@ class WebServer {
     }
 
     /// POST /api/compose  { id?, title?, body, refId? }
-    private func handleComposeSave(data: Data, connection: NWConnection) {
+    private func handleComposeSave(data: Data, connection: HTTPByteSink) {
         guard let obj = jsonBody(from: data) else {
             sendJSON(["ok": false, "message": "expected {body}"], connection: connection)
             return
@@ -1626,7 +1565,7 @@ class WebServer {
     }
 
     /// POST /api/compose/image  { data: base64, mime? }
-    private func handleComposeImage(data: Data, connection: NWConnection) {
+    private func handleComposeImage(data: Data, connection: HTTPByteSink) {
         guard let obj = jsonBody(from: data),
               var raw = obj["data"] as? String else {
             sendJSON(["ok": false, "message": "expected {data}"], connection: connection)
@@ -1650,7 +1589,7 @@ class WebServer {
 
     /// POST /api/archive  { url, itemId? }
     /// Manual web archive — WKWebView + Readability. Never auto.
-    private func handleArchivePost(data: Data, connection: NWConnection) {
+    private func handleArchivePost(data: Data, connection: HTTPByteSink) {
         guard let archive else {
             sendJSON(["ok": false, "message": "归档服务未启动"], connection: connection)
             return
@@ -1675,7 +1614,7 @@ class WebServer {
     }
 
     /// DELETE /api/archive?id=  — drop archive overlay, keep URL clip.
-    private func handleArchiveClear(path: String, connection: NWConnection) {
+    private func handleArchiveClear(path: String, connection: HTTPByteSink) {
         guard let comps = URLComponents(string: "http://localhost\(path)"),
               let idStr = comps.queryItems?.first(where: { $0.name == "id" })?.value,
               let uuid = UUID(uuidString: idStr) else {
@@ -1694,7 +1633,7 @@ class WebServer {
     /// GET /api/archive/view?id=&embed=1
     /// Full HTML document so the browser engine lays out `<pre>`/`<br>`/`&nbsp;`.
     /// Sheet iframe uses embed=1 (no chrome). New-tab uses the same document.
-    private func sendArchiveView(path: String, connection: NWConnection) {
+    private func sendArchiveView(path: String, connection: HTTPByteSink) {
         guard let comps = URLComponents(string: "http://localhost\(path)"),
               let idStr = comps.queryItems?.first(where: { $0.name == "id" })?.value,
               let uuid = UUID(uuidString: idStr) else {
@@ -1794,7 +1733,7 @@ class WebServer {
     }
 
     /// GET /api/archive/asset?sha=  — CAS image for an archive view. Never a publisher CDN.
-    private func sendArchiveAsset(path: String, connection: NWConnection) {
+    private func sendArchiveAsset(path: String, connection: HTTPByteSink) {
         guard let comps = URLComponents(string: "http://localhost\(path)"),
               let sha = comps.queryItems?.first(where: { $0.name == "sha" })?.value?.lowercased(),
               ArchiveImageInliner.isAssetSHA(sha) else {
@@ -1968,7 +1907,7 @@ class WebServer {
     }
 
     /// GET /api/archive/reader?id= — projected learning state + ops.
-    private func sendReaderBundle(path: String, connection: NWConnection) {
+    private func sendReaderBundle(path: String, connection: HTTPByteSink) {
         guard let comps = URLComponents(string: "http://localhost\(path)"),
               let idStr = comps.queryItems?.first(where: { $0.name == "id" })?.value,
               let uuid = UUID(uuidString: idStr) else {
@@ -1986,7 +1925,7 @@ class WebServer {
 
     /// POST /api/clips/link  { fromId, toId?, toHash?, kind?, linked? }
     /// Judgment write. No SSE `update` — caller patches from+peer.
-    private func handleClipLink(data: Data, connection: NWConnection) {
+    private func handleClipLink(data: Data, connection: HTTPByteSink) {
         guard let obj = jsonBody(from: data),
               let fromRaw = obj["fromId"] as? String,
               let fromId = UUID(uuidString: fromRaw) else {
@@ -2038,7 +1977,7 @@ class WebServer {
     }
 
     /// GET /api/items/{uuid}/links
-    private func sendItemLinks(path: String, connection: NWConnection) {
+    private func sendItemLinks(path: String, connection: HTTPByteSink) {
         let pathOnly = path.split(separator: "?").map(String.init).first ?? path
         let parts = pathOnly.split(separator: "/").map(String.init)
         guard parts.count >= 4,
@@ -2076,7 +2015,7 @@ class WebServer {
         return "\(proto)://\(host)\(prefix)/s/\(token)"
     }
 
-    private func handleSharePage(pathOnly: String, connection: NWConnection) {
+    private func handleSharePage(pathOnly: String, connection: HTTPByteSink) {
         let token = String(pathOnly.dropFirst(3))
         guard ShareLinks.isToken(token), let rec = database.lookupShare(token: token) else {
             sendBinary(
@@ -2100,7 +2039,7 @@ class WebServer {
         )
     }
 
-    private func handleShareAsset(path: String, connection: NWConnection) {
+    private func handleShareAsset(path: String, connection: HTTPByteSink) {
         guard let comps = URLComponents(string: "http://localhost\(path)"),
               let token = comps.queryItems?.first(where: { $0.name == "t" })?.value,
               ShareLinks.isToken(token),
@@ -2125,7 +2064,7 @@ class WebServer {
         sendErrorResponse(connection: connection, status: 404, message: "not found")
     }
 
-    private func handleShareCreate(data: Data, headers: [String: String], connection: NWConnection) {
+    private func handleShareCreate(data: Data, headers: [String: String], connection: HTTPByteSink) {
         guard let obj = jsonBody(from: data),
               let idStr = obj["id"] as? String,
               let uuid = UUID(uuidString: idStr) else {
@@ -2154,7 +2093,7 @@ class WebServer {
         }
     }
 
-    private func handleShareRevoke(data: Data, connection: NWConnection) {
+    private func handleShareRevoke(data: Data, connection: HTTPByteSink) {
         guard let obj = jsonBody(from: data),
               let idStr = obj["id"] as? String,
               let uuid = UUID(uuidString: idStr) else {
@@ -2167,7 +2106,7 @@ class WebServer {
     }
 
     /// POST /api/clips/pin  { id, pinned? }  omitted pinned = toggle
-    private func handleClipPin(data: Data, connection: NWConnection) {
+    private func handleClipPin(data: Data, connection: HTTPByteSink) {
         let raw = String(data: data, encoding: .utf8) ?? ""
         guard let brace = raw.range(of: "{"),
               let jsonData = raw[brace.lowerBound...].data(using: .utf8),
@@ -2206,7 +2145,7 @@ class WebServer {
     }
 
     /// POST /api/archive/reader  { id, kind, payload? }
-    private func handleReaderPost(data: Data, connection: NWConnection) {
+    private func handleReaderPost(data: Data, connection: HTTPByteSink) {
         let raw = String(data: data, encoding: .utf8) ?? ""
         guard let brace = raw.range(of: "{"),
               let jsonData = raw[brace.lowerBound...].data(using: .utf8),
@@ -2239,7 +2178,7 @@ class WebServer {
     }
 
     /// GET /api/archive?job=  or /api/archive/{jobId}
-    private func sendArchiveStatus(path: String, connection: NWConnection) {
+    private func sendArchiveStatus(path: String, connection: HTTPByteSink) {
         guard let archive else {
             sendJSON(["ok": false, "message": "归档服务未启动"], connection: connection)
             return
@@ -2264,7 +2203,7 @@ class WebServer {
 
     /// POST /api/clips/evaluate  { id, rating?, note? }
     /// Append-only evaluation history; updates latest projection only. Capture payload immutable.
-    private func handleClipEvaluate(data: Data, connection: NWConnection) {
+    private func handleClipEvaluate(data: Data, connection: HTTPByteSink) {
         let raw = String(data: data, encoding: .utf8) ?? ""
         guard let brace = raw.range(of: "{"),
               let jsonData = raw[brace.lowerBound...].data(using: .utf8),
@@ -2304,11 +2243,11 @@ class WebServer {
     }
 
     /// Legacy alias → evaluate
-    private func handleClipContext(data: Data, connection: NWConnection) {
+    private func handleClipContext(data: Data, connection: HTTPByteSink) {
         handleClipEvaluate(data: data, connection: connection)
     }
 
-    private func sendItemEvaluations(path: String, connection: NWConnection) {
+    private func sendItemEvaluations(path: String, connection: HTTPByteSink) {
         // /api/items/{uuid}/evaluations
         let parts = path.split(separator: "/").map(String.init)
         // ["api","items","{id}","evaluations"]
@@ -2327,7 +2266,7 @@ class WebServer {
     /// Response envelope (always object for new clients):
     ///   { "items": [...], "nextCursor": "..." | null }
     /// Legacy: still works when limit/cursor omitted (returns first page).
-    private func sendItemsJSON(path: String, connection: NWConnection) {
+    private func sendItemsJSON(path: String, connection: HTTPByteSink) {
         let comps = URLComponents(string: "http://localhost\(path)")
         let items = comps?.queryItems ?? []
         let limit = items.first(where: { $0.name == "limit" }).flatMap { Int($0.value ?? "") } ?? 30
@@ -2397,7 +2336,7 @@ class WebServer {
         return Data(text.utf8)
     }
 
-    private func sendBinary(status: Int, reason: String, contentType: String, body: Data, connection: NWConnection, extraHeaders: [(String, String)] = []) {
+    private func sendBinary(status: Int, reason: String, contentType: String, body: Data, connection: HTTPByteSink, extraHeaders: [(String, String)] = []) {
         var headers: [(String, String)] = [
             ("Access-Control-Allow-Origin", "*"),
             ("Content-Type", contentType),
@@ -2412,9 +2351,9 @@ class WebServer {
             headers.append(("Cache-Control", "private, max-age=60"))
         }
         let payload = httpHeader(status: status, reason: reason, headers: headers) + body
-        connection.send(content: payload, completion: .contentProcessed { _ in
+        connection.send(content: payload) { _ in
             connection.cancel()
-        })
+        }
     }
 
     private func detectImageContentType(_ data: Data) -> String {
@@ -2489,7 +2428,7 @@ class WebServer {
         return convertToPNG(data).map { ($0, "image/png") }
     }
 
-    private func sendImage(path: String, connection: NWConnection) {
+    private func sendImage(path: String, connection: HTTPByteSink) {
         guard let comps = URLComponents(string: "http://localhost\(path)") else {
             sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
             return
@@ -2569,7 +2508,7 @@ class WebServer {
         return json
     }
 
-    private func sendJSONObject(_ obj: [String: Any], connection: NWConnection) {
+    private func sendJSONObject(_ obj: [String: Any], connection: HTTPByteSink) {
         guard let data = try? JSONSerialization.data(withJSONObject: obj, options: []),
               let jsonString = String(data: data, encoding: .utf8) else {
             sendErrorResponse(connection: connection, status: 500, message: "JSON encode failed")
@@ -2586,7 +2525,7 @@ class WebServer {
         sendResponse(response, connection: connection)
     }
 
-    private func sendBackupStatus(path: String, connection: NWConnection) {
+    private func sendBackupStatus(path: String, connection: HTTPByteSink) {
         let lite = (Self.formQueryValue(path: path, name: "lite") == "1")
         guard let backup = backup ?? CloudDocsBackupService.shared else {
             sendJSONObject([
@@ -2608,7 +2547,7 @@ class WebServer {
         }
     }
 
-    private func handleBackupConfig(data: Data, connection: NWConnection) {
+    private func handleBackupConfig(data: Data, connection: HTTPByteSink) {
         guard let backup = backup ?? CloudDocsBackupService.shared else {
             sendErrorResponse(connection: connection, status: 503, message: "backup unavailable")
             return
@@ -2629,7 +2568,7 @@ class WebServer {
         }
     }
 
-    private func handleBackupRun(connection: NWConnection) {
+    private func handleBackupRun(connection: HTTPByteSink) {
         guard let backup = backup ?? CloudDocsBackupService.shared else {
             sendErrorResponse(connection: connection, status: 503, message: "backup unavailable")
             return
@@ -2639,7 +2578,7 @@ class WebServer {
         }
     }
 
-    private func handleBackupRestore(data: Data, connection: NWConnection) {
+    private func handleBackupRestore(data: Data, connection: HTTPByteSink) {
         guard let backup = backup ?? CloudDocsBackupService.shared else {
             sendErrorResponse(connection: connection, status: 503, message: "backup unavailable")
             return
@@ -2651,7 +2590,7 @@ class WebServer {
         }
     }
 
-    private func sendErrorResponse(connection: NWConnection, status: Int, message: String) {
+    private func sendErrorResponse(connection: HTTPByteSink, status: Int, message: String) {
         let html = """
         <!DOCTYPE html>
         <html>
@@ -2671,7 +2610,7 @@ class WebServer {
         sendResponse(response, connection: connection)
     }
     
-    private func sendResponse(_ response: String, connection: NWConnection) {
+    private func sendResponse(_ response: String, connection: HTTPByteSink) {
         // Normalize any LF-only HTTP headers (from Swift multiline strings) to CRLF
         // so browsers and curl parse headers/body boundary correctly.
         let normalized: String
@@ -2691,9 +2630,9 @@ class WebServer {
             return
         }
         
-        connection.send(content: data, completion: .contentProcessed { [weak connection] _ in
+        connection.send(content: data) { [weak connection] _ in
             connection?.cancel()
-        })
+        }
     }
     
     deinit {
@@ -2793,7 +2732,7 @@ final class TraeAskFanIn: NSObject, URLSessionDataDelegate {
 
 /// Streams Trae `/api/stream` onto a ClipVault client connection without buffering.
 final class TraeStreamPipe: NSObject, URLSessionDataDelegate {
-    private let client: NWConnection
+    private let client: HTTPByteSink
     private let url: URL
     private let lock = NSLock()
     private var headerSent = false
@@ -2801,7 +2740,7 @@ final class TraeStreamPipe: NSObject, URLSessionDataDelegate {
     private var session: URLSession?
     private var task: URLSessionDataTask?
 
-    init(client: NWConnection, url: URL) {
+    init(client: HTTPByteSink, url: URL) {
         self.client = client
         self.url = url
         super.init()
@@ -2883,19 +2822,14 @@ final class TraeStreamPipe: NSObject, URLSessionDataDelegate {
             return
         }
         lock.unlock()
-        client.send(content: data, completion: .contentProcessed { [weak self] error in
+        client.send(content: data) { [weak self] error in
             if error != nil { self?.close() }
-        })
+        }
     }
 
     private func watchClient() {
-        client.receive(minimumIncompleteLength: 1, maximumLength: 4) { [weak self] _, _, isComplete, error in
-            guard let self else { return }
-            if isComplete || error != nil {
-                self.close()
-                return
-            }
-            self.watchClient()
+        client.watchPeerClose { [weak self] in
+            self?.close()
         }
     }
 

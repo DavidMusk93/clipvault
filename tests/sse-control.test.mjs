@@ -62,6 +62,22 @@ test('unpin JSON nulls pinnedAt and SSE clip_pinned', () => {
   assert.match(web, /headOnly: headOnly/);
 });
 
+test('browser edge is Rust HTTPS/2 on the only TCP port', () => {
+  const rust = readFileSync(join(root, 'http-front/src/main.rs'), 'utf8');
+  const cargo = readFileSync(join(root, 'http-front/Cargo.toml'), 'utf8');
+  const front = readFileSync(join(root, 'ClipFlow/HttpFrontProcess.swift'), 'utf8');
+  const origin = readFileSync(join(root, 'ClipFlow/HTTPByteSink.swift'), 'utf8');
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+  assert.match(cargo, /name = "clipvault-http"/);
+  assert.match(rust, /alpn_protocols = vec!\[b"h2"\.to_vec\(\), b"http\/1\.1"\.to_vec\(\)\]/);
+  assert.match(rust, /UnixStream::connect/);
+  assert.match(front, /clipvault-http/);
+  assert.match(origin, /OriginUnixServer/);
+  assert.match(web, /HttpFrontProcess/);
+  assert.match(agents, /clipvault-http/);
+  assert.doesNotMatch(rust, /8443/);
+});
+
 test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
   const attach = sliceFrom(web, 'func attachSSELocked', 4000);
   assert.match(attach, /retry: 3000/);

@@ -45,7 +45,7 @@ echo "Documents/ClipFlow db bytes: $DOC_SZ"
 echo "AppSupport/Keepsake db bytes: $AS_SZ"
 
 # 2) HTTP + item sample
-HTTP=$(curl -sS -m 3 -o /tmp/cv_clips_sample.json -w '%{http_code}' 'http://127.0.0.1:8080/api/clips?limit=5' || echo 000)
+HTTP=$(curl --noproxy '*' -sk -m 5 -o /tmp/cv_clips_sample.json -w '%{http_code}' 'https://127.0.0.1:8080/api/clips?limit=5' || echo 000)
 if [ "$HTTP" != "200" ]; then
   red "FAIL: API HTTP $HTTP"
   exit 1

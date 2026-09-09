@@ -23,7 +23,7 @@ webServer.start()
 
 print("✅ ClipFlow Web 服务已成功运行：")
 print("📁 数据目录见 [Database] 日志；禁止无 KEEPSAKE_HOME 的 nohup 裸启（incident 2026-08-11）")
-print("👉 本地 Web UI 访问地址: http://localhost:8080")
+print("👉 本地 Web UI: https://127.0.0.1:8080  (HTTP/2)")
 if let root = backup.backupRootURL {
     print("☁️  备份主目录: \(root.path)")
 } else {
