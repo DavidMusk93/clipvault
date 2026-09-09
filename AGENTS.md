@@ -216,7 +216,7 @@ Capture 禁止就地改成笔记。Compose 禁止写成第二套剪贴板。
     正在输入不覆盖；无 parent 的旧 trx 才 wallTs LWW
 ```
 
-工具条向源码插 Markdown，不改预览 DOM。删除线 = GFM `~~文字~~`（钮面「删」+ 删除线 / `Mod-Shift-x`）。预览也露出工具条；点击先切源码再插入。禁止 `visibility:hidden` 藏标记钮，禁止 `overflow:hidden` 裁工具条。
+工具条向源码插 Markdown，不改预览 DOM。删除线 = GFM `~~`；钮面与粗/斜同一套 **B / I / S**（`format_strikethrough`，`Mod-Shift-x`）。预览也露出工具条；点击先切源码再插入。禁止钮面用汉字；禁止 `visibility:hidden` 藏标记钮。
 
 禁止：Vditor / Crepe WYSIWYG；textarea 玩具编辑器；另开文档页；笔记另搞 `note_pin` trx。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`。列表失败禁止开空白新笔记。
 

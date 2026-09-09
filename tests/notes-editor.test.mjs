@@ -224,9 +224,9 @@ test('preview compiles blocks incrementally and React reconciles by hash', () =>
 });
 
 test('notes tools include GFM strikethrough and do not clip the bar', () => {
-  assert.match(html, /data-cmd="strike"[^>]*>删</);
-  assert.match(html, /aria-label="删除线"/);
-  assert.match(html, /button\[data-cmd="strike"\]/);
+  assert.match(html, /data-cmd="strike"/);
+  assert.match(html, /format_strikethrough/);
+  assert.doesNotMatch(html, /data-cmd="strike"[^>]*>删</);
   assert.match(html, /data-cmd="h3"/);
   assert.match(html, /data-cmd="hr"/);
   assert.match(html, /\.notes-tools \{[\s\S]{0,160}flex-wrap:\s*wrap/);

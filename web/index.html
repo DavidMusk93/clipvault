@@ -1973,11 +1973,6 @@
       font: 650 12px/26px var(--font-ui);
       display: inline-flex; align-items: center; justify-content: center;
     }
-    .notes-tools button[data-cmd="strike"] {
-      width: auto; min-width: 28px; padding: 0 6px;
-      text-decoration: line-through;
-      text-decoration-thickness: 1.5px;
-    }
     .notes-tools button:hover { background: rgba(60, 60, 67, 0.08); }
     .notes-tools button:active { transform: scale(0.96); }
     .notes-tools button .material-symbols-outlined { font-size: 16px; }
@@ -2563,7 +2558,7 @@
           <button type="button" data-cmd="h3" title="三级标题">H3</button>
           <button type="button" data-cmd="bold" title="粗体"><span class="material-symbols-outlined">format_bold</span></button>
           <button type="button" data-cmd="italic" title="斜体"><span class="material-symbols-outlined">format_italic</span></button>
-          <button type="button" data-cmd="strike" title="删除线 ~~text~~" aria-label="删除线">删</button>
+          <button type="button" data-cmd="strike" title="Strikethrough"><span class="material-symbols-outlined">format_strikethrough</span></button>
           <button type="button" data-cmd="ul" title="列表"><span class="material-symbols-outlined">format_list_bulleted</span></button>
           <button type="button" data-cmd="ol" title="编号"><span class="material-symbols-outlined">format_list_numbered</span></button>
           <button type="button" data-cmd="quote" title="引用"><span class="material-symbols-outlined">format_quote</span></button>
