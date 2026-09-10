@@ -318,6 +318,9 @@ test('head merge prepends new cards and skips unchanged signatures', () => {
   assert.match(indexHtml, /sig === lastHeadSig/);
   assert.match(indexHtml, /fields: 'head'/);
   assert.match(indexHtml, /kind: 'prepend'/);
+  assert.match(indexHtml, /y0 < 24/, 'at-top prepend is desired UX and still CLS');
+  assert.match(indexHtml, /phase: compensated \? 'keep' : 'top'/);
+  assert.match(indexHtml, /top: nextY, left: 0, behavior: 'instant'/);
   assert.doesNotMatch(
     indexHtml,
     /Head insert changes order — full rebuild/,

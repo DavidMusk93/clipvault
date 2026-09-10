@@ -7571,20 +7571,43 @@ window.ClipViewMasonry = Masonry;
       if (!toAdd.length) return;
       const newestFirst = toAdd.slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       const t0 = performance.now();
+      const y0 = window.scrollY || document.documentElement.scrollTop || 0;
+      const atTop = y0 < 24;
       const colWidth = colEls[0].clientWidth || Math.floor((host.clientWidth || 800) / cols);
       let added = 0;
+      let addedH = 0;
       for (const item of newestFirst) {
         if (cardCache.has(item.id) && cardCache.get(item.id)?.isConnected) continue;
         const card = ensureCard(item);
         const h = Masonry.measureHeightAtWidth(card, colWidth);
+        const gap = colHeights[0] > 0 ? MASONRY_GAP : 0;
         colEls[0].insertBefore(card, colEls[0].firstChild);
         const realH = Masonry.measureHeight(card) || h;
-        colHeights[0] += realH + (colHeights[0] > 0 ? MASONRY_GAP : 0);
+        colHeights[0] += realH + gap;
+        addedH += realH + gap;
         added += 1;
       }
-      if (added) {
-        nm('wall_paint', { dur_ms: performance.now() - t0, payload: { kind: 'prepend', n: added } });
+      if (!added) return;
+      let compensated = 0;
+      if (!atTop && addedH > 0) {
+        const nextY = y0 + addedH;
+        try {
+          window.scrollTo({ top: nextY, left: 0, behavior: 'instant' });
+        } catch (_) {
+          window.scrollTo(0, nextY);
+        }
+        compensated = 1;
       }
+      nm('wall_paint', {
+        dur_ms: performance.now() - t0,
+        payload: {
+          kind: 'prepend',
+          n: added,
+          phase: compensated ? 'keep' : 'top',
+          dy: Math.round(addedH),
+          w: Math.round(y0),
+        },
+      });
     }
 
     function packMasonry(host, orderedCards) {
