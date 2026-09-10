@@ -12,7 +12,12 @@ import { extractCalcExpr, formatCheckpoint, hrStampBlock, inFence, isHrLine, isS
 
 const MODE_KEY = 'clipvault.notes.mode'
 const SPLIT_KEY = 'clipvault.notes.split'
+const WRAP_KEY = 'clipvault.notes.codeWrap'
 const MODES = ['source', 'split', 'preview']
+
+function loadCodeWrap() {
+  try { return localStorage.getItem(WRAP_KEY) === '1' } catch (_) { return false }
+}
 
 function copyNotesCode(text, btn) {
   const done = () => {
@@ -449,13 +454,34 @@ async function mount(root, opts) {
   previewEl.appendChild(previewInner)
   root.append(sourceEl, splitEl, previewEl)
   const preview = mountNotesPreview(previewInner)
+
+  function syncCodeWrap() {
+    const on = loadCodeWrap()
+    previewInner.querySelectorAll('.notes-code').forEach((el) => {
+      el.classList.toggle('is-wrap', on)
+      const b = el.querySelector('.notes-code-wrap')
+      if (!b) return
+      b.classList.toggle('is-on', on)
+      b.setAttribute('aria-pressed', on ? 'true' : 'false')
+    })
+  }
+
   previewEl.addEventListener('click', (e) => {
-    const btn = e.target && e.target.closest && e.target.closest('.notes-code-copy')
+    const t = e.target
+    const wrapBtn = t && t.closest && t.closest('.notes-code-wrap')
+    if (wrapBtn && previewEl.contains(wrapBtn)) {
+      e.preventDefault()
+      e.stopPropagation()
+      try { localStorage.setItem(WRAP_KEY, loadCodeWrap() ? '0' : '1') } catch (_) {}
+      syncCodeWrap()
+      return
+    }
+    const btn = t && t.closest && t.closest('.notes-code-copy')
     if (!btn || !previewEl.contains(btn)) return
     e.preventDefault()
     e.stopPropagation()
-    const wrap = btn.closest('.notes-code')
-    const pre = wrap && wrap.querySelector('pre')
+    const box = btn.closest('.notes-code')
+    const pre = box && box.querySelector('pre')
     copyNotesCode(pre ? pre.textContent : '', btn)
   })
 
@@ -510,12 +536,19 @@ async function mount(root, opts) {
       const lab = document.createElement('div')
       lab.className = 'notes-code-lang'
       lab.textContent = lang
+      const wrapBtn = document.createElement('button')
+      wrapBtn.type = 'button'
+      wrapBtn.className = 'notes-code-wrap'
+      wrapBtn.textContent = '换行'
+      wrapBtn.setAttribute('aria-label', '切换代码换行')
+      wrapBtn.setAttribute('aria-pressed', 'false')
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'notes-code-copy'
       btn.textContent = '复制'
       btn.setAttribute('aria-label', '复制代码')
       head.appendChild(lab)
+      head.appendChild(wrapBtn)
       head.appendChild(btn)
       wrap.appendChild(head)
       wrap.appendChild(pre)
@@ -570,6 +603,7 @@ async function mount(root, opts) {
     const maxBefore = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
     const stickBottom = preserveScroll && maxBefore > 0 && (maxBefore - keepTop) < 48
     const finish = () => {
+      syncCodeWrap()
       if (remap && mode === 'split') syncPreviewToSource(view, { force: true })
       else if (!preserveScroll) previewEl.scrollTop = 0
       else if (stickBottom) previewEl.scrollTop = previewEl.scrollHeight

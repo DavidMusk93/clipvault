@@ -197,7 +197,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.notes-code-copy {
+.notes-code-copy,
+.notes-code-wrap {
   flex: none;
   height: 22px;
   padding: 0 8px;
@@ -210,8 +211,14 @@
   cursor: pointer;
   user-select: none;
 }
-.notes-code-copy:hover { background: rgba(0, 0, 0, 0.06); color: #1d1d1f; }
-.notes-code-copy:active { transform: scale(0.97); }
+.notes-code-copy:hover,
+.notes-code-wrap:hover { background: rgba(0, 0, 0, 0.06); color: #1d1d1f; }
+.notes-code-copy:active,
+.notes-code-wrap:active { transform: scale(0.97); }
+.notes-code-wrap.is-on {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1d1d1f;
+}
 .notes-preview-inner pre,
 .notes-code pre,
 .notes-preview pre {
@@ -219,14 +226,12 @@
   padding: 12px 14px 14px;
   background: #f5f5f7 !important;
   color: #1d1d1f !important;
-  overflow-x: hidden;
+  overflow-x: auto;
   font-family: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.55;
   font-variant-ligatures: none;
-  white-space: pre-wrap !important;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  white-space: pre;
   border-radius: 10px;
 }
 .notes-code pre {
@@ -235,16 +240,21 @@
 }
 .notes-preview-inner pre code,
 .notes-code pre code,
-.notes-preview pre code,
-.notes-preview .hljs {
+.notes-preview pre code {
   background: transparent !important;
   color: #1d1d1f !important;
   padding: 0;
   font-size: inherit;
   border-radius: 0;
+  white-space: inherit;
+}
+.notes-code.is-wrap pre,
+.notes-code.is-wrap pre code,
+.notes-preview .notes-code.is-wrap .hljs {
   white-space: pre-wrap !important;
   overflow-wrap: anywhere;
   word-break: break-word;
+  overflow-x: hidden;
 }
 
 /* Xcode Light, scoped so wall hljs github theme does not leak in. */
