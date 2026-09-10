@@ -269,7 +269,14 @@ test('notes tools include GFM strikethrough and do not clip the bar', () => {
 
 test('open notes lock the wall so chips and format toolbar cannot drag', () => {
   assert.match(html, /html\.notes-open/);
-  assert.match(html, /body\.notes-open[\s\S]{0,80}overflow:\s*hidden/);
+  assert.doesNotMatch(
+    html,
+    /html\.notes-open[\s\S]{0,160}overflow:\s*hidden/,
+    'overflow:hidden on html/body unsticks chrome and jumps first card ~121px',
+  );
+  assert.match(html, /function lockPageScroll/);
+  assert.match(html, /dataset\.scrollLock/);
+  assert.match(html, /position = 'fixed'/);
   assert.match(html, /body\.notes-open \.chips,/);
   assert.match(html, /body\.notes-open main/);
   assert.match(html, /sheet-unlocking/);
