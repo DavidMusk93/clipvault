@@ -7,9 +7,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { src, root } from './helpers/src.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const db = readFileSync(join(root, 'ClipFlow/DatabaseManager.swift'), 'utf8');
+const db = src('DatabaseManager.swift');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
 const indexHtml = readFileSync(join(root, 'web/index.html'), 'utf8');
 

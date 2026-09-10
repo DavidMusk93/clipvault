@@ -3,7 +3,7 @@ import CoreGraphics
 
 /// Compile with StripOCR.swift + ImageStoragePolicy.swift:
 ///   swiftc -o /tmp/strip_ocr_test -framework Vision -framework ImageIO -framework CoreGraphics \
-///     ClipFlow/StripOCR.swift ClipFlow/ImageStoragePolicy.swift tests/strip_ocr_main.swift
+///     Sources/ClipVault/Capture/StripOCR.swift ImageStoragePolicy.swift tests/strip_ocr_main.swift
 @main
 enum StripOCRStitchTests {
     static func main() {

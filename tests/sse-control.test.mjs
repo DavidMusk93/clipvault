@@ -7,9 +7,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { src, root } from './helpers/src.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const web = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
+const web = src('WebServer.swift');
 const indexHtml = readFileSync(join(root, 'web/index.html'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
 
@@ -23,17 +23,17 @@ test('this file is in the deploy frontend gate', () => {
   assert.match(check, /sse-control\.test\.mjs/);
 });
 
-test('sync capture posts ClipFlowItemAdded with itemId', () => {
-  const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
+test('sync capture posts ClipVaultItemAdded with itemId', () => {
+  const sync = src('CloudDocsSyncService.swift');
   const slice = sliceFrom(sync, 'if changed {', 600);
   assert.match(slice, /object: capture \? op\.itemId : nil/);
   assert.match(slice, /kind == "upsert"/);
 });
 
 test('OCR follow-up upsert is packed into trx after capture', () => {
-  const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
-  const monitor = readFileSync(join(root, 'ClipFlow/ClipboardMonitor.swift'), 'utf8');
-  const db = readFileSync(join(root, 'ClipFlow/DatabaseManager.swift'), 'utf8');
+  const sync = src('CloudDocsSyncService.swift');
+  const monitor = src('ClipboardMonitor.swift');
+  const db = src('DatabaseManager.swift');
   const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   assert.match(sync, /func recordLocalOCR/);
   assert.match(sync, /scheduleDrain\(reason: "ocr"\)/);
@@ -62,23 +62,26 @@ test('unpin JSON nulls pinnedAt and SSE clip_pinned', () => {
   assert.match(web, /headOnly: headOnly/);
 });
 
-test('browser edge is Rust HTTPS/2 on the only TCP port', () => {
+test('browser edge is one-hop HTTP/2 (h2c :80 / TLS :443)', () => {
   const rust = readFileSync(join(root, 'http-front/src/main.rs'), 'utf8');
   const cargo = readFileSync(join(root, 'http-front/Cargo.toml'), 'utf8');
-  const front = readFileSync(join(root, 'ClipFlow/HttpFrontProcess.swift'), 'utf8');
-  const origin = readFileSync(join(root, 'ClipFlow/HTTPByteSink.swift'), 'utf8');
+  const front = src('HttpFrontProcess.swift');
+  const origin = src('HTTPByteSink.swift');
+  const wire = src('OriginWire.swift');
   const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   assert.match(cargo, /name = "clipvault-http"/);
-  assert.match(rust, /alpn_protocols = vec!\[b"h2"\.to_vec\(\), b"http\/1\.1"\.to_vec\(\)\]/);
-  assert.match(rust, /UnixStream::connect/);
-  assert.match(rust, /ClipVault Local CA/);
-  assert.match(rust, /write_local_ca/);
-  assert.match(rust, /ca\.pem/);
+  assert.match(rust, /mod origin/);
+  assert.match(rust, /tls_enabled/);
+  assert.match(rust, /127\.0\.0\.1:80/);
+  assert.match(rust, /127\.0\.0\.1:443/);
   assert.match(front, /clipvault-http/);
   assert.match(origin, /OriginUnixServer/);
+  assert.match(wire, /CV01/);
   assert.match(web, /HttpFrontProcess/);
+  assert.match(web, /OriginWire/);
   assert.match(agents, /clipvault-http/);
   assert.doesNotMatch(rust, /8443/);
+  assert.doesNotMatch(rust, /http1::handshake/);
 });
 
 test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
@@ -87,17 +90,18 @@ test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
   assert.match(attach, /sseHelloBodyLocked/);
   assert.match(attach, /X-Accel-Buffering/, 'proxy must not buffer the stream');
   assert.match(attach, /text\/event-stream/);
-  assert.match(attach, /Transfer-Encoding", "chunked"/);
-  assert.match(web, /static func httpChunk/);
+  assert.match(attach, /OriginWire\.encodeResponse/);
+  assert.match(attach, /stream: true/);
+  assert.doesNotMatch(web, /static func httpChunk/);
   const drop = sliceFrom(web, 'func dropSSELocked', 500);
   assert.match(drop, /connection\.cancel\(\)/, 'SSE drop must close the unix fd');
-  const sink = readFileSync(join(root, 'ClipFlow/HTTPByteSink.swift'), 'utf8');
+  const sink = src('HTTPByteSink.swift');
   assert.match(sink, /O_NONBLOCK/);
   assert.match(sink, /MSG_PEEK/);
   assert.match(sink, /EAGAIN/);
   const rust = readFileSync(join(root, 'http-front/src/main.rs'), 'utf8');
-  assert.match(rust, /struct ProxyBody/);
-  assert.match(rust, /oneshot::channel/);
+  const originrs = readFileSync(join(root, 'http-front/src/origin.rs'), 'utf8');
+  assert.match(originrs, /struct OriginBody/);
   assert.match(rust, /keep_alive_interval/);
   assert.match(web, /sseResyncFrame/);
   assert.match(web, /resync_required/);

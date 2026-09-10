@@ -3,9 +3,9 @@ import { readFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { src, root } from './helpers/src.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const swift = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
+const swift = src('WebServer.swift');
 const viewCss = readFileSync(join(root, 'web/assets/archive-view.css'), 'utf8');
 const readerJs = readFileSync(join(root, 'web/assets/archive-reader.js'), 'utf8');
 
@@ -61,25 +61,25 @@ test('archive view self-hosts JetBrains Mono for code, not a font CDN', () => {
 });
 
 test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', () => {
-  const src = readFileSync(join(root, 'ClipFlow/XArticleHTML.swift'), 'utf8');
-  const svc = readFileSync(join(root, 'ClipFlow/WebArchiveService.swift'), 'utf8');
-  assert.match(src, /x-article\+draftjs/);
-  assert.match(src, /header-two/);
-  assert.match(src, /MARKDOWN/);
-  assert.match(src, /renderFence/);
-  assert.match(src, /headingLike/);
-  assert.match(src, /isUsableArticleHTML/);
-  assert.match(src, /media_entities/);
-  assert.match(src, /mediaItems/);
-  assert.match(src, /mediaIndex/);
-  assert.match(src, /cv-x-dropped/);
-  assert.match(src, /DIVIDER/);
-  assert.match(src, /<hr>/);
-  assert.match(src, /target=\\"_blank\\"/);
-  assert.match(src, /safeHTTPURL/);
-  assert.match(src, /headingShift/);
-  assert.match(src, /mediaExpected/);
-  assert.match(src, /struct Coverage/);
+  const xhtml = src('XArticleHTML.swift');
+  const svc = src('WebArchiveService.swift');
+  assert.match(xhtml, /x-article\+draftjs/);
+  assert.match(xhtml, /header-two/);
+  assert.match(xhtml, /MARKDOWN/);
+  assert.match(xhtml, /renderFence/);
+  assert.match(xhtml, /headingLike/);
+  assert.match(xhtml, /isUsableArticleHTML/);
+  assert.match(xhtml, /media_entities/);
+  assert.match(xhtml, /mediaItems/);
+  assert.match(xhtml, /mediaIndex/);
+  assert.match(xhtml, /cv-x-dropped/);
+  assert.match(xhtml, /DIVIDER/);
+  assert.match(xhtml, /<hr>/);
+  assert.match(xhtml, /target=\\"_blank\\"/);
+  assert.match(xhtml, /safeHTTPURL/);
+  assert.match(xhtml, /headingShift/);
+  assert.match(xhtml, /mediaExpected/);
+  assert.match(xhtml, /struct Coverage/);
   assert.match(svc, /coverageJSON/);
   assert.match(svc, /renderDocument/);
   assert.match(svc, /XArticleHTML\.enrich/);
@@ -88,8 +88,8 @@ test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', ()
 });
 
 test('archive extract keeps diagram lists Readability would drop', () => {
-  const svc = readFileSync(join(root, 'ClipFlow/WebArchiveService.swift'), 'utf8');
-  const rdb = readFileSync(join(root, 'ClipFlow/Resources/Readability.js'), 'utf8');
+  const svc = src('WebArchiveService.swift');
+  const rdb = src('Readability.js');
   assert.match(svc, /repairOrphanFigures/);
   assert.match(svc, /figcaption/);
   assert.match(rdb, /diagramList/);
@@ -105,7 +105,7 @@ test('archive view sizes youtube iframes and adds a watch link', () => {
 });
 
 test('archive view flattens Medium picture/srcset so CSP self images paint', () => {
-  const inliner = readFileSync(join(root, 'ClipFlow/ArchiveImageInliner.swift'), 'utf8');
+  const inliner = src('ArchiveImageInliner.swift');
   assert.match(inliner, /func flattenPictures/);
   assert.match(inliner, /<source\\b/);
   assert.match(inliner, /srcset/);
@@ -123,7 +123,7 @@ test('archive view promotes weixin lazy data-src over 1px svg src', () => {
 });
 
 test('public tunnel hosts require TOTP session, Access JWT, or optional origin token', () => {
-  const auth = readFileSync(join(root, 'ClipFlow/ClipVaultAuth.swift'), 'utf8');
+  const auth = src('ClipVaultAuth.swift');
   assert.match(swift, /publicRequestAuthorized/);
   assert.match(swift, /isLoopbackRequest/);
   assert.match(swift, /ClipVaultAuth\.shared\.isSessionAuthorized/);
@@ -148,7 +148,7 @@ test('public tunnel path /clipvault is stripped to local routes', () => {
 });
 
 test('archive images are CAS assets, not publisher CDN', () => {
-  const inliner = readFileSync(join(root, 'ClipFlow/ArchiveImageInliner.swift'), 'utf8');
+  const inliner = src('ArchiveImageInliner.swift');
   assert.match(inliner, /\/api\/archive\/asset\?sha=/);
   assert.match(swift, /sendArchiveAsset/);
   assert.match(swift, /img-src 'self' data: blob:/);
@@ -156,8 +156,8 @@ test('archive images are CAS assets, not publisher CDN', () => {
 });
 
 test('archive sync ships the document closure, not just the HTML sha', () => {
-  const closure = readFileSync(join(root, 'ClipFlow/ArchiveBlobClosure.swift'), 'utf8');
-  const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
+  const closure = src('ArchiveBlobClosure.swift');
+  const sync = src('CloudDocsSyncService.swift');
   assert.match(closure, /archive/);
   assert.match(closure, /asset/);
   assert.match(closure, /blob_keys/);

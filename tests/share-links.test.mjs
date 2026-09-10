@@ -7,11 +7,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { src, root } from './helpers/src.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const swift = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
-const share = readFileSync(join(root, 'ClipFlow/ShareLinks.swift'), 'utf8');
-const db = readFileSync(join(root, 'ClipFlow/DatabaseManager.swift'), 'utf8');
+const swift = src('WebServer.swift');
+const share = src('ShareLinks.swift');
+const db = src('DatabaseManager.swift');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
 

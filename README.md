@@ -2,162 +2,56 @@
 
 **遇到的留下，想到的写下。**
 
-ClipVault 是面向个人 Mac 的剪贴板历史产品：本机守护进程静默捕获，浏览器里检索与预览，图片 OCR 可检索，备份进 iCloud 云盘（CloudDocs）——**无需 App 签名、无第三方云。**
+个人 Mac 剪贴板记忆：本机守护进程静默捕获，浏览器检索与预览，图片 OCR 可检索，备份进你自己的云盘。
 
-> 仓库目录与部分可执行文件名仍可能显示历史代号 `ClipView` / `ClipFlow`。**产品品牌统一为 ClipVault。**
-
----
-
-## 它是什么
-
-| 你感知到的 | 背后 |
-| --- | --- |
-| 复制即归档 | `ClipFlowServer` 守护进程监听系统剪贴板 |
-| 浏览器打开即用 | 本机 Web UI · `http://127.0.0.1/` |
-| 图里的字也能搜 | Apple Vision 离线 OCR |
-| 换机/重装不丢 | iCloud Drive · CloudDocs 在线 SQLite 备份 |
-
-**不是** 又一个 ClipXxx 工具列表；**是** 个人剪贴板的记忆层。
-
----
-
-## 能力一览
-
-- **捕获**：文本 / HTML / 图片等；变更即入库  
-- **浏览**：Material 3 风格瀑布流；类型筛选；服务端搜索（正文 / OCR / 评价备注 / View 划线与评论）  
-- **图片**：列表缩略图（`size=thumb`）；点击 lightbox 看原图（`size=full`）  
-- **OCR**：中英识别，限高可滚动展示，写入可检索字段  
-- **实时**：SSE 控制面推送；15s heartbeat；慢客户端 `resync_required`；切回标签 `mergeHead` 补快照（非整表重刷）  
-- **规模**：游标分页 + 列表不拉 BLOB + `content-visibility`  
-- **备份（灾备平面）**：CloudDocs · **按机器** `hosts/{hostId}/` · `sqlite3_backup` · 互不覆盖  
-- **多机同步**：每机事务 + 云盘运输 · 最终一致 · 附件 `live/attach/` · **禁止整库覆盖当同步**  
-- **会话采集**：Mac 一份 DuckDB；远端 Trae 只跑 Quack client。见 [docs/trae-hooks.md](./docs/trae-hooks.md)  
-- **隐私**：本机数据优先 Application Support / 可配置；备份与同步在你的 iCloud 云盘目录下  
-
----
-
-## 架构（当前真源）
+## 架构
 
 ```text
-ClipVault (product)
-├── ClipFlowServer          # headless daemon (SPM product)
-│   ├── ClipboardMonitor    # pasteboard + OCR
-│   ├── DatabaseManager     # SQLite3 · cursor pages · online backup API
-│   ├── WebServer           # CV01 origin · REST + SSE + static UI
-│   ├── CloudDocsBackupService   # 灾备：hosts/{hostId}/ snapshot
-│   └── CloudDocsSyncService     # 同步：per-host tx + live/attach
-├── web/index.html          # 浏览器控制面
-└── LaunchAgent             # 登录自启（可选）
+ClipVault
+├── Sources/ClipVault/      # Swift daemon（SPM product ClipVaultServer）
+│   ├── App/                # 入口
+│   ├── HTTP/               # CV01 origin + 拉起 clipvault-http
+│   ├── Capture/            # 剪贴板 / OCR
+│   ├── Store/              # SQLite
+│   ├── Sync/               # CloudDocs 同步 + 备份
+│   ├── Archive/            # WKWebView 归档
+│   └── Metrics/
+├── http-front/             # 唯一 HTTP 层：HTTP/2（h2c :80 / TLS :443）
+├── web/                    # 浏览器控制面
+├── android/                # 备份阅读器 + 粘贴/分享
+└── LaunchAgents/           # com.davidmusk.clipvault
 ```
 
 | 层 | 选择 |
 | --- | --- |
-| 语言 | Swift 5.9 · macOS 13+ |
-| 存储 | 原生 SQLite3（**非** DuckDB） |
-| 网络 | 唯一 HTTP 层：Rust `clipvault-http` HTTP/2（明文 :80 h2c / TLS :443）；Swift origin 是 CV01，不是 HTTP |
+| 语言 | Swift 5.9 · macOS 13+ ；HTTP 边车 Rust |
+| 存储 | SQLite3（`clipflow.db` 文件名兼容） |
+| 网络 | 一层 HTTP/2：`clipvault-http`；Swift origin 是 CV01 |
 | OCR | Vision |
-| 备份 | iCloud Drive CloudDocs（**无** App iCloud entitlement） |
-| CI | `swift build` + `node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.test.mjs` |
-
-历史文档若仍写 DuckDB / 仅 Xcode App，以本 README 与 `Package.swift` 为准。
-
----
+| 备份 | iCloud Drive / Google Drive / 夸克（无 App iCloud entitlement） |
 
 ## 快速开始
 
-### 要求
-
-- macOS 13+  
-- Xcode / Command Line Tools（`swift`）  
-
-### 构建并运行守护进程
-
 ```bash
-git clone https://github.com/DavidMusk93/ClipView.git
-cd ClipView
-
-swift build -c release --product ClipFlowServer
-./.build/release/ClipFlowServer
+git clone https://github.com/DavidMusk93/clipvault.git
+cd clipvault
+./scripts/deploy-server.sh
 ```
 
-浏览器打开：**http://127.0.0.1/**（HTTP/2；浏览器明文会落 HTTP/1.1，`curl --http2-prior-knowledge` 走 h2c）。
-
-### 登录自启（可选）
-
-仓库内 `com.davidmusk.clipflow.plist` 可装到 `~/Library/LaunchAgents/`（路径按本机 `.build` 调整）。  
-安装后用 Web UI 或 API 管理备份，无需再开 Xcode。
-
-### 开发调试
+本机 UI：`http://127.0.0.1:8080`（LaunchAgent 默认听 8080；代码默认 :80，macOS 用户进程绑不了特权端口）。
 
 ```bash
-swift build --product ClipFlowServer
-node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.test.mjs
+swift build -c release --product ClipVaultServer
+./scripts/check-frontend.sh
 ```
 
----
+## 数据目录
 
-## 数据 · 备份 · 多机同步
+LaunchAgent 必须设 `CLIPVAULT_HOME`（兼容 `KEEPSAKE_HOME`）。禁止 `nohup ClipVaultServer &`（incident 2026-08-11）。
 
 ```text
-# 本地（LaunchAgent 推荐 KEEPSAKE_HOME → Application Support）
-~/Library/Application Support/Keepsake/   # 历史目录名；产品品牌 ClipVault。或 legacy ~/Documents/ClipFlow
+~/Library/Application Support/Keepsake/   # 现行本机库路径
 ├── clipflow.db
-├── blobs/{sha}.bin
-├── config/{backup,sync,host}.json
-└── sync/outbox/                  # 待推送 trx
-
-# 灾备平面（按机器，互不覆盖）
-…/CloudDocs/ClipFlow/backup/hosts/{hostId}/
-├── latest/{clipflow.db, MANIFEST.json}
 ├── blobs/
-└── snapshots/…
-
-# 同步平面（每机事务 · 最终一致）
-…/CloudDocs/ClipFlow/sync/v1/
-├── trx/{host_id}/{seq:016d}.json   # 事务（新写入）
-├── ops/{host_id}/                  # 旧目录，只读回退
-└── heads/{host_id}.json
-…/CloudDocs/ClipFlow/live/attach/   # 同步附件（web_archive 闭包 = HTML + 文内图）
+└── web/
 ```
-
-Web：右上角 **备份** 侧栏 → 灾备开关 / 立即备份 / 恢复；同侧栏 **多机同步** → 开关 / 立即同步 / peer lag。
-
-**不要**用「恢复 latest」当多机同步：那是整库替换，会丢另一台本地条目。
-
----
-
-## HTTP 摘要
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/` | Web UI |
-| GET | `/api/clips?limit&cursor&q` | 游标分页 · `{ items, nextCursor }` |
-| GET | `/api/image?id=&size=thumb\|medium\|full` | 多档图片 |
-| GET | `/api/events` | SSE |
-| GET | `/api/backup/status` | 灾备状态 |
-| POST | `/api/backup/config` | `{ "enabled": true }` |
-| POST | `/api/backup/run` | 立即备份 |
-| POST | `/api/backup/restore` | `{ "id": "latest" \| snapId }` · 整库恢复 |
-| GET | `/api/sync/status` | 多机同步状态 · peers/lag |
-| POST | `/api/sync/config` | `{ "enabled": true }` |
-| POST | `/api/sync/now` | 立即 push+pull |
-
----
-
-## 产品与协作
-
-- 产品名：**ClipVault**  
-- 品味与 agent 约定：见仓库根目录 **[AGENTS.md](./AGENTS.md)**  
-- 许可证：MIT  
-
----
-
-**ClipVault** — 剪贴板会忘；记忆不必。
-
-## ClipVault Android
-
-手机端备份阅读器（+ 主动粘贴/分享），工程在 [`android/`](./android/)。
-
-- 本地：`cd android && ./gradlew :app:assembleRelease`
-- CI：push `master` 上传 APK artifact；tag `v*` 发 GitHub Release
-- 说明见 [`android/README.md`](./android/README.md)

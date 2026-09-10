@@ -6,15 +6,15 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import test from 'node:test';
+import { src, root } from './helpers/src.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const entry = readFileSync(join(root, 'web/assets/notes-editor/entry.js'), 'utf8');
 const css = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.css'), 'utf8');
 const vendor = readFileSync(join(root, 'scripts/vendor-notes-editor.sh'), 'utf8');
-const restart = readFileSync(join(root, 'scripts/restart-clipflow.sh'), 'utf8');
+const restart = readFileSync(join(root, 'scripts/restart-clipvault.sh'), 'utf8');
 const js = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.js'), 'utf8');
-const swift = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
+const swift = src('WebServer.swift');
 
 test('notes editor is CodeMirror 6, not Crepe/Vditor', () => {
   assert.match(entry, /from '@codemirror\/view'/);

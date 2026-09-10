@@ -48,7 +48,7 @@ test_write
 Vendor/lib/libDuckDB.a
 
 
-## Android (Keepsake mobile)
+## Android
 android/.gradle/
 android/**/build/
 android/local.properties

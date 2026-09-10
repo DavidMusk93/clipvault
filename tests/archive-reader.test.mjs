@@ -7,11 +7,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { src, root } from './helpers/src.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const js = fs.readFileSync(path.join(__dirname, '../web/assets/archive-reader.js'), 'utf8');
-const swiftWeb = fs.readFileSync(path.join(__dirname, '../ClipFlow/WebServer.swift'), 'utf8');
-const swiftDb = fs.readFileSync(path.join(__dirname, '../ClipFlow/DatabaseManager.swift'), 'utf8');
+const swiftWeb = src('WebServer.swift');
+const swiftDb = src('DatabaseManager.swift');
 
 test('reader chrome talks to SQLite via same-origin API', () => {
   assert.match(js, /\/api\/archive\/reader/, 'reader API');

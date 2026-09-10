@@ -55,8 +55,8 @@
 | 一句话 | 遇到的留下，想到的写下 |
 | 是 | 个人记忆：静默捕获世界 + 主动写下自己 |
 | 不是 | 企业协同剪贴板、Notion 替代、又一个 `ClipXxx` 工具箱 |
-| 对外品牌 | 文案 / README / 窗口标题 / UI 字符串 → **ClipVault** |
-| 对内可残留 | 目录 `ClipView`、二进制 `ClipFlow*`、数据路径 Keepsake |
+| 对外品牌 | 文案 / README / 窗口标题 / UI 字符串 / 仓库 / 二进制 → **ClipVault** |
+| 磁盘兼容 | 本机库仍可读 `CLIPVAULT_HOME`/`KEEPSAKE_HOME`；db 文件名 `clipflow.db`；CloudDocs 目录旧名 `ClipFlow/` 继续识别 |
 | 视觉真源 | [`docs/design-taste.md`](docs/design-taste.md)（改色先改它，再 Web + Android） |
 
 否决回潮：`Keepsake` 当现行品牌、`ClipView`/`ClipFlow` 当对外品牌、`XxxView` 组件腔。
@@ -94,7 +94,7 @@ Capture 禁止就地改成笔记。Compose 禁止写成第二套剪贴板。
        │                         唯一 TCP 监听
        │  CV01 帧（不是 HTTP）
        v
-  $KEEPSAKE_HOME/run/http.sock   ClipFlowServer Swift
+  $CLIPVAULT_HOME/run/http.sock  ClipVaultServer Swift
        │                           ├─ 剪贴板 / Vision OCR / SQLite
        │                           ├─ CloudDocs 同步 + 备份
        │                           └─ loopback 反代 /trae → :9488
@@ -128,7 +128,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
   ArchiveBlobClosure      HTML → CAS 闭包（新资产加正则，不加 trx kind）
 ```
 
-生产真源：`Package.swift` → `ClipFlowServer` + `http-front/` + `web/index.html`。文档禁止再把 DuckDB / 仅 Xcode 当唯一路径。
+生产真源：`Package.swift` → `ClipVaultServer` + `http-front/` + `web/index.html`。文档禁止再把 DuckDB / 仅 Xcode 当唯一路径。
 
 ---
 
@@ -309,7 +309,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
     根优先 My Drive/ClipVault/cvbak（避开 wedged backup/）
 ```
 
-禁止：热 copy 开着的 db；双机写同一 `latest/`；把 bulk full 当默认。自检：`rg -n 'forceFullCopy:\s*true' ClipFlow/` 应无匹配（或仅拒绝分支）。
+禁止：热 copy 开着的 db；双机写同一 `latest/`；把 bulk full 当默认。自检：`rg -n 'forceFullCopy:\s*true' Sources/ClipVault/` 应无匹配（或仅拒绝分支）。
 
 事故：`docs/incident-20260813` 叙事已迁出；nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813`。
 
@@ -420,7 +420,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 ./scripts/check-frontend.sh
 ```
 
-门禁是 `check-frontend.sh` 的**硬编码** `node --test` 文件列表（不 glob）。新测试必须追加进脚本。`node --check` 不过禁止上线。
+门禁是 `scripts/check-frontend.sh`：`node --test tests/*.test.mjs`，文件名**硬编码**在脚本 gates 注释里。新测试必须追加进该注释。`node --check` 不过禁止上线。
 
 ### commit / push
 

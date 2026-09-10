@@ -6,14 +6,14 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import test from 'node:test';
+import { src, root } from './helpers/src.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const metricsJs = readFileSync(join(root, 'web/assets/notes-metrics.js'), 'utf8');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
-const swift = readFileSync(join(root, 'ClipFlow/UiMetrics.swift'), 'utf8');
-const web = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
-const backup = readFileSync(join(root, 'ClipFlow/CloudDocsBackupService.swift'), 'utf8');
-const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
+const swift = src('UiMetrics.swift');
+const web = src('WebServer.swift');
+const backup = src('CloudDocsBackupService.swift');
+const sync = src('CloudDocsSyncService.swift');
 
 test('metrics API and db are local-only', () => {
   assert.match(web, /\/api\/ui-metrics/);

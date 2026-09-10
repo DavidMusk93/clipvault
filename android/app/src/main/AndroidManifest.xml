@@ -20,19 +20,19 @@
     </queries>
 
     <application
-        android:name=".KeepsakeApp"
+        android:name=".ClipVaultApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Keepsake"
+        android:theme="@style/Theme.ClipVault"
         android:enableOnBackInvokedCallback="true">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Keepsake"
+            android:theme="@style/Theme.ClipVault"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -44,8 +44,8 @@
         <activity
             android:name=".share.ShareReceiverActivity"
             android:exported="true"
-            android:label="@string/share_to_keepsake"
-            android:theme="@style/Theme.Keepsake.Transparent">
+            android:label="@string/share_to_clipvault"
+            android:theme="@style/Theme.ClipVault.Transparent">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

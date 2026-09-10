@@ -5,7 +5,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 DOC_HOME="${CLIPVAULT_HOME:-${KEEPSAKE_HOME:-$HOME/Documents/ClipFlow}}"
 AS_HOME="$HOME/Library/Application Support/Keepsake"
-LABEL="${LAUNCH_LABEL:-com.davidmusk.clipflow}"
+LABEL="${LAUNCH_LABEL:-com.davidmusk.clipvault}"
 MIN_ITEMS="${MIN_ITEMS:-10}"
 MIN_DB_BYTES="${MIN_DB_BYTES:-65536}"
 
@@ -15,9 +15,9 @@ ok() { printf '\033[32m%s\033[0m\n' "$*"; }
 echo "=== ClipVault data-home verify ==="
 
 # 1) Process + env
-PIDS=$(ps aux | awk '/Keepsake\/bin\/ClipFlowServer/ && !/awk/{print $2}')
+PIDS=$(ps aux | awk '/Keepsake\/bin\/(ClipVaultServer|ClipFlowServer)/ && !/awk/{print $2}')
 if [ -z "${PIDS:-}" ]; then
-  red "FAIL: ClipFlowServer not running"
+  red "FAIL: ClipVaultServer not running"
   exit 1
 fi
 echo "pids: $PIDS"

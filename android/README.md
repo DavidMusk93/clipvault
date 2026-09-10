@@ -50,4 +50,4 @@ ClipVault/backup/
 - 每次 `master` push：上传 `keepsake-debug.apk` + `keepsake-release.apk` 为 workflow artifact  
 - 打 tag `v*`：创建 GitHub Release 并附带 release APK  
 
-版本号可用环境变量覆盖：`KEEPSAKE_VERSION_NAME` / `KEEPSAKE_VERSION_CODE`。
+版本号可用环境变量覆盖：`CLIPVAULT_VERSION_NAME` / `CLIPVAULT_VERSION_CODE`。

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Keepsake"
+rootProject.name = "ClipVault"
 include(":app")

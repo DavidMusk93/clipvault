@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { src, root } from './helpers/src.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const htmlPath = path.join(__dirname, '../trae_hooks/web/sessions.html');
@@ -92,7 +93,7 @@ test('session list asks the store for last_prompt', () => {
 test('session list pins locally and paints recency/volume in soft color', () => {
   const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
   const schema = fs.readFileSync(path.join(__dirname, '../trae_hooks/schema.sql'), 'utf8');
-  const swift = fs.readFileSync(path.join(__dirname, '../ClipFlow/WebServer.swift'), 'utf8');
+  const swift = src('WebServer.swift');
   const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
   const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
   assert.match(schema, /CREATE TABLE IF NOT EXISTS session_pins/);
@@ -114,7 +115,7 @@ test('session list pins locally and paints recency/volume in soft color', () => 
   assert.doesNotMatch(html, /\/api\/clips\/pin/);
   assert.match(html, /newestSession/);
   assert.match(swift, /req\.httpMethod = method/);
-  assert.match(swift, /static func httpBody\(from/);
+  assert.match(swift, /req\.httpBody = data/);
   assert.match(taste, /会话列属性色/);
   assert.match(taste, /session_pins/);
   assert.match(agents, /POST \/api\/sessions\/pin/);
@@ -214,7 +215,7 @@ test('sessions UI is prefix-aware so ClipVault :8080 can proxy /trae', () => {
   assert.match(html, /location\.pathname\.startsWith\(\"\/trae\"\)/);
   assert.match(html, /html\.embed \.top/);
   assert.match(html, /classList\.add\(\"embed\"\)/);
-  const server = fs.readFileSync(path.join(__dirname, '../ClipFlow/WebServer.swift'), 'utf8');
+  const server = src('WebServer.swift');
   assert.match(server, /func handleTraeProxy/);
   assert.match(server, /func traeBackendURL/);
   assert.match(server, /class TraeStreamPipe/);

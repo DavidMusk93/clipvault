@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { src, root } from './helpers/src.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const indexPath = path.join(__dirname, '../web/index.html');
@@ -67,10 +68,10 @@ test('quarkDiscovery UI hooks stay wired', () => {
   assert.match(indexHtml, /id="bkQuarkDiscover"/);
   assert.match(indexHtml, /s\.quarkDiscovery/);
   assert.match(indexHtml, /card-header-lead/);
-  const swift = fs.readFileSync(path.join(__dirname, '../ClipFlow/WebServer.swift'), 'utf8');
+  const swift = src('WebServer.swift');
   assert.match(swift, /backup_status/);
   assert.match(swift, /lite: lite/);
-  const dest = fs.readFileSync(path.join(__dirname, '../ClipFlow/BackupDestinations.swift'), 'utf8');
+  const dest = src('BackupDestinations.swift');
   assert.match(dest, /kickQuarkCloudListScan/);
   assert.doesNotMatch(
     dest,

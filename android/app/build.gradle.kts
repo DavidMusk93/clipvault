@@ -18,15 +18,15 @@ fun prop(name: String, default: String = ""): String =
         ?: default
 
 android {
-    namespace = "com.davidmusk.keepsake"
+    namespace = "com.davidmusk.clipvault"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.davidmusk.keepsake"
+        applicationId = "com.davidmusk.clipvault"
         minSdk = 26
         targetSdk = 34
-        versionCode = (System.getenv("KEEPSAKE_VERSION_CODE") ?: "2").toInt()
-        versionName = System.getenv("KEEPSAKE_VERSION_NAME") ?: "0.1.1"
+        versionCode = (System.getenv("CLIPVAULT_VERSION_CODE") ?: System.getenv("KEEPSAKE_VERSION_CODE") ?: "2").toInt()
+        versionName = System.getenv("CLIPVAULT_VERSION_NAME") ?: System.getenv("KEEPSAKE_VERSION_NAME") ?: "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -36,9 +36,9 @@ android {
             val store = rootProject.file("keystore/keepsake-ci.jks")
             if (store.exists()) {
                 storeFile = store
-                storePassword = prop("KEEPSAKE_STORE_PASSWORD", "keepsake-ci")
-                keyAlias = prop("KEEPSAKE_KEY_ALIAS", "keepsake")
-                keyPassword = prop("KEEPSAKE_KEY_PASSWORD", "keepsake-ci")
+                storePassword = prop("CLIPVAULT_STORE_PASSWORD", "keepsake-ci")
+                keyAlias = prop("CLIPVAULT_KEY_ALIAS", "keepsake")
+                keyPassword = prop("CLIPVAULT_KEY_PASSWORD", "keepsake-ci")
             }
         }
     }

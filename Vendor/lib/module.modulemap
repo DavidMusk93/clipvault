@@ -1,4 +1,0 @@
-module Cduckdb {
-    umbrella "/Users/<user>/Documents/ClipFlow/Vendor/duckdb-swift/Sources/Cduckdb/include"
-    export *
-}

@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { src, root } from './helpers/src.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const notesPage = readFileSync(join(root, 'web/notes.html'), 'utf8');
-const auth = readFileSync(join(root, 'ClipFlow/ComposeNotes.swift'), 'utf8');
-const db = readFileSync(join(root, 'ClipFlow/DatabaseManager.swift'), 'utf8');
-const web = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
-const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
+const auth = src('ComposeNotes.swift');
+const db = src('DatabaseManager.swift');
+const web = src('WebServer.swift');
+const sync = src('CloudDocsSyncService.swift');
 const taste = readFileSync(join(root, 'docs/design-taste.md'), 'utf8');
 
 test('compose is a note type, not an edit of capture', () => {

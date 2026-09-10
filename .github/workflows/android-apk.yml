@@ -1,4 +1,3 @@
-# Lives at .github/workflows/android-apk.yml in ClipView repo
 name: Android APK
 
 on:
@@ -72,11 +71,11 @@ jobs:
 
       - name: Assemble debug + release
         env:
-          KEEPSAKE_VERSION_NAME: ${{ steps.ver.outputs.name }}
-          KEEPSAKE_VERSION_CODE: ${{ steps.ver.outputs.code }}
-          KEEPSAKE_STORE_PASSWORD: keepsake-ci
-          KEEPSAKE_KEY_PASSWORD: keepsake-ci
-          KEEPSAKE_KEY_ALIAS: keepsake
+          CLIPVAULT_VERSION_NAME: ${{ steps.ver.outputs.name }}
+          CLIPVAULT_VERSION_CODE: ${{ steps.ver.outputs.code }}
+          CLIPVAULT_STORE_PASSWORD: keepsake-ci
+          CLIPVAULT_KEY_PASSWORD: keepsake-ci
+          CLIPVAULT_KEY_ALIAS: keepsake
         run: |
           ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
 
@@ -84,15 +83,15 @@ jobs:
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk \
-            "dist/keepsake-${{ steps.ver.outputs.name }}-debug.apk"
+            "dist/clipvault-${{ steps.ver.outputs.name }}-debug.apk"
           cp app/build/outputs/apk/release/app-release.apk \
-            "dist/keepsake-${{ steps.ver.outputs.name }}-release.apk"
+            "dist/clipvault-${{ steps.ver.outputs.name }}-release.apk"
           ls -lh dist/
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: keepsake-android-${{ steps.ver.outputs.name }}
+          name: clipvault-android-${{ steps.ver.outputs.name }}
           path: android/dist/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -102,8 +101,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            android/dist/keepsake-*-release.apk
-            android/dist/keepsake-*-debug.apk
+            android/dist/clipvault-*-release.apk
+            android/dist/clipvault-*-debug.apk
           generate_release_notes: true
           body: |
             ClipVault Android — 备份阅读器 + 主动粘贴/分享。

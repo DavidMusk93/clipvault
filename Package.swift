@@ -2,25 +2,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "ClipFlow",
+    name: "ClipVault",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .executable(
-            name: "ClipFlowServer",
-            targets: ["ClipFlowServer"]
+            name: "ClipVaultServer",
+            targets: ["ClipVaultServer"]
         )
     ],
     dependencies: [],
     targets: [
         .executableTarget(
-            name: "ClipFlowServer",
+            name: "ClipVaultServer",
             dependencies: [],
-            path: "ClipFlow",
-            exclude: ["ClipFlowApp.swift", "ContentView.swift", "ClipFlow.entitlements", "Assets.xcassets", "Preview Assets.xcassets"],
+            path: "Sources/ClipVault",
             resources: [
-                .copy("Resources/Readability.js")
+                .copy("Archive/Resources/Readability.js")
             ]
         )
     ]

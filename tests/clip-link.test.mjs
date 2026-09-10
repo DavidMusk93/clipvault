@@ -8,12 +8,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { src, root } from './helpers/src.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const db = readFileSync(join(root, 'ClipFlow/DatabaseManager.swift'), 'utf8');
-const web = readFileSync(join(root, 'ClipFlow/WebServer.swift'), 'utf8');
-const sync = readFileSync(join(root, 'ClipFlow/CloudDocsSyncService.swift'), 'utf8');
-const item = readFileSync(join(root, 'ClipFlow/ClipboardItem.swift'), 'utf8');
+const db = src('DatabaseManager.swift');
+const web = src('WebServer.swift');
+const sync = src('CloudDocsSyncService.swift');
+const item = src('ClipboardItem.swift');
 const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
 
@@ -162,7 +162,6 @@ test('AGENTS.md requires recordLocalClipLink; check-frontend lists this file', (
   assert.match(agents, /硬编码/);
   const gate = agents.split('### 前端门禁')[1]?.split('### ')[0] ?? '';
   assert.ok(gate.length > 0, 'missing ### 前端门禁');
-  assert.doesNotMatch(gate, /或: node --test tests\/\*\.test\.mjs/);
   assert.match(check, /tests\/clip-link\.test\.mjs/);
-  assert.doesNotMatch(check, /node --test tests\/\*\.test\.mjs/);
+  assert.match(check, /node --test tests\/\*\.test\.mjs/);
 });
