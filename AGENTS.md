@@ -337,6 +337,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | --- | --- |
 | 墙刷新 | `wall_fetch` `wall_merge` `wall_paint` `wall_resync` |
 | 墙插入 CLS | `wall_cls` kind=m3-card phase=wall；`wall_paint` kind=prepend phase=keep\|top |
+| 墙长任务 | `wall_longtask` phase=loaf\|longtask + kind/reason/host |
 | 开合 sheet | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` |
 | 开合笔记顶栏跳 | `chrome_shift` phase=open\|close dy/reason；长周期 `wall_cls` |
 | 笔记输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` |

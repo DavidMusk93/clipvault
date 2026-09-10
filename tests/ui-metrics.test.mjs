@@ -65,6 +65,11 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(html, /sheet_cls/);
   assert.match(html, /chrome_shift/);
   assert.match(html, /wall_cls/);
+  assert.match(html, /wall_longtask/);
+  assert.match(html, /function wallLongtaskPayload/);
+  assert.match(html, /long-animation-frame/);
+  assert.match(html, /phase: 'loaf'/);
+  assert.match(html, /phase: 'longtask'/);
   assert.match(html, /function emitChromeShift/);
   assert.match(html, /function snapshotWallChrome/);
   assert.match(metricsJs, /phase: morphing \? 'morph' : 'live'/);

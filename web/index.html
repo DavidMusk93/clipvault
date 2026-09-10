@@ -8883,14 +8883,61 @@ window.ClipViewMasonry = Masonry;
     setTimeout(() => refreshBackupStatus({ lite: true }), 800);
 
     nm('wall_boot', { payload: { phase: 'start' } });
-    try {
-      const lt = new PerformanceObserver((list) => {
-        if (document.body.classList.contains('notes-open')) return;
-        for (const e of list.getEntries()) {
-          if (e.duration >= 50) nm('wall_longtask', { dur_ms: e.duration });
+    function wallLongtaskPayload(e, phase) {
+      if (phase === 'loaf') {
+        const scripts = Array.from(e.scripts || []);
+        let best = null;
+        let layout = 0;
+        for (const s of scripts) {
+          layout += Number(s.forcedStyleAndLayoutDuration) || 0;
+          if (!best || s.duration > best.duration) best = s;
         }
-      });
-      lt.observe({ type: 'longtask', buffered: false });
+        const rawUrl = String((best && best.sourceURL) || '');
+        const file = rawUrl.split(/[/?#]/).filter(Boolean).pop() || '';
+        const fn = String((best && (best.sourceFunctionName || best.invoker)) || '').slice(0, 32);
+        return {
+          kind: String((best && best.invokerType) || e.name || 'loaf').slice(0, 32),
+          phase: 'loaf',
+          reason: fn || (layout > 8 ? 'layout' : 'script'),
+          host: file.slice(0, 32),
+          n: scripts.length,
+          w: Math.round(Number(e.blockingDuration) || 0),
+          h: Math.round(layout),
+          dy: Math.round((best && best.duration) || 0),
+          lag: Math.round(Math.max(0, (Number(e.renderStart) || 0) - (Number(e.startTime) || 0))),
+        };
+      }
+      const a = (e.attribution && e.attribution[0]) || null;
+      return {
+        kind: String((a && a.containerType) || e.name || 'longtask').slice(0, 32),
+        phase: 'longtask',
+        reason: String((a && (a.containerName || a.name)) || '').slice(0, 32),
+        host: String((a && a.containerId) || '').slice(0, 32),
+        n: (e.attribution && e.attribution.length) || 0,
+        w: Math.round(Number(e.startTime) || 0),
+      };
+    }
+    try {
+      const emitLt = (e, phase) => {
+        if (document.body.classList.contains('notes-open')) return;
+        if (document.body.classList.contains('sessions-open')) return;
+        if (!(e.duration >= 50)) return;
+        nm('wall_longtask', { dur_ms: e.duration, payload: wallLongtaskPayload(e, phase) });
+      };
+      let loaf = false;
+      try {
+        const loafObs = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) emitLt(e, 'loaf');
+        });
+        loafObs.observe({ type: 'long-animation-frame', buffered: false });
+        loaf = true;
+      } catch (_) {}
+      if (!loaf) {
+        const lt = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) emitLt(e, 'longtask');
+        });
+        lt.observe({ type: 'longtask', buffered: false });
+      }
     } catch (_) {}
     try {
       let acc = 0;
