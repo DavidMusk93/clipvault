@@ -313,6 +313,11 @@ enum XArticleHTML {
             let fence = renderFence(md)
             return fence.hasSuffix("\n") ? fence : fence + "\n"
         }
+        // Decorative section rule. Not an image; do not emit cv-x-dropped.
+        if type == "DIVIDER" || type == "HORIZONTAL_RULE" || type == "HR" {
+            coverage.atomicRendered += 1
+            return "<hr>\n"
+        }
         if type == "IMAGE" || type == "MEDIA" {
             if let src = imageURL(from: ent["data"], media: media) {
                 coverage.atomicRendered += 1
@@ -416,6 +421,8 @@ enum XArticleHTML {
         return "<pre><code\(cls)>\(escape(body))</code></pre>"
     }
 
+    /// fxtwitter `entityMap` is a shuffled `{key,value}` list. Match `key` first;
+    /// array index is a last resort (dense maps only). Index 10 ≠ entity key 10.
     private static func lookupEntity(_ map: Any?, key: Int) -> [String: Any]? {
         guard let map else { return nil }
         if let arr = map as? [[String: Any]] {

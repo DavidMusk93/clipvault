@@ -203,6 +203,46 @@ enum XArticleHTMLTests {
         let unknown = XArticleHTML.renderBlocks(unknownBlocks, entityMap: unknownMap)
         ok("unknown-dropped", unknown.contains("cv-x-dropped") && unknown.contains("data-entity=\"TWITTER_CARD\""))
 
+        // fxtwitter entityMap is a shuffled {key,value} list, not a dense array.
+        // AdrianPunk 2088543211656753278: key 10 = DIVIDER, array index 10 = MEDIA.
+        let dividerBlocks: [[String: Any]] = [
+            ["type": "unstyled", "text": "https://weipai.iamadrianpunk.com"],
+            [
+                "type": "atomic",
+                "text": " ",
+                "entityRanges": [["key": 10, "length": 1, "offset": 0]],
+            ],
+            ["type": "header-two", "text": "关于作者"],
+        ]
+        let dividerMap: [[String: Any]] = [
+            [
+                "key": 8,
+                "value": [
+                    "type": "MEDIA",
+                    "data": ["mediaItems": [["mediaId": "2088542283096612865"]]],
+                ],
+            ],
+            ["key": 10, "value": ["type": "DIVIDER", "data": [:] as [String: Any]]],
+            [
+                "key": 7,
+                "value": [
+                    "type": "MEDIA",
+                    "data": ["mediaItems": [["mediaId": "2088542229996707840"]]],
+                ],
+            ],
+        ]
+        let dividerDoc = XArticleHTML.renderDocument(article: [
+            "title": "divider-fixture",
+            "content": ["blocks": dividerBlocks, "entityMap": dividerMap],
+        ])!
+        ok("divider-hr", dividerDoc.html.contains("<hr>"))
+        ok("divider-no-drop", !dividerDoc.html.contains("cv-x-dropped") && !dividerDoc.html.contains("DIVIDER"))
+        ok("divider-author", dividerDoc.html.contains("<h2>关于作者</h2>"))
+        ok("divider-cov", dividerDoc.coverage.atomicExpected == 1
+            && dividerDoc.coverage.atomicRendered == 1
+            && dividerDoc.coverage.atomicDropped == 0
+            && dividerDoc.coverage.warnings.isEmpty)
+
         if fails > 0 {
             FileHandle.standardError.write(Data("x-article-html: \(fails) failed\n".utf8))
             exit(1)
