@@ -81,6 +81,7 @@
 .notes-preview-inner {
   position: relative;
   contain: layout style;
+  box-sizing: border-box;
   max-width: 38rem;
   margin: 0 auto;
   padding: 22px 36px 72px;
@@ -91,6 +92,10 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   word-wrap: break-word;
+}
+.notes-work[data-mode="preview"] .notes-preview-inner {
+  width: 61.8%;
+  max-width: none;
 }
 .notes-md-block {
   display: contents;
@@ -172,15 +177,41 @@
   border-radius: 10px;
   overflow: hidden;
 }
-.notes-code-lang {
+.notes-code-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 6px 0 12px;
+  border-bottom: 0.5px solid rgba(60, 60, 67, 0.08);
+}
+.notes-code-lang {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
   font: 500 11px/28px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   letter-spacing: 0.02em;
   text-transform: lowercase;
   color: #6e6e73;
-  border-bottom: 0.5px solid rgba(60, 60, 67, 0.08);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.notes-code-copy {
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #6e6e73;
+  font: 500 12px/22px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  user-select: none;
+}
+.notes-code-copy:hover { background: rgba(0, 0, 0, 0.06); color: #1d1d1f; }
+.notes-code-copy:active { transform: scale(0.97); }
 .notes-preview-inner pre,
 .notes-code pre,
 .notes-preview pre {
@@ -188,12 +219,14 @@
   padding: 12px 14px 14px;
   background: #f5f5f7 !important;
   color: #1d1d1f !important;
-  overflow: auto;
+  overflow-x: hidden;
   font-family: "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.55;
   font-variant-ligatures: none;
-  white-space: pre;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   border-radius: 10px;
 }
 .notes-code pre {
@@ -202,12 +235,16 @@
 }
 .notes-preview-inner pre code,
 .notes-code pre code,
-.notes-preview pre code {
+.notes-preview pre code,
+.notes-preview .hljs {
   background: transparent !important;
   color: #1d1d1f !important;
   padding: 0;
   font-size: inherit;
   border-radius: 0;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Xcode Light, scoped so wall hljs github theme does not leak in. */
@@ -280,4 +317,5 @@
 
 @media (max-width: 820px) {
   .notes-preview-inner { padding: 16px 20px 56px; }
+  .notes-work[data-mode="preview"] .notes-preview-inner { width: 100%; }
 }

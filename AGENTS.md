@@ -215,7 +215,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
     正在输入不覆盖；无 parent 的旧 trx 才 wallTs LWW
 ```
 
-工具条向源码插 Markdown，不改预览 DOM。**预览藏工具条**（只留模式切换）。删除线钮面是字母 **S** 加删除线（GFM `~~`，`Mod-Shift-x`），不靠 Material ligature、不用汉字。禁止预览露出标记钮。
+工具条向源码插 Markdown，不改预览 DOM。**预览藏工具条**（只留模式切换）。删除线钮面是字母 **S** 加删除线（GFM `~~`，`Mod-Shift-x`），不靠 Material ligature、不用汉字。禁止预览露出标记钮。预览纸面宽 = 父 `.notes-preview` 的 **0.618**；代码块 `pre-wrap` + 头栏「复制」。禁止把预览卡死在 `38rem`；禁止代码默认横向长滚。
 
 禁止：Vditor / Crepe WYSIWYG；textarea 玩具编辑器；另开文档页；笔记另搞 `note_pin` trx。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`。列表失败禁止开空白新笔记。
 

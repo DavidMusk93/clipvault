@@ -42,6 +42,24 @@ test('notes preview code is Apple light, not a charcoal well', () => {
   assert.match(html, /notes-editor\.css\?v=/);
 });
 
+test('preview mode measure is 0.618 of the parent pane', () => {
+  assert.match(css, /\[data-mode="preview"\] \.notes-preview-inner \{\n  width: 61\.8%;/);
+  assert.match(css, /\[data-mode="preview"\] \.notes-preview-inner \{ width: 100%; \}/);
+  assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}max-width: 38rem;/);
+});
+
+test('preview code wraps and has a copy button', () => {
+  assert.match(css, /white-space:\s*pre-wrap\s*!important/);
+  assert.match(css, /overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.notes-code-copy/);
+  assert.match(css, /\.notes-code-head/);
+  assert.match(entry, /function copyNotesCode/);
+  assert.match(entry, /btn\.className = 'notes-code-copy'/);
+  assert.match(entry, /closest\('\.notes-code-copy'\)/);
+  assert.match(entry, /navigator\.clipboard\.writeText/);
+  assert.doesNotMatch(css, /white-space:\s*pre;/);
+});
+
 test('notes remember the open note and support Apple tags', () => {
   assert.match(html, /clipvault\.notes\.id/);
   assert.match(html, /notes\/\$\{|notes\/' \+|notes\//);
@@ -188,8 +206,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n20/);
-  assert.match(html, /notes-editor\.css\?v=n20/);
+  assert.match(html, /notes-editor\.js\?v=n21/);
+  assert.match(html, /notes-editor\.css\?v=n21/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {

@@ -169,8 +169,8 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 标题 | 28px / 700 / -0.03em / 高 52 | 高度锁死 |
 | 工具条 | min 36px · 可换行 · 28px 钮 · `#F6F6F8` | **预览不展示标记钮**（`visibility:hidden`）。源码/分栏才露出。删除线是字母 **S** 加删除线，与 H1 一样是字不是图标。禁止预览露工具条；禁止钮面汉字；禁止 `overflow:hidden` 裁标记 |
 | 源码 | JetBrains Mono 14.5 / 1.62 · Xcode Light token | `web/assets/fonts/`，禁止 CDN |
-| 预览正文 | SF / PingFang 17 / 1.65 · 最大 38rem | Apple Notes 纸面 |
-| 预览代码 | 浅板 `#F5F5F7` + 11px 语言条 + Xcode Light | **不是** View 的炭黑井 |
+| 预览正文 | SF / PingFang 17 / 1.65 · **预览模式宽 = 父容器 61.8%**（黄金分割） | 禁止再卡 `38rem`。窄屏 100%。分栏仍 `max-width: 38rem` |
+| 预览代码 | 浅板 `#F5F5F7` + 语言条 + **「复制」** + `pre-wrap` + Xcode Light | **不是** View 的炭黑井。禁止默认横向长滚 |
 | 模式 | 源码 / 分栏 / 预览；桌面默认分栏 | 窄屏默认源码 |
 | 分栏滚动 | 块锚点 + 块内进度（VS Code / MarkEdit）。头/底 2px 钉住 max | 禁止全程 `scrollTop/max`。禁止只把视口第一行钉在预览顶。围栏用 `data-source-end-line` 摊到 PRE 内容盒。**预览终局**：lexer 块 hash LRU 编译 + React 18 keyed `.notes-md-block`（`display:contents`，行号在 wrapper）。禁止整页 `innerHTML` 换预览。输入不 `force` remap。图 load 不 remap |
 | 保存态 | 11px 文案 + 6px 点：未保存 / 保存中 / 已保存 / 保存失败将重试 | 禁止只留圆点；失败指数退避 + `online` 重放 |

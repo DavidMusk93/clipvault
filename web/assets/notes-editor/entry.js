@@ -14,6 +14,30 @@ const MODE_KEY = 'clipvault.notes.mode'
 const SPLIT_KEY = 'clipvault.notes.split'
 const MODES = ['source', 'split', 'preview']
 
+function copyNotesCode(text, btn) {
+  const done = () => {
+    if (!btn) return
+    btn.textContent = '已复制'
+    window.setTimeout(() => { btn.textContent = '复制' }, 1400)
+  }
+  const fallback = () => {
+    const ta = document.createElement('textarea')
+    ta.value = String(text || '')
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.select()
+    try { document.execCommand('copy'); done() } catch (_) {}
+    document.body.removeChild(ta)
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(String(text || '')).then(done).catch(fallback)
+  } else {
+    fallback()
+  }
+}
+
 const notesTheme = EditorView.theme({
   '&': {
     height: '100%',
@@ -425,6 +449,15 @@ async function mount(root, opts) {
   previewEl.appendChild(previewInner)
   root.append(sourceEl, splitEl, previewEl)
   const preview = mountNotesPreview(previewInner)
+  previewEl.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest && e.target.closest('.notes-code-copy')
+    if (!btn || !previewEl.contains(btn)) return
+    e.preventDefault()
+    e.stopPropagation()
+    const wrap = btn.closest('.notes-code')
+    const pre = wrap && wrap.querySelector('pre')
+    copyNotesCode(pre ? pre.textContent : '', btn)
+  })
 
   let applying = false
   let gen = 0
@@ -472,12 +505,19 @@ async function mount(root, opts) {
       const wrap = document.createElement('div')
       wrap.className = 'notes-code'
       pre.parentNode.insertBefore(wrap, pre)
-      if (lang) {
-        const lab = document.createElement('div')
-        lab.className = 'notes-code-lang'
-        lab.textContent = lang
-        wrap.appendChild(lab)
-      }
+      const head = document.createElement('div')
+      head.className = 'notes-code-head'
+      const lab = document.createElement('div')
+      lab.className = 'notes-code-lang'
+      lab.textContent = lang
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'notes-code-copy'
+      btn.textContent = '复制'
+      btn.setAttribute('aria-label', '复制代码')
+      head.appendChild(lab)
+      head.appendChild(btn)
+      wrap.appendChild(head)
       wrap.appendChild(pre)
     })
     tagifyPreview(root)
