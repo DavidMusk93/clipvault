@@ -5,6 +5,11 @@ import Network
 /// `header-two` / `unordered-list-item` / `MARKDOWN` entities. Many articles never
 /// use header-two: section titles stay unstyled 「一、…」. WKWebView+Readability
 /// only sees the tweet dump: a stream of `<p>`, lists and atomic code gone.
+///
+/// Note tweets (long posts, not Articles) have no Draft.js `article`. fxtwitter
+/// `tweet.text` is often truncated to display_text_range (~140). vxtwitter
+/// returns the full note with `\n\n`. Readability keeps those newlines inside
+/// one `<span>`, which the browser collapses into a blob.
 enum XArticleHTML {
     static func isXURL(_ raw: String) -> Bool {
         guard let host = URL(string: raw)?.host?.lowercased() else { return false }
@@ -30,8 +35,10 @@ enum XArticleHTML {
 
     /// Draft.js rebuilt HTML is usable even without `<pre>` / `<h2>`.
     /// Many X Articles are title + lists + unstyled 一、 sections, no code.
+    /// `cv-x-article` means we already rebuilt (article or note); do not re-soup.
     static func looksStructured(_ html: String) -> Bool {
         let lower = html.lowercased()
+        if lower.contains("cv-x-article") { return true }
         for needle in ["<pre", "<code", "<h1", "<h2", "<h3", "<ul", "<ol", "<blockquote", "<figure"] {
             if lower.contains(needle) { return true }
         }
@@ -99,15 +106,42 @@ enum XArticleHTML {
     struct Rendered {
         var html: String
         var coverage: Coverage
+        var engine: String = "x-article+draftjs"
+        var title: String = ""
     }
 
     static func enrich(url: String, html: String, title: String) -> (html: String, title: String, engine: String, coverage: Coverage)? {
         guard isXURL(url), looksFlattened(html) else { return nil }
-        guard let fetched = fetchArticle(url: url) else { return nil }
-        guard let rendered = renderDocument(article: fetched.article),
+        if let got = archive(url: url), isUsableArticleHTML(got.rendered.html) {
+            let t = got.title.isEmpty ? title : got.title
+            return (got.rendered.html, t, got.rendered.engine, got.rendered.coverage)
+        }
+        let peeled = peelLongestText(html)
+        guard peeled.count >= 80, peeled.contains("\n"),
+              let rendered = renderStatus(text: peeled),
               isUsableArticleHTML(rendered.html) else { return nil }
-        let t = fetched.title.isEmpty ? title : fetched.title
-        return (rendered.html, t, "x-article+draftjs", rendered.coverage)
+        return (rendered.html, title, rendered.engine, rendered.coverage)
+    }
+
+    /// Article Draft.js first; else full note-tweet text (vxtwitter) + quote.
+    static func archive(url: String) -> (title: String, rendered: Rendered)? {
+        if let fetched = fetchArticle(url: url),
+           let rendered = renderDocument(article: fetched.article),
+           isUsableArticleHTML(rendered.html) {
+            return (fetched.title, rendered)
+        }
+        guard let post = fetchStatus(url: url) else { return nil }
+        guard let rendered = renderStatus(
+            text: post.text,
+            title: post.title,
+            quoteText: post.quote?.text ?? "",
+            quoteName: post.quote?.name ?? "",
+            quoteHandle: post.quote?.handle ?? "",
+            quoteURL: post.quote?.url ?? "",
+            media: post.media
+        ), isUsableArticleHTML(rendered.html) else { return nil }
+        let t = rendered.title.isEmpty ? post.title : rendered.title
+        return (t, rendered)
     }
 
     static func render(article: [String: Any]) -> String? {
@@ -145,7 +179,82 @@ enum XArticleHTML {
         let wrapped = "<div class=\"cv-x-article\">\(out)</div>"
         cov.mediaRendered = wrapped.components(separatedBy: "<img ").count - 1
         cov.finalize()
-        return Rendered(html: wrapped, coverage: cov)
+        return Rendered(html: wrapped, coverage: cov, engine: "x-article+draftjs")
+    }
+
+    /// Note tweet / regular status: `\n\n` → `<p>`, headingLike → `<h2>`, quote card.
+    static func renderStatus(
+        text: String,
+        title: String = "",
+        quoteText: String = "",
+        quoteName: String = "",
+        quoteHandle: String = "",
+        quoteURL: String = "",
+        media: [String] = []
+    ) -> Rendered? {
+        var paras = paragraphs(text)
+        guard !paras.isEmpty else { return nil }
+        var h1 = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if h1.isEmpty { h1 = takeTitle(&paras) }
+        var body = ""
+        if !h1.isEmpty {
+            body += "<h1>\(escape(h1))</h1>\n"
+        }
+        for para in paras {
+            let inner = inlineBreaks(para)
+            if headingLike(para) {
+                body += "<h2>\(inner)</h2>\n"
+            } else {
+                body += "<p>\(inner)</p>\n"
+            }
+        }
+        for src in media {
+            guard let href = safeHTTPURL(src) else { continue }
+            body += "<figure><img src=\"\(escape(href))\" alt=\"\"></figure>\n"
+        }
+        let qParas = paragraphs(quoteText)
+        if !qParas.isEmpty {
+            body += "<figure class=\"cv-x-quote\">"
+            let who = quoteHandle.isEmpty ? quoteName : "@\(quoteHandle)"
+            let cap = quoteName.isEmpty ? who : "\(quoteName) \(who)"
+            if !cap.trimmingCharacters(in: .whitespaces).isEmpty {
+                if let href = safeHTTPURL(quoteURL), !href.isEmpty {
+                    body += "<figcaption><a href=\"\(escape(href))\" rel=\"noreferrer\" target=\"_blank\">\(escape(cap.trimmingCharacters(in: .whitespaces)))</a></figcaption>"
+                } else {
+                    body += "<figcaption>\(escape(cap.trimmingCharacters(in: .whitespaces)))</figcaption>"
+                }
+            }
+            body += "<blockquote>"
+            for para in qParas {
+                body += "<p>\(inlineBreaks(para))</p>"
+            }
+            body += "</blockquote></figure>\n"
+        }
+        let out = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !out.isEmpty else { return nil }
+        let wrapped = "<div class=\"cv-x-article\">\(out)</div>"
+        var cov = Coverage()
+        cov.mediaExpected = media.filter { safeHTTPURL($0) != nil }.count
+        cov.mediaRendered = wrapped.components(separatedBy: "<img ").count - 1
+        cov.finalize()
+        return Rendered(html: wrapped, coverage: cov, engine: "x-status", title: h1)
+    }
+
+    static func paragraphs(_ raw: String) -> [String] {
+        raw.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    static func takeTitle(_ paras: inout [String]) -> String {
+        guard let first = paras.first else { return "" }
+        let t = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 2, t.count <= 40 else { return "" }
+        if t.contains("。") || t.contains("？") || t.contains("！") { return "" }
+        if headingLike(t) { return "" }
+        paras.removeFirst()
+        return t
     }
 
     static func renderBlocks(_ blocks: [[String: Any]], entityMap: Any?, media: [String: String] = [:]) -> String {
@@ -242,6 +351,95 @@ enum XArticleHTML {
             }
         }
         return nil
+    }
+
+    private struct StatusQuote {
+        var text: String
+        var name: String
+        var handle: String
+        var url: String
+    }
+    private struct StatusPost {
+        var text: String
+        var title: String
+        var quote: StatusQuote?
+        var media: [String]
+    }
+
+    /// Full note-tweet body. fxtwitter `tweet.text` is often truncated; do not use it here.
+    private static func fetchStatus(url: String) -> StatusPost? {
+        guard let id = statusID(from: url) else { return nil }
+        let endpoints = [
+            "https://api.vxtwitter.com/Twitter/status/\(id)",
+            "https://api.vxtwitter.com/status/\(id)",
+        ]
+        for ep in endpoints {
+            if let post = parseVxStatus(getJSON(ep)), post.text.count >= 20 {
+                return post
+            }
+        }
+        return nil
+    }
+
+    private static func parseVxStatus(_ data: Data?) -> StatusPost? {
+        guard let data,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let text = (obj["text"] as? String) ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        var quote: StatusQuote?
+        if let q = obj["qrt"] as? [String: Any] {
+            let qt = (q["text"] as? String) ?? ""
+            if !qt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                quote = StatusQuote(
+                    text: qt,
+                    name: (q["user_name"] as? String) ?? "",
+                    handle: (q["user_screen_name"] as? String) ?? "",
+                    url: (q["tweetURL"] as? String) ?? (q["qrtURL"] as? String) ?? ""
+                )
+            }
+        }
+        let media = (obj["mediaURLs"] as? [String]) ?? []
+        return StatusPost(text: text, title: "", quote: quote, media: media)
+    }
+
+    static func peelLongestText(_ html: String) -> String {
+        var best = ""
+        let ns = html as NSString
+        let re = try? NSRegularExpression(pattern: "<(p|span)[^>]*>([\\s\\S]*?)</\\1>", options: .caseInsensitive)
+        re?.enumerateMatches(in: html, options: [], range: NSRange(location: 0, length: ns.length)) { m, _, _ in
+            guard let m, m.numberOfRanges >= 3 else { return }
+            let inner = ns.substring(with: m.range(at: 2))
+            let text = stripTags(inner)
+            if text.count > best.count { best = text }
+        }
+        if best.count < 40 { best = stripTags(html) }
+        return best.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func stripTags(_ html: String) -> String {
+        var s = html
+        s = s.replacingOccurrences(of: "<br\\s*/?>", with: "\n", options: [.regularExpression, .caseInsensitive])
+        s = s.replacingOccurrences(of: "</p>", with: "\n\n", options: .caseInsensitive)
+        s = s.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: "&nbsp;", with: " ")
+        s = s.replacingOccurrences(of: "&amp;", with: "&")
+        s = s.replacingOccurrences(of: "&lt;", with: "<")
+        s = s.replacingOccurrences(of: "&gt;", with: ">")
+        s = s.replacingOccurrences(of: "&quot;", with: "\"")
+        s = s.replacingOccurrences(of: "&#39;", with: "'")
+        s = s.replacingOccurrences(of: "\r\n", with: "\n")
+        while s.contains("\n\n\n") {
+            s = s.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        return s
+    }
+
+    private static func inlineBreaks(_ para: String) -> String {
+        para.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { escape(String($0)) }
+            .joined(separator: "<br>\n")
     }
 
     // MARK: - private

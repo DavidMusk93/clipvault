@@ -33,10 +33,12 @@ ClipVault 离线阅读面怎么从 URL 变成可排版的 HTML。产品入口与
 POST /api/archive
   │
   ├─ x.com / twitter.com ?
-  │    是 → fxtwitter /status/{id} → article.content.blocks + entityMap
-  │         XArticleHTML.renderDocument
+  │    是 → XArticleHTML.archive
+  │         1. fxtwitter article.content.blocks（X Article / Draft.js）
+  │         2. 否则 vxtwitter 全文（Note / 长帖；fxtwitter text 常被截到 ~140）
+  │            `\n\n` → <p>；headingLike → <h2>；qrt → blockquote.cv-x-quote
   │         可用（cv-x-article 且够长）→ 跳过 Readability
-  │         失败 → 回落 WKWebView
+  │         失败 → 回落 WKWebView；enrich 再按最长节点剥换行重切段
   │
   └─ 否 → 离屏 WKWebView（无 Safari cookie；无系统代理则 SOCKS :2080）
            Readability.js（二进制同目录）

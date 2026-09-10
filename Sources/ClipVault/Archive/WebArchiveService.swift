@@ -126,22 +126,22 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             return
         }
         // X Articles: Draft.js MARKDOWN/headings are not in the logged-out DOM.
-        // Prefer the article payload over WKWebView+Readability <p> soup.
+        // Note tweets: vxtwitter full text with `\n\n`; Readability is one <span> blob.
         if XArticleHTML.isXURL(job.url) {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
-                if let fetched = XArticleHTML.fetchArticle(url: job.url),
-                   let rendered = XArticleHTML.renderDocument(article: fetched.article),
-                   XArticleHTML.isUsableArticleHTML(rendered.html) {
-                    print("[Archive] x-article fast-path \(job.url) bytes=\(rendered.html.utf8.count) dropped=\(rendered.coverage.atomicDropped)")
+                if let got = XArticleHTML.archive(url: job.url),
+                   XArticleHTML.isUsableArticleHTML(got.rendered.html) {
+                    print("[Archive] x-status fast-path \(job.url) engine=\(got.rendered.engine) bytes=\(got.rendered.html.utf8.count)")
                     DispatchQueue.main.async {
                         self.finish(
                             jobId: job.id,
                             error: nil,
-                            title: fetched.title.isEmpty ? nil : fetched.title,
-                            html: rendered.html,
-                            text: fetched.title,
-                            coverage: rendered.coverage
+                            title: got.title.isEmpty ? nil : got.title,
+                            html: got.rendered.html,
+                            text: got.title,
+                            coverage: got.rendered.coverage,
+                            engine: got.rendered.engine
                         )
                     }
                     return
@@ -163,7 +163,8 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         title: String?,
         html: String?,
         text: String?,
-        coverage: XArticleHTML.Coverage? = nil
+        coverage: XArticleHTML.Coverage? = nil,
+        engine: String? = nil
     ) {
         session?.teardown()
         session = nil
@@ -195,7 +196,8 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 title: title ?? "",
                 html: html,
                 text: text ?? "",
-                coverage: coverage
+                coverage: coverage,
+                engineHint: engine
             ) { [weak self] in
                 self?.onFinished?(itemId, jobId, error)
                 self?.kick()
@@ -213,6 +215,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         html: String,
         text: String,
         coverage: XArticleHTML.Coverage? = nil,
+        engineHint: String? = nil,
         done: @escaping () -> Void
     ) {
         guard database != nil else {
@@ -226,7 +229,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             }
             var articleHTML = html
             var articleTitle = title
-            var engine = "webkit+readability"
+            var engine = engineHint ?? "webkit+readability"
             var coverageJSON = coverage?.json
             if let enriched = XArticleHTML.enrich(url: url, html: html, title: title) {
                 articleHTML = enriched.html

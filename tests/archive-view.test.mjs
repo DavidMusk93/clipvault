@@ -64,6 +64,9 @@ test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', ()
   const xhtml = src('XArticleHTML.swift');
   const svc = src('WebArchiveService.swift');
   assert.match(xhtml, /x-article\+draftjs/);
+  assert.match(xhtml, /x-status/);
+  assert.match(xhtml, /renderStatus/);
+  assert.match(xhtml, /api\.vxtwitter\.com/);
   assert.match(xhtml, /header-two/);
   assert.match(xhtml, /MARKDOWN/);
   assert.match(xhtml, /renderFence/);
@@ -81,7 +84,7 @@ test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', ()
   assert.match(xhtml, /mediaExpected/);
   assert.match(xhtml, /struct Coverage/);
   assert.match(svc, /coverageJSON/);
-  assert.match(svc, /renderDocument/);
+  assert.match(svc, /XArticleHTML\.archive/);
   assert.match(svc, /XArticleHTML\.enrich/);
   assert.match(svc, /XArticleHTML\.isUsableArticleHTML/);
   assert.doesNotMatch(svc, /contains\("<pre"\) \|\| html\.lowercased\(\)\.contains\("<h2"\)/);

@@ -332,6 +332,54 @@ enum XArticleHTMLTests {
         ok("outline-h3", outline.contains("<h3>1. 放入原稿</h3>") && outline.contains("<h3>关于作者</h3>"))
         ok("outline-no-extra-h1", outline.components(separatedBy: "<h1>").count - 1 == 1)
 
+        let note = """
+        “反蒸馏”隐学
+
+        公司永远在宣扬“开源精神”。
+
+        1.  交付结果，不交付过程
+
+        将自己最核心的 AI 工作流留在个人设备。
+
+        2. 拥抱“灰度与复杂性”（不可归纳性）
+
+        AI 最擅长蒸馏结构化流程。
+        """
+        let status = XArticleHTML.renderStatus(
+            text: note,
+            quoteText: "提升自己的 AI 工作流，但不要共享。",
+            quoteName: "AlexZ 🦀",
+            quoteHandle: "blackanger",
+            quoteURL: "https://x.com/blackanger/status/2097532661350994427"
+        )!
+        ok("note-engine", status.engine == "x-status")
+        ok("note-h1", status.html.contains("<h1>“反蒸馏”隐学</h1>"))
+        ok("note-p", status.html.contains("<p>公司永远在宣扬“开源精神”。</p>"))
+        ok("note-h2", status.html.contains("<h2>1.  交付结果，不交付过程</h2>"))
+        ok("note-h2b", status.html.contains("<h2>2. 拥抱“灰度与复杂性”（不可归纳性）</h2>"))
+        ok("note-quote", status.html.contains("cv-x-quote") && status.html.contains("<blockquote>")
+            && status.html.contains("提升自己的 AI 工作流，但不要共享。"))
+        ok("note-quote-link", status.html.contains("href=\"https://x.com/blackanger/status/2097532661350994427\""))
+        ok("note-not-blob", !status.html.contains("<span>") && status.html.contains("cv-x-article"))
+        ok("note-structured", XArticleHTML.looksStructured(status.html))
+        ok("note-title", status.title == "“反蒸馏”隐学")
+
+        let soup = """
+        <div id="readability-page-1" class="page"><p><span>“反蒸馏”隐学
+
+        公司永远在宣扬“开源精神”。
+
+        1.  交付结果，不交付过程
+
+        将自己最核心的 AI 工作流留在个人设备。</span></p><p>Only some accounts can reply.</p></div>
+        """
+        let peeled = XArticleHTML.peelLongestText(soup)
+        ok("peel-newlines", peeled.contains("\n\n") && peeled.contains("“反蒸馏”隐学"))
+        ok("peel-not-footer", !peeled.contains("Only some accounts"))
+        let fromSoup = XArticleHTML.renderStatus(text: peeled)!
+        ok("peel-render-h1", fromSoup.html.contains("<h1>“反蒸馏”隐学</h1>"))
+        ok("peel-render-h2", fromSoup.html.contains("<h2>1.  交付结果，不交付过程</h2>"))
+
         if fails > 0 {
             FileHandle.standardError.write(Data("x-article-html: \(fails) failed\n".utf8))
             exit(1)
