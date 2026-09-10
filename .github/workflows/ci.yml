@@ -26,14 +26,19 @@ jobs:
       - name: Cache SPM
         uses: actions/cache@v4
         with:
+          # Do not cache .build: PCH embeds the checkout path
+          # (/Users/runner/work/<repo>/<repo>). After ClipView → clipvault
+          # that restored a ModuleCache for the old path and failed with
+          # "missing required module 'SwiftShims'".
           path: |
-            .build
             ~/Library/Caches/org.swift.swiftpm
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Sources/ClipVault/**/*.swift') }}
+          key: ${{ runner.os }}-spm-clipvault-${{ hashFiles('Package.swift', 'Sources/ClipVault/**/*.swift') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-spm-clipvault-
       - name: Build (debug)
-        run: swift build --product ClipVaultServer
+        run: |
+          rm -rf .build
+          swift build --product ClipVaultServer
       - name: Build (release)
         run: swift build -c release --product ClipVaultServer
       - name: Verify binary

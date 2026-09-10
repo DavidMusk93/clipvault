@@ -183,3 +183,12 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
     'solo hidden tab must not drop EventSource immediately',
   );
 });
+
+test('swift CI does not cache .build PCH across repo-path renames', () => {
+  const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
+  const cache = sliceFrom(ci, 'name: Cache SPM', 900);
+  assert.doesNotMatch(cache, /^\s+\.build\s*$/m);
+  assert.match(cache, /org\.swift\.swiftpm/);
+  assert.match(cache, /spm-clipvault-/);
+  assert.match(ci, /rm -rf \.build/);
+});
