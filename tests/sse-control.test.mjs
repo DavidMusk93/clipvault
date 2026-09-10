@@ -179,11 +179,17 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
     /es\.close\(\);\s*setTimeout\(setupSSE/,
     'must not close+timer on every onerror (background tabs throttle setTimeout)',
   );
-  const vis = sliceFrom(indexHtml, 'function onFeedVisible()', 500);
+  const vis = sliceFrom(indexHtml, 'function onFeedVisible()', 900);
   assert.match(vis, /considerElect/);
   assert.match(vis, /setupSSE\(\)/);
   assert.match(vis, /scheduleResync\(\)/);
   assert.match(vis, /visibilityState === 'hidden'/);
+  assert.match(indexHtml, /addEventListener\('focus'/);
+  assert.match(indexHtml, /phase: 'watch'/);
+  assert.match(indexHtml, /function liveGet/);
+  assert.match(indexHtml, /cache: 'no-store'/);
+  assert.match(web, /Cache-Control", "no-store"\)\)/);
+  assert.doesNotMatch(web, /private, max-age=60"\)\)/);
   const elect = sliceFrom(indexHtml, 'function considerElect()', 1600);
   assert.match(elect, /role = 'bg'/);
   assert.match(elect, /setSseLeader\(true\)/);

@@ -356,8 +356,9 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
     retry: 3000
     15s  : ping  + {"type":"ping"}
     每连接队列 32；满 → coalesce resync_required（禁止静默踢）
-    onopen / visibility / online → scheduleResync → mergeHead
+    onopen / visibility / focus / pageshow / online → scheduleResync → mergeHead
                                    必须同时 mergeNotesHead
+    活 GET /api/clips 禁止浏览器缓存（no-store）；后台冻住 SSE 后回前台靠 mergeHead
     后台：单页保持 EventSource。仅当 BroadcastChannel 里已有其它 leader
     才放掉 socket（81244ea 多 tab 省连接）。禁止 hidden 一律 teardown。
 

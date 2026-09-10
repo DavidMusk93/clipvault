@@ -1018,7 +1018,8 @@ class WebServer {
             reason: "OK",
             contentType: "application/json; charset=utf-8",
             body: body,
-            connection: connection
+            connection: connection,
+            extraHeaders: [("Cache-Control", "no-store")]
         )
     }
     
@@ -2364,7 +2365,7 @@ class WebServer {
             headers.append(h)
         }
         if !hasCache {
-            headers.append(("Cache-Control", "private, max-age=60"))
+            headers.append(("Cache-Control", "no-store"))
         }
         let payload = OriginWire.encodeResponse(status: status, headers: headers, body: body, stream: false)
         connection.watchPeerClose {}

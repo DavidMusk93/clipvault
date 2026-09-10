@@ -3747,7 +3747,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     async function loadNotesList() {
-      const res = await fetch(API + '/api/clips?type=note&limit=80');
+      const res = await liveGet(API + '/api/clips?type=note&limit=80');
       const data = await res.json();
       notesState.items = Array.isArray(data) ? data : (data.items || []);
       notesState.loaded = true;
@@ -4642,7 +4642,7 @@ window.ClipViewMasonry = Masonry;
       params.set('exclude', 'note');
 
       try {
-        const res = await fetch(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
+        const res = await liveGet(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
         if (!res.ok) throw new Error('API ' + res.status);
         const buf = await res.arrayBuffer();
         const bytes = buf.byteLength;
@@ -4788,8 +4788,12 @@ window.ClipViewMasonry = Masonry;
       return fresh.length;
     }
 
+    function liveGet(url) {
+      return fetch(url, { cache: 'no-store' });
+    }
+
     async function fetchClipById(id) {
-      const res = await fetch(`${API}/api/clips?id=${encodeURIComponent(id)}`);
+      const res = await liveGet(`${API}/api/clips?id=${encodeURIComponent(id)}`);
       if (!res.ok) throw new Error('API ' + res.status);
       const data = await res.json();
       return (Array.isArray(data) ? data[0] : (data.items || [])[0]) || null;
@@ -4804,7 +4808,7 @@ window.ClipViewMasonry = Masonry;
         if (searchQuery) params.set('q', searchQuery);
         if (currentView === 'trash') params.set('view', 'trash');
         params.set('exclude', 'note');
-        const res = await fetch(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
+        const res = await liveGet(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
         if (!res.ok) {
           nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'head', phase: 'error', reason: 'http' } });
           return;
@@ -4876,7 +4880,7 @@ window.ClipViewMasonry = Masonry;
           const fat = new URLSearchParams({ limit: String(PAGE_SIZE), exclude: 'note' });
           if (searchQuery) fat.set('q', searchQuery);
           if (currentView === 'trash') fat.set('view', 'trash');
-          const fatRes = await fetch(`${API}/api/clips?${fat.toString().replace(/\+/g, '%20')}`);
+          const fatRes = await liveGet(`${API}/api/clips?${fat.toString().replace(/\+/g, '%20')}`);
           if (fatRes.ok) {
             const fatData = await fatRes.json();
             const fatItems = Array.isArray(fatData) ? fatData : (fatData.items || []);
@@ -7970,7 +7974,7 @@ window.ClipViewMasonry = Masonry;
     let resyncTimer = 0;
     let resyncing = false;
     let resyncQueued = false;
-    const SSE_STALE_MS = 25000;
+    const SSE_STALE_MS = 18000;
 
     function noteSSEEvent() { sseLastEventAt = Date.now(); }
 
@@ -8266,13 +8270,28 @@ window.ClipViewMasonry = Masonry;
       }
       clearTimeout(sseElectTimer);
       sseElectTimer = window.setTimeout(considerElect, sseBc ? 100 : 0);
-      if (!sseIsFresh()) setupSSE();
+      // Frozen/background EventSource often stays OPEN without pings.
+      // Reopen if stale or not actually open, then always mergeHead.
+      if (!liveSSE || liveSSE.readyState !== EventSource.OPEN || !sseIsFresh()) {
+        setupSSE();
+      }
       scheduleResync();
       scheduleBackupLite();
     }
     document.addEventListener('visibilitychange', onFeedVisible);
-    window.addEventListener('pageshow', (ev) => { if (ev.persisted) onFeedVisible(); });
+    window.addEventListener('pageshow', onFeedVisible);
+    window.addEventListener('focus', onFeedVisible);
     window.addEventListener('online', onFeedVisible);
+    if (!window.__cvSseWatch) {
+      window.__cvSseWatch = window.setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        if (!sseLeader && sseBc) return;
+        if (sseIsFresh()) return;
+        nm('sse_wall', { payload: { phase: 'watch', kind: 'stale' } });
+        setupSSE();
+        scheduleResync();
+      }, 8000);
+    }
     window.addEventListener('beforeunload', () => {
       if (sseLeader) {
         try { sseBc && sseBc.postMessage({ t: 'bye', id: sseTabId }); } catch (_) {}

@@ -81,7 +81,7 @@ test('notes remember the open note and support Apple tags', () => {
   assert.match(css, /\.notes-preview \.notes-tag/);
   assert.doesNotMatch(css, /background:\s*#ffe566/);
   assert.match(entry, /tagifyPreview/);
-  assert.match(swift, /max-age=60/);
+  assert.match(swift, /max-age=60, must-revalidate/);
 });
 
 test('nested lists indent in source and restyle in preview', () => {
