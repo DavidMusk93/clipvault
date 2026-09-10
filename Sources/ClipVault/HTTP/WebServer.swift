@@ -428,14 +428,18 @@ class WebServer {
     }
 
     private func handleOptionsRequest(connection: HTTPByteSink) {
-        let response = """
-        HTTP/1.1 204 No Content
-        Access-Control-Allow-Origin: *
-        Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS
-        Access-Control-Allow-Headers: Content-Type
-        
-        """
-        sendResponse(response, connection: connection)
+        sendBinary(
+            status: 204,
+            reason: "No Content",
+            contentType: "text/plain",
+            body: Data(),
+            connection: connection,
+            extraHeaders: [
+                ("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS"),
+                ("Access-Control-Allow-Headers", "Content-Type"),
+                ("Cache-Control", "no-store"),
+            ]
+        )
     }
 
     /// `URLComponents.queryItems` is RFC 3986: `+` stays `+`.
@@ -695,6 +699,7 @@ class WebServer {
     }
 
     private func tickProcLocked() {
+        UiMetrics.shared.drainHttpFront()
         let s = ProcMetrics.sample(sse: sseSessions.count)
         lastProc = s.asDict()
         UiMetrics.shared.emit(
@@ -869,14 +874,7 @@ class WebServer {
             if success {
                 // Soft-delete only — do not tombstone peers (row still exists for TTL).
                 self.broadcastSSE(event: "clip_deleted", id: uuid.uuidString)
-                let resp = """
-                HTTP/1.1 200 OK
-                Access-Control-Allow-Origin: *
-                Content-Type: application/json
-                
-                {"status":"deleted","soft":true}
-                """
-                self.sendResponse(resp, connection: connection)
+                self.sendJSON(["status": "deleted", "soft": true], connection: connection)
             } else {
                 self.sendErrorResponse(connection: connection, status: 500, message: "Failed to delete")
             }
@@ -895,14 +893,7 @@ class WebServer {
             guard let self = self else { return }
             if ok {
                 self.broadcastSSE(event: "clip_restored", id: uuid.uuidString)
-                let resp = """
-                HTTP/1.1 200 OK
-                Access-Control-Allow-Origin: *
-                Content-Type: application/json
-                
-                {"status":"restored"}
-                """
-                self.sendResponse(resp, connection: connection)
+                self.sendJSON(["status": "restored"], connection: connection)
             } else {
                 self.sendErrorResponse(connection: connection, status: 404, message: "Not in trash")
             }
@@ -2516,23 +2507,7 @@ class WebServer {
     // MARK: - CloudDocs backup API
 
     private func jsonBody(from data: Data) -> [String: Any]? {
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            return json
-        }
-        let requestString = String(data: data, encoding: .utf8) ?? ""
-        let bodyString: String
-        if let r = requestString.range(of: "\r\n\r\n") {
-            bodyString = String(requestString[r.upperBound...])
-        } else if let r = requestString.range(of: "\n\n") {
-            bodyString = String(requestString[r.upperBound...])
-        } else {
-            return nil
-        }
-        guard let bodyData = bodyString.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
-            return nil
-        }
-        return json
+        (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     private func sendJSONObject(_ obj: [String: Any], connection: HTTPByteSink) {
@@ -2612,60 +2587,14 @@ class WebServer {
         <body><h1>\(status) \(message)</h1></body>
         </html>
         """
-        
-        let response = """
-        HTTP/1.1 \(status) \(message)
-        Content-Type: text/html; charset=utf-8
-        Content-Length: \(html.utf8.count)
-        
-        \(html)
-        """
-        
-        sendResponse(response, connection: connection)
-    }
-    
-    private func sendResponse(_ response: String, connection: HTTPByteSink) {
-        // Handlers still assemble an HTTP-looking buffer internally; the origin
-        // wire is CV01. Split status/headers/body here so HTTP never leaves Swift.
-        let normalized: String
-        if let range = response.range(of: "\n\n") {
-            let headerPart = String(response[..<range.lowerBound]).replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n")
-            let bodyPart = String(response[range.upperBound...])
-            normalized = headerPart + "\r\n\r\n" + bodyPart
-        } else if let range = response.range(of: "\r\n\r\n") {
-            normalized = response
-            _ = range
-        } else {
-            normalized = response.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n")
-        }
-
-        guard let data = normalized.data(using: .utf8) else {
-            connection.cancel()
-            return
-        }
-        let sep = data.range(of: Data("\r\n\r\n".utf8))
-        let headerBytes = sep.map { data[..<$0.lowerBound] } ?? data[...]
-        let body = sep.map { Data(data[$0.upperBound...]) } ?? Data()
-        let headerText = String(data: Data(headerBytes), encoding: .utf8) ?? ""
-        var status = 200
-        var headers: [(String, String)] = []
-        let lines = headerText.components(separatedBy: "\r\n")
-        if let first = lines.first {
-            let parts = first.split(separator: " ", maxSplits: 2).map(String.init)
-            if parts.count >= 2, parts[0].hasPrefix("HTTP/") {
-                status = Int(parts[1]) ?? 200
-            }
-        }
-        for line in lines.dropFirst() {
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let name = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
-            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-            if name.lowercased() == "transfer-encoding" { continue }
-            headers.append((name, value))
-        }
-        let payload = OriginWire.encodeResponse(status: status, headers: headers, body: body, stream: false)
-        connection.watchPeerClose {}
-        connection.send(content: payload) { _ in }
+        sendBinary(
+            status: status,
+            reason: message,
+            contentType: "text/html; charset=utf-8",
+            body: Data(html.utf8),
+            connection: connection,
+            extraHeaders: [("Cache-Control", "no-store")]
+        )
     }
     
     deinit {

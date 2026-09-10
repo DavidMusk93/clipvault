@@ -20,6 +20,7 @@ final class UiMetrics {
         "kind", "phase", "reason", "lag", "host",
         "w", "h", "nodes", "dy",
         "fds", "rss", "unix", "sse", "rlim",
+        "route", "proto", "status",
     ])
 
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")
@@ -53,6 +54,44 @@ final class UiMetrics {
         """)
         exec("CREATE INDEX IF NOT EXISTS ui_events_ts ON ui_events(ts);")
         exec("CREATE INDEX IF NOT EXISTS ui_events_name_ts ON ui_events(name, ts);")
+    }
+
+    /// Drain clipvault-http JSONL spool into ui_events. Never blocks the hop.
+    func drainHttpFront() {
+        let root = DatabaseManager.resolveDataRoot()
+        let live = root.appendingPathComponent("run", isDirectory: true)
+            .appendingPathComponent("http-metrics.jsonl")
+        let drain = live.deletingLastPathComponent().appendingPathComponent("http-metrics.jsonl.drain")
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: live.path) else { return }
+        try? fm.removeItem(at: drain)
+        do {
+            try fm.moveItem(at: live, to: drain)
+        } catch {
+            return
+        }
+        guard let raw = try? String(contentsOf: drain, encoding: .utf8) else {
+            try? fm.removeItem(at: drain)
+            return
+        }
+        try? fm.removeItem(at: drain)
+        var events: [[String: Any]] = []
+        events.reserveCapacity(64)
+        for line in raw.split(whereSeparator: \.isNewline) {
+            guard !line.isEmpty,
+                  let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            events.append(obj)
+            if events.count >= Self.maxEventsPerRequest {
+                _ = ingest(events: events, defaultSession: "http")
+                events.removeAll(keepingCapacity: true)
+            }
+        }
+        if !events.isEmpty {
+            _ = ingest(events: events, defaultSession: "http")
+        }
     }
 
     /// Server-side emit (sync cycles). Same sanitizer as HTTP ingest. Never synced.

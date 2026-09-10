@@ -76,6 +76,10 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(swift, /"dy"/);
   assert.match(swift, /"fds"/);
   assert.match(swift, /"rss"/);
+  assert.match(swift, /"route"/);
+  assert.match(swift, /"proto"/);
+  assert.match(swift, /drainHttpFront/);
+  assert.match(metricsJs, /'route'/);
   assert.match(swift, /"unix"/);
   assert.match(swift, /"rlim"/);
   assert.match(web, /\/api\/ui-metrics\/proc/);

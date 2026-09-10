@@ -82,6 +82,16 @@ test('browser edge is one-hop HTTP/2 (h2c :80 / TLS :443)', () => {
   assert.match(agents, /clipvault-http/);
   assert.doesNotMatch(rust, /8443/);
   assert.doesNotMatch(rust, /http1::handshake/);
+  assert.doesNotMatch(web, /private func sendResponse/);
+  assert.doesNotMatch(web, /HTTP\/1\.1 \d{3}/);
+  assert.match(rust, /mod metrics/);
+  assert.match(rust, /metrics::emit/);
+  const metricsRs = readFileSync(join(root, 'http-front/src/metrics.rs'), 'utf8');
+  assert.match(metricsRs, /http_req/);
+  assert.match(metricsRs, /http-metrics\.jsonl/);
+  assert.match(src('UiMetrics.swift'), /drainHttpFront/);
+  assert.match(src('UiMetrics.swift'), /"route"/);
+  assert.match(agents, /http_req/);
 });
 
 test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {

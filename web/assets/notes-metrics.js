@@ -5,6 +5,7 @@
     'mode', 'ratio', 'chars', 'bytes', 'n', 'value', 'interaction', 'q_len',
     'kind', 'phase', 'reason', 'lag', 'host', 'w', 'h', 'nodes', 'dy',
     'fds', 'rss', 'unix', 'sse', 'rlim',
+    'route', 'proto', 'status',
   ]);
   const NAME = /^[a-z][a-z0-9_]{1,63}$/;
   const SESSION_KEY = 'clipvault.metrics.session';

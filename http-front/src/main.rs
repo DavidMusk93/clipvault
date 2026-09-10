@@ -5,20 +5,21 @@
 //! - TLS    → :443 (ALPN h2)
 //! App origin is CV01 frames on a Unix socket — not HTTP.
 
+mod metrics;
 mod origin;
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use http::header::{CONTENT_LENGTH, HOST, HeaderName, HeaderValue};
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
-use hyper::{Request, Response, StatusCode};
+use hyper::{Request, Response, StatusCode, Version};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto::Builder as ConnBuilder;
 use rustls::ServerConfig;
@@ -216,61 +217,194 @@ fn status_from(code: u16) -> StatusCode {
     StatusCode::from_u16(code).unwrap_or(StatusCode::OK)
 }
 
+fn proto_of(req: &Request<Incoming>) -> &'static str {
+    match req.version() {
+        Version::HTTP_2 => "h2",
+        _ => "h1",
+    }
+}
+
+fn record(
+    t0: Instant,
+    origin_ms: f64,
+    status: StatusCode,
+    method: &str,
+    path: &str,
+    proto: &str,
+    phase: &str,
+    bytes_in: u64,
+    bytes_out: u64,
+) {
+    let dur = t0.elapsed().as_secs_f64() * 1000.0;
+    let code = status.as_u16();
+    metrics::emit(
+        dur,
+        origin_ms,
+        code < 500,
+        code,
+        method,
+        path,
+        proto,
+        phase,
+        bytes_in,
+        bytes_out,
+    );
+}
+
 async fn proxy(req: Request<Incoming>, sock: PathBuf) -> Result<Response<RespBody>, Infallible> {
+    let t0 = Instant::now();
+    let proto = proto_of(&req);
     let method = req.method().as_str().to_string();
     let path = request_path(&req);
     let headers = request_headers(&req);
+    metrics::inflight_inc();
+    let out = proxy_inner(req, sock, t0, proto, &method, &path, headers).await;
+    metrics::inflight_dec();
+    out
+}
+
+async fn proxy_inner(
+    req: Request<Incoming>,
+    sock: PathBuf,
+    t0: Instant,
+    proto: &str,
+    method: &str,
+    path: &str,
+    headers: Vec<(String, String)>,
+) -> Result<Response<RespBody>, Infallible> {
     let collected = match req.into_body().collect().await {
         Ok(c) => c.to_bytes(),
         Err(e) => {
             eprintln!("[http] body: {e}");
+            record(
+                t0,
+                0.0,
+                StatusCode::BAD_REQUEST,
+                method,
+                path,
+                proto,
+                "bad_body",
+                0,
+                0,
+            );
             let mut r = Response::new(full_io("bad request body"));
             *r.status_mut() = StatusCode::BAD_REQUEST;
             return Ok(r);
         }
     };
+    let bytes_in = collected.len() as u64;
     if collected.len() > origin::MAX_BODY {
+        record(
+            t0,
+            0.0,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            method,
+            path,
+            proto,
+            "too_large",
+            bytes_in,
+            0,
+        );
         let mut r = Response::new(full_io("payload too large"));
         *r.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
         return Ok(r);
     }
+    let t_origin = Instant::now();
     let unix = match UnixStream::connect(&sock).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[http] origin connect {}: {e}", sock.display());
+            record(
+                t0,
+                t_origin.elapsed().as_secs_f64() * 1000.0,
+                StatusCode::BAD_GATEWAY,
+                method,
+                path,
+                proto,
+                "origin_down",
+                bytes_in,
+                0,
+            );
             let mut r = Response::new(full_io("origin down"));
             *r.status_mut() = StatusCode::BAD_GATEWAY;
             return Ok(r);
         }
     };
     let (mut rd, mut wr) = origin::split(unix);
-    if let Err(e) = write_request(&mut wr, &method, &path, headers, &collected).await {
+    if let Err(e) = write_request(&mut wr, method, path, headers, &collected).await {
         eprintln!("[http] origin write: {e}");
+        record(
+            t0,
+            t_origin.elapsed().as_secs_f64() * 1000.0,
+            StatusCode::BAD_GATEWAY,
+            method,
+            path,
+            proto,
+            "origin_write",
+            bytes_in,
+            0,
+        );
         let mut r = Response::new(full_io("origin write failed"));
         *r.status_mut() = StatusCode::BAD_GATEWAY;
         return Ok(r);
     }
     match origin::read_response_header(&mut rd).await {
         Ok((meta, left)) => {
+            let origin_ms = t_origin.elapsed().as_secs_f64() * 1000.0;
             let status = if meta.status == 0 { 200 } else { meta.status };
             let mut res = match left {
                 Some(n) => {
                     let mut buf = vec![0u8; n as usize];
                     if let Err(e) = tokio::io::AsyncReadExt::read_exact(&mut rd, &mut buf).await {
                         eprintln!("[http] origin body: {e}");
+                        record(
+                            t0,
+                            t_origin.elapsed().as_secs_f64() * 1000.0,
+                            StatusCode::BAD_GATEWAY,
+                            method,
+                            path,
+                            proto,
+                            "origin_body",
+                            bytes_in,
+                            0,
+                        );
                         let mut r = Response::new(full_io("origin body failed"));
                         *r.status_mut() = StatusCode::BAD_GATEWAY;
                         return Ok(r);
                     }
                     drop(rd);
                     drop(wr);
+                    record(
+                        t0,
+                        origin_ms,
+                        status_from(status),
+                        method,
+                        path,
+                        proto,
+                        "ok",
+                        bytes_in,
+                        n,
+                    );
                     Response::new(
                         Full::new(Bytes::from(buf))
                             .map_err(|never| match never {})
                             .boxed(),
                     )
                 }
-                None => Response::new(boxed_origin(OriginBody::new(rd, wr, None))),
+                None => {
+                    record(
+                        t0,
+                        origin_ms,
+                        status_from(status),
+                        method,
+                        path,
+                        proto,
+                        "stream",
+                        bytes_in,
+                        0,
+                    );
+                    Response::new(boxed_origin(OriginBody::new(rd, wr, None)))
+                }
             };
             *res.status_mut() = status_from(status);
             let parts = res.headers_mut();
@@ -302,6 +436,17 @@ async fn proxy(req: Request<Incoming>, sock: PathBuf) -> Result<Response<RespBod
         }
         Err(e) => {
             eprintln!("[http] origin response: {e}");
+            record(
+                t0,
+                t_origin.elapsed().as_secs_f64() * 1000.0,
+                StatusCode::BAD_GATEWAY,
+                method,
+                path,
+                proto,
+                "origin_hdr",
+                bytes_in,
+                0,
+            );
             let mut r = Response::new(full_io("origin response failed"));
             *r.status_mut() = StatusCode::BAD_GATEWAY;
             Ok(r)
@@ -388,6 +533,7 @@ fn watch_parent() {
 #[tokio::main]
 async fn main() {
     let sock = origin_sock();
+    metrics::start(env_path("CLIPVAULT_HOME", keepsake_home()));
     let addrs = listen_addrs();
     if addrs.is_empty() {
         eprintln!("[http] CLIPVAULT_LISTEN empty");
