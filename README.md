@@ -13,7 +13,7 @@ ClipVault 是面向个人 Mac 的剪贴板历史产品：本机守护进程静�
 | 你感知到的 | 背后 |
 | --- | --- |
 | 复制即归档 | `ClipFlowServer` 守护进程监听系统剪贴板 |
-| 浏览器打开即用 | 本机 Web UI · `http://localhost:8080` |
+| 浏览器打开即用 | 本机 Web UI · `http://127.0.0.1/` |
 | 图里的字也能搜 | Apple Vision 离线 OCR |
 | 换机/重装不丢 | iCloud Drive · CloudDocs 在线 SQLite 备份 |
 
@@ -43,7 +43,7 @@ ClipVault (product)
 ├── ClipFlowServer          # headless daemon (SPM product)
 │   ├── ClipboardMonitor    # pasteboard + OCR
 │   ├── DatabaseManager     # SQLite3 · cursor pages · online backup API
-│   ├── WebServer           # :8080 · REST + SSE + static UI
+│   ├── WebServer           # CV01 origin · REST + SSE + static UI
 │   ├── CloudDocsBackupService   # 灾备：hosts/{hostId}/ snapshot
 │   └── CloudDocsSyncService     # 同步：per-host tx + live/attach
 ├── web/index.html          # 浏览器控制面
@@ -54,7 +54,7 @@ ClipVault (product)
 | --- | --- |
 | 语言 | Swift 5.9 · macOS 13+ |
 | 存储 | 原生 SQLite3（**非** DuckDB） |
-| 网络 | 浏览器口 `https://127.0.0.1:8080` HTTP/2（Rust `clipvault-http`）；Swift origin 在 Unix socket |
+| 网络 | 唯一 HTTP 层：Rust `clipvault-http` HTTP/2（明文 :80 h2c / TLS :443）；Swift origin 是 CV01，不是 HTTP |
 | OCR | Vision |
 | 备份 | iCloud Drive CloudDocs（**无** App iCloud entitlement） |
 | CI | `swift build` + `node --test tests/masonry.test.mjs tests/pagination.test.mjs tests/notes-render.test.mjs` |
@@ -80,7 +80,7 @@ swift build -c release --product ClipFlowServer
 ./.build/release/ClipFlowServer
 ```
 
-浏览器打开：**https://127.0.0.1:8080**（HTTP/2）。
+浏览器打开：**http://127.0.0.1/**（HTTP/2；浏览器明文会落 HTTP/1.1，`curl --http2-prior-knowledge` 走 h2c）。
 
 ### 登录自启（可选）
 

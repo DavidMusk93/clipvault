@@ -6,7 +6,7 @@ import AppKit
 setlinebuf(stdout)
 setlinebuf(stderr)
 
-print("🚀 启动 ClipFlow 后台守护进程与 Web 服务 (Port: 8080)...")
+print("🚀 启动 ClipFlow 后台守护进程与 Web 服务")
 
 let db = DatabaseManager()
 // Plane A: per-host disaster backup (never a sync bus)
@@ -16,14 +16,14 @@ let sync = CloudDocsSyncService.bootstrap(database: db)
 let archive = WebArchiveService()
 archive.database = db
 let monitor = ClipboardMonitor(database: db)
-let webServer = WebServer(port: 8080, database: db, backup: backup, sync: sync, archive: archive)
+let webServer = WebServer(port: WebServer.tlsEnabled() ? 443 : 80, database: db, backup: backup, sync: sync, archive: archive)
 
 monitor.startMonitoring()
 webServer.start()
 
 print("✅ ClipFlow Web 服务已成功运行：")
 print("📁 数据目录见 [Database] 日志；禁止无 KEEPSAKE_HOME 的 nohup 裸启（incident 2026-08-11）")
-print("👉 本地 Web UI: https://127.0.0.1:8080  (HTTP/2)")
+print("👉 本地 Web UI: \(WebServer.tlsEnabled() ? "https://127.0.0.1/" : "http://127.0.0.1/")  (HTTP/2)")
 if let root = backup.backupRootURL {
     print("☁️  备份主目录: \(root.path)")
 } else {

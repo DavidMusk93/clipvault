@@ -3421,13 +3421,12 @@ final class DatabaseManager: ObservableObject {
     /// Archive HTML for the View document. Never the clipboard capture payload.
     /// Order: CAS `archive_html_sha` → `archive_html` → meta `htmlKey` → `html_content` (legacy overlay).
     func fetchArchiveHTML(id: UUID) -> String? {
-        var html: String?
+        var sha: String?
+        var inline: String?
+        var legacy: String?
         performReadSync {
             guard let db = self.readDB ?? self.db else { return }
             let idStr = id.uuidString
-            var sha: String?
-            var inline: String?
-            var legacy: String?
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(
                 db,
@@ -3449,20 +3448,15 @@ final class DatabaseManager: ObservableObject {
                let key = meta["htmlKey"] as? String, !key.isEmpty {
                 sha = key
             }
-            if let sha, !sha.isEmpty, let blob = self.readBlobFile(hash: sha),
-               let s = String(data: blob, encoding: .utf8), s.count > 40 {
-                html = s
-                return
-            }
-            if let inline, inline.count > 40 {
-                html = inline
-                return
-            }
-            if let legacy, legacy.count > 40 {
-                html = legacy
-            }
         }
-        return html
+        // File IO stays off the DB read queue — CloudDocs open() can stall for minutes.
+        if let sha, !sha.isEmpty, let blob = readBlobFile(hash: sha),
+           let s = String(data: blob, encoding: .utf8), s.count > 40 {
+            return s
+        }
+        if let inline, inline.count > 40 { return inline }
+        if let legacy, legacy.count > 40 { return legacy }
+        return nil
     }
 
     // MARK: - Reader learning layer (personal, durable)

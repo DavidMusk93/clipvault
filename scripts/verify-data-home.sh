@@ -44,12 +44,33 @@ AS_SZ=$(db_size "$AS_HOME")
 echo "Documents/ClipFlow db bytes: $DOC_SZ"
 echo "AppSupport/Keepsake db bytes: $AS_SZ"
 
-# 2) HTTP + item sample
-HTTP=$(curl --noproxy '*' -sk -m 5 -o /tmp/cv_clips_sample.json -w '%{http_code}' 'https://127.0.0.1:8080/api/clips?limit=5' || echo 000)
+# 2) HTTP + item sample (h2c first; HTTP/1.1 on the same hop for browsers)
+probe() {
+  local base="$1"
+  local code
+  code=$(curl --noproxy '*' --http2-prior-knowledge -s -m 15 -o /tmp/cv_clips_sample.json -w '%{http_code}' "$base/api/clips?limit=5&fields=head" || true)
+  [ "$code" = "200" ] || code=$(curl --noproxy '*' -s -m 15 -o /tmp/cv_clips_sample.json -w '%{http_code}' "$base/api/clips?limit=5&fields=head" || true)
+  [ -n "$code" ] || code=000
+  echo "$code"
+}
+BASE="${CLIPVAULT_BASE:-}"
+HTTP=000
+if [ -n "$BASE" ]; then
+  HTTP=$(probe "$BASE")
+else
+  for cand in http://127.0.0.1 http://127.0.0.1:8080; do
+    HTTP=$(probe "$cand")
+    if [ "$HTTP" = "200" ]; then
+      BASE="$cand"
+      break
+    fi
+  done
+fi
 if [ "$HTTP" != "200" ]; then
   red "FAIL: API HTTP $HTTP"
   exit 1
 fi
+echo "api base: $BASE"
 
 # 3) Prefer sqlite count on expected home (LaunchAgent home)
 EXPECT_HOME="$HOME/Documents/ClipFlow"
@@ -87,7 +108,7 @@ fi
 # 4) API should not look empty when sqlite has corpus
 PAGE=$(/usr/bin/python3 -c 'import json;print(len(json.load(open("/tmp/cv_clips_sample.json")).get("items") or []))')
 if [ "$ITEMS" -ge "$MIN_ITEMS" ] && [ "$PAGE" -eq 0 ]; then
-  red "FAIL: sqlite has $ITEMS items but API returned 0 — wrong process/home serving :8080"
+  red "FAIL: sqlite has $ITEMS items but API returned 0 — wrong process/home serving $BASE"
   exit 1
 fi
 

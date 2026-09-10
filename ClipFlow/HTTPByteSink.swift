@@ -44,7 +44,7 @@ final class HTTPByteSink {
                     }
                     if n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
                         var pfd = pollfd(fd: fd, events: Int16(POLLOUT | POLLERR | POLLHUP), revents: 0)
-                        let pr = poll(&pfd, 1, 2000)
+                        let pr = poll(&pfd, 1, 30_000)
                         if pr <= 0 || (pfd.revents & Int16(POLLERR | POLLHUP | POLLNVAL)) != 0 {
                             sendErr = POSIXError(.EPIPE)
                             break

@@ -87,25 +87,24 @@ Capture 禁止就地改成笔记。Compose 禁止写成第二套剪贴板。
 
 ```text
   Chrome / Safari
-       │  HTTPS  ALPN h2
+       │  明文 :80  → h2c prior-knowledge；浏览器会走 HTTP/1.1（浏览器不做明文 h2）
+       │  TLS  :443 → ALPN h2
        v
-  https://127.0.0.1:8080          clipvault-http   Rust  hyper+rustls
-       │                          唯一 TCP 监听
-       │  HTTP/1.1 流式（非浏览器口）
+  clipvault-http                 Rust hyper     唯一 HTTP 层
+       │                         唯一 TCP 监听
+       │  CV01 帧（不是 HTTP）
        v
-  $KEEPSAKE_HOME/run/http.sock    ClipFlowServer   Swift
-       │                            ├─ 剪贴板 / Vision OCR / SQLite
-       │                            ├─ CloudDocs 同步 + 备份
-       │                            └─ loopback 反代 /trae → :9488
-       │
-       ├─ 本机 CA  tls/ca.pem  → login keychain trustRoot
-       │                         scripts/trust-local-https.sh
+  $KEEPSAKE_HOME/run/http.sock   ClipFlowServer Swift
+       │                           ├─ 剪贴板 / Vision OCR / SQLite
+       │                           ├─ CloudDocs 同步 + 备份
+       │                           └─ loopback 反代 /trae → :9488
        │
        └─ GET /trae/?embed=1 ──► 127.0.0.1:9488   trae_hooks（DuckDB）
                                  浏览器禁止直开 :9488
 ```
 
-禁止：第二浏览器端口、明文 HTTP/1.1 对外、SwiftNIO/BoringSSL 当边车、自签叶子不进信任链。
+禁止：第二层 HTTP（UDS 上再讲 HTTP/1.1）、第二浏览器端口、SwiftNIO/BoringSSL 当边车。
+TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 root socket activation。
 
 ### 三平面（不可混）
 
@@ -122,8 +121,8 @@ Capture 禁止就地改成笔记。Compose 禁止写成第二套剪贴板。
 ```text
   ClipboardMonitor    捕获 + OCR，不写 HTTP
   DatabaseManager     SQLite 原语（含 sqlite3_backup）
-  clipvault-http      浏览器 TLS/h2 边
-  WebServer           UDS 上的协议与静态面
+  clipvault-http      唯一 HTTP/2 层（h2c :80 / TLS :443）
+  WebServer           CV01 origin：路由 / SSE / 静态面
   CloudDocsSyncService    每机 trx + blob_keys
   CloudDocsBackupService  快照生命周期，增量 CAS
   ArchiveBlobClosure      HTML → CAS 闭包（新资产加正则，不加 trx kind）
@@ -361,8 +360,8 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
   禁止 onerror 里 close()+setTimeout 当唯一重连
   HTTP/2 下 EventSource 占一条 stream
-  origin SSE = HTTP/1.1 chunked；drop 必须 close unix fd
-  clipvault-http 在 body drop 时 abort origin 连接（禁止泄漏 UDS）
+  origin SSE = CV01 stream；drop 必须 close unix fd
+  clipvault-http 在 body drop 时关掉 origin fd（禁止泄漏 UDS）
   needs_user：TraeAskFanIn 并进墙 SSE，禁止每页再挂 /trae/api/stream
 ```
 
@@ -410,7 +409,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 ./scripts/deploy-server.sh        # swift + cargo clipvault-http + launchctl + verify
 ./scripts/restart-clipflow.sh     # 已有二进制
 ./scripts/verify-data-home.sh     # 失败 = 禁止说「已恢复」
-# HTTPS 自检走 --noproxy '*'；浏览器 https://127.0.0.1:8080
+# 明文自检：curl --noproxy '*' --http2-prior-knowledge http://127.0.0.1/api/clips?limit=1
 ```
 
 ### 前端门禁

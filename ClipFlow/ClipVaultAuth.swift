@@ -18,7 +18,7 @@ final class ClipVaultAuth {
     private init() {
         secret = Self.loadOrCreateSecret()
         if secret != nil {
-            print("[Auth] TOTP ready. Pair Authenticator at http://127.0.0.1:8080/login/setup")
+            print("[Auth] TOTP ready. Pair Authenticator at http://127.0.0.1/login/setup")
         }
     }
 

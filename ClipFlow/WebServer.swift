@@ -6,7 +6,7 @@ import CoreGraphics
 import CryptoKit
 
 class WebServer {
-    /// Public path on <tunnel-domain>; local :8080 stays `/`. Incoming `/clipvault` is stripped.
+    /// Public path on <tunnel-domain>; local :80 stays `/`. Incoming `/clipvault` is stripped.
     static let publicPathPrefix = "/clipvault"
 
     static func requestHeaders(_ lines: [String]) -> [String: String] {
@@ -59,8 +59,14 @@ class WebServer {
         return path
     }
 
+    static func tlsEnabled() -> Bool {
+        let v = ProcessInfo.processInfo.environment["CLIPVAULT_TLS"] ?? "0"
+        return v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "on"
+    }
+
     private var originStarted = false
     private let port: UInt16
+    private let tls: Bool
     private let database: DatabaseManager
     private let backup: CloudDocsBackupService?
     private let sync: CloudDocsSyncService?
@@ -88,13 +94,14 @@ class WebServer {
     var isRunning: Bool { originStarted }
 
     init(
-        port: UInt16 = 8080,
+        port: UInt16 = 80,
         database: DatabaseManager = DatabaseManager(),
         backup: CloudDocsBackupService? = nil,
         sync: CloudDocsSyncService? = nil,
         archive: WebArchiveService? = nil
     ) {
         self.port = port
+        self.tls = Self.tlsEnabled()
         self.database = database
         self.backup = backup
         self.sync = sync
@@ -133,9 +140,15 @@ class WebServer {
         OriginUnixServer.shared.start(path: sock.path) { [weak self] sink in
             self?.receiveRequest(from: sink)
         }
-        HttpFrontProcess.shared.start(originSock: sock.path, listen: "127.0.0.1:\(port),[::1]:\(port)")
+        let listen = ProcessInfo.processInfo.environment["CLIPVAULT_LISTEN"]
+            ?? "127.0.0.1:\(port),[::1]:\(port)"
+        HttpFrontProcess.shared.start(originSock: sock.path, listen: listen, tls: tls)
         TraeAskFanIn.shared.attach(self)
-        print("Web origin unix \(sock.path); browser https://127.0.0.1:\(port) (HTTP/2)")
+        let scheme = tls ? "https" : "http"
+        let host = (port == 80 && !tls) || (port == 443 && tls)
+            ? "127.0.0.1"
+            : "127.0.0.1:\(port)"
+        print("Web origin CV01 \(sock.path); browser \(scheme)://\(host)/ (HTTP/2)")
         sseQueue.async { [weak self] in
             self?.startProcSamplerLocked()
         }
@@ -199,59 +212,35 @@ class WebServer {
                 self.sendErrorResponse(connection: connection, status: 413, message: "Payload Too Large")
                 return
             }
-            if self.httpMessageComplete(buf) || isComplete {
+            if buf.count >= 4 && !OriginWire.looksLikeCV01(buf) {
+                self.sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+                return
+            }
+            if let (req, _) = OriginWire.decodeRequest(from: buf) {
+                if req.method.isEmpty {
+                    self.sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+                    return
+                }
+                self.handleRequest(req, connection: connection)
+                return
+            }
+            if isComplete || error != nil {
                 if buf.isEmpty {
                     connection.cancel()
                     return
                 }
-                self.handleRequest(data: buf, connection: connection)
-                return
-            }
-            if error != nil {
-                connection.cancel()
+                self.sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
                 return
             }
             self.accumulateRequest(from: connection, buffer: buf)
         }
     }
 
-    private func httpMessageComplete(_ data: Data) -> Bool {
-        guard let sep = data.range(of: Data("\r\n\r\n".utf8)) else { return false }
-        let header = String(data: data[..<sep.lowerBound], encoding: .utf8) ?? ""
-        var contentLength: Int?
-        for line in header.split(separator: "\r\n").dropFirst() {
-            let parts = line.split(separator: ":", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            if parts[0].trimmingCharacters(in: .whitespaces).lowercased() == "content-length" {
-                contentLength = Int(parts[1].trimmingCharacters(in: .whitespaces))
-            }
-        }
-        if let contentLength {
-            return data.count - sep.upperBound >= contentLength
-        }
-        let first = header.split(separator: "\r\n").first.map(String.init) ?? ""
-        return first.hasPrefix("GET ") || first.hasPrefix("HEAD ")
-            || first.hasPrefix("OPTIONS ") || first.hasPrefix("DELETE ")
-    }
-    
-    private func handleRequest(data: Data, connection: HTTPByteSink) {
-        let requestString = String(data: data, encoding: .utf8) ?? ""
-        let lines = requestString.components(separatedBy: "\r\n")
-        
-        guard let firstLine = lines.first else {
-            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
-            return
-        }
-        
-        let parts = firstLine.components(separatedBy: " ")
-        guard parts.count >= 2 else {
-            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
-            return
-        }
-        
-        let method = parts[0]
-        let path = Self.stripPublicPrefix(parts[1])
-        let headers = Self.requestHeaders(lines)
+    private func handleRequest(_ req: OriginWire.Request, connection: HTTPByteSink) {
+        let method = req.method
+        let path = Self.stripPublicPrefix(req.path)
+        let headers = req.headers
+        let data = req.body
         let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
         let loopback = Self.isLoopbackRequest(headers)
 
@@ -402,8 +391,7 @@ class WebServer {
             sendErrorResponse(connection: connection, status: 405, message: "Method Not Allowed")
             return
         }
-        let requestString = String(data: data, encoding: .utf8) ?? ""
-        let body = requestString.range(of: "\r\n\r\n").map { String(requestString[$0.upperBound...]) } ?? ""
+        let body = String(data: data, encoding: .utf8) ?? ""
         let code = Self.formQueryValue(path: "?\(body)", name: "code") ?? ""
         if ClipVaultAuth.shared.verifyCode(code) {
             sendBinary(
@@ -519,7 +507,7 @@ class WebServer {
     }
 
     /// Loopback-only reverse proxy to the Trae DuckDB UI (default :9488).
-    /// Browser stays on ClipVault :8080; 9488 is an internal process port.
+    /// Browser stays on ClipVault HTTP; 9488 is an internal process port.
     static func traeBackendURL(from path: String) -> URL? {
         let port = Int(ProcessInfo.processInfo.environment["CLIPVAULT_TRAE_HTTP_PORT"] ?? "") ?? 9488
         let qMark = path.firstIndex(of: "?")
@@ -535,16 +523,6 @@ class WebServer {
             return nil
         }
         return URL(string: "http://127.0.0.1:\(port)\(backend)\(query)")
-    }
-
-    static func httpBody(from data: Data) -> Data {
-        if let range = data.range(of: Data("\r\n\r\n".utf8)) {
-            return data.subdata(in: range.upperBound..<data.endIndex)
-        }
-        if let range = data.range(of: Data("\n\n".utf8)) {
-            return data.subdata(in: range.upperBound..<data.endIndex)
-        }
-        return Data()
     }
 
     private func handleTraeProxy(
@@ -568,7 +546,7 @@ class WebServer {
         req.timeoutInterval = 20
         req.cachePolicy = .reloadIgnoringLocalCacheData
         if method == "POST" || method == "PUT" || method == "PATCH" {
-            req.httpBody = Self.httpBody(from: data)
+            req.httpBody = data
             req.setValue(headers["content-type"] ?? "application/json", forHTTPHeaderField: "Content-Type")
         }
         URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
@@ -637,12 +615,11 @@ class WebServer {
         let headers: [(String, String)] = [
             ("Content-Type", "text/event-stream; charset=utf-8"),
             ("Cache-Control", "no-cache, no-transform"),
-            ("Transfer-Encoding", "chunked"),
             ("X-Accel-Buffering", "no"),
             ("Access-Control-Allow-Origin", "*")
         ]
-        var hello = httpHeader(status: 200, reason: "OK", headers: headers)
-        hello.append(Self.httpChunk(sseHelloBodyLocked()))
+        var hello = OriginWire.encodeResponse(status: 200, headers: headers, body: Data(), stream: true)
+        hello.append(sseHelloBodyLocked())
         session.queue.append(hello)
         flushSSELocked(session)
         ensureSSEHeartbeatLocked()
@@ -661,11 +638,11 @@ class WebServer {
         if session.queue.count >= Self.sseMaxBuffered {
             session.queue.removeAll(keepingCapacity: true)
             session.resyncRequired = true
-            session.queue.append(Self.httpChunk(Self.sseResyncFrame))
+            session.queue.append(Self.sseResyncFrame)
             flushSSELocked(session)
             return
         }
-        session.queue.append(Self.httpChunk(payload))
+        session.queue.append(payload)
         flushSSELocked(session)
     }
 
@@ -766,7 +743,7 @@ class WebServer {
         for session in sseSessions.values {
             if session.resyncRequired { continue }
             if session.queue.count >= Self.sseMaxBuffered { continue }
-            session.queue.append(Self.httpChunk(ping))
+            session.queue.append(ping)
             flushSSELocked(session)
         }
     }
@@ -789,15 +766,7 @@ class WebServer {
         }
     }
 
-    /// HTTP/1.1 chunk so clipvault-http (hyper) treats SSE as a streaming body,
-    /// not a keep-alive message with no length.
-    static func httpChunk(_ data: Data) -> Data {
-        var out = Data(String(data.count, radix: 16).utf8)
-        out.append(contentsOf: Data("\r\n".utf8))
-        out.append(data)
-        out.append(contentsOf: Data("\r\n".utf8))
-        return out
-    }
+
 
     private func teardownSSELocked() {
         sseHeartbeat?.cancel()
@@ -916,14 +885,7 @@ class WebServer {
 
     
     private func handleRestoreClip(data: Data, connection: HTTPByteSink) {
-        let requestString = String(data: data, encoding: .utf8) ?? ""
-        guard let bodyRange = requestString.range(of: "\r\n\r\n") else {
-            sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
-            return
-        }
-        let bodyString = String(requestString[bodyRange.upperBound...])
-        guard let bodyData = bodyString.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+        guard let json = jsonBody(from: data),
               let idValue = json["id"] as? String,
               let uuid = UUID(uuidString: idValue) else {
             sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
@@ -1056,20 +1018,17 @@ class WebServer {
     }
 
     private func sendJSON(_ object: [String: Any], connection: HTTPByteSink) {
-        guard let body = try? JSONSerialization.data(withJSONObject: object),
-              let bodyStr = String(data: body, encoding: .utf8) else {
+        guard let body = try? JSONSerialization.data(withJSONObject: object) else {
             sendErrorResponse(connection: connection, status: 500, message: "JSON encode failed")
             return
         }
-        let response = """
-        HTTP/1.1 200 OK\r
-        Access-Control-Allow-Origin: *\r
-        Content-Type: application/json; charset=utf-8\r
-        Content-Length: \(body.count)\r
-        \r
-        \(bodyStr)
-        """
-        sendResponse(response, connection: connection)
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: "application/json; charset=utf-8",
+            body: body,
+            connection: connection
+        )
     }
     
     /// Serve files from ./web/assets (logo, favicon, etc.)
@@ -2088,8 +2047,8 @@ class WebServer {
     }
 
     private func sharePublicURL(headers: [String: String], token: String) -> String {
-        let rawHost = headers["x-forwarded-host"] ?? headers["host"] ?? "127.0.0.1:8080"
-        let host = rawHost.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.first ?? "127.0.0.1:8080"
+        let rawHost = headers["x-forwarded-host"] ?? headers["host"] ?? "127.0.0.1"
+        let host = rawHost.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.first ?? "127.0.0.1"
         let xf = (headers["x-forwarded-proto"] ?? "").lowercased()
         let proto: String
         if xf.contains("https") {
@@ -2397,35 +2356,12 @@ class WebServer {
             // Also expose count for debugging
             payload["count"] = jsonItems.count
 
-            do {
-                let jsonData = try JSONSerialization.data(withJSONObject: payload, options: [])
-                let jsonString = String(data: jsonData, encoding: .utf8) ?? "{\"items\":[]}"
-                let response = """
-                HTTP/1.1 200 OK
-                Access-Control-Allow-Origin: *
-                Content-Type: application/json; charset=utf-8
-                Content-Length: \(jsonString.utf8.count)
-
-                \(jsonString)
-                """
-                self.sendResponse(response, connection: connection)
-            } catch {
-                self.sendErrorResponse(connection: connection, status: 500, message: "Internal Server Error")
-            }
+            self.sendJSON(payload, connection: connection)
         }
     }
 
-    /// Build HTTP/1.1 headers with mandatory CRLF and blank line before body.
-    /// Swift multiline strings only emit LF, which breaks binary responses (e.g. PNG)
-    /// because clients cannot locate the end of headers once the body starts with 0x89.
-    private func httpHeader(status: Int, reason: String, headers: [(String, String)]) -> Data {
-        var lines: [String] = ["HTTP/1.1 \(status) \(reason)"]
-        lines.append(contentsOf: headers.map { "\($0.0): \($0.1)" })
-        let text = lines.joined(separator: "\r\n") + "\r\n\r\n"
-        return Data(text.utf8)
-    }
-
     private func sendBinary(status: Int, reason: String, contentType: String, body: Data, connection: HTTPByteSink, extraHeaders: [(String, String)] = []) {
+        _ = reason
         var headers: [(String, String)] = [
             ("Access-Control-Allow-Origin", "*"),
             ("Content-Type", contentType),
@@ -2439,10 +2375,9 @@ class WebServer {
         if !hasCache {
             headers.append(("Cache-Control", "private, max-age=60"))
         }
-        let payload = httpHeader(status: status, reason: reason, headers: headers) + body
-        connection.send(content: payload) { _ in
-            connection.cancel()
-        }
+        let payload = OriginWire.encodeResponse(status: status, headers: headers, body: body, stream: false)
+        connection.watchPeerClose {}
+        connection.send(content: payload) { _ in }
     }
 
     private func detectImageContentType(_ data: Data) -> String {
@@ -2581,6 +2516,9 @@ class WebServer {
     // MARK: - CloudDocs backup API
 
     private func jsonBody(from data: Data) -> [String: Any]? {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return json
+        }
         let requestString = String(data: data, encoding: .utf8) ?? ""
         let bodyString: String
         if let r = requestString.range(of: "\r\n\r\n") {
@@ -2588,7 +2526,7 @@ class WebServer {
         } else if let r = requestString.range(of: "\n\n") {
             bodyString = String(requestString[r.upperBound...])
         } else {
-            bodyString = requestString
+            return nil
         }
         guard let bodyData = bodyString.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
@@ -2598,20 +2536,7 @@ class WebServer {
     }
 
     private func sendJSONObject(_ obj: [String: Any], connection: HTTPByteSink) {
-        guard let data = try? JSONSerialization.data(withJSONObject: obj, options: []),
-              let jsonString = String(data: data, encoding: .utf8) else {
-            sendErrorResponse(connection: connection, status: 500, message: "JSON encode failed")
-            return
-        }
-        let response = """
-        HTTP/1.1 200 OK
-        Access-Control-Allow-Origin: *
-        Content-Type: application/json; charset=utf-8
-        Content-Length: \(jsonString.utf8.count)
-
-        \(jsonString)
-        """
-        sendResponse(response, connection: connection)
+        sendJSON(obj, connection: connection)
     }
 
     private func sendBackupStatus(path: String, connection: HTTPByteSink) {
@@ -2700,8 +2625,8 @@ class WebServer {
     }
     
     private func sendResponse(_ response: String, connection: HTTPByteSink) {
-        // Normalize any LF-only HTTP headers (from Swift multiline strings) to CRLF
-        // so browsers and curl parse headers/body boundary correctly.
+        // Handlers still assemble an HTTP-looking buffer internally; the origin
+        // wire is CV01. Split status/headers/body here so HTTP never leaves Swift.
         let normalized: String
         if let range = response.range(of: "\n\n") {
             let headerPart = String(response[..<range.lowerBound]).replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n")
@@ -2718,10 +2643,29 @@ class WebServer {
             connection.cancel()
             return
         }
-        
-        connection.send(content: data) { [weak connection] _ in
-            connection?.cancel()
+        let sep = data.range(of: Data("\r\n\r\n".utf8))
+        let headerBytes = sep.map { data[..<$0.lowerBound] } ?? data[...]
+        let body = sep.map { Data(data[$0.upperBound...]) } ?? Data()
+        let headerText = String(data: Data(headerBytes), encoding: .utf8) ?? ""
+        var status = 200
+        var headers: [(String, String)] = []
+        let lines = headerText.components(separatedBy: "\r\n")
+        if let first = lines.first {
+            let parts = first.split(separator: " ", maxSplits: 2).map(String.init)
+            if parts.count >= 2, parts[0].hasPrefix("HTTP/") {
+                status = Int(parts[1]) ?? 200
+            }
         }
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            if name.lowercased() == "transfer-encoding" { continue }
+            headers.append((name, value))
+        }
+        let payload = OriginWire.encodeResponse(status: status, headers: headers, body: body, stream: false)
+        connection.watchPeerClose {}
+        connection.send(content: payload) { _ in }
     }
     
     deinit {
@@ -2892,16 +2836,13 @@ final class TraeStreamPipe: NSObject, URLSessionDataDelegate {
         var headers: [(String, String)] = [
             ("Content-Type", contentType),
             ("Cache-Control", "no-cache, no-transform"),
-            ("Connection", "keep-alive"),
             ("X-Accel-Buffering", "no"),
             ("Access-Control-Allow-Origin", "*"),
         ]
         if let contentLength {
             headers.append(("Content-Length", "\(contentLength)"))
         }
-        var lines: [String] = ["HTTP/1.1 \(status) \(status == 200 ? "OK" : "Error")"]
-        lines.append(contentsOf: headers.map { "\($0.0): \($0.1)" })
-        send(Data((lines.joined(separator: "\r\n") + "\r\n\r\n").utf8))
+        send(OriginWire.encodeResponse(status: status, headers: headers, body: Data(), stream: true))
     }
 
     private func send(_ data: Data) {
