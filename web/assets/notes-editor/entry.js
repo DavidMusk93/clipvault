@@ -547,9 +547,12 @@ async function mount(root, opts) {
       btn.className = 'notes-code-copy'
       btn.textContent = '复制'
       btn.setAttribute('aria-label', '复制代码')
+      const actions = document.createElement('div')
+      actions.className = 'notes-code-actions'
+      actions.appendChild(wrapBtn)
+      actions.appendChild(btn)
       head.appendChild(lab)
-      head.appendChild(wrapBtn)
-      head.appendChild(btn)
+      head.appendChild(actions)
       wrap.appendChild(head)
       wrap.appendChild(pre)
     })

@@ -55,6 +55,9 @@ test('preview code wraps and has a copy button', () => {
   assert.match(css, /\.notes-code-copy/);
   assert.match(css, /\.notes-code-wrap/);
   assert.match(css, /\.notes-code-head/);
+  assert.match(css, /\.notes-code-actions \{[\s\S]{0,80}gap:\s*4px/);
+  assert.match(css, /\.notes-code-copy,\n\.notes-code-wrap \{[\s\S]{0,480}box-shadow:/);
+  assert.match(entry, /actions\.className = 'notes-code-actions'/);
   assert.match(entry, /function copyNotesCode/);
   assert.match(entry, /function loadCodeWrap/);
   assert.match(entry, /function syncCodeWrap/);
@@ -212,8 +215,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n22/);
-  assert.match(html, /notes-editor\.css\?v=n22/);
+  assert.match(html, /notes-editor\.js\?v=n23/);
+  assert.match(html, /notes-editor\.css\?v=n23/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
