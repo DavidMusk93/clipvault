@@ -154,7 +154,7 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 
 卡片工具条与笔记栏：**一颗按钮、同一槽**。未分享 `ios_share`「分享」；已分享 `link_off`「取消分享」（可 `.is-shared` Accent）。禁止并排「分享 + 取消分享」。
 
-X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic `MEDIA`，entity 只有 `mediaId`，真 URL 在 `article.media_entities[].media_info.original_img_url`。重建必须按 id 拼 `<figure><img>`。禁止只认 entity `src`/`url`（会只剩封面、正文图全丢）。`DIVIDER` 是装饰分割线，画 `<hr>`（用已有 `.cv-article hr`），禁止当成丢图占位。其余解析不到的 atomic 必须留下 `.cv-x-dropped`，禁止省略。`entityMap` 按 `key` 查。手册：`docs/archive-render.md`。
+X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic `MEDIA`，entity 只有 `mediaId`，真 URL 在 `article.media_entities[].media_info.original_img_url`。重建必须按 id 拼 `<figure><img>`。禁止只认 entity `src`/`url`（会只剩封面、正文图全丢）。`DIVIDER` 画 `<hr>`。正文 URL / LINK / `@` 画 `<a href>`（仅 http(s)，新标签），用已有 `.cv-article a[href]` Accent 下划线。有标题时 `header-*` 下移一级。其余解析不到的 atomic 必须留下 `.cv-x-dropped`，禁止省略。`entityMap` 按 `key` 查。手册：`docs/archive-render.md`。
 
 ## Compose 纸面（笔记编辑器）
 

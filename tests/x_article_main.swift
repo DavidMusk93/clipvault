@@ -237,11 +237,100 @@ enum XArticleHTMLTests {
         ])!
         ok("divider-hr", dividerDoc.html.contains("<hr>"))
         ok("divider-no-drop", !dividerDoc.html.contains("cv-x-dropped") && !dividerDoc.html.contains("DIVIDER"))
-        ok("divider-author", dividerDoc.html.contains("<h2>关于作者</h2>"))
+        ok("divider-title", dividerDoc.html.contains("<h1>divider-fixture</h1>"))
+        ok("divider-author", dividerDoc.html.contains("<h3>关于作者</h3>"))
         ok("divider-cov", dividerDoc.coverage.atomicExpected == 1
             && dividerDoc.coverage.atomicRendered == 1
             && dividerDoc.coverage.atomicDropped == 0
             && dividerDoc.coverage.warnings.isEmpty)
+
+        let urlBlock: [[String: Any]] = [[
+            "type": "unstyled",
+            "text": "https://weipai.iamadrianpunk.com",
+            "inlineStyleRanges": [["offset": 0, "length": 32, "style": "Bold"]],
+            "data": [
+                "urls": [[
+                    "fromIndex": 0,
+                    "toIndex": 32,
+                    "text": "https://weipai.iamadrianpunk.com",
+                ]],
+            ] as [String: Any],
+        ]]
+        let urlHTML = XArticleHTML.renderBlocks(urlBlock, entityMap: nil)
+        ok("url-href", urlHTML.contains("href=\"https://weipai.iamadrianpunk.com\""))
+        ok("url-blank", urlHTML.contains("rel=\"noreferrer\"") && urlHTML.contains("target=\"_blank\""))
+        ok("url-bold-link", urlHTML.contains("<a href=\"https://weipai.iamadrianpunk.com\" rel=\"noreferrer\" target=\"_blank\"><strong>https://weipai.iamadrianpunk.com</strong></a>"))
+
+        let bio = "Punk｜@AdrianPunk115"
+        let bioBlocks: [[String: Any]] = [[
+            "type": "unstyled",
+            "text": bio,
+            "inlineStyleRanges": [["offset": 0, "length": 4, "style": "Bold"]],
+            "entityRanges": [["key": 11, "length": 14, "offset": 5]],
+            "data": [
+                "mentions": [["fromIndex": 5, "toIndex": 19, "text": "AdrianPunk115"]],
+            ] as [String: Any],
+        ]]
+        let bioMap: [[String: Any]] = [[
+            "key": 11,
+            "value": ["type": "LINK", "data": ["url": "https://x.com/@AdrianPunk115"]],
+        ]]
+        let bioHTML = XArticleHTML.renderBlocks(bioBlocks, entityMap: bioMap)
+        ok("bio-bold", bioHTML.contains("<strong>Punk</strong>"))
+        ok("bio-link", bioHTML.contains("href=\"https://x.com/@AdrianPunk115\"") && bioHTML.contains(">@AdrianPunk115</a>"))
+        ok("bio-one-anchor", bioHTML.components(separatedBy: "<a ").count - 1 == 1)
+
+        let jsBlocks: [[String: Any]] = [[
+            "type": "unstyled",
+            "text": "click me",
+            "entityRanges": [["key": 0, "length": 8, "offset": 0]],
+        ]]
+        let jsMap: [[String: Any]] = [[
+            "key": 0,
+            "value": ["type": "LINK", "data": ["url": "javascript:alert(1)"]],
+        ]]
+        let jsHTML = XArticleHTML.renderBlocks(jsBlocks, entityMap: jsMap)
+        ok("js-no-href", !jsHTML.contains("javascript:") && jsHTML.contains("click me"))
+
+        let extraStyles: [[String: Any]] = [[
+            "type": "unstyled",
+            "text": "code and strike",
+            "inlineStyleRanges": [
+                ["offset": 0, "length": 4, "style": "CODE"],
+                ["offset": 9, "length": 6, "style": "STRIKETHROUGH"],
+            ],
+        ]]
+        let extraHTML = XArticleHTML.renderBlocks(extraStyles, entityMap: nil)
+        ok("inline-code", extraHTML.contains("<code>code</code>"))
+        ok("inline-strike", extraHTML.contains("<s>strike</s>"))
+
+        let atomicLinkBlocks: [[String: Any]] = [[
+            "type": "atomic",
+            "text": " ",
+            "entityRanges": [["key": 0, "length": 1, "offset": 0]],
+        ]]
+        let atomicLinkMap: [[String: Any]] = [[
+            "key": 0,
+            "value": ["type": "LINK", "data": ["url": "https://example.com/a"]],
+        ]]
+        let atomicLink = XArticleHTML.renderBlocks(atomicLinkBlocks, entityMap: atomicLinkMap)
+        ok("atomic-link", atomicLink.contains("<a href=\"https://example.com/a\"") && !atomicLink.contains("cv-x-dropped"))
+
+        let outline = XArticleHTML.render(article: [
+            "title": "我做了一个公众号排版工具",
+            "content": [
+                "blocks": [
+                    ["type": "header-one", "text": "一、它先解决一件最烦的事"],
+                    ["type": "header-two", "text": "1. 放入原稿"],
+                    ["type": "header-two", "text": "关于作者"],
+                ] as [[String: Any]],
+                "entityMap": [] as [Any],
+            ],
+        ]) ?? ""
+        ok("outline-title", outline.contains("<h1>我做了一个公众号排版工具</h1>"))
+        ok("outline-h2", outline.contains("<h2>一、它先解决一件最烦的事</h2>"))
+        ok("outline-h3", outline.contains("<h3>1. 放入原稿</h3>") && outline.contains("<h3>关于作者</h3>"))
+        ok("outline-no-extra-h1", outline.components(separatedBy: "<h1>").count - 1 == 1)
 
         if fails > 0 {
             FileHandle.standardError.write(Data("x-article-html: \(fails) failed\n".utf8))

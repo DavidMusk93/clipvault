@@ -124,14 +124,22 @@ enum XArticleHTML {
         cov.mediaExpected = media.count
         cov.markdownExpected = markdownEntityCount(entityMap)
         var html = ""
+        var headingShift = 0
         if let title = (article["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty {
             html += "<h1>\(escape(title))</h1>\n"
+            headingShift = 1
         }
         if let cover = coverImageURL(article) {
             html += "<figure><img src=\"\(escape(cover))\" alt=\"\"></figure>\n"
         }
-        html += renderBlocks(blocks, entityMap: entityMap, media: media, coverage: &cov)
+        html += renderBlocks(
+            blocks,
+            entityMap: entityMap,
+            media: media,
+            coverage: &cov,
+            headingShift: headingShift
+        )
         let out = html.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !out.isEmpty else { return nil }
         let wrapped = "<div class=\"cv-x-article\">\(out)</div>"
@@ -149,7 +157,8 @@ enum XArticleHTML {
         _ blocks: [[String: Any]],
         entityMap: Any?,
         media: [String: String] = [:],
-        coverage: inout Coverage
+        coverage: inout Coverage,
+        headingShift: Int = 0
     ) -> String {
         var out = ""
         var listTag: String?
@@ -168,19 +177,22 @@ enum XArticleHTML {
                     out += "<\(tag)>\n"
                     listTag = tag
                 }
-                out += "<li>\(styledText(block))</li>\n"
+                out += "<li>\(styledText(block, entityMap: entityMap))</li>\n"
                 continue
             }
             flushList()
             switch type {
             case "header-one":
-                out += "<h1>\(styledText(block))</h1>\n"
+                let tag = headerTag(1, shift: headingShift)
+                out += "<\(tag)>\(styledText(block, entityMap: entityMap))</\(tag)>\n"
             case "header-two":
-                out += "<h2>\(styledText(block))</h2>\n"
+                let tag = headerTag(2, shift: headingShift)
+                out += "<\(tag)>\(styledText(block, entityMap: entityMap))</\(tag)>\n"
             case "header-three":
-                out += "<h3>\(styledText(block))</h3>\n"
+                let tag = headerTag(3, shift: headingShift)
+                out += "<\(tag)>\(styledText(block, entityMap: entityMap))</\(tag)>\n"
             case "blockquote":
-                out += "<blockquote>\(styledText(block))</blockquote>\n"
+                out += "<blockquote>\(styledText(block, entityMap: entityMap))</blockquote>\n"
             case "code-block":
                 out += "<pre><code>\(escape((block["text"] as? String) ?? ""))</code></pre>\n"
             case "atomic":
@@ -189,7 +201,7 @@ enum XArticleHTML {
                 out += piece
                 if !piece.hasSuffix("\n") { out += "\n" }
             default:
-                let inner = styledText(block)
+                let inner = styledText(block, entityMap: entityMap)
                 let plain = ((block["text"] as? String) ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if headingLike(plain) {
@@ -201,6 +213,10 @@ enum XArticleHTML {
         }
         flushList()
         return out
+    }
+
+    private static func headerTag(_ level: Int, shift: Int) -> String {
+        "h\(min(6, max(1, level + shift)))"
     }
 
     // MARK: - fetch
@@ -258,38 +274,173 @@ enum XArticleHTML {
         return out
     }
 
-    private static func styledText(_ block: [String: Any]) -> String {
+    private struct TextMark {
+        var start: Int
+        var end: Int
+        var kind: Int
+        var open: String
+        var close: String
+    }
+
+    private static func styledText(_ block: [String: Any], entityMap: Any? = nil) -> String {
         let raw = (block["text"] as? String) ?? ""
         let ns = raw as NSString
-        var marks: [(Int, Int, String)] = []
+        let n = ns.length
+        var marks: [TextMark] = []
+
         if let styles = block["inlineStyleRanges"] as? [[String: Any]] {
             for s in styles {
                 let off = intVal(s["offset"])
                 let len = intVal(s["length"])
                 let style = (s["style"] as? String ?? "").lowercased()
-                let tag: String?
-                if style.contains("bold") { tag = "strong" }
-                else if style.contains("italic") { tag = "em" }
-                else { tag = nil }
-                if let tag, len > 0, off >= 0, off + len <= ns.length {
-                    marks.append((off, off + len, tag))
+                let pair: (Int, String)?
+                if style.contains("bold") { pair = (1, "strong") }
+                else if style.contains("italic") { pair = (2, "em") }
+                else if style.contains("underline") { pair = (3, "u") }
+                else if style.contains("strikethrough") || style == "line-through" { pair = (4, "s") }
+                else if style == "code" || style.contains("inlinecode") || style.contains("inline-code") {
+                    pair = (5, "code")
+                } else { pair = nil }
+                if let pair, len > 0, off >= 0, off + len <= n {
+                    marks.append(TextMark(
+                        start: off, end: off + len, kind: pair.0,
+                        open: "<\(pair.1)>", close: "</\(pair.1)>"
+                    ))
                 }
             }
         }
-        marks.sort { a, b in
-            if a.0 != b.0 { return a.0 > b.0 }
-            return a.1 > b.1
+
+        if let ranges = block["entityRanges"] as? [[String: Any]] {
+            for r in ranges {
+                let off = intVal(r["offset"])
+                let len = intVal(r["length"])
+                let end = off + len
+                guard len > 0, off >= 0, end <= n else { continue }
+                let key = intVal(r["key"])
+                guard let ent = lookupEntity(entityMap, key: key) else { continue }
+                let type = (ent["type"] as? String ?? "").uppercased()
+                if type == "LINK" || type == "MENTION" {
+                    if let href = linkHREF(from: ent["data"], fallbackText: ns.substring(with: NSRange(location: off, length: len))) {
+                        appendLink(&marks, start: off, end: end, href: href)
+                    }
+                }
+            }
         }
-        var body = raw
-        for (start, end, tag) in marks {
-            let innerRange = NSRange(location: start, length: end - start)
-            let inner = escape((body as NSString).substring(with: innerRange))
-            let wrapped = "<\(tag)>\(inner)</\(tag)>"
-            body = (body as NSString).replacingCharacters(in: innerRange, with: wrapped)
+
+        if let data = block["data"] as? [String: Any] {
+            if let urls = data["urls"] as? [[String: Any]] {
+                for u in urls {
+                    let start = intVal(u["fromIndex"] ?? u["offset"])
+                    var end = intVal(u["toIndex"])
+                    if end <= start { end = start + intVal(u["length"]) }
+                    guard end > start, start >= 0, end <= n else { continue }
+                    let slice = ns.substring(with: NSRange(location: start, length: end - start))
+                    if let href = linkHREF(from: u, fallbackText: slice) ?? safeHTTPURL(slice) {
+                        appendLink(&marks, start: start, end: end, href: href)
+                    }
+                }
+            }
+            if let mentions = data["mentions"] as? [[String: Any]] {
+                for m in mentions {
+                    let start = intVal(m["fromIndex"] ?? m["offset"])
+                    var end = intVal(m["toIndex"])
+                    if end <= start { end = start + intVal(m["length"]) }
+                    guard end > start, start >= 0, end <= n else { continue }
+                    let slice = ns.substring(with: NSRange(location: start, length: end - start))
+                    let handle = slice.hasPrefix("@") ? String(slice.dropFirst()) : slice
+                    if let href = safeHTTPURL("https://x.com/\(handle)") {
+                        appendLink(&marks, start: start, end: end, href: href)
+                    }
+                }
+            }
         }
+
         if marks.isEmpty { return escape(raw) }
-        // Already escaped insides of marks; escape the leftover plain runs.
-        return escapeOutsideTags(body)
+        return applyMarks(ns, marks)
+    }
+
+    private static func appendLink(_ marks: inout [TextMark], start: Int, end: Int, href: String) {
+        if marks.contains(where: { $0.kind == 0 && $0.start == start && $0.end == end }) { return }
+        marks.append(TextMark(
+            start: start, end: end, kind: 0,
+            open: anchorOpen(href), close: "</a>"
+        ))
+    }
+
+    private static func applyMarks(_ ns: NSString, _ marks: [TextMark]) -> String {
+        let n = ns.length
+        func active(_ i: Int) -> [TextMark] {
+            marks.filter { $0.start <= i && i < $0.end }
+                .sorted { a, b in
+                    if a.kind != b.kind { return a.kind < b.kind }
+                    if a.start != b.start { return a.start < b.start }
+                    return a.end > b.end
+                }
+        }
+        func same(_ a: TextMark, _ b: TextMark) -> Bool {
+            a.kind == b.kind && a.start == b.start && a.end == b.end && a.open == b.open
+        }
+        var stack: [TextMark] = []
+        var out = ""
+        var i = 0
+        func sync() {
+            let want = i < n ? active(i) : []
+            while !stack.isEmpty {
+                if stack.count <= want.count,
+                   zip(stack, want).prefix(stack.count).allSatisfy({ same($0.0, $0.1) }) {
+                    break
+                }
+                out += stack.removeLast().close
+            }
+            for m in want.dropFirst(stack.count) {
+                out += m.open
+                stack.append(m)
+            }
+        }
+        while i < n {
+            sync()
+            let step = utf16Step(ns, i)
+            out += escape(ns.substring(with: NSRange(location: i, length: step)))
+            i += step
+        }
+        sync()
+        return out
+    }
+
+    private static func utf16Step(_ ns: NSString, _ i: Int) -> Int {
+        guard i < ns.length else { return 0 }
+        let c = ns.character(at: i)
+        if i + 1 < ns.length, UTF16.isLeadSurrogate(c), UTF16.isTrailSurrogate(ns.character(at: i + 1)) {
+            return 2
+        }
+        return 1
+    }
+
+    private static func anchorOpen(_ href: String) -> String {
+        "<a href=\"\(escape(href))\" rel=\"noreferrer\" target=\"_blank\">"
+    }
+
+    private static func linkHREF(from data: Any?, fallbackText: String? = nil) -> String? {
+        if let href = dictString(data, "url") ?? dictString(data, "href") {
+            return safeHTTPURL(href)
+        }
+        if let d = data as? [String: Any] {
+            if let href = d["url"] as? String ?? d["href"] as? String {
+                return safeHTTPURL(href)
+            }
+        }
+        return safeHTTPURL(fallbackText)
+    }
+
+    private static func safeHTTPURL(_ raw: String?) -> String? {
+        guard var s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        if s.hasPrefix("//") { s = "https:" + s }
+        guard let u = URL(string: s),
+              let scheme = u.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              u.host != nil
+        else { return nil }
+        return s
     }
 
     private static func renderAtomic(
@@ -317,6 +468,13 @@ enum XArticleHTML {
         if type == "DIVIDER" || type == "HORIZONTAL_RULE" || type == "HR" {
             coverage.atomicRendered += 1
             return "<hr>\n"
+        }
+        if type == "LINK" {
+            if let href = linkHREF(from: ent["data"]) {
+                coverage.atomicRendered += 1
+                return "<p>\(anchorOpen(href))\(escape(href))</a></p>\n"
+            }
+            return droppedFigure(entity: "LINK", detail: nil, coverage: &coverage)
         }
         if type == "IMAGE" || type == "MEDIA" {
             if let src = imageURL(from: ent["data"], media: media) {

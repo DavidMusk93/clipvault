@@ -75,6 +75,9 @@ test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', ()
   assert.match(src, /cv-x-dropped/);
   assert.match(src, /DIVIDER/);
   assert.match(src, /<hr>/);
+  assert.match(src, /target=\\"_blank\\"/);
+  assert.match(src, /safeHTTPURL/);
+  assert.match(src, /headingShift/);
   assert.match(src, /mediaExpected/);
   assert.match(src, /struct Coverage/);
   assert.match(svc, /coverageJSON/);

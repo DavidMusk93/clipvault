@@ -68,15 +68,19 @@ blocks[]                  entityMap[]（乱序 {key,value}）
 
 ### block.type
 
-| type | HTML |
-| --- | --- |
-| `header-one/two/three` | `h1/h2/h3` |
-| `blockquote` | `blockquote` |
-| `code-block` | `pre>code` |
-| `unordered-list-item` / `ordered-list-item` | 连续 `ul`/`ol` |
-| `unstyled` 且像「一、…」「1. …」 | `h2`（`headingLike`） |
-| `unstyled` | `p` |
-| `atomic` | 看 entity |
+有 `article.title` 时先输出 `<h1>`，正文 `header-*` **下移一级**，避免和标题抢 h1。
+
+| type | 无标题 | 有标题（shift=1） |
+| --- | --- | --- |
+| `header-one` | `h1` | `h2` |
+| `header-two` | `h2` | `h3` |
+| `header-three` | `h3` | `h4` |
+| `blockquote` | `blockquote` | 同 |
+| `code-block` | `pre>code` | 同 |
+| `unordered-list-item` / `ordered-list-item` | 连续 `ul`/`ol` | 同 |
+| `unstyled` 且像「一、…」「1. …」 | `h2`（`headingLike`，不 shift） | 同 |
+| `unstyled` | `p` | 同 |
+| `atomic` | 看 entity | 同 |
 
 ### atomic entity.type
 
@@ -85,8 +89,17 @@ blocks[]                  entityMap[]（乱序 {key,value}）
 | `MEDIA` / `IMAGE` | 正文图。entity 常只有 `mediaId` | `<figure><img>`，URL 来自 `article.media_entities[].media_info.original_img_url` |
 | `MARKDOWN` | 围栏代码 | `renderFence` → `pre>code` |
 | `DIVIDER`（别名 `HR` / `HORIZONTAL_RULE`） | 装饰分割线，`data` 为空 | **`<hr>`**。不是丢图 |
-| `LINK` | 多为 inline `entityRanges` | 目前只处理 bold/italic；链接未接 `<a>` |
+| `LINK` | inline `entityRanges`，偶尔 atomic | `<a href>`（只 http/https；`rel=noreferrer` `target=_blank`）。`javascript:` 丢掉属性，留纯文本 |
 | 其它（`TWITTER_CARD`…） | 未建模 | `.cv-x-dropped` +「未归档的介质（TYPE）」 |
+
+inline 还认：
+
+| 来源 | 结果 |
+| --- | --- |
+| `inlineStyleRanges` Bold/Italic/Underline/Strikethrough/CODE | `strong` / `em` / `u` / `s` / `code` |
+| `entityRanges` LINK | `<a>`，与加粗可套叠 |
+| `block.data.urls[]` `fromIndex..toIndex` | 裸 URL 自动成链（与 entity 同区间不重复） |
+| `block.data.mentions[]` | `https://x.com/{handle}`（已被 LINK 覆盖则跳过） |
 
 封面：`cover_media.media_info.original_img_url`，与正文 `media_entities` 分开索引。
 
@@ -130,7 +143,7 @@ blocks[]                  entityMap[]（乱序 {key,value}）
 2. 新 atomic type：在 `renderAtomic` 显式分支；能画的算 `atomicRendered`；不能画的 `droppedFigure`，禁止省略。
 3. `entityMap` **先匹配 `key`**，禁止 `arr[i]` 当 key。
 4. 测：`tests/x_article_main.swift`（`swiftc` 进 `check-frontend.sh`）+ `tests/archive-view.test.mjs` 字符串门禁。
-5. 对照作者介质清单（X：`media_entities` / atomic / MARKDOWN / DIVIDER）。
+5. 对照作者介质清单（X：`media_entities` / atomic / MARKDOWN / DIVIDER / LINK / `data.urls`）。
 6. 回写本文 entity 表；视觉改动先改 `design-taste.md`。
 
 ## 源码索引

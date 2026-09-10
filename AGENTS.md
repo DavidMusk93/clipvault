@@ -272,7 +272,7 @@ Capture 禁止就地改成笔记。Compose 禁止写成第二套剪贴板。
 
 View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 `/api/archive/asset`。阅读态（划线/评论/续读）进 SQLite，不进 capture HTML，不进 IndexedDB。
 
-抽取：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」。X Article atomic：`MEDIA`/`IMAGE` → 图；`MARKDOWN` → 代码；`DIVIDER` → `<hr>`；其余 `.cv-x-dropped`。`entityMap` 按 `key` 查，禁止当下标。禁止只凭 `cv-x-article` 当成功。渲染手册：`docs/archive-render.md`。
+抽取：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」。X Article atomic：`MEDIA`/`IMAGE` → 图；`MARKDOWN` → 代码；`DIVIDER` → `<hr>`；`LINK` → `<a>`；其余 `.cv-x-dropped`。inline LINK / `data.urls` / mention 也画 `<a>`（仅 http(s)）。有 `article.title` 时正文 `header-*` 下移一级。`entityMap` 按 `key` 查，禁止当下标。禁止只凭 `cv-x-article` 当成功。渲染手册：`docs/archive-render.md`。
 
 选区条：28px 浅玻璃；黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**。
 
