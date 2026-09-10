@@ -170,4 +170,12 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   assert.match(vis, /setupSSE\(\)/);
   assert.match(vis, /scheduleResync\(\)/);
   assert.match(vis, /visibilityState === 'hidden'/);
+  const elect = sliceFrom(indexHtml, 'function considerElect()', 1600);
+  assert.match(elect, /role = 'bg'/);
+  assert.match(elect, /setSseLeader\(true\)/);
+  assert.doesNotMatch(
+    elect,
+    /visibilityState === 'hidden'[\s\S]{0,280}teardownSSE\(\);\s*return;/,
+    'solo hidden tab must not drop EventSource immediately',
+  );
 });

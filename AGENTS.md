@@ -356,6 +356,8 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
     每连接队列 32；满 → coalesce resync_required（禁止静默踢）
     onopen / visibility / online → scheduleResync → mergeHead
                                    必须同时 mergeNotesHead
+    后台：单页保持 EventSource。仅当 BroadcastChannel 里已有其它 leader
+    才放掉 socket（81244ea 多 tab 省连接）。禁止 hidden 一律 teardown。
 
   禁止 onerror 里 close()+setTimeout 当唯一重连
   HTTP/2 下 EventSource 占一条 stream

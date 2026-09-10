@@ -8195,12 +8195,32 @@ window.ClipViewMasonry = Masonry;
 
     function considerElect() {
       if (document.visibilityState === 'hidden') {
+        // Offer the socket to a visible sibling, but do not drop it until
+        // someone else actually leads. A solo background tab must keep
+        // EventSource or copies never land until the page is focused again.
         if (sseLeader) {
           try { sseBc && sseBc.postMessage({ t: 'bye', id: sseTabId }); } catch (_) {}
         }
-        setSseLeader(false);
-        sseDebug.wall.role = 'hidden';
-        teardownSSE();
+        const otherLive = !!(sseBc && sseLeadAt && (Date.now() - sseLeadAt) < 2500);
+        if (otherLive) {
+          setSseLeader(false);
+          sseDebug.wall.role = 'hidden';
+          teardownSSE();
+          return;
+        }
+        clearTimeout(sseElectTimer);
+        sseElectTimer = window.setTimeout(() => {
+          if (document.visibilityState !== 'hidden') return;
+          const taken = !!(sseBc && sseLeadAt && (Date.now() - sseLeadAt) < 2500);
+          if (taken) {
+            setSseLeader(false);
+            sseDebug.wall.role = 'hidden';
+            teardownSSE();
+          } else {
+            setSseLeader(true);
+            sseDebug.wall.role = 'bg';
+          }
+        }, 200);
         return;
       }
       if (!sseBc) {
