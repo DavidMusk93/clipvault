@@ -7,7 +7,7 @@
 | 日期 | 2026-08-28 |
 | 状态 | Draft（评审修订） |
 | 产品 | ClipVault（仓库历史名 ClipView / ClipFlowServer） |
-| 仓库 | `/Users/<user>/Documents/trae_projects/recallfs/projects/ClipView` |
+| 仓库 | `/Users/<user>/Documents/trae_projects/recallfs/projects/clipvault` |
 | 对照 | `docs/feature-url-archive.md` · `docs/design-taste.md` · `AGENTS.md` |
 
 ---

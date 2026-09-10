@@ -80,6 +80,7 @@ python3 - <<PY
 from pathlib import Path
 src = Path("$HOOKS_DIR/com.davidmusk.clipvault-trae.plist").read_text()
 src = src.replace("/Users/<user>", "$HOME_USER")
+src = src.replace("/Users/<user>/Documents/trae_projects/recallfs/projects/clipvault", "$REPO_ROOT")
 src = src.replace("/Users/<user>/Documents/trae_projects/recallfs/projects/ClipView", "$REPO_ROOT")
 src = src.replace("/Users/<user>/Documents/ClipFlow", "$CLIPVAULT_HOME")
 Path("$PLIST_DST").write_text(src)
