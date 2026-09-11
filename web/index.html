@@ -3535,7 +3535,7 @@ window.ClipViewMasonry = Masonry;
       const t = (title || '').trim();
       const raw = decodeNoteBody(md);
       if (!t) return raw;
-      const esc = t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
+      const esc = escapeRegExp(t);
       // Storage is "# title\n\nbody". Eat the heading plus the separator blank
       // line so the editor does not grow a leading empty line on every save.
       return raw.replace(new RegExp('^#\\s+' + esc + '(?:\\n\\n|\\n)?'), '');

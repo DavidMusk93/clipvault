@@ -147,11 +147,14 @@ test('opening a note defaults to preview; new note is source', () => {
   assert.doesNotMatch(html, /tools\.hidden = mode === 'preview'/);
 });
 
+function escapeRegExp(s) {
+  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 function noteStripTitle(md, title) {
   const t = (title || '').trim();
   const raw = String(md || '');
   if (!t) return raw;
-  const esc = t.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
+  const esc = escapeRegExp(t);
   return raw.replace(new RegExp('^#\\s+' + esc + '(?:\\n\\n|\\n)?'), '');
 }
 function trimNoteTrailingBlanks(md) {
@@ -160,11 +163,17 @@ function trimNoteTrailingBlanks(md) {
 
 test('strip title eats the separator blank line, not an extra body line', () => {
   assert.match(html, /function noteStripTitle/);
+  assert.match(html, /function noteStripTitle[\s\S]{0,220}escapeRegExp\(t\)/);
+  assert.doesNotMatch(html, /function noteStripTitle[\s\S]{0,400}\|\[\\\\\]/);
   assert.ok(html.includes("'(?:\\\\n\\\\n|\\\\n)?'"));
   assert.equal(noteStripTitle('# T\n\nhello', 'T'), 'hello');
   assert.equal(noteStripTitle('# T\nhello', 'T'), 'hello');
   assert.equal(noteStripTitle('# T\n\n\nhello', 'T'), '\nhello');
   assert.equal(noteStripTitle('# T\n\nhello\n\n', 'T'), 'hello\n\n');
+  assert.equal(noteStripTitle('# b+tree impl\n\nbody', 'b+tree impl'), 'body');
+  assert.equal(noteStripTitle('# C++ notes\n\nx', 'C++ notes'), 'x');
+  assert.equal(noteStripTitle('# foo.bar\n\nz', 'foo.bar'), 'z');
+  assert.equal(noteStripTitle('# (draft)\n\nok', '(draft)'), 'ok');
 });
 
 test('trailing blanks trim only on close, not on autosave', () => {
