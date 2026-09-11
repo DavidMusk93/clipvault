@@ -234,7 +234,12 @@
       toggle();
     });
 
-    return { setOpen, toggle, noteIncoming, paintBadge, slowCount, family };
+    function destroy() {
+      setOpen(false);
+      wrap.remove();
+    }
+
+    return { setOpen, toggle, noteIncoming, paintBadge, slowCount, destroy, family };
   }
 
   globalThis.ClipMetricsPanel = { create, inFamily, isSlow };

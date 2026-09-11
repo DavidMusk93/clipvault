@@ -325,7 +325,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   感觉抖 / 白屏 / 慢
        │
        v
-  笔记/会话左下角「调试」→ 悬浮卡片（再点关闭）
+  笔记/会话左下角透明「调试」→ 悬浮卡片（再点关闭；随子页生灭）
   GET /api/ui-metrics/recent?name=&limit=40
   GET /api/ui-metrics/summary
   墙：#debug  Cmd-Shift-M

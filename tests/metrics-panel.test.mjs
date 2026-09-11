@@ -24,28 +24,32 @@ test('popover keeps skip/paint and compile/preview, drops 24h essays', () => {
   assert.match(js, /function toggle/);
   assert.doesNotMatch(js, /24 小时/);
   assert.doesNotMatch(js, /p95/);
-  assert.match(css, /\.cv-debug-fab/);
+  assert.match(css, /\.cv-debug-fab \{\n  height: 28px;/);
+  assert.match(css, /background: transparent;/);
   assert.match(css, /\.cv-metrics-pop/);
   assert.doesNotMatch(css, /\.cv-debug-row/);
+  assert.doesNotMatch(css, /box-shadow: 0 4px 16px/);
 });
 
 test('notes and sessions mount a bottom-left debug fab, not a full paper', () => {
-  assert.match(html, /ClipMetricsPanel\?\.create/);
-  assert.match(html, /mount:\s*document\.getElementById\('notesPanel'\)/);
+  assert.match(js, /function destroy/);
+  assert.match(html, /function ensureNotesMetrics/);
+  assert.match(html, /function teardownNotesMetrics/);
+  assert.match(html, /#notesPanel \.notes-shell/);
   assert.doesNotMatch(html, /id="notesDebugRow"/);
   assert.doesNotMatch(html, /id="notesMetrics"/);
   assert.doesNotMatch(html, /setNotesMetricsOpen/);
   assert.doesNotMatch(html, /notes-paper\.is-metrics/);
   assert.match(sess, /family: "sessions"/);
-  assert.match(sess, /mount: document\.body/);
+  assert.match(sess, /document\.querySelector\("\.app"\)/);
   assert.doesNotMatch(sess, /id="sessDebugRow"/);
   assert.doesNotMatch(sess, /id="sessMetrics"/);
   assert.doesNotMatch(sess, /setSessMetricsOpen/);
-  assert.match(html, /metrics-panel\.css\?v=m2/);
-  assert.match(sess, /metrics-panel\.css\?v=m2/);
+  assert.match(html, /metrics-panel\.css\?v=m3/);
+  assert.match(sess, /metrics-panel\.css\?v=m3/);
 });
 
 test('AGENTS.md points at the floating debug card', () => {
-  assert.match(agents, /左下角「调试」/);
-  assert.match(agents, /悬浮卡片/);
+  assert.match(agents, /透明「调试」/);
+  assert.match(agents, /随子页生灭/);
 });

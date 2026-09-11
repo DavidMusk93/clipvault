@@ -21,8 +21,8 @@
   <script src="/assets/notes-editor/notes-editor.js?v=n24"></script>
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n13"></script>
-  <link rel="stylesheet" href="/assets/metrics-panel.css?v=m2" />
-  <script src="/assets/metrics-panel.js?v=m2"></script>
+  <link rel="stylesheet" href="/assets/metrics-panel.css?v=m3" />
+  <script src="/assets/metrics-panel.js?v=m3"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -3821,11 +3821,22 @@ window.ClipViewMasonry = Masonry;
       if (debugPaintQueued == null) return;
       scheduleDebugPaint();
     }
-    const notesMetricsCtl = globalThis.ClipMetricsPanel?.create?.({
-      family: 'notes',
-      mount: document.getElementById('notesPanel'),
-      getLocal: () => globalThis.ClipNotesMetrics?.recentLocal?.() || [],
-    });
+    let notesMetricsCtl = null;
+    function ensureNotesMetrics() {
+      if (notesMetricsCtl || !globalThis.ClipMetricsPanel?.create) return;
+      const mount = document.querySelector('#notesPanel .notes-shell');
+      if (!mount) return;
+      notesMetricsCtl = ClipMetricsPanel.create({
+        family: 'notes',
+        mount,
+        getLocal: () => globalThis.ClipNotesMetrics?.recentLocal?.() || [],
+      });
+    }
+    function teardownNotesMetrics() {
+      notesMetricsCtl?.setOpen?.(false);
+      notesMetricsCtl?.destroy?.();
+      notesMetricsCtl = null;
+    }
     const wallBootAt = performance.now();
     let wallTtfpSent = false;
     let lastWallFetchAt = 0;
@@ -4458,7 +4469,7 @@ window.ClipViewMasonry = Masonry;
       if (!panel) return;
       const origin = readSheetRect(sheetTrigger('sessions'));
       const frame = document.getElementById('sessionsFrame');
-      const embedSrc = '/trae/?embed=1&v=s7';
+      const embedSrc = '/trae/?embed=1&v=s8';
       if (frame && frame.getAttribute('src') !== embedSrc) {
         frame.src = embedSrc;
       } else {
@@ -4519,6 +4530,7 @@ window.ClipViewMasonry = Masonry;
         M.startObservers(panel);
       }
       nm('notes_open');
+      ensureNotesMetrics();
       notesMetricsCtl?.paintBadge?.();
       await morph;
       try { await loadNotesList(); } catch (e) {
@@ -4557,6 +4569,7 @@ window.ClipViewMasonry = Masonry;
       }
       const held = notesState.openedAt ? Date.now() - notesState.openedAt : 0;
       nm('notes_close', { dur_ms: held });
+      teardownNotesMetrics();
       if (parseAppHash().kind === 'notes') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
       }
