@@ -116,8 +116,6 @@ test('panel is source + preview split', () => {
   assert.match(html, /data-mode="preview"/);
   assert.match(html, /id="notesTools"/);
   assert.match(html, /id="notesStatus"/);
-  assert.match(html, /id="notesDebugRow"/);
-  assert.match(html, /id="notesMetrics"/);
   assert.match(entry, /notes_md_compile/);
   assert.match(entry, /notes_preview_ms/);
   assert.match(entry, /phase: 'compile'/);

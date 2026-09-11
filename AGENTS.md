@@ -325,14 +325,14 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   感觉抖 / 白屏 / 慢
        │
        v
-  笔记/会话左栏底「指标」→ 右侧同一套纸面
+  笔记/会话左下角「调试」→ 悬浮卡片（再点关闭）
   GET /api/ui-metrics/recent?name=&limit=40
   GET /api/ui-metrics/summary
   墙：#debug  Cmd-Shift-M
        │
        ├─ 能归因 (name+phase+kind+reason) → 改产品 → 同一 name 对照
        └─ 不能归因                       → 先补点，再改
-  禁止用一条 11px 文案代替面板
+  卡片只留越阈值 attention + 关键 name 的 n/avg/max + 最近 payload
 ```
 
 | 症状 | name |
@@ -349,7 +349,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 资源泄漏 / 502 | `proc_sample`（fds/rss/unix/sse/rlim）；SSE `ping` 同字段；`GET /api/ui-metrics/proc` |
 | HTTP 边车 | `http_req` dur=总时间；`lag`=origin；`n`=status；`route` 去 query/id；`proto` h1/h2；`phase` ok/stream/origin_* |
 
-`notes_close.dur_ms` = 开着墙钟，不是关动画。关动画看 `sheet_morph` phase=close。Agent 自己拉 metrics。笔记/会话的优化入口是左栏「指标」：attention + name 表 + 归因 + 最近事件；复制摘要才能当对照输入。
+`notes_close.dur_ms` = 开着墙钟，不是关动画。关动画看 `sheet_morph` phase=close。Agent 自己拉 metrics。笔记/会话入口是左下角「调试」悬浮卡，只看关键 name。
 
 备份徽章走 SSE `backup_status` + `?lite=1`，禁止 30s 轮询 `/api/backup/status`。
 
