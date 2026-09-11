@@ -45,8 +45,11 @@ test('payload forbids note content keys', () => {
   assert.match(swift, /"lag"/);
   assert.match(metricsJs, /'w'/);
   assert.match(metricsJs, /'nodes'/);
+  assert.match(metricsJs, /'compiled'/);
+  assert.match(metricsJs, /'reused'/);
   assert.match(metricsJs, /recentLocal/);
-  assert.match(metricsJs, /startsWith\('wall_'\)/);
+  assert.match(metricsJs, /recordLocal/);
+  assert.match(metricsJs, /startsWith\('notes_'\)/);
   assert.match(metricsJs, /FORBIDDEN/);
   assert.match(metricsJs, /body\|title\|markdown/);
   assert.doesNotMatch(metricsJs, /textContent|getMarkdown\(\)/);
@@ -58,6 +61,11 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(html, /nm\('note_save'/);
   assert.match(html, /id="nmList"/);
   assert.match(html, /id="debugDrawer"/);
+  assert.match(html, /id="notesPerf"/);
+  assert.match(html, /id="debugHotNotes"/);
+  assert.match(html, /id="debugHotSessions"/);
+  assert.match(html, /notes_md_compile/);
+  assert.match(html, /trae_sessions_md/);
   assert.match(html, /wall_fetch/);
   assert.match(html, /wall_paint/);
   assert.match(html, /wall_ttfp/);
@@ -78,6 +86,8 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(metricsJs, /e\.duration < 40/);
   assert.match(metricsJs, /over\$\|out\$\|enter\$\|leave\$/);
   assert.match(html, /ok: value < 0\.1 && ltMax < 50 && dur < 2000/);
+  assert.match(swift, /"compiled"/);
+  assert.match(swift, /"reused"/);
   assert.match(swift, /"dy"/);
   assert.match(swift, /"fds"/);
   assert.match(swift, /"rss"/);
@@ -106,4 +116,6 @@ test('AGENTS.md requires metrics-based UI iteration', () => {
   assert.match(agents, /wall_cls/);
   assert.match(agents, /先补点，再改/);
   assert.match(agents, /notes_close\.dur_ms` = 开着墙钟/);
+  assert.match(agents, /notes_md_compile/);
+  assert.match(agents, /trae_sessions_md/);
 });

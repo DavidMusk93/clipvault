@@ -6,6 +6,7 @@
     'kind', 'phase', 'reason', 'lag', 'host', 'w', 'h', 'nodes', 'dy',
     'fds', 'rss', 'unix', 'sse', 'rlim',
     'route', 'proto', 'status',
+    'compiled', 'reused',
   ]);
   const NAME = /^[a-z][a-z0-9_]{1,63}$/;
   const SESSION_KEY = 'clipvault.metrics.session';
@@ -77,14 +78,19 @@
     if (extra && typeof extra.ok === 'boolean') ev.ok = extra.ok;
     if (payload && Object.keys(payload).length) ev.payload = payload;
     queue.push(ev);
-    ring.push(ev);
-    if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
+    recordLocal(ev);
     const hot = name.startsWith('trae_') || name.startsWith('wall_') || name.startsWith('sse_')
-      || name.startsWith('sheet_') || name === 'notes_cls' || name === 'notes_longtask' || name === 'notes_open'
-      || name === 'chrome_shift' || name === 'wall_cls' || name === 'proc_sample';
+      || name.startsWith('sheet_') || name.startsWith('notes_')
+      || name === 'chrome_shift' || name === 'proc_sample';
     if (hot) flush();
     else if (queue.length >= 20) flush();
     else if (!flushTimer) flushTimer = setTimeout(flush, 2000);
+  }
+
+  function recordLocal(ev) {
+    if (!ev || !NAME.test(ev.name || '')) return;
+    ring.push(ev);
+    if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
   }
 
   function setOpen(open) {
@@ -172,6 +178,7 @@
   globalThis.ClipNotesMetrics = {
     emit,
     flush,
+    record: recordLocal,
     setOpen,
     noteInput,
     startObservers,

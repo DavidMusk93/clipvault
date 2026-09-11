@@ -243,6 +243,10 @@ test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () =>
   assert.doesNotMatch(html, /thread\.innerHTML = '<div class="empty">没有匹配事件<\/div>';\n          lastSig/);
   assert.doesNotMatch(html, /requestAnimationFrame\(pinBottom\)/);
   assert.match(html, /trae_sessions_cls/);
+  assert.match(html, /trae_sessions_md/);
+  assert.match(html, /id="sessPerf"/);
+  assert.match(html, /meterMd/);
+  assert.match(html, /compiled\|reused/);
   assert.match(html, /phase: layoutReady \? "live" : "boot"/);
   assert.match(html, /trae_sessions_paint/);
   assert.match(html, /trae_sessions_longtask/);

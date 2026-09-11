@@ -17,10 +17,10 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n23" />
-  <script src="/assets/notes-editor/notes-editor.js?v=n23"></script>
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n24" />
+  <script src="/assets/notes-editor/notes-editor.js?v=n24"></script>
   <script src="/assets/motion.js?v=m1"></script>
-  <script src="/assets/notes-metrics.js?v=n12"></script>
+  <script src="/assets/notes-metrics.js?v=n13"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -1993,6 +1993,14 @@
     .notes-status[data-state="saved"] { color: #248A3D; }
     .notes-status[data-state="error"] { color: #D70015; }
     .notes-status-label { white-space: nowrap; }
+    .notes-perf {
+      font: 500 11px/26px var(--font-ui); letter-spacing: -0.01em;
+      color: var(--muted); font-variant-numeric: tabular-nums;
+      white-space: nowrap; flex: none; max-width: 42vw;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .notes-perf.is-slow { color: #D70015; font-weight: 650; }
+    .notes-perf[hidden] { display: none; }
     .notes-share {
       width: 28px; height: 26px; border: 0; border-radius: 6px; flex: none;
       background: transparent; color: var(--ink); cursor: pointer;
@@ -2356,8 +2364,8 @@
         <button type="button" class="secondary" id="syRefresh">刷新同步状态</button>
       </div>
 
-      <h3 style="font-size:14px;font-weight:600;margin-top:20px">笔记性能</h3>
-      <p class="backup-label" style="margin:4px 0 8px">本机 24 小时；不含正文。库文件 ui-metrics.db，不同步。</p>
+      <h3 style="font-size:14px;font-weight:600;margin-top:20px">笔记 / 会话性能</h3>
+      <p class="backup-label" style="margin:4px 0 8px">本机 24 小时；不含正文。库文件 ui-metrics.db，不同步。笔记看 notes_*，会话看 trae_sessions_*。</p>
       <div class="backup-row"><span class="backup-label">事件</span><span class="backup-value" id="nmTotal">—</span></div>
       <ul class="snap-list" id="nmList"></ul>
       <h3 style="font-size:14px;font-weight:600;margin-top:20px">同步实效</h3>
@@ -2393,13 +2401,17 @@
       <button type="button" class="btn-icon" id="debugCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。墙慢看 wall_*。打开抖看 sheet_morph / sheet_cls。关笔记顶栏解遮挡看 chrome_shift（phase=close）与长周期 wall_cls（kind=top-bar\|chips）。CLS≥0.1 或 dur≥80 标红。fd/sock 走 SSE ping，不轮询。</p>
+      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。墙慢看 wall_*。笔记 Markdown 看 notes_md_compile / notes_preview_ms。会话看 trae_sessions_paint / trae_sessions_md。打开抖看 sheet_morph / sheet_cls。关笔记顶栏解遮挡看 chrome_shift（phase=close）与长周期 wall_cls（kind=top-bar\|chips）。CLS≥0.1 或 dur≥80 标红。fd/sock 走 SSE ping，不轮询。</p>
       <h3 style="font-size:14px;font-weight:600">SSE</h3>
       <div class="debug-kv" id="debugSseKv"></div>
       <h3 style="font-size:14px;font-weight:600">进程资源</h3>
       <div class="debug-kv" id="debugProcKv"></div>
       <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
       <table class="debug-hot" id="debugHot"><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody></tbody></table>
+      <h3 style="font-size:14px;font-weight:600">笔记 Markdown</h3>
+      <table class="debug-hot" id="debugHotNotes"><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody></tbody></table>
+      <h3 style="font-size:14px;font-weight:600">会话</h3>
+      <table class="debug-hot" id="debugHotSessions"><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody></tbody></table>
       <div class="backup-actions">
         <button type="button" id="debugReload">重测刷新</button>
         <button type="button" class="secondary" id="debugPull">拉 recent</button>
@@ -2585,6 +2597,7 @@
         <button type="button" class="notes-share" id="notesShare" title="复制分享链接" aria-label="分享">
           <span class="material-symbols-outlined">ios_share</span>
         </button>
+        <span class="notes-perf" id="notesPerf" hidden title="Markdown 预览耗时"></span>
       </div>
       <div id="notesMergeHint" class="notes-merge-hint" hidden></div>
       <div id="notesEditor" class="notes-work"></div>
@@ -3811,8 +3824,39 @@ window.ClipViewMasonry = Masonry;
     function nm(name, extra) {
       const M = globalThis.ClipNotesMetrics;
       if (M) M.emit(name, extra || {});
+      if (String(name || '').startsWith('notes_')) paintNotesPerf();
       if (debugPaintQueued == null) return;
       scheduleDebugPaint();
+    }
+    function paintNotesPerf() {
+      const el = document.getElementById('notesPerf');
+      if (!el) return;
+      const rows = globalThis.ClipNotesMetrics?.recentLocal?.() || [];
+      let preview;
+      let compile;
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const n = rows[i] && rows[i].name;
+        if (!preview && n === 'notes_preview_ms') preview = rows[i];
+        if (!compile && n === 'notes_md_compile') compile = rows[i];
+        if (preview && compile) break;
+      }
+      if (!preview && !compile) {
+        el.hidden = true;
+        el.textContent = '';
+        return;
+      }
+      const p = (preview && preview.payload) || (compile && compile.payload) || {};
+      const parts = [];
+      if (preview && preview.dur_ms != null) parts.push('预览 ' + Math.round(preview.dur_ms) + 'ms');
+      if (compile && compile.dur_ms != null) parts.push('编译 ' + Math.round(compile.dur_ms) + 'ms');
+      const compiled = Number(p.compiled);
+      const reused = Number(p.reused);
+      if (Number.isFinite(compiled) && Number.isFinite(reused)) {
+        parts.push('复用 ' + reused + '/' + (compiled + reused));
+      }
+      el.textContent = parts.join(' · ');
+      el.hidden = !parts.length;
+      el.classList.toggle('is-slow', (preview && preview.dur_ms >= 80) || (compile && compile.dur_ms >= 80));
     }
     const wallBootAt = performance.now();
     let wallTtfpSent = false;
@@ -4402,12 +4446,17 @@ window.ClipViewMasonry = Masonry;
       if (ev.origin !== location.origin) return;
       const d = ev.data;
       if (!d || d.type !== 'clipvault-ui-metrics' || !Array.isArray(d.events)) return;
+      const M = globalThis.ClipNotesMetrics;
+      if (M && typeof M.record === 'function') {
+        for (const ev of d.events) M.record(ev);
+      }
       fetch('/api/ui-metrics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ events: d.events, session: d.session || 'trae-sessions' }),
         keepalive: true,
       }).catch(() => {});
+      scheduleDebugPaint();
     });
     function emitSessionsLayout(phase) {
       const frame = document.getElementById('sessionsFrame');
@@ -4441,7 +4490,7 @@ window.ClipViewMasonry = Masonry;
       if (!panel) return;
       const origin = readSheetRect(sheetTrigger('sessions'));
       const frame = document.getElementById('sessionsFrame');
-      const embedSrc = '/trae/?embed=1&v=s4';
+      const embedSrc = '/trae/?embed=1&v=s5';
       if (frame && frame.getAttribute('src') !== embedSrc) {
         frame.src = embedSrc;
       } else {
@@ -4502,6 +4551,7 @@ window.ClipViewMasonry = Masonry;
         M.startObservers(panel);
       }
       nm('notes_open');
+      paintNotesPerf();
       await morph;
       try { await loadNotesList(); } catch (e) {
         if (!notesState.loaded) notesState.items = notesState.items || [];
@@ -8442,26 +8492,33 @@ window.ClipViewMasonry = Masonry;
           `<span>采样</span><span class="${warn ? 'is-slow' : ''}">SSE ping · ${esc(ageLabel(p.at))}</span>`;
       }
       const rows = (globalThis.ClipNotesMetrics?.recentLocal?.() || []).slice();
-      const agg = new Map();
-      for (const ev of rows) {
-        const name = ev.name || '';
-        if (!/^(wall_|sse_|sheet_|notes_cls|notes_longtask|notes_open|notes_editor|chrome_shift|trae_sessions_cls|trae_sessions_longtask|trae_sessions_layout|trae_sessions_paint|trae_sessions_ttfp|proc_sample)/.test(name)) continue;
-        let a = agg.get(name);
-        if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0 }; agg.set(name, a); }
-        a.n += 1;
-        if (ev.dur_ms != null && Number.isFinite(ev.dur_ms)) {
-          a.sum += ev.dur_ms;
-          a.durN += 1;
-          if (ev.dur_ms > a.max) a.max = ev.dur_ms;
+      const fillHot = (tbody, pred, empty) => {
+        if (!tbody) return;
+        const agg = new Map();
+        for (const ev of rows) {
+          const name = ev.name || '';
+          if (!pred(name)) continue;
+          let a = agg.get(name);
+          if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0 }; agg.set(name, a); }
+          a.n += 1;
+          if (ev.dur_ms != null && Number.isFinite(ev.dur_ms)) {
+            a.sum += ev.dur_ms;
+            a.durN += 1;
+            if (ev.dur_ms > a.max) a.max = ev.dur_ms;
+          }
         }
-      }
-      const hotRows = [...agg.values()].sort((a, b) => b.max - a.max || b.n - a.n);
-      hot.innerHTML = hotRows.length ? hotRows.map((r) => {
-        const avg = r.durN ? Math.round(r.sum / r.durN) : '—';
-        const mx = r.durN ? Math.round(r.max) : '—';
-        const slow = /_cls$/.test(r.name) || r.name === 'chrome_shift' ? r.max >= 80 : (r.name === 'sheet_morph' ? (r.max >= 800) : r.max >= 200);
-        return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(r.name)}</td><td>${r.n}</td><td>${avg}</td><td>${mx}</td></tr>`;
-      }).join('') : '<tr><td colspan="4">尚无 wall_/sse_/sheet_/cls 打点</td></tr>';
+        const hotRows = [...agg.values()].sort((a, b) => b.max - a.max || b.n - a.n);
+        tbody.innerHTML = hotRows.length ? hotRows.map((r) => {
+          const avg = r.durN ? Math.round(r.sum / r.durN) : '—';
+          const mx = r.durN ? Math.round(r.max) : '—';
+          const slow = /_cls$/.test(r.name) || r.name === 'chrome_shift' ? r.max >= 80
+            : (r.name === 'sheet_morph' ? (r.max >= 800) : r.max >= 80);
+          return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(r.name)}</td><td>${r.n}</td><td>${avg}</td><td>${mx}</td></tr>`;
+        }).join('') : `<tr><td colspan="4">${empty}</td></tr>`;
+      };
+      fillHot(hot, (n) => /^(wall_|sse_|sheet_|chrome_shift|proc_sample)/.test(n), '尚无 wall_/sse_/sheet_ 打点');
+      fillHot(document.getElementById('debugHotNotes')?.querySelector('tbody'), (n) => n.startsWith('notes_'), '尚无 notes_ 打点');
+      fillHot(document.getElementById('debugHotSessions')?.querySelector('tbody'), (n) => n.startsWith('trae_sessions_'), '尚无 trae_sessions_ 打点');
       const latest = rows.slice(-24).reverse();
       log.innerHTML = latest.length ? latest.map((ev) => {
         const tms = new Date(ev.ts || Date.now()).toLocaleTimeString();
@@ -8844,11 +8901,19 @@ window.ClipViewMasonry = Masonry;
           const avg = row.avg_ms != null ? `${Math.round(row.avg_ms)}ms` : '—';
           return `<li class="snap-meta">${esc(row.name)} · ${row.n} · avg ${avg}</li>`;
         };
-        const notes = names.filter((row) => !String(row.name || '').startsWith('sync_'));
-        const syncs = names.filter((row) => String(row.name || '').startsWith('sync_'));
-        listEl.innerHTML = notes.length
-          ? notes.map(line).join('')
-          : '<li class="snap-meta">暂无打点</li>';
+        const head = (title) => `<li class="snap-meta" style="font-weight:650;color:var(--ink)">${title}</li>`;
+        const take = (pred) => names.filter((row) => pred(String(row.name || '')));
+        const notesMd = take((n) => n.startsWith('notes_'));
+        const sessions = take((n) => n.startsWith('trae_sessions_'));
+        const wall = take((n) => /^(wall_|sheet_|chrome_shift|sse_)/.test(n));
+        const rest = take((n) => !n.startsWith('sync_') && !n.startsWith('notes_') && !n.startsWith('trae_sessions_') && !/^(wall_|sheet_|chrome_shift|sse_)/.test(n));
+        const syncs = take((n) => n.startsWith('sync_'));
+        const chunks = [];
+        if (notesMd.length) chunks.push(head('笔记 Markdown'), ...notesMd.map(line));
+        if (sessions.length) chunks.push(head('会话'), ...sessions.map(line));
+        if (wall.length) chunks.push(head('墙'), ...wall.map(line));
+        if (rest.length) chunks.push(head('其它'), ...rest.map(line));
+        listEl.innerHTML = chunks.length ? chunks.join('') : '<li class="snap-meta">暂无打点</li>';
         const syList = document.getElementById('syMetricList');
         if (syList) {
           syList.innerHTML = syncs.length

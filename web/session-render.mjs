@@ -340,7 +340,18 @@ function highlightCode(source, lang, hljs) {
  * @param {'auto'|'json'|'markdown'|'code'|'meta'} hint
  * @param {{ marked?: any, purify?: any, hljs?: any, jsBeautify?: any }} engines
  */
+function nowMs() {
+  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
+}
+
 export function renderValue(text, hint = 'auto', engines = {}) {
+  const t0 = nowMs();
+  const finish = (out) => {
+    if (out && out.kind === 'markdown') out.dur_ms = nowMs() - t0;
+    return out;
+  };
   const raw = String(text ?? '');
   if (hint === 'meta') {
     return { kind: 'meta', html: `<pre class="meta-line">${escapeHtml(raw)}</pre>` };
@@ -357,7 +368,7 @@ export function renderValue(text, hint = 'auto', engines = {}) {
   if (hint === 'markdown') {
     const md = renderMarkdownToHtml(raw, engines);
     if (md.ok && md.html) {
-      return { kind: 'markdown', html: `<div class="md-preview">${md.html}</div>` };
+      return finish({ kind: 'markdown', html: `<div class="md-preview">${md.html}</div>` });
     }
     return { kind: 'plain', html: `<pre>${escapeHtml(raw)}</pre>` };
   }
@@ -375,7 +386,7 @@ export function renderValue(text, hint = 'auto', engines = {}) {
   if (formatted.kind === 'markdown') {
     const md = renderMarkdownToHtml(formatted.display || raw, engines);
     if (md.ok && md.html) {
-      return { kind: 'markdown', html: `<div class="md-preview">${md.html}</div>` };
+      return finish({ kind: 'markdown', html: `<div class="md-preview">${md.html}</div>` });
     }
   }
   if (formatted.kind === 'json' || formatted.kind === 'ndjson') {

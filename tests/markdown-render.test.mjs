@@ -100,6 +100,8 @@ test('compileMarkdownBlocks reuses unchanged token HTML by hash', () => {
   assert.equal(a.blocks.length, 3);
   assert.equal(a.stats.compiled, 3);
   assert.equal(a.stats.reused, 0);
+  assert.equal(typeof a.stats.dur_ms, 'number');
+  assert.ok(a.stats.dur_ms >= 0);
   assert.doesNotMatch(a.blocks[0].html, /data-source-line/);
   assert.equal(a.blocks[0].lineFrom, 1);
   assert.match(a.blocks[0].key, /^[0-9a-f]+:0$/);

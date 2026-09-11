@@ -616,11 +616,19 @@ async function mount(root, opts) {
     let compiled = 0
     let reused = 0
     let blocks = []
+    let compileMs = 0
     if (text.trim()) {
       const r = compileMarkdownBlocks(text, { marked, purify: DOMPurify }, { enhance: enhancePreview })
       blocks = r.ok ? r.blocks : []
       compiled = r.stats ? r.stats.compiled : 0
       reused = r.stats ? r.stats.reused : 0
+      compileMs = r.stats && Number.isFinite(r.stats.dur_ms) ? r.stats.dur_ms : 0
+    }
+    const total = compiled + reused
+    const ratio = total ? Math.round((reused / total) * 100) / 100 : 0
+    const mdPayload = { chars: text.length, n: blocks.length, compiled, reused, ratio }
+    if (text.trim()) {
+      metric('notes_md_compile', { dur_ms: compileMs, payload: { ...mdPayload, phase: 'compile' } })
     }
     preview.render(blocks, {
       scrollEl: previewEl,
@@ -631,7 +639,7 @@ async function mount(root, opts) {
     const dur = performance.now() - t
     metric('notes_preview_ms', {
       dur_ms: dur,
-      payload: { chars: text.length, compiled, reused, blocks: blocks.length },
+      payload: { ...mdPayload, phase: 'paint' },
     })
     if (dur > 16) metric('notes_input_to_preview', { dur_ms: dur })
   }

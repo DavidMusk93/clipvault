@@ -99,8 +99,21 @@
       overflow-x: hidden;
       overflow-y: auto;
       overscroll-behavior: contain;
-      padding: 0 8px 28px;
+      padding: 0 8px 12px;
     }
+    .rail-perf {
+      flex: 0 0 auto;
+      padding: 6px 12px 10px;
+      font: 500 11px/1.35 var(--font-ui);
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      border-top: 0.5px solid var(--separator);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rail-perf.is-slow { color: #D70015; font-weight: 650; }
+    .rail-perf[hidden] { display: none; }
     input[type="search"] {
       width: 100%;
       border: 0;
@@ -597,6 +610,7 @@
     <aside class="rail">
       <div class="rail-search"><input type="search" id="q" placeholder="搜 prompt / 工具" /></div>
       <div id="sessionList"><div class="empty">暂无会话</div></div>
+      <div class="rail-perf" id="sessPerf" hidden></div>
     </aside>
     <section class="stage">
       <div class="session-head" id="sessionHead" hidden>
@@ -660,16 +674,64 @@
       if (extra && extra.payload && typeof extra.payload === "object") {
         const p = {};
         for (const [k, v] of Object.entries(extra.payload)) {
-          if (!/^(mode|ratio|chars|bytes|n|value|interaction|q_len|kind|phase|reason|lag|host|w|h|nodes)$/.test(k)) continue;
+          if (!/^(mode|ratio|chars|bytes|n|value|interaction|q_len|kind|phase|reason|lag|host|w|h|nodes|compiled|reused)$/.test(k)) continue;
           if (typeof v === "number" && Number.isFinite(v)) p[k] = v;
           else if (typeof v === "string" && v.length <= 32) p[k] = v;
         }
         if (Object.keys(p).length) ev.payload = p;
       }
       metricQ.push(ev);
+      noteSessPerf(ev);
       if (name.startsWith("trae_")) flushMetrics();
       else if (metricQ.length >= 20) flushMetrics();
       else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 2000);
+    };
+    const lastPerf = { paint: null, md: null, ttfp: null, skip: "", phase: "" };
+    const paintSessPerf = () => {
+      const el = $("sessPerf");
+      if (!el) return;
+      const parts = [];
+      if (lastPerf.phase) parts.push(lastPerf.phase);
+      if (lastPerf.ttfp != null) parts.push("ttfp " + Math.round(lastPerf.ttfp) + "ms");
+      if (lastPerf.paint != null) parts.push("paint " + Math.round(lastPerf.paint) + "ms");
+      if (lastPerf.md != null) parts.push("md " + Math.round(lastPerf.md) + "ms");
+      if (lastPerf.skip) parts.push("skip " + lastPerf.skip);
+      el.textContent = parts.join(" · ");
+      el.hidden = !parts.length;
+      const slow = (lastPerf.paint || 0) >= 80 || (lastPerf.md || 0) >= 80;
+      el.classList.toggle("is-slow", slow);
+    };
+    const noteSessPerf = (ev) => {
+      if (!ev || !ev.name) return;
+      if (ev.name === "trae_sessions_paint" && ev.dur_ms != null) lastPerf.paint = ev.dur_ms;
+      if (ev.name === "trae_sessions_md" && ev.dur_ms != null) lastPerf.md = ev.dur_ms;
+      if (ev.name === "trae_sessions_ttfp" && ev.dur_ms != null) lastPerf.ttfp = ev.dur_ms;
+      if (ev.name === "trae_sessions_fsm" && ev.payload && ev.payload.phase) lastPerf.phase = String(ev.payload.phase);
+      if (ev.name === "trae_sessions_skip" && ev.payload && ev.payload.reason) lastPerf.skip = String(ev.payload.reason).slice(0, 24);
+      if (ev.name === "trae_sessions_paint") lastPerf.skip = "";
+      paintSessPerf();
+    };
+    const mdMeter = { n: 0, chars: 0, dur: 0 };
+    const resetMdMeter = () => { mdMeter.n = 0; mdMeter.chars = 0; mdMeter.dur = 0; };
+    const meterMd = (rendered, text) => {
+      if (rendered && rendered.kind === "markdown") {
+        mdMeter.n += 1;
+        mdMeter.chars += String(text || "").length;
+        if (Number.isFinite(rendered.dur_ms)) mdMeter.dur += rendered.dur_ms;
+      }
+      return rendered;
+    };
+    const emitMdMeter = (kind) => {
+      if (!mdMeter.n) return;
+      emit("trae_sessions_md", {
+        dur_ms: mdMeter.dur,
+        payload: {
+          n: mdMeter.n,
+          chars: mdMeter.chars,
+          kind: String(kind || "paint").slice(0, 32),
+          phase: "markdown",
+        },
+      });
     };
     const rectSize = (el) => {
       if (!el || !el.getBoundingClientRect) return { w: 0, h: 0 };
@@ -1112,7 +1174,7 @@
       let html = `<div class="tool-head"><span class="tool-name">${esc(name)}</span><span class="tool-result">${esc(result)}</span></div>`;
       for (const b of blocksFromEvent(e)) {
         if (b.key === "result") continue;
-        const rendered = renderValue(b.text, b.hint, engines());
+        const rendered = meterMd(renderValue(b.text, b.hint, engines()), b.text);
         if (b.key === "command" || b.key === "tool_input") {
           html += `<div class="tool-cmd">${rendered.html}</div>`;
           continue;
@@ -1154,9 +1216,10 @@
         lastRole = row.role;
         const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(" / ");
         const meta = [localDateTime(e.ts), tools].filter(Boolean).join(" · ");
-        const body = row.role === "tool" ? "" : renderEventBlocks(e, engines()).map((b) =>
-          `<div class="kv">${(b.key === "result" || b.key === "prompt") ? "" : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`
-        ).join("");
+        const body = row.role === "tool" ? "" : renderEventBlocks(e, engines()).map((b) => {
+          meterMd(b, "");
+          return `<div class="kv">${(b.key === "result" || b.key === "prompt") ? "" : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`;
+        }).join("");
         const who = grouped ? "" : `<div class="who">${esc(row.label)}</div>`;
         let inner;
         if (row.role === "tool") {
@@ -1480,6 +1543,7 @@
     }
     function paintFromLive(kind) {
       try {
+        resetMdMeter();
         const gate = paintGateReason();
         if (gate) {
           emitLayout(kind || "paint");
@@ -1537,6 +1601,7 @@
               value: bundles,
             },
           });
+          emitMdMeter("append");
           emitLayout(kind || "paint");
           markTtfp(kind);
           painted = current;
@@ -1557,6 +1622,7 @@
             value: bundles,
           },
         });
+        emitMdMeter(kind || "full");
         emitLayout(kind || "paint");
         markTtfp(kind);
         if (!(followTail || painted !== current) && grew) {

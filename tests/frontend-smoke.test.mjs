@@ -88,6 +88,9 @@ test('debug dashboard covers SSE and wall metrics', () => {
   assert.match(indexHtml, /id="debugDrawer"/);
   assert.match(indexHtml, /id="debugSseKv"/);
   assert.match(indexHtml, /id="debugHot"/);
+  assert.match(indexHtml, /id="debugHotNotes"/);
+  assert.match(indexHtml, /id="debugHotSessions"/);
+  assert.match(indexHtml, /id="notesPerf"/);
   assert.match(indexHtml, /id="debugLog"/);
   assert.match(indexHtml, /kind: 'debug'/);
 });

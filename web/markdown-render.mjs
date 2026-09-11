@@ -147,18 +147,26 @@ function bakeLineAttrs(html, lineFrom, lineTo) {
  * React keys `key`; scroll maps `lineFrom`/`lineTo` on the wrapper.
  *
  * @typedef {{ key: string, hash: string, type: string, lineFrom: number, lineTo: number, html: string }} CompiledBlock
- * @returns {{ ok: boolean, engine: string, blocks: CompiledBlock[], stats: { compiled: number, reused: number } }}
+ * @returns {{ ok: boolean, engine: string, blocks: CompiledBlock[], stats: { compiled: number, reused: number, dur_ms: number } }}
  */
+function nowMs() {
+  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
+}
+
 export function compileMarkdownBlocks(src, engines = {}, opts = {}) {
-  const empty = { ok: false, engine: '', blocks: [], stats: { compiled: 0, reused: 0 } };
+  const t0 = nowMs();
+  const stats = (compiled, reused) => ({ compiled, reused, dur_ms: nowMs() - t0 });
+  const fail = (engine = '') => ({ ok: false, engine, blocks: [], stats: stats(0, 0) });
   const text = toGfmNestedLists(String(src ?? '').replace(/\r\n/g, '\n'));
   const marked = engines.marked ?? (typeof globalThis !== 'undefined' ? globalThis.marked : null);
   const purify = engines.purify ?? (typeof globalThis !== 'undefined' ? globalThis.DOMPurify : null);
   if (!marked || (typeof marked.lexer !== 'function' && typeof marked.parse !== 'function')) {
-    return empty;
+    return fail();
   }
   if (!purify || typeof purify.sanitize !== 'function') {
-    return { ...empty, engine: 'marked-no-purify' };
+    return fail('marked-no-purify');
   }
   try {
     if (typeof marked.setOptions === 'function') {
@@ -184,7 +192,7 @@ export function compileMarkdownBlocks(src, engines = {}, opts = {}) {
           lineTo: tokenLineSpan(text, 1),
           html,
         }],
-        stats: { compiled: 1, reused: 0 },
+        stats: stats(1, 0),
       };
     }
     const tokens = lexer(text);
@@ -223,9 +231,9 @@ export function compileMarkdownBlocks(src, engines = {}, opts = {}) {
         html,
       });
     }
-    return { ok: true, engine: 'marked+dompurify', blocks, stats: { compiled, reused } };
+    return { ok: true, engine: 'marked+dompurify', blocks, stats: stats(compiled, reused) };
   } catch (_) {
-    return { ...empty, engine: 'marked-error' };
+    return fail('marked-error');
   }
 }
 

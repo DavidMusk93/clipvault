@@ -341,7 +341,9 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 开合 sheet | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` |
 | 开合笔记顶栏跳 | `chrome_shift` phase=open\|close dy/reason；长周期 `wall_cls` |
 | 笔记输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` |
+| 笔记 Markdown | `notes_md_compile` vs `notes_preview_ms`；payload `compiled`/`reused`/`n`/`ratio` |
 | 会话白屏 | `trae_sessions_skip` vs `trae_sessions_paint` `trae_sessions_layout` |
+| 会话 Markdown | `trae_sessions_md`（paint 内 md 块耗时合计） |
 | 资源泄漏 / 502 | `proc_sample`（fds/rss/unix/sse/rlim）；SSE `ping` 同字段；`GET /api/ui-metrics/proc` |
 | HTTP 边车 | `http_req` dur=总时间；`lag`=origin；`n`=status；`route` 去 query/id；`proto` h1/h2；`phase` ok/stream/origin_* |
 

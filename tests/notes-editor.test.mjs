@@ -116,6 +116,11 @@ test('panel is source + preview split', () => {
   assert.match(html, /data-mode="preview"/);
   assert.match(html, /id="notesTools"/);
   assert.match(html, /id="notesStatus"/);
+  assert.match(html, /id="notesPerf"/);
+  assert.match(entry, /notes_md_compile/);
+  assert.match(entry, /notes_preview_ms/);
+  assert.match(entry, /phase: 'compile'/);
+  assert.match(entry, /phase: 'paint'/);
   assert.doesNotMatch(html, /milkdown-top-bar/);
   assert.doesNotMatch(html, /id="notesMeta"/);
   assert.match(css, /notes-source/);
@@ -215,8 +220,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n23/);
-  assert.match(html, /notes-editor\.css\?v=n23/);
+  assert.match(html, /notes-editor\.js\?v=n24/);
+  assert.match(html, /notes-editor\.css\?v=n24/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
