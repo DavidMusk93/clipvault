@@ -21,6 +21,8 @@
   <script src="/assets/notes-editor/notes-editor.js?v=n24"></script>
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n13"></script>
+  <link rel="stylesheet" href="/assets/metrics-panel.css?v=m1" />
+  <script src="/assets/metrics-panel.js?v=m1"></script>
   <style>
     /* ClipVault · apple-design visual shell
        Tokens + materials; JS class names preserved (.m3-card, --md-*).
@@ -1853,7 +1855,11 @@
     .notes-new-plus::after {
       top: 0; bottom: 0; width: 1.5px; left: 50%; transform: translateX(-50%);
     }
-    .notes-list { flex: 1; overflow: auto; padding: 4px 8px 12px; }
+    .notes-list { flex: 1; overflow: auto; padding: 4px 8px 8px; }
+    .notes-paper.is-metrics .notes-chrome,
+    .notes-paper.is-metrics #notesEditor,
+    .notes-paper.is-metrics #notesMergeHint { display: none !important; }
+    .notes-paper.is-metrics .notes-title { pointer-events: none; }
     .note-row {
       width: 100%; text-align: left; border: 0; background: transparent;
       border-radius: 12px; padding: 10px 36px 11px 10px; cursor: pointer;
@@ -1993,14 +1999,6 @@
     .notes-status[data-state="saved"] { color: #248A3D; }
     .notes-status[data-state="error"] { color: #D70015; }
     .notes-status-label { white-space: nowrap; }
-    .notes-perf {
-      font: 500 11px/26px var(--font-ui); letter-spacing: -0.01em;
-      color: var(--muted); font-variant-numeric: tabular-nums;
-      white-space: nowrap; flex: none; max-width: 42vw;
-      overflow: hidden; text-overflow: ellipsis;
-    }
-    .notes-perf.is-slow { color: #D70015; font-weight: 650; }
-    .notes-perf[hidden] { display: none; }
     .notes-share {
       width: 28px; height: 26px; border: 0; border-radius: 6px; flex: none;
       background: transparent; color: var(--ink); cursor: pointer;
@@ -2560,6 +2558,13 @@
         </button>
       </div>
       <div class="notes-list" id="notesList"></div>
+      <div class="cv-debug-foot">
+        <button type="button" class="cv-debug-row" id="notesDebugRow" aria-pressed="false">
+          <span class="cv-debug-mark" aria-hidden="true"></span>
+          <span class="cv-debug-copy"><span class="cv-debug-k">指标</span><span class="cv-debug-s">本页打点 · 对照优化</span></span>
+          <span class="cv-debug-n" hidden></span>
+        </button>
+      </div>
     </aside>
     <section class="notes-paper">
       <button type="button" class="notes-close" id="notesClose" title="关闭" aria-label="关闭">
@@ -2597,10 +2602,10 @@
         <button type="button" class="notes-share" id="notesShare" title="复制分享链接" aria-label="分享">
           <span class="material-symbols-outlined">ios_share</span>
         </button>
-        <span class="notes-perf" id="notesPerf" hidden title="Markdown 预览耗时"></span>
       </div>
       <div id="notesMergeHint" class="notes-merge-hint" hidden></div>
       <div id="notesEditor" class="notes-work"></div>
+      <div id="notesMetrics" class="cv-metrics-host" hidden></div>
     </section>
     </div>
   </div>
@@ -3437,7 +3442,7 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0, baseHash: '' };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0, baseHash: '', metricsOpen: false };
     const NOTE_ID_KEY = 'clipvault.notes.id';
 
     function noteExcerpt(md) {
@@ -3677,7 +3682,7 @@ window.ClipViewMasonry = Masonry;
     }
     function fillNoteRow(btn, n) {
       btn.dataset.noteId = n.id;
-      btn.classList.toggle('is-on', n.id === notesState.id);
+      btn.classList.toggle('is-on', n.id === notesState.id && !notesState.metricsOpen);
       btn.classList.toggle('is-pinned', noteIsPinned(n));
       let t = btn.querySelector('.nt');
       let x = btn.querySelector('.nx');
@@ -3824,40 +3829,48 @@ window.ClipViewMasonry = Masonry;
     function nm(name, extra) {
       const M = globalThis.ClipNotesMetrics;
       if (M) M.emit(name, extra || {});
-      if (String(name || '').startsWith('notes_')) paintNotesPerf();
+      if (String(name || '').startsWith('notes_')) {
+        notesMetricsCtl?.noteIncoming?.();
+        notesMetricsCtl?.paintBadge?.(document.getElementById('notesDebugRow'));
+      }
       if (debugPaintQueued == null) return;
       scheduleDebugPaint();
     }
-    function paintNotesPerf() {
-      const el = document.getElementById('notesPerf');
-      if (!el) return;
-      const rows = globalThis.ClipNotesMetrics?.recentLocal?.() || [];
-      let preview;
-      let compile;
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const n = rows[i] && rows[i].name;
-        if (!preview && n === 'notes_preview_ms') preview = rows[i];
-        if (!compile && n === 'notes_md_compile') compile = rows[i];
-        if (preview && compile) break;
+    const notesMetricsCtl = globalThis.ClipMetricsPanel?.create?.(document.getElementById('notesMetrics'), {
+      family: 'notes',
+      api: typeof API === 'string' ? API : '',
+      getLocal: () => globalThis.ClipNotesMetrics?.recentLocal?.() || [],
+    });
+    function setNotesMetricsOpen(on) {
+      notesState.metricsOpen = !!on;
+      document.querySelector('.notes-paper')?.classList.toggle('is-metrics', on);
+      const title = document.getElementById('notesTitle');
+      const view = document.getElementById('notesTitleView');
+      if (on) {
+        if (title) {
+          title.value = '指标';
+          title.readOnly = true;
+        }
+        if (view) view.textContent = '指标';
+        document.getElementById('notesTitleWrap')?.classList.add('has-value');
+        document.getElementById('notesPanel')?.classList.add('is-writing');
+        notesMetricsCtl?.setOpen(true);
+      } else {
+        if (title) title.readOnly = false;
+        notesMetricsCtl?.setOpen(false);
       }
-      if (!preview && !compile) {
-        el.hidden = true;
-        el.textContent = '';
-        return;
+      const row = document.getElementById('notesDebugRow');
+      if (row) {
+        row.classList.toggle('is-on', on);
+        row.setAttribute('aria-pressed', on ? 'true' : 'false');
+        notesMetricsCtl?.paintBadge?.(row);
       }
-      const p = (preview && preview.payload) || (compile && compile.payload) || {};
-      const parts = [];
-      if (preview && preview.dur_ms != null) parts.push('预览 ' + Math.round(preview.dur_ms) + 'ms');
-      if (compile && compile.dur_ms != null) parts.push('编译 ' + Math.round(compile.dur_ms) + 'ms');
-      const compiled = Number(p.compiled);
-      const reused = Number(p.reused);
-      if (Number.isFinite(compiled) && Number.isFinite(reused)) {
-        parts.push('复用 ' + reused + '/' + (compiled + reused));
-      }
-      el.textContent = parts.join(' · ');
-      el.hidden = !parts.length;
-      el.classList.toggle('is-slow', (preview && preview.dur_ms >= 80) || (compile && compile.dur_ms >= 80));
+      paintNotesList();
     }
+    document.getElementById('notesDebugRow')?.addEventListener('click', async () => {
+      if (notesState.dirty) await saveNoteNow();
+      setNotesMetricsOpen(true);
+    });
     const wallBootAt = performance.now();
     let wallTtfpSent = false;
     let lastWallFetchAt = 0;
@@ -3997,6 +4010,7 @@ window.ClipViewMasonry = Masonry;
 
     async function openNoteInPanel(id) {
       if (notesState.dirty) await saveNoteNow();
+      setNotesMetricsOpen(false);
       const item = notesState.items.find(n => n.id === id);
       if (!item) return;
       const switching = notesState.id && notesState.id !== id;
@@ -4022,6 +4036,7 @@ window.ClipViewMasonry = Masonry;
 
     async function newNoteInPanel() {
       if (notesState.dirty) await saveNoteNow();
+      setNotesMetricsOpen(false);
       notesState.id = null;
       notesState.baseHash = '';
       paintNotesMergeHint('');
@@ -4490,7 +4505,7 @@ window.ClipViewMasonry = Masonry;
       if (!panel) return;
       const origin = readSheetRect(sheetTrigger('sessions'));
       const frame = document.getElementById('sessionsFrame');
-      const embedSrc = '/trae/?embed=1&v=s5';
+      const embedSrc = '/trae/?embed=1&v=s6';
       if (frame && frame.getAttribute('src') !== embedSrc) {
         frame.src = embedSrc;
       } else {
@@ -4551,7 +4566,7 @@ window.ClipViewMasonry = Masonry;
         M.startObservers(panel);
       }
       nm('notes_open');
-      paintNotesPerf();
+      notesMetricsCtl?.paintBadge?.(document.getElementById('notesDebugRow'));
       await morph;
       try { await loadNotesList(); } catch (e) {
         if (!notesState.loaded) notesState.items = notesState.items || [];

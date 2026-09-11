@@ -10,6 +10,8 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
+  <link rel="stylesheet" href="/assets/metrics-panel.css?v=m1" />
+  <script src="/assets/metrics-panel.js?v=m1"></script>
   <style>
     :root {
       --bg: #f5f5f7;
@@ -99,21 +101,11 @@
       overflow-x: hidden;
       overflow-y: auto;
       overscroll-behavior: contain;
-      padding: 0 8px 12px;
+      padding: 0 8px 8px;
     }
-    .rail-perf {
-      flex: 0 0 auto;
-      padding: 6px 12px 10px;
-      font: 500 11px/1.35 var(--font-ui);
-      color: var(--muted);
-      font-variant-numeric: tabular-nums;
-      border-top: 0.5px solid var(--separator);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .rail-perf.is-slow { color: #D70015; font-weight: 650; }
-    .rail-perf[hidden] { display: none; }
+    .stage.is-metrics .thread,
+    .stage.is-metrics .follow { display: none !important; }
+    .stage.is-metrics .cv-metrics-host { display: flex; background: #fff; }
     input[type="search"] {
       width: 100%;
       border: 0;
@@ -610,7 +602,13 @@
     <aside class="rail">
       <div class="rail-search"><input type="search" id="q" placeholder="搜 prompt / 工具" /></div>
       <div id="sessionList"><div class="empty">暂无会话</div></div>
-      <div class="rail-perf" id="sessPerf" hidden></div>
+      <div class="cv-debug-foot">
+        <button type="button" class="cv-debug-row" id="sessDebugRow" aria-pressed="false">
+          <span class="cv-debug-mark" aria-hidden="true"></span>
+          <span class="cv-debug-copy"><span class="cv-debug-k">指标</span><span class="cv-debug-s">本页打点 · 对照优化</span></span>
+          <span class="cv-debug-n" hidden></span>
+        </button>
+      </div>
     </aside>
     <section class="stage">
       <div class="session-head" id="sessionHead" hidden>
@@ -618,6 +616,7 @@
       </div>
       <div class="thread" id="thread"><div class="empty">选择左侧会话</div></div>
       <button type="button" class="follow" id="jumpBot" hidden title="回到最新" aria-label="回到最新并跟踪">↓</button>
+      <div id="sessMetrics" class="cv-metrics-host" hidden></div>
     </section>
   </div>
   <script type="module">
@@ -681,36 +680,34 @@
         if (Object.keys(p).length) ev.payload = p;
       }
       metricQ.push(ev);
-      noteSessPerf(ev);
+      sessRing.push(ev);
+      if (sessRing.length > 80) sessRing.splice(0, sessRing.length - 80);
+      sessMetricsCtl?.noteIncoming?.();
+      sessMetricsCtl?.paintBadge?.($("sessDebugRow"));
       if (name.startsWith("trae_")) flushMetrics();
       else if (metricQ.length >= 20) flushMetrics();
       else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 2000);
     };
-    const lastPerf = { paint: null, md: null, ttfp: null, skip: "", phase: "" };
-    const paintSessPerf = () => {
-      const el = $("sessPerf");
-      if (!el) return;
-      const parts = [];
-      if (lastPerf.phase) parts.push(lastPerf.phase);
-      if (lastPerf.ttfp != null) parts.push("ttfp " + Math.round(lastPerf.ttfp) + "ms");
-      if (lastPerf.paint != null) parts.push("paint " + Math.round(lastPerf.paint) + "ms");
-      if (lastPerf.md != null) parts.push("md " + Math.round(lastPerf.md) + "ms");
-      if (lastPerf.skip) parts.push("skip " + lastPerf.skip);
-      el.textContent = parts.join(" · ");
-      el.hidden = !parts.length;
-      const slow = (lastPerf.paint || 0) >= 80 || (lastPerf.md || 0) >= 80;
-      el.classList.toggle("is-slow", slow);
-    };
-    const noteSessPerf = (ev) => {
-      if (!ev || !ev.name) return;
-      if (ev.name === "trae_sessions_paint" && ev.dur_ms != null) lastPerf.paint = ev.dur_ms;
-      if (ev.name === "trae_sessions_md" && ev.dur_ms != null) lastPerf.md = ev.dur_ms;
-      if (ev.name === "trae_sessions_ttfp" && ev.dur_ms != null) lastPerf.ttfp = ev.dur_ms;
-      if (ev.name === "trae_sessions_fsm" && ev.payload && ev.payload.phase) lastPerf.phase = String(ev.payload.phase);
-      if (ev.name === "trae_sessions_skip" && ev.payload && ev.payload.reason) lastPerf.skip = String(ev.payload.reason).slice(0, 24);
-      if (ev.name === "trae_sessions_paint") lastPerf.skip = "";
-      paintSessPerf();
-    };
+    const sessRing = [];
+    const sessMetricsCtl = globalThis.ClipMetricsPanel && ClipMetricsPanel.create
+      ? ClipMetricsPanel.create($("sessMetrics"), {
+          family: "sessions",
+          api: "http://127.0.0.1:8080",
+          getLocal: () => sessRing.slice(),
+        })
+      : null;
+    function setSessMetricsOpen(on) {
+      document.querySelector(".stage")?.classList.toggle("is-metrics", !!on);
+      sessMetricsCtl?.setOpen(!!on);
+      const row = $("sessDebugRow");
+      if (row) {
+        row.classList.toggle("is-on", !!on);
+        row.setAttribute("aria-pressed", on ? "true" : "false");
+        sessMetricsCtl?.paintBadge?.(row);
+      }
+      if (on && jumpBot) jumpBot.hidden = true;
+    }
+    $("sessDebugRow")?.addEventListener("click", () => setSessMetricsOpen(true));
     const mdMeter = { n: 0, chars: 0, dur: 0 };
     const resetMdMeter = () => { mdMeter.n = 0; mdMeter.chars = 0; mdMeter.dur = 0; };
     const meterMd = (rendered, text) => {
@@ -1093,6 +1090,7 @@
       if (el.dataset.bound) return;
       el.dataset.bound = "1";
       el.addEventListener("click", () => {
+        setSessMetricsOpen(false);
         const id = el.getAttribute("data-id") || "";
         const newest = newestSession(sessionRows);
         followLatest = !!(newest && newest.session_id === id);

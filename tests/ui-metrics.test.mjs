@@ -61,7 +61,9 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(html, /nm\('note_save'/);
   assert.match(html, /id="nmList"/);
   assert.match(html, /id="debugDrawer"/);
-  assert.match(html, /id="notesPerf"/);
+  assert.match(html, /id="notesDebugRow"/);
+  assert.match(html, /id="notesMetrics"/);
+  assert.match(html, /metrics-panel\.js/);
   assert.match(html, /id="debugHotNotes"/);
   assert.match(html, /id="debugHotSessions"/);
   assert.match(html, /notes_md_compile/);
