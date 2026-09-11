@@ -2,12 +2,13 @@
 
 .cv-metrics-float {
   position: absolute;
-  left: 14px;
-  bottom: 14px;
+  right: 16px;
+  bottom: 16px;
+  left: auto;
   z-index: 8;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 8px;
   pointer-events: none;
 }
@@ -16,36 +17,31 @@
 
 .cv-debug-fab {
   height: 28px;
-  padding: 0 2px;
-  border: 0;
-  border-radius: 0;
+  padding: 0 10px;
+  border: 0.5px solid rgba(60, 60, 67, 0.28);
+  border-radius: 980px;
   background: transparent;
-  color: rgba(60, 60, 67, 0.42);
-  font: 600 12px/28px -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+  color: rgba(60, 60, 67, 0.55);
+  font: 600 12px/27px -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
   letter-spacing: -0.01em;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
   box-shadow: none;
 }
 .cv-debug-fab:active { transform: scale(0.97); }
 @media (hover: hover) and (pointer: fine) {
-  .cv-debug-fab:hover { color: rgba(29, 29, 31, 0.72); }
+  .cv-debug-fab:hover { color: #1d1d1f; border-color: rgba(60, 60, 67, 0.45); }
 }
-.cv-debug-fab.is-on { color: #0071E3; background: transparent; }
-.cv-debug-fab-dot {
-  width: 6px; height: 6px; border-radius: 980px;
-  background: rgba(142, 142, 147, 0.45);
+.cv-debug-fab.is-on {
+  color: #0071E3;
+  border-color: #0071E3;
+  background: transparent;
 }
-.cv-debug-fab.is-slow { color: #D70015; }
-.cv-debug-fab.is-slow .cv-debug-fab-dot { background: #D70015; }
-.cv-debug-fab .cv-debug-n {
-  min-width: 14px; height: 14px; padding: 0 4px; border-radius: 980px;
-  background: transparent; color: inherit;
-  font: 650 10px/14px inherit; font-variant-numeric: tabular-nums; text-align: center;
+.cv-debug-fab.is-slow {
+  color: #D70015;
+  border-color: #D70015;
 }
-.cv-debug-fab .cv-debug-n[hidden] { display: none; }
 
 .cv-metrics-pop {
   width: min(340px, calc(100vw - 36px));

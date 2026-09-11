@@ -24,14 +24,19 @@ test('popover keeps skip/paint and compile/preview, drops 24h essays', () => {
   assert.match(js, /function toggle/);
   assert.doesNotMatch(js, /24 小时/);
   assert.doesNotMatch(js, /p95/);
+  assert.match(css, /\.cv-metrics-float \{[\s\S]{0,80}right:\s*16px/);
   assert.match(css, /\.cv-debug-fab \{\n  height: 28px;/);
+  assert.match(css, /border: 0\.5px solid/);
   assert.match(css, /background: transparent;/);
+  assert.match(css, /\.cv-debug-fab\.is-slow \{[\s\S]{0,80}#D70015/);
   assert.match(css, /\.cv-metrics-pop/);
+  assert.doesNotMatch(css, /cv-debug-fab-dot/);
+  assert.doesNotMatch(js, /cv-debug-fab-dot/);
+  assert.doesNotMatch(js, /cv-debug-n/);
   assert.doesNotMatch(css, /\.cv-debug-row/);
-  assert.doesNotMatch(css, /box-shadow: 0 4px 16px/);
 });
 
-test('notes and sessions mount a bottom-left debug fab, not a full paper', () => {
+test('notes and sessions mount a bottom-right debug fab, not a full paper', () => {
   assert.match(js, /function destroy/);
   assert.match(html, /function ensureNotesMetrics/);
   assert.match(html, /function teardownNotesMetrics/);
@@ -45,11 +50,11 @@ test('notes and sessions mount a bottom-left debug fab, not a full paper', () =>
   assert.doesNotMatch(sess, /id="sessDebugRow"/);
   assert.doesNotMatch(sess, /id="sessMetrics"/);
   assert.doesNotMatch(sess, /setSessMetricsOpen/);
-  assert.match(html, /metrics-panel\.css\?v=m3/);
-  assert.match(sess, /metrics-panel\.css\?v=m3/);
+  assert.match(html, /metrics-panel\.css\?v=m4/);
+  assert.match(sess, /metrics-panel\.css\?v=m4/);
 });
 
 test('AGENTS.md points at the floating debug card', () => {
-  assert.match(agents, /透明「调试」/);
+  assert.match(agents, /右下角透明「调试」/);
   assert.match(agents, /随子页生灭/);
 });

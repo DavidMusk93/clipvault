@@ -152,10 +152,7 @@
         '<div data-slot="table"></div>' +
         '<ul class="cv-metrics-log" data-slot="log"></ul>' +
       '</div>' +
-      '<button type="button" class="cv-debug-fab" aria-label="调试" aria-pressed="false">' +
-        '<span class="cv-debug-fab-dot" aria-hidden="true"></span>调试' +
-        '<span class="cv-debug-n" hidden></span>' +
-      '</button>';
+      '<button type="button" class="cv-debug-fab" aria-label="调试" aria-pressed="false">调试</button>';
     mount.appendChild(wrap);
     const fab = wrap.querySelector('.cv-debug-fab');
     const pop = wrap.querySelector('.cv-metrics-pop');
@@ -204,13 +201,7 @@
       return localRows().reduce((n, ev) => n + (isSlow(ev) ? 1 : 0), 0);
     }
     function paintBadge() {
-      const n = slowCount();
-      fab.classList.toggle('is-slow', n > 0);
-      const badge = fab.querySelector('.cv-debug-n');
-      if (badge) {
-        badge.textContent = n ? String(n) : '';
-        badge.hidden = !n;
-      }
+      fab.classList.toggle('is-slow', slowCount() > 0);
     }
     function setOpen(open) {
       state.open = !!open;

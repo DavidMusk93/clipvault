@@ -325,7 +325,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   感觉抖 / 白屏 / 慢
        │
        v
-  笔记/会话左下角透明「调试」→ 悬浮卡片（再点关闭；随子页生灭）
+  笔记/会话右下角透明「调试」（边框；慢=红 开=蓝）→ 悬浮卡片（再点关闭；随子页生灭）
   GET /api/ui-metrics/recent?name=&limit=40
   GET /api/ui-metrics/summary
   墙：#debug  Cmd-Shift-M
@@ -349,7 +349,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 资源泄漏 / 502 | `proc_sample`（fds/rss/unix/sse/rlim）；SSE `ping` 同字段；`GET /api/ui-metrics/proc` |
 | HTTP 边车 | `http_req` dur=总时间；`lag`=origin；`n`=status；`route` 去 query/id；`proto` h1/h2；`phase` ok/stream/origin_* |
 
-`notes_close.dur_ms` = 开着墙钟，不是关动画。关动画看 `sheet_morph` phase=close。Agent 自己拉 metrics。笔记/会话入口是左下角「调试」悬浮卡，只看关键 name。
+`notes_close.dur_ms` = 开着墙钟，不是关动画。关动画看 `sheet_morph` phase=close。Agent 自己拉 metrics。笔记/会话入口是右下角「调试」悬浮卡，只看关键 name。
 
 备份徽章走 SSE `backup_status` + `?lite=1`，禁止 30s 轮询 `/api/backup/status`。
 
