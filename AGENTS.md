@@ -184,6 +184,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | hover 不改几何 | `translateY` hover + 全量 remount |
 | 图框锁高；禁止 `img.onload → rebuildFromData` | 滑动中全量 rebalance |
 | 置顶排最前；翻页 cursor 只走未置顶 | 钉子混进下一页 |
+| 对端 sync 按 wall_ts 进同一 (timestamp,id) 序 | 为「列表轻」砍 cursor 刚拉到的更旧行 |
 | 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
 
 ### URL 双面（只在这里写一遍）

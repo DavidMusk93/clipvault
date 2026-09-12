@@ -2774,7 +2774,6 @@
 
 
     const PAGE_SIZE = 30;
-    const CLIENT_CAP = 300; // soft cap in memory — drop oldest (tail) when exceeded
     let lastHeadSig = '';
     function clipHeadSig(items) {
       return (items || []).slice(0, PAGE_SIZE).map((i) =>
@@ -2814,12 +2813,6 @@
         if (loading || exhausted) return false;
         if (nextCursor == null || nextCursor === '') return false;
         return true;
-      },
-      /** Soft cap: drop oldest (tail) when newest-first list exceeds cap. */
-      applyCap(clips, cap) {
-        if (!clips || clips.length <= cap) return { clips: clips || [], removed: [] };
-        const removed = clips.slice(cap);
-        return { clips: clips.slice(0, cap), removed };
       }
     };
     window.ClipViewPagination = Pagination;
@@ -4757,13 +4750,6 @@ window.ClipViewMasonry = Masonry;
         nextCursor = cursor;
         if (!cursor || items.length === 0) exhausted = true;
 
-        const capped = Pagination.applyCap(clips, CLIENT_CAP);
-        clips = capped.clips;
-        capped.removed.forEach(r => {
-          cardCache.get(r.id)?.remove();
-          cardCache.delete(r.id);
-        });
-
         if (reset) {
           cardCache.clear();
           colHeights = null;
@@ -4869,10 +4855,6 @@ window.ClipViewMasonry = Masonry;
       const fresh = incoming.filter((i) => !seen.has(i.id));
       if (!fresh.length) return 0;
       clips = sortClipsForFeed(dedupeClipsById([...fresh, ...clips]));
-      if (clips.length > CLIENT_CAP) {
-        const removed = clips.splice(CLIENT_CAP);
-        removed.forEach((r) => { cardCache.get(r.id)?.remove(); cardCache.delete(r.id); });
-      }
       lastHeadSig = clipHeadSig(clips);
       const pinnedNew = fresh.filter((it) => itemIsPinned(it));
       const restNew = fresh.filter((it) => !itemIsPinned(it));

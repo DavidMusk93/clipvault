@@ -331,6 +331,15 @@ test('head merge prepends new cards and skips unchanged signatures', () => {
   );
 });
 
+test('fetchPage does not tail-cap the keyset walk', () => {
+  const fetchIdx = indexHtml.indexOf('async function fetchPage');
+  assert.ok(fetchIdx >= 0);
+  const chunk = indexHtml.slice(fetchIdx, fetchIdx + 4500);
+  assert.doesNotMatch(chunk, /applyCap\(/, 'load-more must keep cursor-older rows');
+  assert.doesNotMatch(indexHtml, /CLIENT_CAP/);
+  assert.doesNotMatch(indexHtml, /clips\.splice\(CLIENT_CAP\)/);
+});
+
 test('type chips refetch from server, not only the in-memory page', () => {
   assert.match(indexHtml, /function applyWallQueryParams/);
   assert.match(indexHtml, /params\.set\('type', currentFilter\)/);

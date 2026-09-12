@@ -35,11 +35,6 @@ const Pagination = {
     if (loading || exhausted) return false;
     if (nextCursor == null || nextCursor === '') return false;
     return true;
-  },
-  applyCap(clips, cap) {
-    if (!clips || clips.length <= cap) return { clips: clips || [], removed: [] };
-    const removed = clips.slice(cap);
-    return { clips: clips.slice(0, cap), removed };
   }
 };
 
@@ -113,11 +108,8 @@ test('canLoadMore true only when idle + cursor + not exhausted', () => {
 
 // --- applyCap ---
 
-test('applyCap drops oldest tail when newest-first exceeds cap', () => {
-  const clips = [item('n0'), item('n1'), item('n2'), item('n3')];
-  const { clips: kept, removed } = Pagination.applyCap(clips, 2);
-  assert.deepEqual(kept.map(x => x.id), ['n0', 'n1']);
-  assert.deepEqual(removed.map(x => x.id), ['n2', 'n3']);
+test('applyCap is not on the live Pagination object (keyset walk must not drop tail)', () => {
+  assert.equal(typeof Pagination.applyCap, 'undefined');
 });
 
 // --- cursor precision (documents why bitPattern wire format exists) ---
