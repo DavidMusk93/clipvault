@@ -35,15 +35,18 @@ const Masonry = {
   pack(heights, cols, gap = 14) /* sync web MASONRY_GAP */ {
     const nCols = Math.max(1, cols | 0);
     const colOf = new Array(heights.length);
+    const ys = new Array(heights.length);
     const colHeights = new Array(nCols).fill(0);
     for (let i = 0; i < heights.length; i++) {
       const best = Masonry.shortestCol(colHeights);
       colOf[i] = best;
       const raw = Number(heights[i]);
       const add = Number.isFinite(raw) && raw > 0 ? raw : 1;
-      colHeights[best] += add + (colHeights[best] > 0 ? gap : 0);
+      const y = colHeights[best] > 0 ? colHeights[best] + gap : 0;
+      ys[i] = y;
+      colHeights[best] = y + add;
     }
-    return { colOf, colHeights };
+    return { colOf, colHeights, ys };
   },
 
   isCompactItem(item) {
@@ -137,6 +140,23 @@ test('live prepend spreads across shortest columns, not a col0 stack', () => {
   assert.equal(new Set(dests).size, 3);
 });
 
+test('pack newest-first puts the first N items at y=0 across columns', () => {
+  const { colOf, ys } = Masonry.pack([80, 80, 80, 120, 40], 3, 14);
+  assert.deepEqual(colOf.slice(0, 3), [0, 1, 2]);
+  assert.deepEqual(ys.slice(0, 3), [0, 0, 0]);
+  assert.ok(ys[3] > 0);
+});
+
+test('re-packing with a new head item moves later cards down, not into one column', () => {
+  const a = Masonry.pack([100, 100, 100], 3, 14);
+  const b = Masonry.pack([90, 100, 100, 100], 3, 14);
+  assert.equal(new Set(b.colOf).size, 3);
+  assert.equal(b.ys[0], 0);
+  assert.equal(b.colOf[0], 0);
+  assert.ok(b.ys[1] === 0 || b.ys[2] === 0);
+  assert.notDeepEqual(a.colOf, b.colOf.slice(1));
+});
+
 test('prepend after a col0 pile fills the other columns first', () => {
   const heights = [2000, 400, 400];
   const dests = [];
@@ -158,12 +178,13 @@ test('live packMasonry heals a one-column collapse', async () => {
   assert.match(html, /used\.size < 2/);
   assert.match(html, /i % cols/);
   assert.match(html, /healMasonryIfDegenerate\(host\)/);
-  assert.match(html, /Masonry\.shortestCol\(colHeights\)/);
-  assert.match(html, /colEl\.insertBefore\(card, colEl\.firstChild\)/);
+  assert.match(html, /function layoutMasonry/);
+  assert.match(html, /position = 'absolute'/);
+  assert.match(html, /packed\.ys/);
   assert.doesNotMatch(
     html,
-    /Newest captures belong at the top of col 0/,
-    'prepend must not always stack into col0',
+    /colEls\[0\]\.insertBefore/,
+    'live updates must re-pack the ordered list, not stack col0',
   );
 });
 

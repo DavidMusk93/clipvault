@@ -228,8 +228,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n24/);
-  assert.match(html, /notes-editor\.css\?v=n24/);
+  assert.match(html, /notes-editor\.js\?v=n25/);
+  assert.match(html, /notes-editor\.css\?v=n25/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
@@ -241,6 +241,8 @@ test('preview compiles blocks incrementally and React reconciles by hash', () =>
   assert.match(preview, /useLayoutEffect/);
   assert.match(preview, /className: 'notes-md-block'/);
   assert.match(preview, /key: b\.key/);
+  assert.match(preview, /previewWindow/);
+  assert.match(preview, /notes-md-pad/);
   assert.match(entry, /compileMarkdownBlocks/);
   assert.match(entry, /mountNotesPreview/);
   assert.match(entry, /preview\.render\(/);
@@ -261,6 +263,7 @@ test('preview compiles blocks incrementally and React reconciles by hash', () =>
   assert.match(vendor, /react@18/);
   assert.match(vendor, /react-dom@18/);
   assert.match(vendor, /notes-preview\.mjs/);
+  assert.match(vendor, /notes-preview-window\.mjs/);
 });
 
 test('notes tools include GFM strikethrough and do not clip the bar', () => {

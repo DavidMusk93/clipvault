@@ -100,17 +100,17 @@ test('masonry must not collapse into one occupied column', () => {
   assert.match(html, /function healMasonryIfDegenerate/);
   assert.match(html, /function masonryIsDegenerate/);
   assert.match(html, /masonryOccupiedCols/);
-  const pack = htmlFn('packMasonry');
+  const pack = htmlFn('layoutMasonry');
   assert.match(pack, /used\.size < 2/);
   assert.match(pack, /i % cols/);
+  assert.match(pack, /position = 'absolute'/);
   const prepend = htmlFn('prependCardsIncremental');
   assert.match(prepend, /healMasonryIfDegenerate\(host\)/);
-  assert.match(prepend, /Masonry\.shortestCol\(colHeights\)/);
-  assert.match(prepend, /colEl\.insertBefore\(card, colEl\.firstChild\)/);
+  assert.match(prepend, /layoutMasonry/);
   assert.doesNotMatch(
     prepend,
     /colEls\[0\]\.insertBefore/,
-    'live updates must not stack every new card into col0',
+    'live updates must re-pack the ordered list, not stack col0',
   );
 });
 

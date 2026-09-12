@@ -317,15 +317,15 @@ test('head merge prepends new cards and skips unchanged signatures', () => {
   assert.match(indexHtml, /function prependCardsIncremental/);
   assert.match(indexHtml, /function ingestClipById/);
   assert.match(indexHtml, /function applyFreshItems/);
-  assert.match(indexHtml, /Masonry\.shortestCol\(colHeights\)/);
-  assert.match(indexHtml, /colEl\.insertBefore\(card, colEl\.firstChild\)/);
+  assert.match(indexHtml, /function layoutMasonry/);
+  assert.match(indexHtml, /position = 'absolute'/);
   assert.doesNotMatch(indexHtml, /colEls\[0\]\.insertBefore\(card, colEls\[0\]\.firstChild\)/);
   assert.match(indexHtml, /sig === lastHeadSig/);
   assert.match(indexHtml, /fields: 'head'/);
-  assert.match(indexHtml, /kind: 'prepend'/);
+  assert.match(indexHtml, /kind: 'layout'/);
   assert.match(indexHtml, /y0 < 24/, 'at-top prepend is desired UX and still CLS');
-  assert.match(indexHtml, /phase: compensated \? 'keep' : 'top'/);
-  assert.match(indexHtml, /top: nextY, left: 0, behavior: 'instant'/);
+  assert.match(indexHtml, /preserveScroll \? 'keep' : 'reset'/);
+  assert.match(indexHtml, /behavior: 'instant'/);
   assert.doesNotMatch(
     indexHtml,
     /Head insert changes order — full rebuild/,
@@ -363,12 +363,13 @@ test('broken thumbs keep card geometry (no display:none collapse)', () => {
 });
 
 test('masonry stays a row of columns; degenerate one-strip self-heals', () => {
-  assert.match(indexHtml, /\.masonry\s*\{[\s\S]{0,280}?flex-direction:\s*row/);
-  assert.match(indexHtml, /\.masonry\s*\{[\s\S]{0,280}?flex-wrap:\s*nowrap/);
+  assert.match(indexHtml, /\.masonry\s*\{[\s\S]{0,220}?position:\s*relative/);
+  assert.match(indexHtml, /\.masonry > \.m3-card\s*\{[\s\S]{0,80}?position:\s*absolute/);
   assert.match(indexHtml, /function masonryIsDegenerate/);
   assert.match(indexHtml, /function healMasonryIfDegenerate/);
   assert.match(indexHtml, /Number\.isFinite\(raw\) && raw > 0 \? raw : 1/);
   assert.match(indexHtml, /healMasonryIfDegenerate\(host\)/);
+  assert.match(indexHtml, /function layoutMasonry/);
 });
 
 test('delete/restore use differential remove (no full rebuild scroll jump)', () => {

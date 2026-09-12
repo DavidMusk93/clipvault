@@ -14,7 +14,7 @@
   display: grid;
   grid-template-columns: 0.46fr 5px 0.54fr;
   grid-template-areas: "source split preview";
-  contain: strict;
+  contain: layout paint;
 }
 .notes-source { grid-area: source; }
 .notes-splitter { grid-area: split; }
@@ -100,7 +100,10 @@
 .notes-md-block {
   display: contents;
 }
-.notes-preview-inner > .notes-md-block:first-child > :first-child { margin-top: 0; }
+.notes-preview-window { position: relative; min-height: 100%; }
+.notes-md-pad { pointer-events: none; }
+.notes-preview-inner > .notes-md-block:first-child > :first-child,
+.notes-preview-window > .notes-md-block:first-of-type > :first-child { margin-top: 0; }
 
 .notes-preview-inner h1,
 .notes-preview-inner h2,

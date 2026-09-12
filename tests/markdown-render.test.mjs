@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, compileMarkdownBlocks, resetMarkdownCompileCache, hashMarkdownToken, toGfmNestedLists, mapLineToScrollTop, mapScrollTopToLine, mapSourceToPreviewScroll, mapPreviewToSourceLine, tokenLineSpan } from '../web/markdown-render.mjs';
+import { renderMarkdownToHtml, neutralizeAnchorsHtml, renderMarkdownBlocks, compileMarkdownBlocks, resetMarkdownCompileCache, hashMarkdownToken, toGfmNestedLists, mapLineToScrollTop, mapScrollTopToLine, mapSourceToPreviewScroll, mapPreviewToSourceLine, tokenLineSpan, countNewlinesInRange } from '../web/markdown-render.mjs';
+import { previewWindow, PREVIEW_WINDOW_MIN } from '../web/notes-preview-window.mjs';
 import { formatTextForDisplay } from '../web/text-format.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -91,6 +92,43 @@ function fakeMarkdownEngines() {
     purify: { sanitize: (html) => html },
   };
 }
+
+test('compileMarkdownBlocks does not re-split the document prefix per token', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../web/markdown-render.mjs'), 'utf8');
+  assert.doesNotMatch(src, /text\.slice\(0,\s*at\)\.split\(/);
+  assert.match(src, /countNewlinesInRange/);
+  assert.equal(countNewlinesInRange('a\nb\nc', 0, 5), 2);
+  assert.equal(countNewlinesInRange('a\nb\nc', 2, 4), 1);
+});
+
+test('compileMarkdownBlocks line numbers stay sequential on a long list', () => {
+  resetMarkdownCompileCache();
+  const engines = fakeMarkdownEngines();
+  const body = Array.from({ length: 80 }, (_, i) => `para ${i}\n\n`).join('');
+  const r = compileMarkdownBlocks(body, engines);
+  assert.equal(r.ok, true);
+  assert.equal(r.blocks.length, 80);
+  assert.equal(r.blocks[0].lineFrom, 1);
+  assert.ok(r.blocks[79].lineFrom > r.blocks[0].lineFrom);
+  for (let i = 1; i < r.blocks.length; i++) {
+    assert.ok(r.blocks[i].lineFrom >= r.blocks[i - 1].lineFrom);
+  }
+});
+
+test('previewWindow keeps small notes unwindowed and long notes sparse', () => {
+  const small = previewWindow(0, 800, 10, []);
+  assert.equal(small.from, 0);
+  assert.equal(small.to, 10);
+  assert.equal(small.padTop, 0);
+  const n = PREVIEW_WINDOW_MIN + 40;
+  const heights = Array(n).fill(80);
+  const mid = previewWindow(800, 400, n, heights, 80, 2);
+  assert.ok(mid.from > 0);
+  assert.ok(mid.to < n);
+  assert.ok(mid.to - mid.from < n);
+  assert.ok(mid.padTop > 0);
+  assert.ok(mid.padBottom > 0);
+});
 
 test('compileMarkdownBlocks reuses unchanged token HTML by hash', () => {
   resetMarkdownCompileCache();

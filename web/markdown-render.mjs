@@ -155,6 +155,15 @@ function nowMs() {
     : Date.now();
 }
 
+/** Count `\n` in s[from, to). O(to-from), never re-scan the document prefix. */
+export function countNewlinesInRange(s, from, to) {
+  let n = 0;
+  const start = Math.max(0, from | 0);
+  const end = Math.min(String(s).length, to | 0);
+  for (let i = start; i < end; i++) if (s.charCodeAt(i) === 10) n += 1;
+  return n;
+}
+
 export function compileMarkdownBlocks(src, engines = {}, opts = {}) {
   const t0 = nowMs();
   const stats = (compiled, reused) => ({ compiled, reused, dur_ms: nowMs() - t0 });
@@ -201,11 +210,14 @@ export function compileMarkdownBlocks(src, engines = {}, opts = {}) {
     let compiled = 0;
     let reused = 0;
     let pos = 0;
+    let line = 1;
     for (const t of tokens) {
       const raw = String(t.raw || '');
       const i = raw ? text.indexOf(raw, pos) : pos;
       const at = i >= 0 ? i : pos;
-      const lineFrom = text.slice(0, at).split('\n').length;
+      line += countNewlinesInRange(text, pos, at);
+      const lineFrom = line;
+      line += countNewlinesInRange(text, at, at + raw.length);
       pos = at + raw.length;
       if (t.type === 'space' || !String(raw).trim()) continue;
       const lineTo = tokenLineSpan(raw, lineFrom);
