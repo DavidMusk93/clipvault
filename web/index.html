@@ -2827,13 +2827,25 @@
         if (w < 1680) return 4;
         return 5;
       },
+      shortestCol(heights) {
+        const n = Array.isArray(heights) ? heights.length : 0;
+        if (n <= 0) return 0;
+        let best = 0;
+        for (let c = 1; c < n; c++) {
+          const a = Number(heights[c]);
+          const b = Number(heights[best]);
+          const ac = Number.isFinite(a) ? a : 0;
+          const bc = Number.isFinite(b) ? b : 0;
+          if (ac < bc) best = c;
+        }
+        return best;
+      },
       pack(heights, cols, gap = MASONRY_GAP) {
         const nCols = Math.max(1, cols | 0);
         const colOf = new Array(heights.length);
         const colHeights = new Array(nCols).fill(0);
         for (let i = 0; i < heights.length; i++) {
-          let best = 0;
-          for (let c = 1; c < nCols; c++) if (colHeights[c] < colHeights[best]) best = c;
+          const best = this.shortestCol(colHeights);
           colOf[i] = best;
           const raw = Number(heights[i]);
           // 0/NaN/undefined must not collapse shortest-column into col0 forever.
@@ -7629,10 +7641,7 @@ window.ClipViewMasonry = Masonry;
         // Off-DOM measure — never attach to a live column just to probe (scroll thrash).
         const h = Masonry.measureHeightAtWidth(card, colWidth);
 
-        let best = 0;
-        for (let c = 1; c < cols; c++) {
-          if (colHeights[c] < colHeights[best]) best = c;
-        }
+        const best = Masonry.shortestCol(colHeights);
         colEls[best].appendChild(card);
         // Thumb geometry is locked; post-attach height should match probe.
         const realH = Masonry.measureHeight(card) || h;
@@ -7640,7 +7649,7 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
-    /** Newest captures belong at the top of col 0, not at the tail of the shortest column. */
+    /** Newest captures go at the top of the shortest column — never a col0-only stack. */
     function prependCardsIncremental(newItems) {
       const host = document.getElementById('grid');
       let colEls = [...host.querySelectorAll(':scope > .masonry-col')];
@@ -7658,23 +7667,31 @@ window.ClipViewMasonry = Masonry;
       const y0 = window.scrollY || document.documentElement.scrollTop || 0;
       const atTop = y0 < 24;
       const colWidth = colEls[0].clientWidth || Math.floor((host.clientWidth || 800) / cols);
+      const maxBefore = Math.max(0, ...colHeights);
       let added = 0;
       let addedH = 0;
+      const usedCols = new Set();
       for (const item of newestFirst) {
         if (cardCache.has(item.id) && cardCache.get(item.id)?.isConnected) continue;
         const card = ensureCard(item);
         const h = Masonry.measureHeightAtWidth(card, colWidth);
-        const gap = colHeights[0] > 0 ? MASONRY_GAP : 0;
-        colEls[0].insertBefore(card, colEls[0].firstChild);
+        const dest = Masonry.shortestCol(colHeights);
+        const colEl = colEls[dest] || colEls[0];
+        const gap = (colHeights[dest] || 0) > 0 ? MASONRY_GAP : 0;
+        colEl.insertBefore(card, colEl.firstChild);
         const realH = Masonry.measureHeight(card) || h;
-        colHeights[0] += realH + gap;
+        colHeights[dest] += realH + gap;
         addedH += realH + gap;
         added += 1;
+        usedCols.add(dest);
       }
       if (!added) return;
+      const grew = Math.max(0, Math.max(0, ...colHeights) - maxBefore);
       let compensated = 0;
-      if (!atTop && addedH > 0) {
-        const nextY = y0 + addedH;
+      // Only bump scrollY when the document actually grew. Inserting into a
+      // shorter column must not shift the viewport by that card's height.
+      if (!atTop && grew > 0) {
+        const nextY = y0 + grew;
         try {
           window.scrollTo({ top: nextY, left: 0, behavior: 'instant' });
         } catch (_) {
@@ -7690,6 +7707,8 @@ window.ClipViewMasonry = Masonry;
           phase: compensated ? 'keep' : 'top',
           dy: Math.round(addedH),
           w: Math.round(y0),
+          col: [...usedCols][0] ?? 0,
+          cols: usedCols.size,
         },
       });
     }

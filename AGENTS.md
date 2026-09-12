@@ -51,7 +51,7 @@
   砍尾   CLIENT_CAP / applyCap 丢掉 cursor 更旧行    → 翻不动
   滤错   chip 只 clientFilter 当前 30 条             → 「其他类型都丢了」
   图404  /api/image 不 hydrate；blobs→Documents 链   → 卡在、图没有
-  塌列   pack 0/NaN 锁 col0；空列仍 flex-grow         → 墙变成一条
+  塌列   pack 0/NaN 锁 col0；prepend 只插 col0        → 墙/更新变成一条
   团块   对端 206ms 内 440 张图是 440 张卡            → 禁止合成一张
   会话   工具 LIMIT 200 砍尾                         → 历史只剩 Stop 结论
 ```
@@ -201,7 +201,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | cursor 怎么走，clips/DOM 就怎么留 | 为「列表轻」砍 cursor 刚拉到的更旧行（CLIENT_CAP 砍尾） |
 | 类型 chip 改 `type=` 后 `fetchPage({reset:true})` 走完整 keyset | 只 `clientFilter` 内存里的 30 条 |
 | html chip `IN ('html','rtf')`（Notes 粘贴） | html 把 rtf 当丢失 |
-| pack 0/NaN 仍分列；一列有卡必须 heal | 空列 flex 把墙拉成一条 |
+| pack 0/NaN 仍分列；prepend 插最短列顶部 | 新卡永远堆 col0 成一条线 |
 | 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
 | 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
 

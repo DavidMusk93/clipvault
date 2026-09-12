@@ -105,6 +105,13 @@ test('masonry must not collapse into one occupied column', () => {
   assert.match(pack, /i % cols/);
   const prepend = htmlFn('prependCardsIncremental');
   assert.match(prepend, /healMasonryIfDegenerate\(host\)/);
+  assert.match(prepend, /Masonry\.shortestCol\(colHeights\)/);
+  assert.match(prepend, /colEl\.insertBefore\(card, colEl\.firstChild\)/);
+  assert.doesNotMatch(
+    prepend,
+    /colEls\[0\]\.insertBefore/,
+    'live updates must not stack every new card into col0',
+  );
 });
 
 test('440-image peer clump stays 440 cards on a capture-time keyset', () => {

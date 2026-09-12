@@ -18,15 +18,26 @@ const Masonry = {
     return 5;
   },
 
+  shortestCol(heights) {
+    const n = Array.isArray(heights) ? heights.length : 0;
+    if (n <= 0) return 0;
+    let best = 0;
+    for (let c = 1; c < n; c++) {
+      const a = Number(heights[c]);
+      const b = Number(heights[best]);
+      const ac = Number.isFinite(a) ? a : 0;
+      const bc = Number.isFinite(b) ? b : 0;
+      if (ac < bc) best = c;
+    }
+    return best;
+  },
+
   pack(heights, cols, gap = 14) /* sync web MASONRY_GAP */ {
     const nCols = Math.max(1, cols | 0);
     const colOf = new Array(heights.length);
     const colHeights = new Array(nCols).fill(0);
     for (let i = 0; i < heights.length; i++) {
-      let best = 0;
-      for (let c = 1; c < nCols; c++) {
-        if (colHeights[c] < colHeights[best]) best = c;
-      }
+      const best = Masonry.shortestCol(colHeights);
       colOf[i] = best;
       const raw = Number(heights[i]);
       const add = Number.isFinite(raw) && raw > 0 ? raw : 1;
@@ -106,6 +117,38 @@ test('pack zero/NaN heights still uses multiple columns', () => {
   assert.equal(colOf[2], 2);
 });
 
+test('shortestCol ties go left then fills remaining columns', () => {
+  assert.equal(Masonry.shortestCol([]), 0);
+  assert.equal(Masonry.shortestCol([0, 0, 0]), 0);
+  assert.equal(Masonry.shortestCol([100, 0, 0]), 1);
+  assert.equal(Masonry.shortestCol([100, 50, 50]), 1);
+  assert.equal(Masonry.shortestCol([100, 200, 10]), 2);
+});
+
+test('live prepend spreads across shortest columns, not a col0 stack', () => {
+  const heights = [400, 400, 400];
+  const dests = [];
+  for (let i = 0; i < 6; i++) {
+    const dest = Masonry.shortestCol(heights);
+    dests.push(dest);
+    heights[dest] += 100;
+  }
+  assert.deepEqual(dests, [0, 1, 2, 0, 1, 2]);
+  assert.equal(new Set(dests).size, 3);
+});
+
+test('prepend after a col0 pile fills the other columns first', () => {
+  const heights = [2000, 400, 400];
+  const dests = [];
+  for (let i = 0; i < 4; i++) {
+    const dest = Masonry.shortestCol(heights);
+    dests.push(dest);
+    heights[dest] += 120;
+  }
+  assert.ok(!dests.includes(0), 'new cards must leave the tall col0 pile');
+  assert.deepEqual(new Set(dests), new Set([1, 2]));
+});
+
 test('live packMasonry heals a one-column collapse', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
@@ -115,6 +158,13 @@ test('live packMasonry heals a one-column collapse', async () => {
   assert.match(html, /used\.size < 2/);
   assert.match(html, /i % cols/);
   assert.match(html, /healMasonryIfDegenerate\(host\)/);
+  assert.match(html, /Masonry\.shortestCol\(colHeights\)/);
+  assert.match(html, /colEl\.insertBefore\(card, colEl\.firstChild\)/);
+  assert.doesNotMatch(
+    html,
+    /Newest captures belong at the top of col 0/,
+    'prepend must not always stack into col0',
+  );
 });
 
 test('isCompactItem: short html/text yes, image/long no', () => {

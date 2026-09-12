@@ -317,7 +317,9 @@ test('head merge prepends new cards and skips unchanged signatures', () => {
   assert.match(indexHtml, /function prependCardsIncremental/);
   assert.match(indexHtml, /function ingestClipById/);
   assert.match(indexHtml, /function applyFreshItems/);
-  assert.match(indexHtml, /insertBefore\(card, colEls\[0\]\.firstChild\)/);
+  assert.match(indexHtml, /Masonry\.shortestCol\(colHeights\)/);
+  assert.match(indexHtml, /colEl\.insertBefore\(card, colEl\.firstChild\)/);
+  assert.doesNotMatch(indexHtml, /colEls\[0\]\.insertBefore\(card, colEls\[0\]\.firstChild\)/);
   assert.match(indexHtml, /sig === lastHeadSig/);
   assert.match(indexHtml, /fields: 'head'/);
   assert.match(indexHtml, /kind: 'prepend'/);
