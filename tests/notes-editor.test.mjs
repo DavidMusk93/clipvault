@@ -228,8 +228,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n25/);
-  assert.match(html, /notes-editor\.css\?v=n25/);
+  assert.match(html, /notes-editor\.js\?v=n26/);
+  assert.match(html, /notes-editor\.css\?v=n26/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
@@ -241,8 +241,8 @@ test('preview compiles blocks incrementally and React reconciles by hash', () =>
   assert.match(preview, /useLayoutEffect/);
   assert.match(preview, /className: 'notes-md-block'/);
   assert.match(preview, /key: b\.key/);
-  assert.match(preview, /previewWindow/);
-  assert.match(preview, /notes-md-pad/);
+  assert.doesNotMatch(preview, /notes-md-pad/);
+  assert.doesNotMatch(preview, /setWin/);
   assert.match(entry, /compileMarkdownBlocks/);
   assert.match(entry, /mountNotesPreview/);
   assert.match(entry, /preview\.render\(/);
