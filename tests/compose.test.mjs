@@ -56,8 +56,13 @@ test('compose concurrent edits use parentHash + diff3, not last apply wins', () 
   assert.match(db, /repairExplodedComposeNotesLocked/);
   assert.match(db, /threeWay\(base: ""/);
   assert.doesNotMatch(db, /ComposeMerge\.both\(currentBody, incoming\)/);
+  const applyAt = db.indexOf('func applySyncComposeLocked');
+  const apply = db.slice(applyAt, applyAt + 2800);
+  assert.doesNotMatch(apply, /planComposeWrite/);
+  assert.match(apply, /sequential autosaves are a log/);
   const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   assert.match(agents, /禁止嵌套/);
+  assert.match(agents, /整篇覆盖/);
 });
 
 test('notes list load failure must not open a blank new note', () => {

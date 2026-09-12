@@ -231,11 +231,11 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
               结束必须 clearSheetInline
 
   多机同一篇
-    保存带 parentHash → 快照 DAG → 行级 diff3（ComposeMerge）
-    分叉重叠段 <<<<<<< hash（两侧排序，交换律）
-    正在输入不覆盖；无 parent 的旧 trx 才 wallTs LWW
-    禁止嵌套 <<<<<<<：both/缺 parent 先 unique leaves，同题取最长
-    ≥3 个 <<<<<<< 起算爆炸，启动 flatten；禁止整篇相包
+    本机保存才 parentHash + 行级 diff3（ComposeMerge）
+    对端 sync compose 按 wallTs **整篇覆盖**，禁止 replica 上 threeWay/both
+    空闲机回放自动保存不是双写分叉
+    分叉重叠段 <<<<<<< hash 只出现在本机多页保存
+    禁止嵌套 <<<<<<<；≥3 个起算爆炸，启动 flatten
 ```
 
 工具条向源码插 Markdown，不改预览 DOM。**预览藏工具条**（只留模式切换）。删除线钮面是字母 **S** 加删除线（GFM `~~`，`Mod-Shift-x`），不靠 Material ligature、不用汉字。禁止预览露出标记钮。预览纸面宽 = 父 `.notes-preview` 的 **0.618**；代码块头栏「换行」+「复制」，**默认不换行**。禁止把预览卡死在 `38rem`；禁止默认 `pre-wrap`。

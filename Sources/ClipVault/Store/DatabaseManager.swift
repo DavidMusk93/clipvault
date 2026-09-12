@@ -2958,33 +2958,15 @@ final class DatabaseManager: ObservableObject {
                 ? ComposeNotes.contentHash(id: id, body: incoming)
                 : contentHash
             if incomingHash != currentHash && incoming != currentBody {
-                let plan: ComposeWritePlan
-                if let parentHash, !parentHash.isEmpty {
-                    plan = planComposeWrite(
-                        noteId: id,
-                        incoming: incoming,
-                        parentHash: parentHash,
-                        current: existing
-                    )
-                } else if timestamp >= (existing?.timestamp ?? .distantPast) {
-                    plan = ComposeWritePlan(
-                        body: incoming,
-                        hash: incomingHash,
-                        parentHash: nil,
-                        conflict: ComposeMerge.hasConflictMarkers(incoming),
-                        merged: false
-                    )
+                // Idle replica of a single writer: sequential autosaves are a log,
+                // not two-machine forks. threeWay/both here nested <<<<<<< into 1.2M notes.
+                if timestamp >= (existing?.timestamp ?? .distantPast) {
+                    body = incoming
+                    contentHash = incomingHash
                 } else {
-                    plan = ComposeWritePlan(
-                        body: currentBody,
-                        hash: currentHash,
-                        parentHash: parentHash,
-                        conflict: ComposeMerge.hasConflictMarkers(currentBody),
-                        merged: false
-                    )
+                    body = currentBody
+                    contentHash = currentHash
                 }
-                body = plan.body
-                contentHash = plan.hash
             }
             let sql = """
             UPDATE clipboard_items SET
