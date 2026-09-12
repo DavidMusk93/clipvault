@@ -52,6 +52,11 @@ _RE_TASTE_FILE = re.compile(
     r"(AGENTS\.md|design-taste\.md|SKILL\.md|nmem-knowledge-format\.md)",
     re.I,
 )
+_RE_PROJECT_DOC = re.compile(
+    r"(?:^|/)([\w.-]+)/(AGENTS\.md|design-taste\.md|nmem-knowledge-format\.md)\b",
+    re.I,
+)
+_TASTE_SKIP_PARENT = {".tmp", "tmp", "refs", "references", "node_modules"}
 _RE_PATH_TOKEN = re.compile(
     r"(?:^|[\s\"'=])(/[^\s:\"']+\.[A-Za-z0-9]{1,8}|[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{1,8})"
 )
@@ -170,6 +175,60 @@ def first_line(text: str | None, n: int = 160) -> str:
     return line[:n]
 
 
+def _project_name(parent: str) -> str:
+    p = str(parent or "").strip()
+    m = re.match(r"^([^/@\s]+)(?:@|--).+$", p)
+    return m.group(1) if m else p
+
+
+def taste_keys(*parts: str | None) -> list[str]:
+    """Identity for a spec file: skill name or project/AGENTS.md, never a bare filename."""
+    bits: list[str] = []
+    for p in parts:
+        s = str(p or "").replace("\\", "/").strip()
+        if not s:
+            continue
+        if "/" in s and not s.endswith("/"):
+            s += "/"
+        bits.append(s)
+    blob = "\n".join(bits)
+    keys: list[str] = []
+    seen: set[str] = set()
+
+    def add(key: str) -> None:
+        key = str(key or "").strip()
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
+
+    for m in re.finditer(r"/skills/([\w.-]+)/", blob, re.I):
+        add(f"skill:{m.group(1)}")
+    for m in _RE_PROJECT_DOC.finditer(blob):
+        parent = _project_name(m.group(1))
+        if not parent or parent in _TASTE_SKIP_PARENT:
+            continue
+        if re.search(r"\.[a-zA-Z0-9]{1,8}$", parent):
+            continue
+        add(f"{parent}/{m.group(2)}")
+    if not keys:
+        m = _RE_TASTE_FILE.search(blob)
+        parent = ""
+        for p in reversed(parts):
+            raw = str(p or "").replace("\\", "/").rstrip("/")
+            if "/" not in raw:
+                continue
+            name = Path(raw).name
+            if name and not name.endswith(".md") and re.match(r"^[\w.-]+$", name):
+                parent = _project_name(name)
+                if parent in _TASTE_SKIP_PARENT or re.search(r"\.[a-zA-Z0-9]{1,8}$", parent):
+                    parent = ""
+                    continue
+                break
+        if m and parent:
+            add(f"{parent}/{m.group(1)}")
+    return keys
+
+
 def paths_from_cmd(cmd: str | None) -> list[str]:
     out: list[str] = []
     for m in _RE_PATH_TOKEN.finditer(str(cmd or "")):
@@ -247,9 +306,9 @@ def mine_rows(
                     git_branch[g[0]][g[1]] += 1
         if hook != "PostToolUse":
             prompt = str(raw.get("prompt") or "")
-            for hit in _RE_TASTE_FILE.findall(prompt):
-                taste_n[hit] += 1
-            if re.search(r"\btaste\b|风格|规范", prompt, re.I):
+            for key in taste_keys(prompt, cwd):
+                taste_n[key] += 1
+            if re.search(r"\btaste\b|风格|规范", prompt, re.I) and not taste_keys(prompt, cwd):
                 taste_n["taste-mention"] += 1
             continue
         name = str(raw.get("tool_name") or raw.get("llm_tool_name") or "tool")
@@ -282,20 +341,19 @@ def mine_rows(
             dir_n[str(Path(fp).parent)] += 1
             if Path(fp).suffix:
                 ext_n[Path(fp).suffix] += 1
-            if _RE_TASTE_FILE.search(fp):
-                taste_n[Path(fp).name] += 2
         cmd = str(parsed.get("cmd") or "")
         fam = cmd_family(cmd) if cmd else ""
         if fam:
             family_n[fam] += 1
             family_s[fam] += wall
-        for p in paths_from_cmd(cmd):
+        cmd_paths = paths_from_cmd(cmd)
+        for p in cmd_paths:
             file_n[p] += 1
             dir_n[str(Path(p).parent)] += 1
             if Path(p).suffix:
                 ext_n[Path(p).suffix] += 1
-            if _RE_TASTE_FILE.search(p):
-                taste_n[Path(p).name] += 1
+        for key in taste_keys(fp, wd, cwd, cmd, *cmd_paths):
+            taste_n[key] += 1
         mcp = mcp_parts(name) or mcp_parts(raw.get("llm_tool_name"))
         if mcp:
             mcp_n[mcp[0]] += 1
@@ -367,7 +425,7 @@ def mine_rows(
         blocks["user.taste"] = _block(
             "Taste / 规范",
             "user",
-            "prompt 或路径里出现的 AGENTS.md / SKILL.md / design-taste / nmem。提到却未成为闸门 = 口头 taste。",
+            "线索必须带项目或技能名（`clipvault/AGENTS.md`、`skill:ce-code-review`），禁止只记 SKILL.md 文件名。",
             [_table([{"doc": r["key"], "n": r["n"]} for r in _rank(taste_n)], [("doc", "线索"), ("n", "次")])],
         )
     if "agent.files" in want:
@@ -615,13 +673,17 @@ def _insights(**kw: Any) -> list[dict[str, str]]:
             f"- 工作目录 `{cwd}`。",
         )
     if taste_n:
-        doc, n = taste_n.most_common(1)[0]
+        top = [k for k, _ in taste_n.most_common(4) if k != "taste-mention"]
+        named = [k for k in top if "/" in k or k.startswith("skill:")]
+        doc = named[0] if named else (top[0] if top else taste_n.most_common(1)[0][0])
+        n = taste_n[doc]
+        listing = "、".join(f"{k} ×{taste_n[k]}" for k in (named or top)[:4])
         add(
             "agent", "agents.md",
             "规范被提到却不是闸门",
-            f"本会话反复碰到 {doc}（{n} 次）。口头 taste 不会执行；把对应约束写进 AGENTS.md。",
+            f"本会话碰到 {listing}。必须写明是哪个项目的 AGENTS、哪条 skill，禁止只说 SKILL.md。口头 taste 不会执行。",
             f"taste={dict(taste_n)}",
-            f"- 已引用 `{doc}` 的约束必须写成可执行闸门，禁止只在对话里提。",
+            f"- 执行 `{doc}` 的闸门（×{n}）；禁止只引用文件名 SKILL.md / AGENTS.md。",
         )
     if file_n:
         path, n = file_n.most_common(1)[0]

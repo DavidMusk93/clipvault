@@ -65,3 +65,9 @@ test('directions cover user and agent axes', () => {
     assert.match(mine, new RegExp(`"id": "${id}"`));
   }
 });
+
+test('taste keys keep skill and project names, not bare SKILL.md', () => {
+  assert.match(mine, /def taste_keys/);
+  assert.match(mine, /skill:/);
+  assert.match(mine, /禁止只记 SKILL\.md 文件名/);
+});

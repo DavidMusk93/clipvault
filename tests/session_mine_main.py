@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "trae_hooks"))
 
-from mine import classify_phase, cmd_family, git_from_path, mcp_parts, mine_rows, parse_head  # noqa: E402
+from mine import classify_phase, cmd_family, git_from_path, mcp_parts, mine_rows, parse_head, taste_keys  # noqa: E402
 
 
 def ok(name: str, cond: bool, detail: str = "") -> None:
@@ -43,13 +43,32 @@ def main() -> None:
     ok("cmd-rg", cmd_family("rg -n foo src/a.cc") == "search")
     ok("cmd-git", cmd_family("git status --short") == "git")
     ok("git-not-cwd-guess", git_from_path("/root/Documents/flowkit") is None)
+    ok(
+        "taste-skill",
+        taste_keys("/root/Documents/flowkit/.trae/skills/ce-code-review/SKILL.md") == ["skill:ce-code-review"],
+        str(taste_keys("/root/Documents/flowkit/.trae/skills/ce-code-review/SKILL.md")),
+    )
+    ok("taste-grok-skill", "skill:leetcode" in taste_keys("/Users/x/.grok/skills/leetcode/SKILL.md"))
+    ok("taste-agents-project", "flowkit/AGENTS.md" in taste_keys("/root/Documents/flowkit/AGENTS.md"))
+    ok("taste-agents-cwd", "flowkit/AGENTS.md" in taste_keys("加载AGENTS.md", "/root/flowkit"))
+    ok("taste-not-bare", "SKILL.md" not in taste_keys("/root/flowkit/.trae/skills/ce-code-review/references/a.md"))
+    ok(
+        "taste-agents-worktree",
+        "stream_engine/AGENTS.md" in taste_keys("/root/x/.tmp/repos/stream_engine--fix-x/AGENTS.md"),
+        str(taste_keys("/root/x/.tmp/repos/stream_engine--fix-x/AGENTS.md")),
+    )
+    ok(
+        "taste-not-prompt-blob",
+        not any("提交mr" in k for k in taste_keys("好的，按照你的建议修改。提交mr。加载AGENTS.md", "/root/flowkit")),
+        str(taste_keys("好的，按照你的建议修改。提交mr。加载AGENTS.md", "/root/flowkit")),
+    )
 
     rows = [
         {"event_id": "u1", "ts": "1", "hook_event": "UserPromptSubmit", "prompt": "加载AGENTS.md,注意review 时间", "cwd": "/root/flowkit"},
         {
             "event_id": "t1", "ts": "2", "hook_event": "PostToolUse",
             "tool_name": "mcp__nowledge-mem__memory_search",
-            "cwd": "/root/flowkit",
+            "cwd": "/root/flowkit/.trae/skills/ce-code-review",
             "input_head": '{"args":{"query":"x"}}',
             "resp_head": '{"wall_time_seconds":0.2,"exit_code":0}',
         },
@@ -111,6 +130,10 @@ def main() -> None:
     ok("insight-runcommand", "RunCommand" in texts)
     ok("insight-nmem", "搜索" in texts and "写入" in texts)
     ok("insight-review", "review" in texts.lower())
+    taste_docs = [r["doc"] for r in out["blocks"]["user.taste"]["table"]["rows"]]
+    ok("taste-named-skill", any(d.startswith("skill:ce-code-review") for d in taste_docs), str(taste_docs))
+    ok("taste-named-agents", any(d.endswith("/AGENTS.md") or "AGENTS.md" in d for d in taste_docs), str(taste_docs))
+    ok("taste-not-bare-filename", "SKILL.md" not in taste_docs, str(taste_docs))
     files = out["blocks"]["agent.files"]["table"]["rows"]
     ok("file-write", any("a.cc" in r["path"] for r in files), str(files))
     ok("feedback-title", all(f.get("title") and f.get("evidence") for f in out["feedback"]))
