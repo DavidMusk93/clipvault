@@ -2004,13 +2004,17 @@ final class DatabaseManager: ObservableObject {
 
     private static func typePredicateSQL(alias: String? = nil, typeFilter: String?, excludeType: String?) -> String {
         let col = alias.map { "\($0).type" } ?? "type"
+        // Wall chip 「富文本/HTML」includes RTF (Notes paste).
+        if typeFilter == "html" { return " AND \(col) IN ('html', 'rtf')" }
         if typeFilter != nil { return " AND \(col) = ?" }
         if excludeType != nil { return " AND \(col) != ?" }
         return ""
     }
 
     private func bindTypePredicate(_ stmt: OpaquePointer?, bind: inout Int, typeFilter: String?, excludeType: String?) {
-        if let typeFilter {
+        if typeFilter == "html" {
+            return
+        } else if let typeFilter {
             bindText(stmt, Int32(bind), typeFilter); bind += 1
         } else if let excludeType {
             bindText(stmt, Int32(bind), excludeType); bind += 1

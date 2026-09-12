@@ -4736,9 +4736,7 @@ window.ClipViewMasonry = Masonry;
       const params = new URLSearchParams();
       params.set('limit', String(PAGE_SIZE));
       if (cursorForRequest) params.set('cursor', cursorForRequest);
-      if (searchQuery) params.set('q', searchQuery);
-      if (currentView === 'trash') params.set('view', 'trash');
-      params.set('exclude', 'note');
+      applyWallQueryParams(params);
 
       try {
         const res = await liveGet(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
@@ -4891,6 +4889,13 @@ window.ClipViewMasonry = Masonry;
       return fetch(url, { cache: 'no-store' });
     }
 
+    function applyWallQueryParams(params) {
+      if (searchQuery) params.set('q', searchQuery);
+      if (currentView === 'trash') params.set('view', 'trash');
+      if (currentFilter && currentFilter !== 'all') params.set('type', currentFilter);
+      else params.set('exclude', 'note');
+    }
+
     async function fetchClipById(id) {
       const res = await liveGet(`${API}/api/clips?id=${encodeURIComponent(id)}`);
       if (!res.ok) throw new Error('API ' + res.status);
@@ -4904,9 +4909,7 @@ window.ClipViewMasonry = Masonry;
       nm('wall_merge', { payload: { kind: 'head', phase: 'start' } });
       try {
         const params = new URLSearchParams({ limit: String(PAGE_SIZE), fields: 'head' });
-        if (searchQuery) params.set('q', searchQuery);
-        if (currentView === 'trash') params.set('view', 'trash');
-        params.set('exclude', 'note');
+        applyWallQueryParams(params);
         const res = await liveGet(`${API}/api/clips?${params.toString().replace(/\+/g, '%20')}`);
         if (!res.ok) {
           nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'head', phase: 'error', reason: 'http' } });
@@ -4976,9 +4979,8 @@ window.ClipViewMasonry = Masonry;
             } catch (_) {}
           }
         } else {
-          const fat = new URLSearchParams({ limit: String(PAGE_SIZE), exclude: 'note' });
-          if (searchQuery) fat.set('q', searchQuery);
-          if (currentView === 'trash') fat.set('view', 'trash');
+          const fat = new URLSearchParams({ limit: String(PAGE_SIZE) });
+          applyWallQueryParams(fat);
           const fatRes = await liveGet(`${API}/api/clips?${fat.toString().replace(/\+/g, '%20')}`);
           if (fatRes.ok) {
             const fatData = await fatRes.json();
@@ -8079,15 +8081,14 @@ window.ClipViewMasonry = Masonry;
         document.querySelectorAll('.chip').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const prevFilter = currentFilter;
+        const prevView = currentView;
         currentFilter = btn.dataset.type || 'all';
-        const nextView = btn.dataset.view || 'library';
-        const viewChanged = nextView !== currentView;
-        currentView = nextView;
+        currentView = btn.dataset.view || 'library';
         colHeights = null;
-        const needServer = viewChanged;
-        if (needServer) {
+        if (prevFilter !== currentFilter || prevView !== currentView) {
           nextCursor = null;
           exhausted = false;
+          cardCache.clear();
           fetchPage({ reset: true });
         } else {
           rebuildFromData({ preserveScroll: false });

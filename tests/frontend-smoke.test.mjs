@@ -331,6 +331,17 @@ test('head merge prepends new cards and skips unchanged signatures', () => {
   );
 });
 
+test('type chips refetch from server, not only the in-memory page', () => {
+  assert.match(indexHtml, /function applyWallQueryParams/);
+  assert.match(indexHtml, /params\.set\('type', currentFilter\)/);
+  assert.match(
+    indexHtml,
+    /prevFilter !== currentFilter \|\| prevView !== currentView/,
+    'chip change must reset fetchPage so 纯文本 is not stuck on 14 in-memory rows',
+  );
+  assert.match(indexHtml, /applyWallQueryParams\(params\)/);
+});
+
 test('broken thumbs keep card geometry (no display:none collapse)', () => {
   assert.match(indexHtml, /\.thumb-wrap\.is-broken\s*\{[\s\S]{0,180}?background:/);
   assert.doesNotMatch(

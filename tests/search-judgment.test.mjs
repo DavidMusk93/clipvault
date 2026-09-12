@@ -19,6 +19,11 @@ function sliceFrom(src, startNeedle, maxLen = 8000) {
   return src.slice(start, start + maxLen);
 }
 
+test('html type filter includes rtf (wall 富文本 chip)', () => {
+  assert.match(db, /typeFilter == "html"/);
+  assert.match(db, /IN \('html', 'rtf'\)/);
+});
+
 test('this file is in the deploy frontend gate', () => {
   assert.match(check, /search-judgment\.test\.mjs/);
 });
