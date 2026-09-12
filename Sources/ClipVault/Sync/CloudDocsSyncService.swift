@@ -243,11 +243,19 @@ final class CloudDocsSyncService {
         sourceApp: String?,
         drain: Bool
     ) -> Int {
+        var captureTs: Double?
+        let sem = DispatchSemaphore(value: 0)
+        database.performSyncWork {
+            captureTs = self.database.captureTimestampLocked(id: itemId)
+            sem.signal()
+        }
+        sem.wait()
         var op = makeOp(
             kind: "upsert",
             itemId: itemId,
             item: nil,
-            blobKeys: nil
+            blobKeys: nil,
+            wallTs: captureTs
         )
         op.contentHash = contentHash
         op.type = typeRaw
@@ -675,11 +683,11 @@ final class CloudDocsSyncService {
         return best
     }
 
-    private func makeOp(kind: String, itemId: String, item: ClipboardItem?, blobKeys: [String]?) -> SyncOp {
+    private func makeOp(kind: String, itemId: String, item: ClipboardItem?, blobKeys: [String]?, wallTs: Double? = nil) -> SyncOp {
         let seq = nextSeq
         nextSeq += 1
         persistNextSeq()
-        let wall = item?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
+        let wall = wallTs ?? item?.timestamp.timeIntervalSince1970 ?? Date().timeIntervalSince1970
         let hlc = String(format: "%.0f-%@-%d", wall * 1000, hostId, seq)
         return SyncOp(
             opId: UUID().uuidString,
@@ -1118,7 +1126,8 @@ final class CloudDocsSyncService {
                 sourceApp: op.sourceApp,
                 urlString: op.url,
                 fileURLPaths: op.fileUrls,
-                copyCount: op.copyCount ?? 1
+                copyCount: op.copyCount ?? 1,
+                bumpTimestamp: op.kind == "touch"
             )
         default:
             return false

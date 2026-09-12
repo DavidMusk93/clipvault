@@ -317,6 +317,10 @@ final class DatabaseManager: ObservableObject {
                 if restored > 0 {
                     print("[DatabaseManager] restored substr_fold victims=\(restored)")
                 }
+                let tsRestored = self.restoreCaptureTimestampsIfNeeded()
+                if tsRestored > 0 {
+                    print("[DatabaseManager] restored capture timestamps=\(tsRestored)")
+                }
                 self.runAnalyze()
             }
         } else {
@@ -1492,7 +1496,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Apply remote upsert. Content-hash latest-alive: same body does not create a second row.
-    /// Returns whether the local DB changed.
+    /// `bumpTimestamp` only for kind=touch (peer recopied). OCR/replica upsert must not move the wall.
     @discardableResult
     func applySyncUpsertLocked(
         id: UUID,
@@ -1505,7 +1509,8 @@ final class DatabaseManager: ObservableObject {
         sourceApp: String?,
         urlString: String?,
         fileURLPaths: [String]?,
-        copyCount: Int
+        copyCount: Int,
+        bumpTimestamp: Bool
     ) -> Bool {
         guard let db = db else { return false }
         let idStr = id.uuidString
@@ -1526,21 +1531,34 @@ final class DatabaseManager: ObservableObject {
                     ocrText: ocrText,
                     textContent: textContent,
                     htmlContent: htmlContent,
-                    copyCount: copyCount
+                    copyCount: copyCount,
+                    bumpTimestamp: bumpTimestamp
                 )
             }
-            // Different id, same body: bump existing, keep local id stable.
-            let item = ClipboardItem(
-                id: UUID(uuidString: existing) ?? id,
+            // Different id, same body: keep local id. Only a peer recopy (touch) moves the wall.
+            if bumpTimestamp {
+                let item = ClipboardItem(
+                    id: UUID(uuidString: existing) ?? id,
+                    timestamp: timestamp,
+                    type: type,
+                    contentHash: contentHash,
+                    textContent: textContent,
+                    htmlContent: htmlContent,
+                    ocrText: ocrText,
+                    sourceApp: sourceApp
+                )
+                return bumpLatestAlive(id: existing, item: item)
+            }
+            return refreshRemoteFields(
+                id: existing,
                 timestamp: timestamp,
-                type: type,
-                contentHash: contentHash,
+                sourceApp: sourceApp,
+                ocrText: ocrText,
                 textContent: textContent,
                 htmlContent: htmlContent,
-                ocrText: ocrText,
-                sourceApp: sourceApp
+                copyCount: copyCount,
+                bumpTimestamp: false
             )
-            return bumpLatestAlive(id: existing, item: item)
         }
 
         // Row with this id already? (re-delivery)
@@ -1552,7 +1570,8 @@ final class DatabaseManager: ObservableObject {
                 ocrText: ocrText,
                 textContent: textContent,
                 htmlContent: htmlContent,
-                copyCount: copyCount
+                copyCount: copyCount,
+                bumpTimestamp: bumpTimestamp
             )
         }
 
@@ -1568,7 +1587,8 @@ final class DatabaseManager: ObservableObject {
             url: url,
             htmlContent: htmlContent,
             ocrText: ocrText,
-            sourceApp: sourceApp
+            sourceApp: sourceApp,
+            firstSeenAt: Date()
         )
         guard insertNewItem(item, db: db) else { return false }
         if copyCount > 1 {
@@ -1635,30 +1655,47 @@ final class DatabaseManager: ObservableObject {
         ocrText: String?,
         textContent: String?,
         htmlContent: String?,
-        copyCount: Int
+        copyCount: Int,
+        bumpTimestamp: Bool
     ) -> Bool {
         guard let db = db else { return false }
-        let sql = """
-        UPDATE clipboard_items SET
-            timestamp = MAX(timestamp, ?),
-            source_app = COALESCE(?, source_app),
-            ocr_text = CASE WHEN ? IS NOT NULL AND length(?) > length(COALESCE(ocr_text, '')) THEN ? ELSE ocr_text END,
-            text_content = COALESCE(text_content, ?),
-            html_content = COALESCE(html_content, ?),
-            copy_count = MAX(COALESCE(copy_count, 1), ?)
-        WHERE id = ?;
-        """
+        let sql: String
+        if bumpTimestamp {
+            sql = """
+            UPDATE clipboard_items SET
+                timestamp = ?,
+                source_app = COALESCE(?, source_app),
+                ocr_text = CASE WHEN ? IS NOT NULL AND length(?) > length(COALESCE(ocr_text, '')) THEN ? ELSE ocr_text END,
+                text_content = COALESCE(text_content, ?),
+                html_content = COALESCE(html_content, ?),
+                copy_count = MAX(COALESCE(copy_count, 1), ?)
+            WHERE id = ?;
+            """
+        } else {
+            sql = """
+            UPDATE clipboard_items SET
+                source_app = COALESCE(?, source_app),
+                ocr_text = CASE WHEN ? IS NOT NULL AND length(?) > length(COALESCE(ocr_text, '')) THEN ? ELSE ocr_text END,
+                text_content = COALESCE(text_content, ?),
+                html_content = COALESCE(html_content, ?),
+                copy_count = MAX(COALESCE(copy_count, 1), ?)
+            WHERE id = ?;
+            """
+        }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
-        sqlite3_bind_double(stmt, 1, timestamp.timeIntervalSince1970)
-        bindText(stmt, 2, sourceApp)
-        bindText(stmt, 3, ocrText)
-        bindText(stmt, 4, ocrText)
-        bindText(stmt, 5, ocrText)
-        bindText(stmt, 6, textContent)
-        bindText(stmt, 7, htmlContent)
-        sqlite3_bind_int(stmt, 8, Int32(max(1, copyCount)))
-        bindText(stmt, 9, id)
+        var bind = 1
+        if bumpTimestamp {
+            sqlite3_bind_double(stmt, Int32(bind), timestamp.timeIntervalSince1970); bind += 1
+        }
+        bindText(stmt, Int32(bind), sourceApp); bind += 1
+        bindText(stmt, Int32(bind), ocrText); bind += 1
+        bindText(stmt, Int32(bind), ocrText); bind += 1
+        bindText(stmt, Int32(bind), ocrText); bind += 1
+        bindText(stmt, Int32(bind), textContent); bind += 1
+        bindText(stmt, Int32(bind), htmlContent); bind += 1
+        sqlite3_bind_int(stmt, Int32(bind), Int32(max(1, copyCount))); bind += 1
+        bindText(stmt, Int32(bind), id)
         let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
         guard rc == SQLITE_DONE else { return false }
@@ -1859,7 +1896,7 @@ final class DatabaseManager: ObservableObject {
         let fsSQL = "UPDATE clipboard_items SET first_seen_at = COALESCE(first_seen_at, ?) WHERE id = ?;"
         var fs: OpaquePointer?
         if sqlite3_prepare_v2(db, fsSQL, -1, &fs, nil) == SQLITE_OK {
-            sqlite3_bind_double(fs, 1, item.timestamp.timeIntervalSince1970)
+            sqlite3_bind_double(fs, 1, (item.firstSeenAt ?? Date()).timeIntervalSince1970)
             bindText(fs, 2, idStr)
             _ = sqlite3_step(fs)
         }
@@ -3002,6 +3039,19 @@ final class DatabaseManager: ObservableObject {
         let ocr: String
         let typeRaw: String
         let sourceApp: String?
+    }
+
+    /// Capture-clock for an existing row. OCR follow-up trx must reuse this, never Date().
+    func captureTimestampLocked(id: String) -> Double? {
+        guard let db = db else { return nil }
+        var stmt: OpaquePointer?
+        defer { if stmt != nil { sqlite3_finalize(stmt) } }
+        guard sqlite3_prepare_v2(db, "SELECT timestamp FROM clipboard_items WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        bindText(stmt, 1, id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_double(stmt, 0)
     }
 
     /// Sync-queue helper: every alive row that already has OCR text. Call on `dbQueue`.
@@ -4752,6 +4802,28 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+
+    /// Wall order is capture time. OCR replay / replica upsert used Date() as wall_ts
+    /// and MAX(timestamp) moved cards to sync-clock. first_seen_at still holds capture.
+    /// copy_count=1 means never recopied — restore timestamp.
+    @discardableResult
+    private func restoreCaptureTimestampsIfNeeded() -> Int {
+        guard let db = db else { return 0 }
+        let flag = "wall.restore_capture_ts_v1"
+        if metaGet(flag) == "1" { return 0 }
+        let sql = """
+        UPDATE clipboard_items
+        SET timestamp = first_seen_at
+        WHERE first_seen_at IS NOT NULL
+          AND timestamp > first_seen_at + 0.5
+          AND COALESCE(copy_count, 1) = 1
+          AND deleted_at IS NULL;
+        """
+        let ok = execQuiet(sql)
+        let n = ok ? Int(sqlite3_changes(db)) : 0
+        metaSet(flag, "1")
+        return n
+    }
 
     // MARK: - Undo substr fold (feature removed)
 

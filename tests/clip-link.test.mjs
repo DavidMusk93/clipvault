@@ -37,6 +37,19 @@ function functionBody(src, name) {
   return src.slice(start, start + name.length + cut);
 }
 
+test('wall timestamp is capture time; OCR/replica must not MAX it', () => {
+  assert.match(db, /bumpTimestamp: Bool/);
+  assert.match(db, /restoreCaptureTimestampsIfNeeded/);
+  assert.match(db, /SET timestamp = first_seen_at/);
+  assert.match(db, /func captureTimestampLocked/);
+  assert.doesNotMatch(
+    functionBody(db, 'refreshRemoteFields'),
+    /timestamp = MAX\(timestamp/,
+  );
+  assert.match(sync, /bumpTimestamp: op\.kind == "touch"/);
+  assert.match(sync, /wallTs: captureTs/);
+});
+
 test('clip_link is a judgment kind with recordLocal + replay + non-default cursor', () => {
   assert.match(sync, /case "clip_link"/);
   assert.match(sync, /func recordLocalClipLink\(/);

@@ -293,6 +293,8 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
     → 对端 pull apply（grow-only 字段：ocr_text 更长才写）
 ```
 
+墙序 = **捕获时间** `clipboard_items.timestamp`（本机复制或对端 wall_ts）。`first_seen_at` = 本机首次见到。OCR / 副本 upsert 不得改 timestamp、不得把 wall_ts 写成 Date()。只有 kind=touch（对端又复制了同一内容）才 bump。
+
 禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite。
 
 ---
