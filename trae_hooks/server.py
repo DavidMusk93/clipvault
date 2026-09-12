@@ -482,6 +482,8 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 q = (qs.get("q") or [""])[0]
                 # Thread list is IM chrome: beats need Ask payloads; tool slog
                 # bodies stay on GET /api/event?id= so WKWebView is not parsing MB.
+                # Tool *index* must be complete — LIMIT 200 newest is CLIENT_CAP
+                # and historical turns collapse to Stop last_assistant_message.
                 list_cols = (
                     "event_id, ts, instance_id, session_id, hook_event, source, "
                     "cwd, tool_name, llm_tool_name, tool_use_id, prompt, "
@@ -493,6 +495,10 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                     "cwd, tool_name, llm_tool_name, tool_use_id, prompt, "
                     "last_assistant_message, notification_type, notification_message, "
                     "loop_count, tool_input, tool_response, raw_hash"
+                )
+                tool_index_cols = (
+                    "event_id, ts, session_id, hook_event, "
+                    "tool_name, llm_tool_name, tool_use_id"
                 )
                 view = (qs.get("view") or [""])[0]
                 if session_id and not hook_event and not q:
@@ -514,18 +520,19 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                             [session_id],
                         )
                     if view != "beats":
-                        tools = store.query(
-                            f"""
-                            SELECT {list_cols}
-                            FROM hook_events
-                            WHERE session_id = ?
-                              AND hook_event IN ('PreToolUse', 'PostToolUse')
-                              AND coalesce(tool_name, '') != 'AskUserQuestion'
-                              AND coalesce(llm_tool_name, '') != 'AskUserQuestion'
-                            ORDER BY ts DESC
-                            LIMIT ?
-                            """,
-                            [session_id, limit],
+                        tools = index_session_tools(
+                            store.query(
+                                f"""
+                                SELECT {tool_index_cols}
+                                FROM hook_events
+                                WHERE session_id = ?
+                                  AND hook_event IN ('PreToolUse', 'PostToolUse')
+                                  AND coalesce(tool_name, '') != 'AskUserQuestion'
+                                  AND coalesce(llm_tool_name, '') != 'AskUserQuestion'
+                                ORDER BY ts ASC
+                                """,
+                                [session_id],
+                            )
                         )
                     seen: set[str] = set()
                     rows: list[dict[str, Any]] = []
@@ -650,6 +657,40 @@ def _static_file(url_path: str) -> tuple[bytes, str] | None:
         ctype = STATIC_TYPES.get(resolved.suffix.lower(), "application/octet-stream")
         return resolved.read_bytes(), ctype
     return None
+
+
+TOOL_INDEX_KEYS = (
+    "event_id",
+    "ts",
+    "session_id",
+    "hook_event",
+    "tool_name",
+    "llm_tool_name",
+    "tool_use_id",
+)
+
+
+def index_session_tools(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Full tool timeline as stubs. Bodies stay on GET /api/event?id=.
+
+    Drop PreToolUse when the matching Post exists (same as the IM renderer).
+    Never tail-cap: LIMIT 200 newest tools leaves historical turns as Stop-only.
+    """
+    posted = {
+        str(row.get("tool_use_id") or "")
+        for row in rows
+        if row.get("hook_event") == "PostToolUse" and row.get("tool_use_id")
+    }
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if (
+            row.get("hook_event") == "PreToolUse"
+            and row.get("tool_use_id")
+            and str(row.get("tool_use_id")) in posted
+        ):
+            continue
+        out.append({key: row.get(key) for key in TOOL_INDEX_KEYS})
+    return out
 
 
 def _int(raw: str, default: int, lo: int, hi: int) -> int:

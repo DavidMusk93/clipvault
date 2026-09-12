@@ -1624,19 +1624,23 @@
         if (e.tool_input != null || e.tool_response != null) continue;
         if (e.event_id) ids.push(e.event_id);
       }
-      const want = ids.slice(-1);
-      if (!want.length) return;
+      if (!ids.length) return;
       let n = 0;
-      for (const id of want) {
+      const loadOne = async (id) => {
         if (gen !== eventsGen) return;
         try {
           const d = await (await fetch(apiUrl("/api/event?id=" + encodeURIComponent(id)))).json();
           const ev = d.event;
-          if (!ev || !ev.event_id) continue;
+          if (!ev || !ev.event_id) return;
           const i = liveEvents.findIndex((x) => x.event_id === ev.event_id);
           if (i >= 0) liveEvents[i] = ev;
           n += 1;
         } catch (_) {}
+      };
+      const pool = 4;
+      for (let i = 0; i < ids.length; i += pool) {
+        if (gen !== eventsGen) return;
+        await Promise.all(ids.slice(i, i + pool).map(loadOne));
       }
       if (n && gen === eventsGen) paintFromLive("patch");
     }
@@ -1659,7 +1663,10 @@
       const ac = new AbortController();
       if (kind !== "tools") eventsAbort = ac;
       const q = (document.getElementById("q") || {}).value || "";
-      const params = new URLSearchParams({ limit: "200" });
+      const params = new URLSearchParams();
+      // Tool index is the whole timeline. limit=200 here is CLIENT_CAP:
+      // historical turns keep Stop conclusions and drop every Pre/PostToolUse.
+      if (kind !== "tools") params.set("limit", "200");
       if (sid) params.set("session_id", sid);
       if (String(q).trim()) params.set("q", String(q).trim());
       else if (kind === "beats" || kind === "tools") params.set("view", kind);
@@ -1732,6 +1739,8 @@
       if (canFetch(load)) await loadEvents("tools", { paint: false });
       if (current && liveEvents.length) paintFromLive("pair");
       else if (current) paintFromLive("beats");
+      if (canFetch(load)) await hydrateSlimTools();
+      if (canFetch(load)) dispatch({ type: "resync_ok" });
     }
     $("q").addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") loadThreadPair();

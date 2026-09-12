@@ -58,6 +58,7 @@ test('AGENTS.md states the six product-loss modes as hard law', () => {
   assert.match(agents, /hydrateBlob/);
   assert.match(agents, /Documents/);
   assert.match(agents, /禁止合成一张/);
+  assert.match(agents, /历史只剩 Stop 结论/);
   assert.match(agents, /wall-integrity\.test\.mjs/);
   assert.match(agents, /WallClockPolicy\.swift/);
   assert.match(agents, /fetchPage\(\{reset:true\}\)/);

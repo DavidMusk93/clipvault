@@ -285,6 +285,10 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(html, /if \(!pack.open && body.dataset.expandAll !== \"1\"\)/);
   assert.match(html, /scheduleList/);
   assert.match(html, /hydrateSlimTools/);
+  assert.match(html, /await hydrateSlimTools\(\)/);
+  assert.match(html, /if \(kind !== "tools"\) params\.set\("limit", "200"\)/);
+  assert.match(server, /def index_session_tools/);
+  assert.match(server, /tool_index_cols/);
   assert.match(html, /加载对话…/);
   assert.match(html, /await loadEvents\(\"beats\", \{ paint: false \}\)/);
   assert.match(html, /runResync/);

@@ -53,6 +53,7 @@
   图404  /api/image 不 hydrate；blobs→Documents 链   → 卡在、图没有
   塌列   pack 0/NaN 锁 col0；空列仍 flex-grow         → 墙变成一条
   团块   对端 206ms 内 440 张图是 440 张卡            → 禁止合成一张
+  会话   工具 LIMIT 200 砍尾                         → 历史只剩 Stop 结论
 ```
 
 5. **墙序 = 捕获时间。** `clipboard_items.timestamp` 只表示复制发生的时刻（本机捕获或对端捕获 `wall_ts`）。OCR、副本 upsert、hydrate **不得**改这条序。只有 `kind=touch` 才 bump。策略真源 `WallClockPolicy.swift`。事故：2026-09-11 OCR 回放 `wall_ts=Date()` + `MAX(timestamp)`。
@@ -253,7 +254,9 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
           paused 禁止 fetch；关面板 pause iframe SSE
 
   首屏  cv.trae.snap.v1   stale-while-revalidate（禁止当真相，禁止 cache tool 正文）
-  列表  GET /api/events?view=beats    无 tool_input/tool_response（Ask 除外）
+  节拍  GET /api/events?view=beats     用户 / 助手 Stop / Ask 全文
+  索引  GET /api/events?view=tools     工具 stub 全量（无正文；禁止 LIMIT 200 砍尾）
+  正文  GET /api/event?id=             bundle 展开 / 打开的最后一跳才拉
   hook  SSE stub → GET /api/event?id=  追加；列表 1s 合并
   线程  event_id keyed patch；bundle 就地手风琴
   置顶  DuckDB session_pins + POST /api/sessions/pin   不进墙 pin rail
@@ -261,11 +264,11 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 采集是 **Mac 一份 DuckDB + 多机 Quack 写入**，不是 clip 的 trx 同步。远端只装 hook/spool/quack client，禁止每机再起 `server.py`。部署：`docs/trae-hooks.md`。
 
-**hook 禁止每次拉 `/api/sessions`+全量 events。** bundle 正文 **lazy** 加载。
+**hook 禁止每次拉 `/api/sessions`+全量 events。** 工具 **索引必须完整**；bundle 正文 **lazy** 加载。历史回合不得只剩 `Stop.last_assistant_message`。回归：`tests/session-thread.test.mjs`。
 
 列语义色：蜂蜜暖度=`fresh/today/week/old`；工具蓝=`xs/s/m/l`。禁止彩虹。默认打开 `last_ts` 最大的会话。用户气泡全展开；工具只在助手侧压缩，最后一条操作始终展开。
 
-禁止：`setInterval` 刷 DOM；每次 hook 整页 `innerHTML`；overlay 盖住后续气泡；embed 窄宽叠成 30vh。
+禁止：`setInterval` 刷 DOM；每次 hook 整页 `innerHTML`；overlay 盖住后续气泡；embed 窄宽叠成 30vh；用最新 200 条工具当整段历史。
 
 新加载 bug：先补 `tests/session-load.test.mjs` 再改 fetch。
 
