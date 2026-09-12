@@ -331,6 +331,15 @@ test('head merge prepends new cards and skips unchanged signatures', () => {
   );
 });
 
+test('masonry stays a row of columns; degenerate one-strip self-heals', () => {
+  assert.match(indexHtml, /\.masonry\s*\{[\s\S]{0,280}?flex-direction:\s*row/);
+  assert.match(indexHtml, /\.masonry\s*\{[\s\S]{0,280}?flex-wrap:\s*nowrap/);
+  assert.match(indexHtml, /function masonryIsDegenerate/);
+  assert.match(indexHtml, /function healMasonryIfDegenerate/);
+  assert.match(indexHtml, /Number\.isFinite\(raw\) && raw > 0 \? raw : 1/);
+  assert.match(indexHtml, /healMasonryIfDegenerate\(host\)/);
+});
+
 test('delete/restore use differential remove (no full rebuild scroll jump)', () => {
   assert.match(indexHtml, /function removeCardFromMasonry/, 'differential remove required');
   const delIdx = indexHtml.indexOf('async function deleteClip');

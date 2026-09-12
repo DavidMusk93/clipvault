@@ -19,15 +19,18 @@ const Masonry = {
   },
 
   pack(heights, cols, gap = 14) /* sync web MASONRY_GAP */ {
+    const nCols = Math.max(1, cols | 0);
     const colOf = new Array(heights.length);
-    const colHeights = new Array(cols).fill(0);
+    const colHeights = new Array(nCols).fill(0);
     for (let i = 0; i < heights.length; i++) {
       let best = 0;
-      for (let c = 1; c < cols; c++) {
+      for (let c = 1; c < nCols; c++) {
         if (colHeights[c] < colHeights[best]) best = c;
       }
       colOf[i] = best;
-      colHeights[best] += heights[i] + (colHeights[best] > 0 ? gap : 0);
+      const raw = Number(heights[i]);
+      const add = Number.isFinite(raw) && raw > 0 ? raw : 1;
+      colHeights[best] += add + (colHeights[best] > 0 ? gap : 0);
     }
     return { colOf, colHeights };
   },
@@ -92,6 +95,15 @@ test('pack empty input', () => {
   const { colOf, colHeights } = Masonry.pack([], 3, 16);
   assert.deepEqual(colOf, []);
   assert.deepEqual(colHeights, [0, 0, 0]);
+});
+
+test('pack zero/NaN heights still uses multiple columns', () => {
+  const { colOf } = Masonry.pack([0, 0, 0, 0, Number.NaN, undefined], 3, 14);
+  assert.equal(colOf.length, 6);
+  assert.ok(new Set(colOf).size >= 2, 'zero heights must not dump every card into col0');
+  assert.equal(colOf[0], 0);
+  assert.equal(colOf[1], 1);
+  assert.equal(colOf[2], 2);
 });
 
 test('isCompactItem: short html/text yes, image/long no', () => {
