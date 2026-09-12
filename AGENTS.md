@@ -44,6 +44,18 @@
 1. **改动及时提交并推送。** 可独立描述的单元验证完 → `git commit` → `git push origin <branch>`（默认 `master`）。禁止攒脏树、只 commit 不 push、用会话结束当「以后再推」。push 失败必须写明。
 2. **nmem 不是流水账。** 写可复用机制：一句话结论 + ASCII + 证据。禁止聊天摘要。
 3. **开发迭代 = metrics-based optimization。** 卡顿/抖动/白屏先读本机 `ui-metrics.db`（`#debug` / `GET /api/ui-metrics/recent`）。归因不够：**先补点，再改**。禁止让用户翻红行。未用同一指标对照不得宣称丝滑。
+4. **记忆不可丢。一次错误，用户的时间线就没了。** ClipVault 是产品。墙「丢了」几乎都是序 / 翻页 / 筛选 / 回源写错，不是用户删了库。禁止用 cap、占位图、合成一张卡、只滤当前页来「看起来正常」。回归必须过 `tests/wall-integrity.test.mjs` + `tests/wall_clock_main.swift` + `tests/wall-clock.test.mjs`（`check-frontend.sh`）。
+
+```text
+  拨钟   OCR/副本 wall_ts=Date() 或 MAX(timestamp)   → 440 张挤同一秒
+  砍尾   CLIENT_CAP / applyCap 丢掉 cursor 更旧行    → 翻不动
+  滤错   chip 只 clientFilter 当前 30 条             → 「其他类型都丢了」
+  图404  /api/image 不 hydrate；blobs→Documents 链   → 卡在、图没有
+  塌列   pack 0/NaN 锁 col0；空列仍 flex-grow         → 墙变成一条
+  团块   对端 206ms 内 440 张图是 440 张卡            → 禁止合成一张
+```
+
+5. **墙序 = 捕获时间。** `clipboard_items.timestamp` 只表示复制发生的时刻（本机捕获或对端捕获 `wall_ts`）。OCR、副本 upsert、hydrate **不得**改这条序。只有 `kind=touch` 才 bump。策略真源 `WallClockPolicy.swift`。事故：2026-09-11 OCR 回放 `wall_ts=Date()` + `MAX(timestamp)`。
 
 ---
 
@@ -165,7 +177,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 ## 墙
 
-**不变式：** 列表轻、预览重；变更差分；滚动不重建瀑布流。
+**不变式：** 列表轻、预览重；变更差分；滚动不重建瀑布流。**时间线 = 捕获时钟，不是同步到达时钟。**
 
 ```text
   SSE /api/events
@@ -184,7 +196,12 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | hover 不改几何 | `translateY` hover + 全量 remount |
 | 图框锁高；禁止 `img.onload → rebuildFromData` | 滑动中全量 rebalance |
 | 置顶排最前；翻页 cursor 只走未置顶 | 钉子混进下一页 |
-| 对端 sync 按 wall_ts 进同一 (timestamp,id) 序 | 为「列表轻」砍 cursor 刚拉到的更旧行 |
+| 对端 sync 按 **捕获** wall_ts 进同一 (timestamp,id) 序 | 用同步/OCR 的 Date() 当 timestamp |
+| cursor 怎么走，clips/DOM 就怎么留 | 为「列表轻」砍 cursor 刚拉到的更旧行（CLIENT_CAP 砍尾） |
+| 类型 chip 改 `type=` 后 `fetchPage({reset:true})` 走完整 keyset | 只 `clientFilter` 内存里的 30 条 |
+| html chip `IN ('html','rtf')`（Notes 粘贴） | html 把 rtf 当丢失 |
+| pack 0/NaN 仍分列；一列有卡必须 heal | 空列 flex 把墙拉成一条 |
+| 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
 | 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
 
 ### URL 双面（只在这里写一遍）
@@ -293,9 +310,17 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
     → 对端 pull apply（grow-only 字段：ocr_text 更长才写）
 ```
 
-墙序 = **捕获时间** `clipboard_items.timestamp`（本机复制或对端 wall_ts）。`first_seen_at` = 本机首次见到。OCR / 副本 upsert 不得改 timestamp、不得把 wall_ts 写成 Date()。只有 kind=touch（对端又复制了同一内容）才 bump。
+```text
+  捕获          timestamp = 复制时刻     first_seen_at = 本机首次见到
+  OCR 回放      只写 ocr_text            trx.wall_ts = 原 timestamp（禁止 Date()）
+  副本 upsert   只补字段                 禁止 MAX(timestamp)
+  kind=touch    对端又复制了同一内容      才允许 bump timestamp
+  墙            ORDER BY timestamp DESC, id DESC
+```
 
-禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite。
+策略真源：`WallClockPolicy.swift`。回归：`tests/wall_clock_main.swift`（策略 + 440 团块 keyset 必须翻到更早 text；类型 chip 走同一 keyset，禁止只滤第 1 页）。
+
+禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite；OCR/hydrate 拨捕获钟；把 440 张图合成一张卡。
 
 ---
 
@@ -435,7 +460,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 ./scripts/check-frontend.sh
 ```
 
-门禁是 `scripts/check-frontend.sh`：`node --test tests/*.test.mjs`，文件名**硬编码**在脚本 gates 注释里。新测试必须追加进该注释。`node --check` 不过禁止上线。
+门禁是 `scripts/check-frontend.sh`：`node --test tests/*.test.mjs`，文件名**硬编码**在脚本 gates 注释里。新测试必须追加进该注释。墙记忆丢失：`tests/wall-integrity.test.mjs` + `tests/wall_clock_main.swift` + `tests/wall-clock.test.mjs`。`node --check` 不过禁止上线。
 
 ### commit / push
 
@@ -472,6 +497,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | Compose | nmem `c2c20497-bc52-4204-99fc-34191bb98a99` |
 | 评论 header | nmem `clipvault_reader_comment_header_strut_20260814` |
 | 错 home | `docs/incident-20260811-wrong-data-home.md` |
+| 墙记忆丢失（拨钟/砍尾/滤错/图404/塌列） | 本文硬约束 4–5；`tests/wall-integrity.test.mjs` |
 | GDrive EDEADLK | nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813` |
 | URL/HTML 安全 | nmem `clipvault_gate_url_html_safety_20260813` |
 | SQLite 运维 | `.trae/skills/sqlite-runtime-tricks/` |

@@ -106,6 +106,17 @@ test('pack zero/NaN heights still uses multiple columns', () => {
   assert.equal(colOf[2], 2);
 });
 
+test('live packMasonry heals a one-column collapse', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const html = fs.readFileSync(path.resolve('web/index.html'), 'utf8');
+  assert.match(html, /function healMasonryIfDegenerate/);
+  assert.match(html, /function masonryIsDegenerate/);
+  assert.match(html, /used\.size < 2/);
+  assert.match(html, /i % cols/);
+  assert.match(html, /healMasonryIfDegenerate\(host\)/);
+});
+
 test('isCompactItem: short html/text yes, image/long no', () => {
   assert.equal(Masonry.isCompactItem({ type: 'html', htmlContent: '<span>city</span>' }), true);
   assert.equal(Masonry.isCompactItem({ type: 'text', textContent: 'hello' }), true);

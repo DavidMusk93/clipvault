@@ -250,12 +250,16 @@ final class CloudDocsSyncService {
             sem.signal()
         }
         sem.wait()
+        guard let wallTs = WallClockPolicy.wallTsForDerivedOp(captureTs: captureTs) else {
+            print("[Sync] ocr skip, no capture clock id=\(itemId.prefix(8))")
+            return 0
+        }
         var op = makeOp(
             kind: "upsert",
             itemId: itemId,
             item: nil,
             blobKeys: nil,
-            wallTs: captureTs
+            wallTs: wallTs
         )
         op.contentHash = contentHash
         op.type = typeRaw
@@ -1127,7 +1131,7 @@ final class CloudDocsSyncService {
                 urlString: op.url,
                 fileURLPaths: op.fileUrls,
                 copyCount: op.copyCount ?? 1,
-                bumpTimestamp: op.kind == "touch"
+                bumpTimestamp: WallClockPolicy.bumpTimestamp(forKind: op.kind)
             )
         default:
             return false
