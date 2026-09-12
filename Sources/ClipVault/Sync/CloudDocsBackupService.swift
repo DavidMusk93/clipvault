@@ -608,7 +608,7 @@ final class CloudDocsBackupService {
                                     // AGENTS.md · 备份：增量是核心。forceFull 全目标禁止（含 quark）。
                                     // size-match skip；只修 missing / sizeMismatch / 空占位。
                                     let forceFull = false
-                                    let cas = self.syncBlobsToCAS(
+                                    let cas = try self.syncBlobsToCAS(
                                         destRoot: blobs,
                                         forceFullCopy: forceFull,
                                         cloudSafe: (dest.type == "gdrive" || dest.type == "icloud")
@@ -829,16 +829,26 @@ final class CloudDocsBackupService {
     /// Mirror local CAS into destination `blobs/` **incrementally**.
     /// - forceFullCopy: **must stay false** (AGENTS.md · 备份). Parameter kept only for call-site clarity / tests.
     /// - cloudSafe: stream write + long backoff; never bulk delete+copyItem (EDEADLK).
-    private func syncBlobsToCAS(destRoot: URL, forceFullCopy: Bool = false, cloudSafe: Bool = false) -> CASSyncResult {
+    private func syncBlobsToCAS(destRoot: URL, forceFullCopy: Bool = false, cloudSafe: Bool = false) throws -> CASSyncResult {
         try? fm.createDirectory(at: destRoot, withIntermediateDirectories: true)
         scrubCloudTmpFiles(in: destRoot)
-        let local = database.blobsDirectoryURL
-        guard let files = try? fm.contentsOfDirectory(
-            at: local,
-            includingPropertiesForKeys: [.fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return CASSyncResult(total: 0, bytes: 0, copied: 0, repaired: 0)
+        let local = database.blobsDirectoryURL.resolvingSymlinksInPath()
+        let files: [URL]
+        do {
+            files = try fm.contentsOfDirectory(
+                at: local,
+                includingPropertiesForKeys: [.fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            throw NSError(
+                domain: "ClipFlow.Backup",
+                code: 3,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "local CAS unlistable at \(local.path): \(error.localizedDescription)",
+                ]
+            )
         }
         // Absolute ban: never rewrite the whole CAS tree in one pass (quark included).
         var forceFullCopy = forceFullCopy
@@ -899,11 +909,12 @@ final class CloudDocsBackupService {
 
     /// Ensure every local CAS file exists on dest with identical size.
     private func verifyCASMirror(local: URL, dest: URL) throws -> CASVerifyResult {
-        let localFiles = (try? fm.contentsOfDirectory(
-            at: local,
+        let resolved = local.resolvingSymlinksInPath()
+        let localFiles = try fm.contentsOfDirectory(
+            at: resolved,
             includingPropertiesForKeys: [.fileSizeKey],
             options: [.skipsHiddenFiles]
-        )) ?? []
+        )
         var missing = 0
         var sizeMismatch = 0
         for src in localFiles where src.pathExtension == "bin" {
@@ -1268,7 +1279,7 @@ final class CloudDocsBackupService {
         try fm.createDirectory(at: latest, withIntermediateDirectories: true)
         try fm.createDirectory(at: snaps, withIntermediateDirectories: true)
         try fm.createDirectory(at: blobs, withIntermediateDirectories: true)
-        let cas = syncBlobsToCAS(destRoot: blobs, forceFullCopy: false, cloudSafe: false)
+        let cas = try syncBlobsToCAS(destRoot: blobs, forceFullCopy: false, cloudSafe: false)
         let verified = try verifyCASMirror(local: database.blobsDirectoryURL, dest: blobs)
         guard verified.ok else {
             throw NSError(domain: "ClipFlow.Backup", code: 2, userInfo: [

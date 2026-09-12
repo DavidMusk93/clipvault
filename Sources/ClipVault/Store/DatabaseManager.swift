@@ -79,6 +79,7 @@ final class DatabaseManager: ObservableObject {
         try? fm.createDirectory(at: appDir, withIntermediateDirectories: true)
         dbPath = appDir.appendingPathComponent("clipflow.db")
         blobsDir = appDir.appendingPathComponent("blobs", isDirectory: true)
+        materializeBlobsIfSymlinked()
         try? fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: appDir.appendingPathComponent("config", isDirectory: true), withIntermediateDirectories: true)
         try? fm.createDirectory(at: appDir.appendingPathComponent("logs", isDirectory: true), withIntermediateDirectories: true)
@@ -202,12 +203,37 @@ final class DatabaseManager: ObservableObject {
         blobsDir.appendingPathComponent(hash + ".bin")
     }
 
+    /// LaunchAgent + TCC cannot read historical CAS through a Documents symlink.
+    /// Copy into CLIPVAULT_HOME/blobs (real directory) once.
+    private func materializeBlobsIfSymlinked() {
+        let path = blobsDir.path
+        guard let dest = try? fm.destinationOfSymbolicLink(atPath: path) else { return }
+        let src = (dest as NSString).isAbsolutePath
+            ? URL(fileURLWithPath: dest, isDirectory: true)
+            : blobsDir.deletingLastPathComponent().appendingPathComponent(dest, isDirectory: true)
+        print("[Database] blobs is symlink -> \(src.path); materializing into data home")
+        let tmp = appDir.appendingPathComponent("blobs.materialize-tmp", isDirectory: true)
+        try? fm.removeItem(at: tmp)
+        do {
+            try fm.copyItem(at: src, to: tmp)
+            let bak = appDir.appendingPathComponent("blobs.symlink.bak")
+            try? fm.removeItem(at: bak)
+            try fm.moveItem(at: blobsDir, to: bak)
+            try fm.moveItem(at: tmp, to: blobsDir)
+            print("[Database] blobs materialized at \(blobsDir.path)")
+        } catch {
+            print("[Database] blobs materialize failed: \(error)")
+            try? fm.removeItem(at: tmp)
+        }
+    }
+
     @discardableResult
     func writeBlobFile(hash: String, data: Data) -> Bool {
         let url = blobFileURL(hash: hash)
-        if fm.fileExists(atPath: url.path) { return true }
+        if let existing = try? Data(contentsOf: url), existing.count > 16 { return true }
         do {
             try fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
+            try? fm.removeItem(at: url)
             try data.write(to: url, options: .atomic)
             return true
         } catch {
@@ -217,16 +243,33 @@ final class DatabaseManager: ObservableObject {
     }
 
     func readBlobFile(hash: String) -> Data? {
-        let url = blobFileURL(hash: hash)
-        guard fm.fileExists(atPath: url.path) else { return nil }
-        return try? Data(contentsOf: url)
+        let h = hash.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard h.count == 64 else { return nil }
+        var urls: [URL] = [blobFileURL(hash: h)]
+        let docs = (fm.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents"))
+            .appendingPathComponent("ClipFlow/blobs", isDirectory: true)
+        if docs.standardizedFileURL != blobsDir.resolvingSymlinksInPath().standardizedFileURL {
+            urls.append(docs.appendingPathComponent(h + ".bin"))
+        }
+        for url in urls {
+            guard let data = try? Data(contentsOf: url), data.count > 16 else { continue }
+            if url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+                != blobsDir.resolvingSymlinksInPath().standardizedFileURL {
+                _ = writeBlobFile(hash: h, data: data)
+            }
+            return data
+        }
+        return nil
     }
 
     /// Import a blob from backup CAS into local store (restore path).
+    /// Existence is not enough — symlink/TCC can exist and still be unreadable.
     func importBlobIfNeeded(hash: String, from source: URL) {
         let dest = blobFileURL(hash: hash)
-        if fm.fileExists(atPath: dest.path) { return }
+        if let existing = try? Data(contentsOf: dest), existing.count > 16 { return }
         try? fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
+        try? fm.removeItem(at: dest)
         try? fm.copyItem(at: source, to: dest)
     }
 

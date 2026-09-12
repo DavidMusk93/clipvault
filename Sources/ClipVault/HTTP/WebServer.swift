@@ -821,9 +821,9 @@ class WebServer {
     /// Put the stored CAS image on NSPasteboard (not OCR). Do not attach
     /// `public.utf8-plain-text` — many paste targets prefer text over image.
     private func copyStoredImageToPasteboard(id: UUID, connection: HTTPByteSink) {
-        database.fetchImageData(id: id) { [weak self] data in
+        loadClipImageBytes(id: id) { [weak self] data in
             guard let self else { return }
-            guard let data, !data.isEmpty else {
+            guard let data, data.count > 16 else {
                 self.sendErrorResponse(connection: connection, status: 404, message: "Not Found")
                 return
             }
@@ -838,6 +838,36 @@ class WebServer {
                 source: "web"
             )
             self.sendJSON(["status": "success", "copied": "image"], connection: connection)
+        }
+    }
+
+    /// Local CAS first, then the same hydrateBlob roots as archive (live/attach ∪ backup CAS).
+    /// SQLite having a type=image row must not 404 the wall if any replica still has bytes.
+    private func loadClipImageBytes(id: UUID? = nil, sha: String? = nil, completion: @escaping (Data?) -> Void) {
+        if let raw = sha?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           ArchiveImageInliner.isAssetSHA(raw) {
+            if let data = database.readBlobFile(hash: raw), data.count > 16 {
+                completion(data)
+                return
+            }
+            if sync?.hydrateBlob(raw) == true,
+               let data = database.readBlobFile(hash: raw), data.count > 16 {
+                completion(data)
+                return
+            }
+            completion(nil)
+            return
+        }
+        guard let id else { completion(nil); return }
+        database.fetchImageData(id: id) { [weak self] data in
+            if let data, data.count > 16 {
+                completion(data)
+                return
+            }
+            guard let self else { completion(nil); return }
+            self.database.fetchItem(id: id) { item in
+                self.loadClipImageBytes(sha: item?.contentHash, completion: completion)
+            }
         }
     }
 
@@ -2454,23 +2484,9 @@ class WebServer {
 
         if let sha = comps.queryItems?.first(where: { $0.name == "sha" })?.value?.lowercased(),
            ArchiveImageInliner.isAssetSHA(sha) {
-            guard let data = database.readBlobFile(hash: sha), !data.isEmpty else {
-                sendErrorResponse(connection: connection, status: 404, message: "Not Found")
-                return
+            loadClipImageBytes(sha: sha) { [weak self] data in
+                self?.finishSendImage(data, tier: tier, connection: connection)
             }
-            guard let (body, contentType) = encodeImage(data, tier: tier) else {
-                sendErrorResponse(connection: connection, status: 500, message: "Encode Failed")
-                return
-            }
-            let cache = tier == .full ? "private, max-age=120" : "private, max-age=86400"
-            sendBinary(
-                status: 200,
-                reason: "OK",
-                contentType: contentType,
-                body: body,
-                connection: connection,
-                extraHeaders: [("Cache-Control", cache), ("X-Image-Size", tier.rawValue)]
-            )
             return
         }
 
@@ -2480,28 +2496,29 @@ class WebServer {
             return
         }
 
-        database.fetchImageData(id: uuid) { [weak self] imageData in
-            guard let self = self, let data = imageData, !data.isEmpty else {
-                self?.sendErrorResponse(connection: connection, status: 404, message: "Not Found")
-                return
-            }
-
-            // Resize off main-ish path (already on callback queue)
-            guard let (body, contentType) = self.encodeImage(data, tier: tier) else {
-                self.sendErrorResponse(connection: connection, status: 500, message: "Encode Failed")
-                return
-            }
-
-            let cache = tier == .full ? "private, max-age=120" : "private, max-age=86400"
-            self.sendBinary(
-                status: 200,
-                reason: "OK",
-                contentType: contentType,
-                body: body,
-                connection: connection,
-                extraHeaders: [("Cache-Control", cache), ("X-Image-Size", tier.rawValue)]
-            )
+        loadClipImageBytes(id: uuid) { [weak self] data in
+            self?.finishSendImage(data, tier: tier, connection: connection)
         }
+    }
+
+    private func finishSendImage(_ data: Data?, tier: ImageSizeTier, connection: HTTPByteSink) {
+        guard let data, data.count > 16 else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        guard let (body, contentType) = encodeImage(data, tier: tier) else {
+            sendErrorResponse(connection: connection, status: 500, message: "Encode Failed")
+            return
+        }
+        let cache = tier == .full ? "private, max-age=120" : "private, max-age=86400"
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: contentType,
+            body: body,
+            connection: connection,
+            extraHeaders: [("Cache-Control", cache), ("X-Image-Size", tier.rawValue)]
+        )
     }
     
 

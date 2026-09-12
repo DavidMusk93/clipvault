@@ -172,6 +172,19 @@ test('archive sync ships the document closure, not just the HTML sha', () => {
   assert.doesNotMatch(sync, /blobKeys: \[htmlSHA\]/);
 });
 
+test('wall image 404 hydrates the same CAS replicas as archive', () => {
+  const swift = src('WebServer.swift');
+  const db = src('DatabaseManager.swift');
+  const backup = src('CloudDocsBackupService.swift');
+  assert.match(swift, /func loadClipImageBytes/);
+  assert.match(swift, /hydrateBlob\(raw\)/);
+  assert.match(db, /func materializeBlobsIfSymlinked/);
+  assert.match(db, /try\? Data\(contentsOf: url\)/);
+  assert.match(backup, /resolvingSymlinksInPath/);
+  assert.match(backup, /local CAS unlistable/);
+  assert.match(backup, /throws -> CASSyncResult/);
+});
+
 test('archive HTML contract: asset sha is 64 hex and extractable', () => {
   const sha = '50e702b10be74b6200de24bce7a5ab906ef6a137a2beefbc3e9966e109eb42da';
   const html = `<img src="/api/archive/asset?sha=${sha}" alt="x">`;

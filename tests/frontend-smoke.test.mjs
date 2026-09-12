@@ -331,6 +331,15 @@ test('head merge prepends new cards and skips unchanged signatures', () => {
   );
 });
 
+test('broken thumbs keep card geometry (no display:none collapse)', () => {
+  assert.match(indexHtml, /\.thumb-wrap\.is-broken\s*\{[\s\S]{0,180}?background:/);
+  assert.doesNotMatch(
+    indexHtml,
+    /\.thumb-wrap\.is-broken\s*\{[\s\S]{0,80}?display:\s*none\s*!important/,
+    'hiding the thumb box collapses masonry and looks like lost history cards',
+  );
+});
+
 test('masonry stays a row of columns; degenerate one-strip self-heals', () => {
   assert.match(indexHtml, /\.masonry\s*\{[\s\S]{0,280}?flex-direction:\s*row/);
   assert.match(indexHtml, /\.masonry\s*\{[\s\S]{0,280}?flex-wrap:\s*nowrap/);
