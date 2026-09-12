@@ -43,9 +43,21 @@ test('analysis fab sits above the debug fab', () => {
   assert.doesNotMatch(html, /\.cv-mine-float \{[\s\S]{0,80}bottom:\s*52px/);
   assert.match(html, /data-scope="session"/);
   assert.match(html, /data-scope="recent"/);
-  assert.match(html, /复制反馈到剪贴板/);
+  assert.match(html, /复制 AGENTS 草稿/);
   assert.match(html, /cv\.trae\.mine\.v1/);
   assert.match(html, /sessMetricsCtl\?\.setOpen/);
+});
+
+test('analysis is a stage sheet, not a 420px pop with ellipsis', () => {
+  assert.match(html, /cv-mine-sheet/);
+  assert.match(html, /inset:\s*8px 8px 52px 8px/);
+  const sheet = html.slice(html.indexOf('.cv-mine-sheet'), html.indexOf('.cv-mine-fab.is-on'));
+  assert.match(sheet, /overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(sheet, /width:\s*min\(420px/);
+  assert.doesNotMatch(sheet, /text-overflow:\s*ellipsis/);
+  assert.match(html, /f\.draft/);
+  assert.match(html, /f\.evidence/);
+  assert.match(html, /b\.tables/);
 });
 
 test('directions cover user and agent axes', () => {

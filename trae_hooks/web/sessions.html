@@ -648,34 +648,55 @@
       align-items: flex-end;
       gap: 8px;
     }
-    .cv-mine-pop {
-      width: min(420px, calc(100vw - 36px));
-      max-height: min(72vh, 640px);
-      overflow: auto;
-      overscroll-behavior: contain;
-      padding: 12px 14px 14px;
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.94);
+    .cv-mine-sheet {
+      position: absolute;
+      inset: 8px 8px 52px 8px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      background: rgba(250, 250, 250, 0.98);
       backdrop-filter: blur(22px) saturate(160%);
       -webkit-backdrop-filter: blur(22px) saturate(160%);
-      border: 0.5px solid rgba(60, 60, 67, 0.12);
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+      border: 0.5px solid var(--separator);
+      border-radius: 16px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.16);
+      color: var(--ink);
     }
-    .cv-mine-pop[hidden] { display: none !important; }
-    .cv-mine-pop h2 {
-      font-size: 15px;
+    .cv-mine-sheet[hidden] { display: none !important; }
+    .cv-mine-sheet .mine-head {
+      flex: 0 0 auto;
+      padding: 12px 16px 10px;
+      border-bottom: 0.5px solid var(--separator);
+    }
+    .cv-mine-sheet .mine-head-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .cv-mine-sheet h2 {
+      flex: 1;
+      font-size: 16px;
       font-weight: 650;
       letter-spacing: -0.02em;
+      margin: 0;
+    }
+    .cv-mine-sheet .mine-sum {
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
       margin: 0 0 8px;
     }
-    .cv-mine-pop .mine-scopes,
-    .cv-mine-pop .mine-dirs {
+    .cv-mine-sheet .mine-scopes,
+    .cv-mine-sheet .mine-dirs {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      margin: 0 0 10px;
+      margin: 0 0 6px;
     }
-    .cv-mine-pop .mine-chip {
+    .cv-mine-sheet .mine-chip {
       height: 24px;
       padding: 0 9px;
       border-radius: 980px;
@@ -685,55 +706,95 @@
       font: 600 11.5px/23px inherit;
       cursor: pointer;
     }
-    .cv-mine-pop .mine-chip.is-on {
+    .cv-mine-sheet .mine-chip.is-on {
       color: var(--honey);
       border-color: var(--honey);
       background: var(--honey-soft);
     }
-    .cv-mine-pop .mine-fb {
-      border-radius: 10px;
-      padding: 8px 10px;
-      margin: 0 0 8px;
-      background: var(--honey-soft);
-      font-size: 12.5px;
-      line-height: 1.45;
+    .cv-mine-sheet .mine-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      overscroll-behavior: contain;
+      padding: 12px 16px 20px;
     }
-    .cv-mine-pop .mine-fb .who {
-      font-size: 10.5px;
+    .cv-mine-sheet .mine-fb {
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin: 0 0 10px;
+      background: var(--honey-soft);
+      font-size: 13.5px;
+      line-height: 1.5;
+    }
+    .cv-mine-sheet .mine-fb .who {
+      font-size: 11px;
       font-weight: 650;
       letter-spacing: 0.04em;
       text-transform: uppercase;
       color: var(--honey);
-      margin-bottom: 3px;
+      margin-bottom: 2px;
     }
-    .cv-mine-pop .mine-block { margin: 12px 0 4px; }
-    .cv-mine-pop .mine-block h3 {
-      font-size: 12px;
+    .cv-mine-sheet .mine-fb .ttl {
+      font-weight: 650;
+      margin-bottom: 4px;
+    }
+    .cv-mine-sheet .mine-fb .ev {
+      margin-top: 6px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--muted);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .cv-mine-sheet .mine-fb .draft {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #fff;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .cv-mine-sheet .mine-block { margin: 16px 0 8px; }
+    .cv-mine-sheet .mine-block h3 {
+      font-size: 13px;
+      font-weight: 650;
+      margin: 0 0 4px;
+    }
+    .cv-mine-sheet .mine-block .note {
+      font-size: 12.5px;
+      color: var(--muted);
+      margin: 0 0 8px;
+      line-height: 1.45;
+    }
+    .cv-mine-sheet .mine-cap {
+      font-size: 11.5px;
       font-weight: 650;
       color: var(--muted);
-      margin: 0 0 6px;
+      margin: 10px 0 4px;
     }
-    .cv-mine-pop table {
+    .cv-mine-sheet table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 11.5px;
+      font-size: 12.5px;
       font-variant-numeric: tabular-nums;
     }
-    .cv-mine-pop th, .cv-mine-pop td {
+    .cv-mine-sheet th, .cv-mine-sheet td {
       text-align: left;
-      padding: 3px 4px;
+      padding: 5px 6px;
       border-bottom: 0.5px solid var(--separator);
       vertical-align: top;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
     }
-    .cv-mine-pop td.path, .cv-mine-pop td.repo, .cv-mine-pop td.tool, .cv-mine-pop td.mcp, .cv-mine-pop td.doc {
-      max-width: 240px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    .cv-mine-sheet td.path, .cv-mine-sheet td.repo, .cv-mine-sheet td.tool,
+    .cv-mine-sheet td.mcp, .cv-mine-sheet td.doc, .cv-mine-sheet td.prompt {
       font-family: var(--font-mono);
+      font-size: 12px;
     }
-    .cv-mine-pop .mine-actions { display: flex; gap: 8px; margin-top: 10px; }
-    .cv-mine-pop .mine-copy {
+    .cv-mine-sheet .mine-copy,
+    .cv-mine-sheet .mine-x {
       height: 28px;
       padding: 0 10px;
       border-radius: 8px;
@@ -742,7 +803,7 @@
       font: 600 12px/27px inherit;
       cursor: pointer;
     }
-    .cv-mine-pop .mine-empty { color: var(--muted); font-size: 12.5px; }
+    .cv-mine-sheet .mine-empty { color: var(--muted); font-size: 13px; }
     .cv-mine-fab.is-on {
       color: var(--honey);
       border-color: var(--honey);
@@ -877,25 +938,30 @@
     } catch (_) {}
     const mineHost = document.createElement("div");
     mineHost.className = "cv-mine-float";
-    mineHost.innerHTML = `<div class="cv-mine-pop" hidden>
-        <h2>会话分析</h2>
+    mineHost.innerHTML = `<button type="button" class="cv-debug-fab cv-mine-fab" id="mineOpen" aria-label="分析" aria-pressed="false">分析</button>`;
+    corner.insertBefore(mineHost, corner.firstChild);
+    const jump = $("jumpBot");
+    if (jump) corner.appendChild(jump);
+    const mineSheet = document.createElement("div");
+    mineSheet.className = "cv-mine-sheet";
+    mineSheet.hidden = true;
+    mineSheet.innerHTML = `<div class="mine-head">
+        <div class="mine-head-row">
+          <h2>会话分析</h2>
+          <button type="button" class="mine-copy" id="mineCopy">复制 AGENTS 草稿</button>
+          <button type="button" class="mine-x" id="mineClose" aria-label="关闭">关闭</button>
+        </div>
+        <p class="mine-sum" id="mineSum"></p>
         <div class="mine-scopes">
           <button type="button" class="mine-chip" data-scope="session">当前会话</button>
           <button type="button" class="mine-chip" data-scope="recent">最近 7 天</button>
         </div>
         <div class="mine-dirs" id="mineDirs"></div>
-        <div id="mineBody"><p class="mine-empty">打开后按工作目录、Git 库、工具与阶段挖资产。</p></div>
-        <div class="mine-actions">
-          <button type="button" class="mine-copy" id="mineCopy">复制反馈到剪贴板</button>
-        </div>
       </div>
-      <button type="button" class="cv-debug-fab cv-mine-fab" id="mineOpen" aria-label="分析" aria-pressed="false">分析</button>`;
-    corner.insertBefore(mineHost, corner.firstChild);
-    const jump = $("jumpBot");
-    if (jump) corner.appendChild(jump);
-    const minePop = mineHost.querySelector(".cv-mine-pop");
-    const mineBody = mineHost.querySelector("#mineBody");
-    const mineDirsEl = mineHost.querySelector("#mineDirs");
+      <div class="mine-scroll" id="mineBody"><p class="mine-empty">打开后按工作目录、Git 库、工具、MCP 与阶段挖资产。</p></div>`;
+    cornerMount.appendChild(mineSheet);
+    const mineBody = mineSheet.querySelector("#mineBody");
+    const mineDirsEl = mineSheet.querySelector("#mineDirs");
     let mineLast = null;
     const persistMine = () => {
       try { localStorage.setItem(MINE_KEY, JSON.stringify({ scope: mineState.scope, dirs: mineState.dirs })); } catch (_) {}
@@ -907,30 +973,54 @@
         const on = !mineState.dirs.length || mineState.dirs.includes(d.id);
         return `<button type="button" class="mine-chip${on ? " is-on" : ""}" data-dir="${escMine(d.id)}">${escMine(d.title)}</button>`;
       }).join("");
-      mineHost.querySelectorAll("[data-scope]").forEach((b) => {
+      mineSheet.querySelectorAll("[data-scope]").forEach((b) => {
         b.classList.toggle("is-on", b.getAttribute("data-scope") === mineState.scope);
       });
+    };
+    const renderTable = (t) => {
+      if (!t || !t.rows || !t.rows.length) return "";
+      const cap = t.caption ? `<div class="mine-cap">${escMine(t.caption)}</div>` : "";
+      const head = t.cols.map((c) => `<th>${escMine(c.title)}</th>`).join("");
+      const body = t.rows.map((row) => `<tr>${t.cols.map((c) => `<td class="${escMine(c.id)}">${escMine(row[c.id] ?? "")}</td>`).join("")}</tr>`).join("");
+      return `${cap}<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     };
     const renderMine = (data) => {
       mineLast = data;
       paintMineChips(data.directions);
+      const sum = mineSheet.querySelector("#mineSum");
+      const s = data && data.summary;
+      if (sum) {
+        sum.textContent = s
+          ? `${s.n_turns || 0} 回合 · ${s.n_tools || 0} 工具 · 工作 ${s.work_s || 0}s · 等待 ${s.wait_s || 0}s · ${s.span || ""}`
+          : "";
+      }
       if (!data || !data.ok) {
         mineBody.innerHTML = `<p class="mine-empty">分析失败${data && data.error ? " · " + escMine(data.error) : ""}</p>`;
         return;
       }
       const fb = (data.feedback || []).map((f) => {
         const who = f.audience === "agent" ? "给 Agent / AGENTS.md" : "给用户 / prompt";
-        return `<div class="mine-fb"><div class="who">${escMine(who)}</div>${escMine(f.text)}</div>`;
+        return `<article class="mine-fb">
+            <div class="who">${escMine(who)}</div>
+            <div class="ttl">${escMine(f.title || "")}</div>
+            <div>${escMine(f.text || "")}</div>
+            ${f.evidence ? `<div class="ev">${escMine(f.evidence)}</div>` : ""}
+            ${f.draft ? `<pre class="draft">${escMine(f.draft)}</pre>` : ""}
+          </article>`;
       }).join("");
-      const blocks = data.active ? data.active.map((id) => data.blocks && data.blocks[id]).filter(Boolean) : Object.values(data.blocks || {});
-      const tables = blocks.map((b) => {
-        const t = b.table || { cols: [], rows: [] };
-        if (!t.rows || !t.rows.length) return "";
-        const head = t.cols.map((c) => `<th>${escMine(c.title)}</th>`).join("");
-        const body = t.rows.map((row) => `<tr>${t.cols.map((c) => `<td class="${escMine(c.id)}">${escMine(row[c.id])}</td>`).join("")}</tr>`).join("");
-        return `<section class="mine-block"><h3>${escMine(b.axis === "user" ? "用户 · " : "Agent · ")}${escMine(b.title)}</h3><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
+      const blocks = data.active
+        ? data.active.map((id) => data.blocks && data.blocks[id]).filter(Boolean)
+        : Object.values(data.blocks || {});
+      const sections = blocks.map((b) => {
+        const tables = (b.tables && b.tables.length ? b.tables : (b.table ? [b.table] : [])).map(renderTable).join("");
+        if (!tables) return "";
+        return `<section class="mine-block">
+            <h3>${escMine(b.axis === "user" ? "用户 · " : "Agent · ")}${escMine(b.title)}</h3>
+            ${b.note ? `<p class="note">${escMine(b.note)}</p>` : ""}
+            ${tables}
+          </section>`;
       }).join("");
-      mineBody.innerHTML = (fb || "") + (tables || `<p class="mine-empty">${data.n_rows ? "这个方向没有信号" : "还没有足够事件"}</p>`);
+      mineBody.innerHTML = (fb || "") + (sections || `<p class="mine-empty">${data.n_rows ? "这个方向没有信号" : "还没有足够事件"}</p>`);
     };
     const loadMine = async () => {
       if (!mineState.open || mineState.loading) return;
@@ -950,7 +1040,7 @@
     };
     const setMineOpen = (open) => {
       mineState.open = !!open;
-      minePop.hidden = !mineState.open;
+      mineSheet.hidden = !mineState.open;
       mineHost.querySelector("#mineOpen").classList.toggle("is-on", mineState.open);
       mineHost.querySelector("#mineOpen").setAttribute("aria-pressed", mineState.open ? "true" : "false");
       if (mineState.open) {
@@ -964,7 +1054,11 @@
       ev.stopPropagation();
       setMineOpen(!mineState.open);
     });
-    mineHost.addEventListener("click", (ev) => {
+    mineSheet.querySelector("#mineClose").addEventListener("click", (ev) => {
+      ev.preventDefault();
+      setMineOpen(false);
+    });
+    mineSheet.addEventListener("click", (ev) => {
       const scopeBtn = ev.target.closest("[data-scope]");
       if (scopeBtn) {
         mineState.scope = scopeBtn.getAttribute("data-scope") || "session";
@@ -986,13 +1080,16 @@
         loadMine();
       }
     });
-    mineHost.querySelector("#mineCopy").addEventListener("click", async () => {
-      const lines = (mineLast && mineLast.feedback || []).map((f) => `- (${f.use || "prompt"}) ${f.text}`);
-      const md = lines.length ? "# 从会话分析得到的约束\n\n" + lines.join("\n") : "";
+    mineSheet.querySelector("#mineCopy").addEventListener("click", async () => {
+      const drafts = (mineLast && mineLast.feedback || []).map((f) => f.draft).filter(Boolean);
+      const body = drafts.length
+        ? drafts.join("\n")
+        : (mineLast && mineLast.feedback || []).map((f) => `- ${f.text}`).join("\n");
+      const md = "# 从会话分析得到的约束\n\n" + body + "\n";
       try {
         await navigator.clipboard.writeText(md);
-        mineHost.querySelector("#mineCopy").textContent = "已复制";
-        setTimeout(() => { mineHost.querySelector("#mineCopy").textContent = "复制反馈到剪贴板"; }, 1200);
+        mineSheet.querySelector("#mineCopy").textContent = "已复制";
+        setTimeout(() => { mineSheet.querySelector("#mineCopy").textContent = "复制 AGENTS 草稿"; }, 1200);
       } catch (_) {}
     });
     const mdMeter = { n: 0, chars: 0, dur: 0 };

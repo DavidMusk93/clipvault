@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "trae_hooks"))
 
-from mine import classify_phase, git_from_path, mcp_parts, mine_rows, parse_head  # noqa: E402
+from mine import classify_phase, cmd_family, git_from_path, mcp_parts, mine_rows, parse_head  # noqa: E402
 
 
 def ok(name: str, cond: bool, detail: str = "") -> None:
@@ -40,6 +40,9 @@ def main() -> None:
     ok("git-repo-dash", g2 == ("stream_engine", "fix-taskmanager-crash-lifecycle"))
     ok("mcp", mcp_parts("mcp__nowledge-mem__memory_search") == ("nowledge-mem", "memory_search"))
     ok("phase-review", classify_phase("注意 review 时间，提交 mr") == "review")
+    ok("cmd-rg", cmd_family("rg -n foo src/a.cc") == "search")
+    ok("cmd-git", cmd_family("git status --short") == "git")
+    ok("git-not-cwd-guess", git_from_path("/root/Documents/flowkit") is None)
 
     rows = [
         {"event_id": "u1", "ts": "1", "hook_event": "UserPromptSubmit", "prompt": "加载AGENTS.md,注意review 时间", "cwd": "/root/flowkit"},
@@ -110,6 +113,11 @@ def main() -> None:
     ok("insight-review", "review" in texts.lower())
     files = out["blocks"]["agent.files"]["table"]["rows"]
     ok("file-write", any("a.cc" in r["path"] for r in files), str(files))
+    ok("feedback-title", all(f.get("title") and f.get("evidence") for f in out["feedback"]))
+    ok("feedback-draft", any(f.get("draft") for f in out["feedback"]))
+    phases = out["blocks"]["agent.phases"]
+    ok("phase-turns-table", len(phases.get("tables") or []) >= 2)
+    ok("summary-work", out["summary"]["work_s"] >= 20)
     print("session-mine: all passed")
 
 

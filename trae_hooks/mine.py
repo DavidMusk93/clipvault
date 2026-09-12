@@ -110,21 +110,6 @@ def parse_head(text: str | None) -> dict[str, Any]:
     return out
 
 
-def git_from_path(path: str | None) -> tuple[str, str] | None:
-    p = str(path or "").replace("\\", "/")
-    if not p:
-        return None
-    m = _RE_REPO_AT.search(p)
-    if m:
-        return m.group(1), m.group(2)
-    name = Path(p.rstrip("/")).name
-    if not name or name in (".", "/"):
-        return None
-    if name.startswith("."):
-        return None
-    return name, ""
-
-
 def mcp_parts(name: str | None) -> tuple[str, str] | None:
     raw = str(name or "")
     if raw.startswith("mcp__"):
@@ -146,6 +131,45 @@ def classify_phase(prompt: str | None) -> str:
     return "other"
 
 
+def cmd_family(cmd: str | None) -> str:
+    c = str(cmd or "")
+    if re.search(r"\bgit\b", c):
+        return "git"
+    if re.search(r"\b(rg|grep|ag|ack)\b", c):
+        return "search"
+    if re.search(r"\b(cat|head|tail|less|bat|sed -n)\b", c):
+        return "read"
+    if re.search(r"\b(pytest|ctest|cargo test|go test|googletest)\b", c):
+        return "test"
+    if re.search(r"\b(ninja|make\b|blade|bazel|cmake|cargo build)\b", c):
+        return "build"
+    if re.search(r"\b(ssh|scp|rsync)\b", c):
+        return "remote"
+    return "shell"
+
+
+def is_wait_tool(name: str | None) -> bool:
+    n = str(name or "")
+    return n in ("CheckCommandStatus", "StopCommand", "WriteStdin")
+
+
+def git_from_path(path: str | None) -> tuple[str, str] | None:
+    p = str(path or "").replace("\\", "/")
+    if not p:
+        return None
+    m = _RE_REPO_AT.search(p)
+    if m:
+        return m.group(1), m.group(2)
+    if p.endswith(".git"):
+        return Path(p).stem, ""
+    return None
+
+
+def first_line(text: str | None, n: int = 160) -> str:
+    line = str(text or "").strip().split("\n", 1)[0]
+    return line[:n]
+
+
 def paths_from_cmd(cmd: str | None) -> list[str]:
     out: list[str] = []
     for m in _RE_PATH_TOKEN.finditer(str(cmd or "")):
@@ -158,12 +182,20 @@ def paths_from_cmd(cmd: str | None) -> list[str]:
     return out[:8]
 
 
-def _rank(counter: Counter[str], n: int = 8) -> list[dict[str, Any]]:
+def _rank(counter: Counter[str], n: int = 20) -> list[dict[str, Any]]:
     return [{"key": k, "n": v} for k, v in counter.most_common(n) if k]
 
 
-def _table(rows: list[dict[str, Any]], cols: list[tuple[str, str]]) -> dict[str, Any]:
-    return {"cols": [{"id": i, "title": t} for i, t in cols], "rows": rows}
+def _table(rows: list[dict[str, Any]], cols: list[tuple[str, str]], caption: str = "") -> dict[str, Any]:
+    return {
+        "caption": caption,
+        "cols": [{"id": i, "title": t} for i, t in cols],
+        "rows": rows,
+    }
+
+
+def _block(title: str, axis: str, note: str, tables: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"title": title, "axis": axis, "note": note, "table": tables[0] if tables else _table([], []), "tables": tables}
 
 
 def mine_rows(
@@ -181,21 +213,30 @@ def mine_rows(
     git_n: Counter[str] = Counter()
     git_branch: dict[str, Counter[str]] = defaultdict(Counter)
     file_n: Counter[str] = Counter()
+    file_write: Counter[str] = Counter()
+    dir_n: Counter[str] = Counter()
+    ext_n: Counter[str] = Counter()
     tool_n: Counter[str] = Counter()
     tool_s: dict[str, float] = defaultdict(float)
     tool_fail: Counter[str] = Counter()
+    family_n: Counter[str] = Counter()
+    family_s: dict[str, float] = defaultdict(float)
     mcp_n: Counter[str] = Counter()
     mcp_tool: Counter[str] = Counter()
     taste_n: Counter[str] = Counter()
+    inst_n: Counter[str] = Counter()
     phase_n: Counter[str] = Counter()
     phase_s: dict[str, float] = defaultdict(float)
+    phase_work: dict[str, float] = defaultdict(float)
+    wait_s = 0.0
+    work_s = 0.0
 
-    beats: list[dict[str, Any]] = []
-    for raw in rows:
+    ordered = sorted(rows, key=lambda r: (str(r.get("ts") or ""), str(r.get("event_id") or "")))
+    for raw in ordered:
         hook = str(raw.get("hook_event") or "")
-        ts = str(raw.get("ts") or "")
-        if hook in ("UserPromptSubmit", "Stop"):
-            beats.append(raw)
+        inst = str(raw.get("instance_id") or "")
+        if inst:
+            inst_n[inst] += 1
         cwd = str(raw.get("cwd") or "").rstrip("/")
         if cwd:
             cwd_n[cwd] += 1
@@ -214,9 +255,16 @@ def mine_rows(
         name = str(raw.get("tool_name") or raw.get("llm_tool_name") or "tool")
         tool_n[name] += 1
         parsed = parse_head(raw.get("input_head"))
-        parsed.update({k: v for k, v in parse_head(raw.get("resp_head")).items() if k not in parsed or k in ("wall_s", "exit_code")})
+        parsed.update({
+            k: v for k, v in parse_head(raw.get("resp_head")).items()
+            if k not in parsed or k in ("wall_s", "exit_code")
+        })
         wall = float(parsed.get("wall_s") or 0)
         tool_s[name] += wall
+        if is_wait_tool(name):
+            wait_s += wall
+        else:
+            work_s += wall
         if parsed.get("exit_code") not in (None, 0):
             tool_fail[name] += 1
         wd = str(parsed.get("workdir") or cwd or "").rstrip("/")
@@ -230,39 +278,57 @@ def mine_rows(
         fp = str(parsed.get("file_path") or "")
         if fp:
             file_n[fp] += 1
+            file_write[fp] += 1
+            dir_n[str(Path(fp).parent)] += 1
+            if Path(fp).suffix:
+                ext_n[Path(fp).suffix] += 1
             if _RE_TASTE_FILE.search(fp):
                 taste_n[Path(fp).name] += 2
-        for p in paths_from_cmd(parsed.get("cmd")):
+        cmd = str(parsed.get("cmd") or "")
+        fam = cmd_family(cmd) if cmd else ""
+        if fam:
+            family_n[fam] += 1
+            family_s[fam] += wall
+        for p in paths_from_cmd(cmd):
             file_n[p] += 1
+            dir_n[str(Path(p).parent)] += 1
+            if Path(p).suffix:
+                ext_n[Path(p).suffix] += 1
             if _RE_TASTE_FILE.search(p):
                 taste_n[Path(p).name] += 1
         mcp = mcp_parts(name) or mcp_parts(raw.get("llm_tool_name"))
         if mcp:
             mcp_n[mcp[0]] += 1
             mcp_tool[f"{mcp[0]}/{mcp[1]}"] += 1
-        cmd = str(parsed.get("cmd") or "")
         if re.search(r"\bgit\b", cmd):
             g = git_from_path(wd)
             if g:
                 git_n[g[0]] += 2
 
-    # Turns: UserPromptSubmit → next Stop, tools between.
     turns: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
-    for raw in sorted(rows, key=lambda r: (str(r.get("ts") or ""), str(r.get("event_id") or ""))):
+    for raw in ordered:
         hook = str(raw.get("hook_event") or "")
         if hook == "UserPromptSubmit":
             pending = {
-                "ts": raw.get("ts"),
-                "prompt": raw.get("prompt") or "",
+                "ts": str(raw.get("ts") or ""),
+                "prompt": first_line(raw.get("prompt"), 200),
                 "phase": classify_phase(raw.get("prompt")),
                 "wall_s": 0.0,
+                "work_s": 0.0,
+                "wait_s": 0.0,
                 "tools": 0,
             }
             continue
         if pending and hook == "PostToolUse":
+            name = str(raw.get("tool_name") or "")
+            wall = float(parse_head(raw.get("resp_head")).get("wall_s") or 0)
             pending["tools"] += 1
-            pending["wall_s"] += float(parse_head(raw.get("resp_head")).get("wall_s") or 0)
+            pending["wall_s"] += wall
+            if is_wait_tool(name):
+                pending["wait_s"] += wall
+            else:
+                pending["work_s"] += wall
         if pending and hook == "Stop":
             turns.append(pending)
             pending = None
@@ -271,97 +337,157 @@ def mine_rows(
     for t in turns:
         phase_n[t["phase"]] += 1
         phase_s[t["phase"]] += float(t["wall_s"] or 0)
+        phase_work[t["phase"]] += float(t["work_s"] or 0)
 
+    total_s = wait_s + work_s or 1.0
     blocks: dict[str, Any] = {}
     if "user.cwd" in want:
-        blocks["user.cwd"] = {
-            "title": "工作目录",
-            "axis": "user",
-            "table": _table(
-                [{"path": r["key"], "n": r["n"]} for r in _rank(cwd_n)],
-                [("path", "目录"), ("n", "次")],
-            ),
-        }
+        blocks["user.cwd"] = _block(
+            "工作目录",
+            "user",
+            "cwd / workdir 出现次数。主目录应写进 prompt，避免 agent 在邻近树里乱走。",
+            [_table([{"path": r["key"], "n": r["n"]} for r in _rank(cwd_n)], [("path", "目录"), ("n", "次")])],
+        )
     if "user.git" in want:
         rows_g = []
         for r in _rank(git_n):
-            br = git_branch[r["key"]].most_common(1)
-            rows_g.append({"repo": r["key"], "branch": br[0][0] if br else "", "n": r["n"]})
-        blocks["user.git"] = {
-            "title": "Git 库",
-            "axis": "user",
-            "table": _table(rows_g, [("repo", "库"), ("branch", "分支"), ("n", "次")]),
-        }
+            br = git_branch[r["key"]].most_common(3)
+            rows_g.append({
+                "repo": r["key"],
+                "branch": ", ".join(b for b, _ in br),
+                "n": r["n"],
+            })
+        blocks["user.git"] = _block(
+            "Git 库",
+            "user",
+            "只认 `.tmp/repos/<name>@branch` 或 `--branch` 工作树，不用目录名猜库。",
+            [_table(rows_g, [("repo", "库"), ("branch", "分支"), ("n", "次")])],
+        )
     if "user.taste" in want:
-        blocks["user.taste"] = {
-            "title": "Taste / 规范",
-            "axis": "user",
-            "table": _table(
-                [{"doc": r["key"], "n": r["n"]} for r in _rank(taste_n)],
-                [("doc", "线索"), ("n", "次")],
-            ),
-        }
+        blocks["user.taste"] = _block(
+            "Taste / 规范",
+            "user",
+            "prompt 或路径里出现的 AGENTS.md / SKILL.md / design-taste / nmem。提到却未成为闸门 = 口头 taste。",
+            [_table([{"doc": r["key"], "n": r["n"]} for r in _rank(taste_n)], [("doc", "线索"), ("n", "次")])],
+        )
     if "agent.files" in want:
-        blocks["agent.files"] = {
-            "title": "读写文件",
-            "axis": "agent",
-            "table": _table(
-                [{"path": r["key"], "n": r["n"]} for r in _rank(file_n, 12)],
-                [("path", "文件"), ("n", "次")],
-            ),
-        }
+        blocks["agent.files"] = _block(
+            "读写文件",
+            "agent",
+            "Write 的 file_path + shell 命令里的路径。热文件应直接写进下一轮 prompt。",
+            [
+                _table(
+                    [{"path": r["key"], "n": r["n"], "writes": file_write.get(r["key"], 0)} for r in _rank(file_n)],
+                    [("path", "文件"), ("n", "次"), ("writes", "写入")],
+                    "文件",
+                ),
+                _table(
+                    [{"path": r["key"], "n": r["n"]} for r in _rank(dir_n, 12)],
+                    [("path", "目录"), ("n", "次")],
+                    "目录簇",
+                ),
+                _table(
+                    [{"ext": r["key"], "n": r["n"]} for r in _rank(ext_n, 10)],
+                    [("ext", "后缀"), ("n", "次")],
+                    "语言/后缀",
+                ),
+            ],
+        )
     if "agent.tools" in want:
         rows_t = []
-        for r in _rank(tool_n, 12):
+        for r in _rank(tool_n):
+            sec = tool_s.get(r["key"], 0)
             rows_t.append({
                 "tool": r["key"],
                 "n": r["n"],
-                "sec": round(tool_s.get(r["key"], 0), 1),
+                "sec": round(sec, 1),
+                "share": round(100 * sec / total_s, 1),
                 "fail": tool_fail.get(r["key"], 0),
+                "kind": "等待" if is_wait_tool(r["key"]) else "工作",
             })
-        blocks["agent.tools"] = {
-            "title": "工具调用",
-            "axis": "agent",
-            "table": _table(rows_t, [("tool", "工具"), ("n", "次"), ("sec", "秒"), ("fail", "失败")]),
-        }
+        rows_f = [{
+            "family": r["key"],
+            "n": r["n"],
+            "sec": round(family_s.get(r["key"], 0), 1),
+        } for r in _rank(family_n)]
+        blocks["agent.tools"] = _block(
+            "工具调用",
+            "agent",
+            f"墙钟合计 {round(total_s, 1)}s，其中工作 {round(work_s, 1)}s、等待（CheckCommandStatus 等）{round(wait_s, 1)}s。等待不是任务阶段。",
+            [
+                _table(rows_t, [("tool", "工具"), ("kind", "类"), ("n", "次"), ("sec", "秒"), ("share", "%"), ("fail", "失败")], "工具"),
+                _table(rows_f, [("family", "shell 族"), ("n", "次"), ("sec", "秒")], "RunCommand 族（git / rg / read / build / test）"),
+            ],
+        )
     if "agent.mcp" in want:
-        rows_m = [{"mcp": r["key"], "n": r["n"]} for r in _rank(mcp_tool, 12)]
-        if not rows_m:
-            rows_m = [{"mcp": r["key"], "n": r["n"]} for r in _rank(mcp_n)]
-        blocks["agent.mcp"] = {
-            "title": "MCP",
-            "axis": "agent",
-            "table": _table(rows_m, [("mcp", "调用"), ("n", "次")]),
-        }
+        rows_m = []
+        for r in _rank(mcp_tool):
+            kind = "search" if "search" in r["key"] else ("write" if r["key"].endswith("add") or "memory_add" in r["key"] else "other")
+            rows_m.append({"mcp": r["key"], "kind": kind, "n": r["n"]})
+        blocks["agent.mcp"] = _block(
+            "MCP",
+            "agent",
+            "search 远多于 add = 知识只读不沉淀。",
+            [_table(rows_m, [("mcp", "调用"), ("kind", "类"), ("n", "次")])],
+        )
     if "agent.phases" in want:
-        total_s = sum(phase_s.values()) or 1.0
+        work_total = sum(phase_work.values()) or 1.0
         rows_p = []
         for name, n in phase_n.most_common():
-            sec = phase_s.get(name, 0)
             rows_p.append({
                 "phase": name,
                 "n": n,
-                "sec": round(sec, 1),
-                "share": round(100 * sec / total_s, 1),
+                "sec": round(phase_s.get(name, 0), 1),
+                "work": round(phase_work.get(name, 0), 1),
+                "share": round(100 * phase_work.get(name, 0) / work_total, 1),
             })
-        blocks["agent.phases"] = {
-            "title": "任务阶段",
-            "axis": "agent",
-            "table": _table(rows_p, [("phase", "阶段"), ("n", "回合"), ("sec", "秒"), ("share", "%")]),
-        }
+        rows_turn = [{
+            "ts": t["ts"],
+            "phase": t["phase"],
+            "tools": t["tools"],
+            "work": round(t["work_s"], 1),
+            "wait": round(t["wait_s"], 1),
+            "prompt": t["prompt"],
+        } for t in turns]
+        blocks["agent.phases"] = _block(
+            "任务阶段",
+            "agent",
+            "阶段按用户 prompt 分类；占比用工作秒，不含 CheckCommandStatus 空等。每回合 prompt 全文首行。",
+            [
+                _table(rows_p, [("phase", "阶段"), ("n", "回合"), ("work", "工作秒"), ("sec", "墙钟秒"), ("share", "工作%")], "阶段占比"),
+                _table(rows_turn, [("ts", "时间"), ("phase", "阶段"), ("tools", "工具"), ("work", "工作秒"), ("wait", "等待秒"), ("prompt", "用户首行")], "回合时间线"),
+            ],
+        )
 
+    summary = {
+        "n_rows": len(rows),
+        "n_turns": len(turns),
+        "n_tools": sum(tool_n.values()),
+        "work_s": round(work_s, 1),
+        "wait_s": round(wait_s, 1),
+        "instances": [{"id": k, "n": v} for k, v in inst_n.most_common()],
+        "span": f"{ordered[0].get('ts') if ordered else ''} → {ordered[-1].get('ts') if ordered else ''}",
+    }
     feedback = _insights(
         cwd_n=cwd_n,
         git_n=git_n,
+        git_branch=git_branch,
         tool_n=tool_n,
         tool_s=tool_s,
+        family_n=family_n,
         mcp_n=mcp_n,
         mcp_tool=mcp_tool,
         taste_n=taste_n,
         phase_n=phase_n,
         phase_s=phase_s,
+        phase_work=phase_work,
         file_n=file_n,
+        file_write=file_write,
+        dir_n=dir_n,
         turns=turns,
+        wait_s=wait_s,
+        work_s=work_s,
+        summary=summary,
     )
     return {
         "ok": True,
@@ -369,105 +495,151 @@ def mine_rows(
         "session_id": session_id or "",
         "n_rows": len(rows),
         "n_turns": len(turns),
+        "summary": summary,
         "directions": DIRECTIONS,
         "active": want,
         "blocks": blocks,
         "feedback": feedback,
+        "draft": "\n".join(f.get("draft") or "" for f in feedback if f.get("draft")).strip(),
     }
 
 
 def _insights(**kw: Any) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     tool_n: Counter[str] = kw["tool_n"]
-    tool_s: dict[str, float] = kw["tool_s"]
+    family_n: Counter[str] = kw["family_n"]
     mcp_tool: Counter[str] = kw["mcp_tool"]
     mcp_n: Counter[str] = kw["mcp_n"]
-    phase_n: Counter[str] = kw["phase_n"]
-    phase_s: dict[str, float] = kw["phase_s"]
+    phase_work: dict[str, float] = kw["phase_work"]
     git_n: Counter[str] = kw["git_n"]
+    git_branch: dict[str, Counter[str]] = kw["git_branch"]
     taste_n: Counter[str] = kw["taste_n"]
     file_n: Counter[str] = kw["file_n"]
+    file_write: Counter[str] = kw["file_write"]
+    dir_n: Counter[str] = kw["dir_n"]
     cwd_n: Counter[str] = kw["cwd_n"]
     turns: list[dict[str, Any]] = kw["turns"]
+    wait_s: float = kw["wait_s"]
+    work_s: float = kw["work_s"]
 
     total_tools = sum(tool_n.values()) or 1
-    total_s = sum(phase_s.values()) or sum(tool_s.values()) or 1.0
+    work_total = sum(phase_work.values()) or (work_s or 1.0)
     run_n = tool_n.get("RunCommand", 0)
+    search_cmd = family_n.get("search", 0)
+    read_cmd = family_n.get("read", 0)
+    write_n = tool_n.get("Write", 0)
+
+    def add(audience: str, use: str, title: str, text: str, evidence: str, draft: str = "") -> None:
+        out.append({
+            "audience": audience,
+            "use": use,
+            "title": title,
+            "text": text,
+            "evidence": evidence,
+            "draft": draft,
+        })
+
     if run_n / total_tools >= 0.45:
-        out.append({
-            "audience": "agent",
-            "use": "agents.md",
-            "text": (
-                f"工具里 RunCommand 占 {round(100 * run_n / total_tools)}%。"
-                "文件轨迹主要靠 shell/rg，Read 几乎缺席。"
-                "AGENTS 应写清：改代码先 Read 目标文件，禁止用全库 rg 代替阅读。"
+        add(
+            "agent", "agents.md",
+            "阅读靠 shell，不靠 Read",
+            (
+                f"工具里 RunCommand 占 {round(100 * run_n / total_tools)}%"
+                f"（rg/search {search_cmd} 次，cat/read {read_cmd} 次，Write {write_n} 次）。"
+                "文件轨迹主要来自命令行，Read 工具几乎缺席。下一轮应直接点名热文件，禁止全库 rg 代替阅读。"
             ),
-        })
-    search_n = sum(v for k, v in mcp_tool.items() if "search" in k or "memory_search" in k)
-    add_n = sum(v for k, v in mcp_tool.items() if k.endswith("memory_add") or k.endswith("/memory_add"))
+            f"RunCommand={run_n}/{total_tools} search={search_cmd} read={read_cmd} Write={write_n}",
+            "- 改代码先 Read 目标文件；禁止用全库 rg/grep 代替阅读。",
+        )
+    if wait_s >= work_s and wait_s >= 30:
+        add(
+            "agent", "prompt",
+            "墙钟大半是空等",
+            (
+                f"等待（CheckCommandStatus 等）{round(wait_s, 1)}s，真正工作 {round(work_s, 1)}s。"
+                "阶段占比必须看工作秒，不能把轮询当 review/实现。"
+            ),
+            f"wait_s={round(wait_s,1)} work_s={round(work_s,1)}",
+            "- 评估耗时用工作秒，忽略 CheckCommandStatus 轮询。",
+        )
+    search_n = sum(v for k, v in mcp_tool.items() if "search" in k)
+    add_n = sum(v for k, v in mcp_tool.items() if "memory_add" in k or k.endswith("/add"))
     if search_n >= 3 and add_n == 0:
-        out.append({
-            "audience": "agent",
-            "use": "agents.md",
-            "text": (
-                f"nmem/MCP 搜索 {search_n} 次、写入 {add_n} 次。"
-                "知识只读不沉淀。非琐碎结论必须 memory_add。"
-            ),
-        })
+        add(
+            "agent", "agents.md",
+            "nmem 只搜不写",
+            f"MCP 搜索 {search_n} 次、memory_add {add_n} 次。知识只读不沉淀。非琐碎结论必须 memory_add。",
+            f"search={search_n} add={add_n} servers={dict(mcp_n)}",
+            "- 非琐碎结论必须 memory_add；禁止只 search。",
+        )
     elif mcp_n:
         top = mcp_n.most_common(1)[0]
-        out.append({
-            "audience": "agent",
-            "use": "prompt",
-            "text": f"MCP 集中在 {top[0]}（{top[1]} 次）。确认这是本任务该用的记忆面，而不是顺手乱搜。",
-        })
-    review_s = phase_s.get("review", 0)
-    if any(t["phase"] == "review" or "review" in str(t.get("prompt") or "").lower() for t in turns):
-        share = 100 * review_s / total_s
-        if share < 20:
-            out.append({
-                "audience": "agent",
-                "use": "agents.md",
-                "text": (
-                    f"用户提到 review，但 review 阶段只占工具耗时 {round(share, 1)}%。"
-                    "把 review 闸门写成硬约束：改完必须对照 diff/测试，不能只用实现回合收尾。"
+        add(
+            "agent", "prompt",
+            "MCP 面过窄或过散",
+            f"MCP 集中在 {top[0]}（{top[1]} 次，共 {sum(mcp_n.values())}）。确认这是本任务该用的记忆面。",
+            f"mcp={list(mcp_tool.most_common(8))}",
+        )
+    review_work = phase_work.get("review", 0)
+    if any("review" in (t.get("prompt") or "").lower() or t.get("phase") == "review" for t in turns):
+        share = 100 * review_work / work_total
+        if share < 25:
+            add(
+                "agent", "agents.md",
+                "用户要 review，时间却没花在 review",
+                (
+                    f"用户 prompt 提到 review，但 review 阶段只占工作秒 {round(share, 1)}%"
+                    f"（{round(review_work, 1)}s / {round(work_total, 1)}s）。"
+                    "实现回合收尾不等于 review。"
                 ),
-            })
+                f"review_work={round(review_work,1)} work_total={round(work_total,1)} turns={len(turns)}",
+                "- review 闸门：改完必须对照 diff/测试；不能只用实现回合收尾。",
+            )
     if git_n:
         repo, n = git_n.most_common(1)[0]
-        out.append({
-            "audience": "user",
-            "use": "prompt",
-            "text": f"最常落在 git 库 {repo}（{n} 次）。新开任务时在 prompt 里写明仓库根，避免 agent 在邻近目录里乱找。",
-        })
+        branches = ", ".join(b for b, _ in git_branch[repo].most_common(3)) or "（无分支标记）"
+        add(
+            "user", "prompt",
+            "把仓库根写进任务",
+            f"最常落在 git 库 {repo}（{n} 次，分支 {branches}）。新开任务在 prompt 里写明仓库根与分支。",
+            f"repos={list(git_n.most_common(5))}",
+            f"- 默认仓库 `{repo}`" + (f" 分支 `{branches}`。" if branches else "。"),
+        )
     if cwd_n:
         cwd, n = cwd_n.most_common(1)[0]
-        out.append({
-            "audience": "user",
-            "use": "prompt",
-            "text": f"主工作目录 {cwd}（{n} 次）。",
-        })
+        add(
+            "user", "prompt",
+            "主工作目录",
+            f"主工作目录 {cwd}（{n} 次）。",
+            f"cwd_top={list(cwd_n.most_common(5))}",
+            f"- 工作目录 `{cwd}`。",
+        )
     if taste_n:
         doc, n = taste_n.most_common(1)[0]
-        out.append({
-            "audience": "agent",
-            "use": "agents.md",
-            "text": f"本会话反复碰到 {doc}（{n}）。规范被提到却未成为闸门时，把对应约束写进 AGENTS.md，不要只靠口头 taste。",
-        })
+        add(
+            "agent", "agents.md",
+            "规范被提到却不是闸门",
+            f"本会话反复碰到 {doc}（{n} 次）。口头 taste 不会执行；把对应约束写进 AGENTS.md。",
+            f"taste={dict(taste_n)}",
+            f"- 已引用 `{doc}` 的约束必须写成可执行闸门，禁止只在对话里提。",
+        )
     if file_n:
         path, n = file_n.most_common(1)[0]
-        out.append({
-            "audience": "agent",
-            "use": "prompt",
-            "text": f"读写最热文件 {path}（{n}）。若这是核心模块，prompt 应直接点名，减少搜索回合。",
-        })
+        hot_dir = dir_n.most_common(1)[0][0] if dir_n else ""
+        add(
+            "agent", "prompt",
+            "点名热文件，少搜一轮",
+            (
+                f"最热文件 {path}（{n} 次，写入 {file_write.get(path, 0)}）。"
+                + (f" 最热目录 {hot_dir}。" if hot_dir else "")
+                + " 下一轮 prompt 直接点名这些路径。"
+            ),
+            f"files={list(file_n.most_common(8))}",
+            f"- 核心文件 `{path}`。",
+        )
     if not out:
-        out.append({
-            "audience": "user",
-            "use": "prompt",
-            "text": "事件太少，还不够形成稳定习惯。多几个完整回合后再分析。",
-        })
-    return out[:8]
+        add("user", "prompt", "样本不足", "事件太少，还不够形成稳定习惯。多几个完整回合后再分析。", "n=0")
+    return out
 
 
 def fetch_rows(query_fn, *, session_id: str | None, scope: str) -> list[dict[str, Any]]:
