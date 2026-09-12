@@ -270,6 +270,8 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 列卡必须标最后一条 `localDateTime`（`YYYY-MM-DD HH:mm:ss`）、来源 `instance_id`、工作目录 `cwd`。禁止只用「刚刚」当会话时刻。
 
+**会话是资产。** 只拉正文没有价值。分析走 `GET /api/mine`（当前会话 / 最近 7 天；方向可多选：工作目录、Git 库、Taste、文件、工具、MCP、阶段），产出给用户（prompt）或给 agent（`AGENTS.md`）的反馈。右下角「分析」在「调试」上方。禁止把分析做成 metrics 再版，禁止把 tool 正文灌进分析 JSON。回归：`tests/session-mine.test.mjs` + `tests/session_mine_main.py`。
+
 禁止：`setInterval` 刷 DOM；每次 hook 整页 `innerHTML`；overlay 盖住后续气泡；embed 窄宽叠成 30vh；用最新 200 条工具当整段历史。
 
 新加载 bug：先补 `tests/session-load.test.mjs` 再改 fetch。

@@ -25,6 +25,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+from mine import DIRECTIONS as MINE_DIRECTIONS, mine as mine_session  # noqa: E402
 from row import needs_user_input, utc_now  # noqa: E402
 
 LOG = logging.getLogger("clipvault-trae")
@@ -441,6 +442,27 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
             if static is not None:
                 body, ctype = static
                 self._send(200, body, ctype)
+                return
+            if path == "/api/mine":
+                if (qs.get("catalog") or [""])[0] in ("1", "true"):
+                    self._json(200, {"directions": MINE_DIRECTIONS})
+                    return
+                session_id = (qs.get("session_id") or [""])[0]
+                scope = (qs.get("scope") or ["session"])[0]
+                dirs_raw = (qs.get("dirs") or [""])[0]
+                dirs = [d.strip() for d in dirs_raw.split(",") if d.strip()]
+                try:
+                    result = mine_session(
+                        store.query,
+                        session_id=session_id or None,
+                        scope=scope,
+                        dirs=dirs or None,
+                    )
+                except Exception:  # noqa: BLE001
+                    LOG.exception("mine")
+                    self._json(500, {"ok": False, "error": "mine failed"})
+                    return
+                self._json(200, result)
                 return
             if path == "/api/sessions":
                 limit = _int(qs.get("limit", ["50"])[0], 50, 1, 200)

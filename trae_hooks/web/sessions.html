@@ -618,6 +618,117 @@
       overflow: auto; max-height: 22em;
     }
     .url-inert.md-link { color: var(--accent); }
+    .cv-mine-float {
+      position: absolute;
+      right: 16px;
+      bottom: 52px;
+      z-index: 9;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .cv-mine-float > * { pointer-events: auto; }
+    .cv-mine-pop {
+      width: min(420px, calc(100vw - 36px));
+      max-height: min(72vh, 640px);
+      overflow: auto;
+      overscroll-behavior: contain;
+      padding: 12px 14px 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(22px) saturate(160%);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      border: 0.5px solid rgba(60, 60, 67, 0.12);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+    }
+    .cv-mine-pop[hidden] { display: none !important; }
+    .cv-mine-pop h2 {
+      font-size: 15px;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+    }
+    .cv-mine-pop .mine-scopes,
+    .cv-mine-pop .mine-dirs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 10px;
+    }
+    .cv-mine-pop .mine-chip {
+      height: 24px;
+      padding: 0 9px;
+      border-radius: 980px;
+      border: 0.5px solid rgba(60, 60, 67, 0.22);
+      background: transparent;
+      color: var(--ink);
+      font: 600 11.5px/23px inherit;
+      cursor: pointer;
+    }
+    .cv-mine-pop .mine-chip.is-on {
+      color: var(--honey);
+      border-color: var(--honey);
+      background: var(--honey-soft);
+    }
+    .cv-mine-pop .mine-fb {
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin: 0 0 8px;
+      background: var(--honey-soft);
+      font-size: 12.5px;
+      line-height: 1.45;
+    }
+    .cv-mine-pop .mine-fb .who {
+      font-size: 10.5px;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--honey);
+      margin-bottom: 3px;
+    }
+    .cv-mine-pop .mine-block { margin: 12px 0 4px; }
+    .cv-mine-pop .mine-block h3 {
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--muted);
+      margin: 0 0 6px;
+    }
+    .cv-mine-pop table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11.5px;
+      font-variant-numeric: tabular-nums;
+    }
+    .cv-mine-pop th, .cv-mine-pop td {
+      text-align: left;
+      padding: 3px 4px;
+      border-bottom: 0.5px solid var(--separator);
+      vertical-align: top;
+    }
+    .cv-mine-pop td.path, .cv-mine-pop td.repo, .cv-mine-pop td.tool, .cv-mine-pop td.mcp, .cv-mine-pop td.doc {
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--font-mono);
+    }
+    .cv-mine-pop .mine-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .cv-mine-pop .mine-copy {
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 8px;
+      border: 0.5px solid rgba(60, 60, 67, 0.22);
+      background: #fff;
+      font: 600 12px/27px inherit;
+      cursor: pointer;
+    }
+    .cv-mine-pop .mine-empty { color: var(--muted); font-size: 12.5px; }
+    .cv-mine-fab.is-on {
+      color: var(--honey);
+      border-color: var(--honey);
+    }
     @media (max-width: 800px) {
       .app {
         grid-template-columns: 1fr;
@@ -733,6 +844,133 @@
           getLocal: () => sessRing.slice(),
         })
       : null;
+    const MINE_KEY = "cv.trae.mine.v1";
+    const mineState = { open: false, scope: "session", dirs: [], loading: false };
+    try {
+      const saved = JSON.parse(localStorage.getItem(MINE_KEY) || "null");
+      if (saved && typeof saved === "object") {
+        if (saved.scope === "recent" || saved.scope === "session") mineState.scope = saved.scope;
+        if (Array.isArray(saved.dirs)) mineState.dirs = saved.dirs.filter((d) => typeof d === "string");
+      }
+    } catch (_) {}
+    const mineHost = document.createElement("div");
+    mineHost.className = "cv-mine-float";
+    mineHost.innerHTML = `<div class="cv-mine-pop" hidden>
+        <h2>会话分析</h2>
+        <div class="mine-scopes">
+          <button type="button" class="mine-chip" data-scope="session">当前会话</button>
+          <button type="button" class="mine-chip" data-scope="recent">最近 7 天</button>
+        </div>
+        <div class="mine-dirs" id="mineDirs"></div>
+        <div id="mineBody"><p class="mine-empty">打开后按工作目录、Git 库、工具与阶段挖资产。</p></div>
+        <div class="mine-actions">
+          <button type="button" class="mine-copy" id="mineCopy">复制反馈到剪贴板</button>
+        </div>
+      </div>
+      <button type="button" class="cv-debug-fab cv-mine-fab" id="mineOpen" aria-label="分析" aria-pressed="false">分析</button>`;
+    (document.querySelector(".app") || document.body).appendChild(mineHost);
+    const minePop = mineHost.querySelector(".cv-mine-pop");
+    const mineBody = mineHost.querySelector("#mineBody");
+    const mineDirsEl = mineHost.querySelector("#mineDirs");
+    let mineLast = null;
+    const persistMine = () => {
+      try { localStorage.setItem(MINE_KEY, JSON.stringify({ scope: mineState.scope, dirs: mineState.dirs })); } catch (_) {}
+    };
+    const escMine = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const paintMineChips = (directions) => {
+      const dirs = directions || (mineLast && mineLast.directions) || [];
+      mineDirsEl.innerHTML = dirs.map((d) => {
+        const on = !mineState.dirs.length || mineState.dirs.includes(d.id);
+        return `<button type="button" class="mine-chip${on ? " is-on" : ""}" data-dir="${escMine(d.id)}">${escMine(d.title)}</button>`;
+      }).join("");
+      mineHost.querySelectorAll("[data-scope]").forEach((b) => {
+        b.classList.toggle("is-on", b.getAttribute("data-scope") === mineState.scope);
+      });
+    };
+    const renderMine = (data) => {
+      mineLast = data;
+      paintMineChips(data.directions);
+      if (!data || !data.ok) {
+        mineBody.innerHTML = `<p class="mine-empty">分析失败${data && data.error ? " · " + escMine(data.error) : ""}</p>`;
+        return;
+      }
+      const fb = (data.feedback || []).map((f) => {
+        const who = f.audience === "agent" ? "给 Agent / AGENTS.md" : "给用户 / prompt";
+        return `<div class="mine-fb"><div class="who">${escMine(who)}</div>${escMine(f.text)}</div>`;
+      }).join("");
+      const blocks = data.active ? data.active.map((id) => data.blocks && data.blocks[id]).filter(Boolean) : Object.values(data.blocks || {});
+      const tables = blocks.map((b) => {
+        const t = b.table || { cols: [], rows: [] };
+        if (!t.rows || !t.rows.length) return "";
+        const head = t.cols.map((c) => `<th>${escMine(c.title)}</th>`).join("");
+        const body = t.rows.map((row) => `<tr>${t.cols.map((c) => `<td class="${escMine(c.id)}">${escMine(row[c.id])}</td>`).join("")}</tr>`).join("");
+        return `<section class="mine-block"><h3>${escMine(b.axis === "user" ? "用户 · " : "Agent · ")}${escMine(b.title)}</h3><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
+      }).join("");
+      mineBody.innerHTML = (fb || "") + (tables || `<p class="mine-empty">${data.n_rows ? "这个方向没有信号" : "还没有足够事件"}</p>`);
+    };
+    const loadMine = async () => {
+      if (!mineState.open || mineState.loading) return;
+      mineState.loading = true;
+      mineBody.innerHTML = '<p class="mine-empty">分析中…</p>';
+      const params = new URLSearchParams({ scope: mineState.scope });
+      if (mineState.scope === "session" && current) params.set("session_id", current);
+      if (mineState.dirs.length) params.set("dirs", mineState.dirs.join(","));
+      try {
+        const data = await netJson("mine", apiUrl("/api/mine?" + params.toString()));
+        if (mineState.open) renderMine(data);
+      } catch (err) {
+        if (mineState.open) mineBody.innerHTML = `<p class="mine-empty">分析失败${err && err.message ? " · " + escMine(err.message) : ""}</p>`;
+      } finally {
+        mineState.loading = false;
+      }
+    };
+    const setMineOpen = (open) => {
+      mineState.open = !!open;
+      minePop.hidden = !mineState.open;
+      mineHost.querySelector("#mineOpen").classList.toggle("is-on", mineState.open);
+      mineHost.querySelector("#mineOpen").setAttribute("aria-pressed", mineState.open ? "true" : "false");
+      if (mineState.open) {
+        try { sessMetricsCtl?.setOpen?.(false); } catch (_) {}
+        paintMineChips();
+        loadMine();
+      }
+    };
+    mineHost.querySelector("#mineOpen").addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      setMineOpen(!mineState.open);
+    });
+    mineHost.addEventListener("click", (ev) => {
+      const scopeBtn = ev.target.closest("[data-scope]");
+      if (scopeBtn) {
+        mineState.scope = scopeBtn.getAttribute("data-scope") || "session";
+        persistMine();
+        paintMineChips();
+        loadMine();
+        return;
+      }
+      const dirBtn = ev.target.closest("[data-dir]");
+      if (dirBtn) {
+        const id = dirBtn.getAttribute("data-dir");
+        const dirs = mineState.dirs.length ? mineState.dirs.slice() : (mineLast && mineLast.directions || []).map((d) => d.id);
+        const i = dirs.indexOf(id);
+        if (i >= 0) dirs.splice(i, 1);
+        else dirs.push(id);
+        mineState.dirs = dirs;
+        persistMine();
+        paintMineChips();
+        loadMine();
+      }
+    });
+    mineHost.querySelector("#mineCopy").addEventListener("click", async () => {
+      const lines = (mineLast && mineLast.feedback || []).map((f) => `- (${f.use || "prompt"}) ${f.text}`);
+      const md = lines.length ? "# 从会话分析得到的约束\n\n" + lines.join("\n") : "";
+      try {
+        await navigator.clipboard.writeText(md);
+        mineHost.querySelector("#mineCopy").textContent = "已复制";
+        setTimeout(() => { mineHost.querySelector("#mineCopy").textContent = "复制反馈到剪贴板"; }, 1200);
+      } catch (_) {}
+    });
     const mdMeter = { n: 0, chars: 0, dur: 0 };
     const resetMdMeter = () => { mdMeter.n = 0; mdMeter.chars = 0; mdMeter.dur = 0; };
     const meterMd = (rendered, text) => {
@@ -1170,6 +1408,7 @@
           c.classList.toggle("active", c.getAttribute("data-id") === current);
         });
         loadThreadPair();
+        if (mineState.open) loadMine();
       });
       el.querySelector(".pin-btn")?.addEventListener("click", (ev) => {
         ev.preventDefault();
@@ -1591,6 +1830,7 @@
           markFollow(true);
           showSessionHead(current, sessionTitle(latest), latest);
           switched = true;
+          if (mineState.open) loadMine();
         }
         emit("trae_sessions_list", { payload: { n: sessions.length } });
         if (listSig === lastListSig) return { sessions, switched };
