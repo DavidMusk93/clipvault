@@ -304,6 +304,10 @@ final class DatabaseManager: ObservableObject {
             createTables()
             migrateSchema()
             bootstrapFTSIfNeeded()
+            let exploded = repairExplodedComposeNotesLocked()
+            if exploded > 0 {
+                print("[DatabaseManager] flattened exploded compose notes=\(exploded)")
+            }
             runAnalyze()
             // Blob peel off the request path. Never full VACUUM here (skill §3).
             dbQueue.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -2814,7 +2818,8 @@ final class DatabaseManager: ObservableObject {
                 merged: r.body != incoming
             )
         }
-        let r = ComposeMerge.both(currentBody, incoming)
+        // Missing parent snapshot must not wrap two whole notes (incident: 1.2M nested <<<<<<<).
+        let r = ComposeMerge.threeWay(base: "", a: currentBody, b: incoming)
         return ComposeWritePlan(
             body: r.body,
             hash: ComposeNotes.contentHash(id: noteId, body: r.body),
@@ -2822,6 +2827,49 @@ final class DatabaseManager: ObservableObject {
             conflict: r.conflict,
             merged: true
         )
+    }
+
+    /// Nested `<<<<<<<` wraps from `both()` of an already-conflicted note. Do not bump timestamp.
+    @discardableResult
+    private func repairExplodedComposeNotesLocked() -> Int {
+        guard let db else { return 0 }
+        let sql = """
+        SELECT id, text_content FROM clipboard_items
+        WHERE type = 'note' AND deleted_at IS NULL AND text_content LIKE '%<<<<<<< %';
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        var rows: [(String, String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+            let body = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            if !id.isEmpty { rows.append((id, body)) }
+        }
+        sqlite3_finalize(stmt)
+        var n = 0
+        for (idStr, body) in rows {
+            guard ComposeMerge.isExploded(body), let uuid = UUID(uuidString: idStr) else { continue }
+            let r = ComposeMerge.flatten(body)
+            if r.body.isEmpty || r.body == body { continue }
+            if r.body.count >= body.count { continue }
+            let hash = ComposeNotes.contentHash(id: uuid, body: r.body)
+            let upd = "UPDATE clipboard_items SET content_hash = ?, text_content = ? WHERE id = ? AND type = 'note';"
+            var us: OpaquePointer?
+            guard sqlite3_prepare_v2(db, upd, -1, &us, nil) == SQLITE_OK else { continue }
+            bindText(us, 1, hash)
+            bindText(us, 2, r.body)
+            bindText(us, 3, idStr)
+            let rc = sqlite3_step(us)
+            sqlite3_finalize(us)
+            guard rc == SQLITE_DONE, sqlite3_changes(db) > 0 else { continue }
+            upsertFTS(id: idStr, text: r.body, ocr: nil, source: ComposeNotes.sourceApp, html: nil)
+            persistTextHash(
+                id: idStr,
+                item: ClipboardItem(id: uuid, timestamp: Date(), type: .note, contentHash: hash, textContent: r.body)
+            )
+            n += 1
+        }
+        return n
     }
 
     private func lookupComposeBody(itemId: String, hash: String, noteId: UUID) -> String? {
@@ -2833,7 +2881,7 @@ final class DatabaseManager: ObservableObject {
         SELECT body, content_hash FROM compose_ops
         WHERE item_id = ?
         ORDER BY ts DESC
-        LIMIT 48;
+        LIMIT 512;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }

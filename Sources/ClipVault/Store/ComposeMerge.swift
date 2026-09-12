@@ -3,6 +3,11 @@ import Foundation
 
 /// Line-level git-style 3-way merge for Compose markdown snapshots.
 /// Conflict hunks are ordered by text so `threeWay(base, a, b) == threeWay(base, b, a)`.
+///
+/// Nested `<<<<<<<` wrapping (sync `both()` of an already-conflicted body) is a
+/// product-loss bug: one note becomes hundreds of copies of itself. Flatten to
+/// unique leaves before emitting a hunk. Same-title linear history keeps the
+/// longest leaf. Never concatenate two whole documents.
 enum ComposeMerge {
     struct Result: Equatable {
         var body: String
@@ -10,30 +15,205 @@ enum ComposeMerge {
     }
 
     static func threeWay(base: String, a: String, b: String) -> Result {
-        if a == b { return Result(body: a, conflict: false) }
-        if a == base { return Result(body: b, conflict: false) }
-        if b == base { return Result(body: a, conflict: false) }
-        let bl = lines(base)
-        let al = lines(a)
-        let cl = lines(b)
+        let a2 = peelExploded(a)
+        let b2 = peelExploded(b)
+        let base2 = peelExploded(base)
+        if a2 == b2 { return Result(body: a2, conflict: hasConflictMarkers(a2)) }
+        if a2 == base2 { return Result(body: b2, conflict: hasConflictMarkers(b2)) }
+        if b2 == base2 { return Result(body: a2, conflict: hasConflictMarkers(a2)) }
+        let bl = lines(base2)
+        let al = lines(a2)
+        let cl = lines(b2)
         if bl.count > 8000 || al.count > 8000 || cl.count > 8000 {
-            return both(al, cl)
+            return flattenLeaves(uniqueLeaves(a2) + uniqueLeaves(b2))
         }
         let merged = mergeLines(base: bl, a: al, b: cl)
-        return Result(body: joined(merged.lines), conflict: merged.conflict)
+        let raw = joined(merged.lines)
+        if isExploded(raw) { return flatten(raw) }
+        return Result(body: raw, conflict: merged.conflict)
     }
 
     static func both(_ a: String, _ b: String) -> Result {
-        both(lines(a), lines(b))
+        flattenLeaves(uniqueLeaves(a) + uniqueLeaves(b))
     }
 
-    private static func both(_ a: [String], _ b: [String]) -> Result {
-        if a == b { return Result(body: joined(a), conflict: false) }
-        return Result(body: joined(conflictHunk(a, b)), conflict: true)
+    static func flatten(_ text: String) -> Result {
+        flattenLeaves(uniqueLeaves(text))
     }
 
     static func hasConflictMarkers(_ text: String) -> Bool {
         text.contains("\n<<<<<<< ") || text.hasPrefix("<<<<<<< ")
+    }
+
+    /// Three or more start markers means the body was wrapped, not a normal 1–2 hunk merge.
+    static func isExploded(_ text: String) -> Bool {
+        markerStartCount(text) >= 3
+    }
+
+    static func uniqueLeaves(_ text: String) -> [String] {
+        var queue = [text]
+        var seen = Set<String>()
+        var leaves: [String] = []
+        while let cur = queue.popLast() {
+            if !hasConflictMarkers(cur) {
+                if !cur.isEmpty, seen.insert(cur).inserted { leaves.append(cur) }
+                continue
+            }
+            let chunks = splitTopLevel(cur)
+            if chunks.isEmpty {
+                if seen.insert(cur).inserted { leaves.append(cur) }
+                continue
+            }
+            var progressed = false
+            for chunk in chunks {
+                switch chunk {
+                case .plain(let s):
+                    if s.isEmpty { continue }
+                    if hasConflictMarkers(s) {
+                        queue.append(s)
+                        progressed = true
+                    } else if seen.insert(s).inserted {
+                        leaves.append(s)
+                    }
+                case .sides(let lo, let hi):
+                    progressed = true
+                    if !lo.isEmpty { queue.append(lo) }
+                    if !hi.isEmpty { queue.append(hi) }
+                }
+            }
+            if !progressed, seen.insert(cur).inserted {
+                leaves.append(cur)
+            }
+        }
+        return leaves.sorted()
+    }
+
+    private enum Chunk {
+        case plain(String)
+        case sides(String, String)
+    }
+
+    private static func peelExploded(_ text: String) -> String {
+        isExploded(text) ? flatten(text).body : text
+    }
+
+    private static func flattenLeaves(_ leaves: [String]) -> Result {
+        var seen = Set<String>()
+        var uniq: [String] = []
+        for s in leaves where !s.isEmpty {
+            if seen.insert(s).inserted { uniq.append(s) }
+        }
+        uniq.sort()
+        if uniq.isEmpty { return Result(body: "", conflict: false) }
+        if uniq.count == 1 { return Result(body: uniq[0], conflict: false) }
+        if uniq.count == 2 {
+            return Result(body: joined(emitHunkLines(uniq[0], uniq[1])), conflict: true)
+        }
+        if sameFamily(uniq) {
+            let longest = uniq.max(by: { $0.count < $1.count }) ?? uniq[0]
+            return Result(body: longest, conflict: false)
+        }
+        let top = uniq.sorted { $0.count > $1.count }
+        return Result(body: joined(emitHunkLines(top[0], top[1])), conflict: true)
+    }
+
+    private static func sameFamily(_ leaves: [String]) -> Bool {
+        let keys = Set(leaves.map(familyKey).filter { !$0.isEmpty })
+        return keys.count <= 1
+    }
+
+    private static func familyKey(_ s: String) -> String {
+        for ln in lines(s) {
+            let t = ln.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty { continue }
+            return t
+        }
+        return ""
+    }
+
+    private static func markerStartCount(_ text: String) -> Int {
+        var n = 0
+        if text.hasPrefix("<<<<<<< ") { n += 1 }
+        var search = text.startIndex
+        while let r = text.range(of: "\n<<<<<<< ", range: search..<text.endIndex) {
+            n += 1
+            search = r.upperBound
+        }
+        return n
+    }
+
+    private static func isStart(_ ln: String) -> Bool { ln.hasPrefix("<<<<<<< ") }
+    private static func isMid(_ ln: String) -> Bool { ln == "=======" }
+    private static func isEnd(_ ln: String) -> Bool { ln.hasPrefix(">>>>>>> ") }
+
+    private static func splitTopLevel(_ text: String) -> [Chunk] {
+        let ls = lines(text)
+        var i = 0
+        var buf: [String] = []
+        var out: [Chunk] = []
+        func flush() {
+            if !buf.isEmpty {
+                out.append(.plain(joined(buf)))
+                buf.removeAll(keepingCapacity: true)
+            }
+        }
+        while i < ls.count {
+            if isStart(ls[i]) {
+                flush()
+                let (lo, hi, next) = parseHunk(ls, at: i)
+                out.append(.sides(lo, hi))
+                i = next
+            } else {
+                buf.append(ls[i])
+                i += 1
+            }
+        }
+        flush()
+        return out
+    }
+
+    private static func parseHunk(_ ls: [String], at start: Int) -> (String, String, Int) {
+        var i = start + 1
+        var lo: [String] = []
+        var hi: [String] = []
+        var phase = 0
+        var depth = 1
+        while i < ls.count {
+            let ln = ls[i]
+            if isStart(ln) {
+                depth += 1
+                if phase == 0 { lo.append(ln) } else { hi.append(ln) }
+                i += 1
+                continue
+            }
+            if isMid(ln), depth == 1 {
+                phase = 1
+                i += 1
+                continue
+            }
+            if isEnd(ln) {
+                depth -= 1
+                if depth == 0 {
+                    return (joined(lo), joined(hi), i + 1)
+                }
+                if phase == 0 { lo.append(ln) } else { hi.append(ln) }
+                i += 1
+                continue
+            }
+            if phase == 0 { lo.append(ln) } else { hi.append(ln) }
+            i += 1
+        }
+        return (joined(lo), joined(hi), ls.count)
+    }
+
+    private static func emitHunkLines(_ a: String, _ b: String) -> [String] {
+        let (lo, hi): (String, String) = a < b ? (a, b) : (b, a)
+        var out = ["<<<<<<< \(stamp(lo))"]
+        out.append(contentsOf: lines(lo))
+        out.append("=======")
+        out.append(contentsOf: lines(hi))
+        out.append(">>>>>>> \(stamp(hi))")
+        return out
     }
 
     private static func lines(_ s: String) -> [String] {
@@ -65,9 +245,6 @@ enum ComposeMerge {
             let baseSlice = slice(base, s0 + 1, s1)
             let aSlice = slice(a, a0 + 1, a1)
             let bSlice = slice(b, b0 + 1, b1)
-            if s1 < base.count {
-                // matched stable line is emitted after the gap
-            }
             if aSlice == bSlice {
                 out.append(contentsOf: aSlice)
             } else if aSlice == baseSlice {
@@ -129,21 +306,10 @@ enum ComposeMerge {
         return pairs.reversed()
     }
 
+    /// Sides may themselves contain markers; never wrap them raw.
     private static func conflictHunk(_ x: [String], _ y: [String]) -> [String] {
-        let sx = joined(x)
-        let sy = joined(y)
-        let (lo, hi): ([String], [String])
-        if sx < sy { lo = x; hi = y }
-        else if sy < sx { lo = y; hi = x }
-        else { lo = x; hi = y }
-        let idLo = stamp(joined(lo))
-        let idHi = stamp(joined(hi))
-        var out = ["<<<<<<< \(idLo)"]
-        out.append(contentsOf: lo)
-        out.append("=======")
-        out.append(contentsOf: hi)
-        out.append(">>>>>>> \(idHi)")
-        return out
+        let r = flattenLeaves(uniqueLeaves(joined(x)) + uniqueLeaves(joined(y)))
+        return lines(r.body)
     }
 
     private static func stamp(_ s: String) -> String {

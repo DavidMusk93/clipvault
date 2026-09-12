@@ -49,6 +49,15 @@ test('compose concurrent edits use parentHash + diff3, not last apply wins', () 
   assert.match(html, /notesMergeHint/);
   assert.match(html, /<<<<<<< /);
   assert.match(taste, /三路合并/);
+  const merge = src('ComposeMerge.swift');
+  assert.match(merge, /func uniqueLeaves/);
+  assert.match(merge, /func isExploded/);
+  assert.match(merge, /Never concatenate two whole documents/);
+  assert.match(db, /repairExplodedComposeNotesLocked/);
+  assert.match(db, /threeWay\(base: ""/);
+  assert.doesNotMatch(db, /ComposeMerge\.both\(currentBody, incoming\)/);
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+  assert.match(agents, /禁止嵌套/);
 });
 
 test('notes list load failure must not open a blank new note', () => {
