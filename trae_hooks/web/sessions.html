@@ -36,8 +36,13 @@
       overflow: hidden;
     }
     html.embed .top { display: none; }
-    html.embed .session-head { display: none !important; }
-    html.embed .stage { padding-top: 12px; }
+    html.embed .session-head .sid { display: none; }
+    html.embed .session-head {
+      height: auto;
+      min-height: 0;
+      padding: 8px 14px 10px;
+    }
+    html.embed .stage { padding-top: 0; }
     html.embed .app {
       grid-template-columns: minmax(200px, 34%) minmax(0, 1fr) !important;
       grid-template-rows: 1fr !important;
@@ -186,6 +191,20 @@
       color: var(--tool);
       background: color-mix(in srgb, var(--tool) calc(var(--vol-a) * 70%), transparent);
     }
+    .chip.host {
+      color: var(--ink);
+      background: rgba(120, 120, 128, 0.12);
+    }
+    .card .where {
+      margin-top: 4px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      letter-spacing: -0.02em;
+    }
     .pin-btn {
       flex-shrink: 0;
       width: 24px;
@@ -225,24 +244,46 @@
     .session-head {
       flex: 0 0 auto;
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 8px;
+      row-gap: 4px;
       min-width: 0;
-      height: 48px;
-      padding: 0 18px;
+      height: auto;
+      min-height: 48px;
+      padding: 8px 18px;
       background: rgba(250, 250, 250, 0.72);
       backdrop-filter: blur(18px);
       border-bottom: 0.5px solid var(--separator);
     }
     .session-head[hidden] { display: none !important; }
     .session-head .sid {
-      flex: 1;
+      flex: 1 1 auto;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       font-size: 14px;
       font-weight: 590;
+      letter-spacing: -0.02em;
+    }
+    .session-head .idline {
+      flex: 1 1 100%;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      min-width: 0;
+      font-size: 11.5px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .session-head .idline .cwd {
+      flex: 1 1 12em;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--font-mono);
       letter-spacing: -0.02em;
     }
     .copy-id {
@@ -606,6 +647,11 @@
     <section class="stage">
       <div class="session-head" id="sessionHead" hidden>
         <span class="sid" id="sessionSid"></span>
+        <span class="idline">
+          <span id="sessionWhen"></span>
+          <span id="sessionHost"></span>
+          <span class="cwd" id="sessionCwd"></span>
+        </span>
       </div>
       <div class="thread" id="thread"><div class="empty">选择左侧会话</div></div>
       <button type="button" class="follow" id="jumpBot" hidden title="回到最新" aria-label="回到最新并跟踪">↓</button>
@@ -984,16 +1030,27 @@
         return false;
       }
     };
-    const showSessionHead = (sid, title) => {
+    const sessionHost = (s) => String((s && s.instance_id) || "").trim();
+    const sessionCwd = (s) => String((s && s.cwd) || "").replace(/\/$/, "");
+    const showSessionHead = (sid, title, s) => {
       const head = $("sessionHead");
+      const row = s || sessionRows.find((x) => x.session_id === sid) || null;
       if (!sid) {
         head.hidden = true;
         $("sessionSid").textContent = "";
+        $("sessionWhen").textContent = "";
+        $("sessionHost").textContent = "";
+        $("sessionCwd").textContent = "";
         return;
       }
       head.hidden = false;
       $("sessionSid").textContent = title || sid;
       $("sessionSid").title = sid;
+      $("sessionWhen").textContent = localDateTime(row && row.last_ts) || "";
+      $("sessionHost").textContent = sessionHost(row);
+      const cwd = sessionCwd(row);
+      $("sessionCwd").textContent = cwd;
+      $("sessionCwd").title = cwd;
     };
     const bindCopyButtons = (root) => {
       root.querySelectorAll("[data-copy-sid]").forEach((btn) => {
@@ -1052,10 +1109,40 @@
         t.textContent = title;
         t.title = s.session_id || "";
       }
+      const meta = el.querySelector(".meta");
+      if (meta && !el.querySelector(".chip.host")) {
+        const hostChip = document.createElement("span");
+        hostChip.className = "chip host";
+        const volChip = meta.querySelector(".chip.vol");
+        meta.insertBefore(hostChip, volChip);
+      }
+      if (!el.querySelector(".where")) {
+        const whereEl = document.createElement("div");
+        whereEl.className = "where";
+        if (meta && meta.nextSibling) el.insertBefore(whereEl, meta.nextSibling);
+        else el.appendChild(whereEl);
+      }
       const time = el.querySelector(".chip.time");
-      if (time) time.textContent = relTime(s.last_ts) || "—";
+      if (time) {
+        time.textContent = localDateTime(s.last_ts) || "—";
+        time.title = relTime(s.last_ts) || "";
+      }
+      const host = el.querySelector(".chip.host");
+      if (host) {
+        const name = sessionHost(s);
+        host.textContent = name || "—";
+        host.title = name;
+        host.hidden = !name;
+      }
       const vol = el.querySelector(".chip.vol");
       if (vol) vol.textContent = `${s.event_count ?? 0} 条`;
+      const where = el.querySelector(".where");
+      if (where) {
+        const cwd = sessionCwd(s);
+        where.textContent = cwd;
+        where.title = cwd;
+        where.hidden = !cwd;
+      }
       const pin = el.querySelector(".pin-btn");
       if (pin) {
         pin.setAttribute("aria-pressed", pinned ? "true" : "false");
@@ -1102,7 +1189,8 @@
             <button type="button" class="pin-btn" title="置顶" aria-label="置顶">${PIN_ICON}</button>
             ${s.session_id ? `<button type="button" class="copy-id" data-copy-sid="${sid}" title="复制 session id" aria-label="复制 session id">复制</button>` : ""}
           </div>
-          <div class="meta"><span class="chip time"></span><span class="chip vol"></span></div>`;
+          <div class="meta"><span class="chip time"></span><span class="chip host"></span><span class="chip vol"></span></div>
+          <div class="where" hidden></div>`;
       fillSessionCard(el, s);
       bindSessionCard(el);
       bindCopyButtons(el);
@@ -1490,7 +1578,7 @@
           return { sessions, switched };
         }
         const listSig = sessions.map((s) =>
-          `${s.session_id}:${s.event_count}:${s.last_ts}:${s.pinned_at || ""}:${recencyTone(s.last_ts)}:${volumeBand(s.event_count)}`
+          `${s.session_id}:${s.event_count}:${s.last_ts}:${s.pinned_at || ""}:${s.instance_id || ""}:${s.cwd || ""}:${recencyTone(s.last_ts)}:${volumeBand(s.event_count)}`
         ).join("|");
         const latest = newestSession(sessions);
         const takeLatest = latest && latest.session_id && (!current || (followLatest && latest.session_id !== current));
@@ -1501,7 +1589,7 @@
           liveEvents = [];
           liveIds.clear();
           markFollow(true);
-          showSessionHead(current, sessionTitle(latest));
+          showSessionHead(current, sessionTitle(latest), latest);
           switched = true;
         }
         emit("trae_sessions_list", { payload: { n: sessions.length } });
@@ -1510,6 +1598,10 @@
         railY = box.scrollTop;
         patchSessionList(sessions);
         box.scrollTop = railY;
+        if (current) {
+          const row = sessions.find((s) => s.session_id === current);
+          if (row) showSessionHead(current, sessionTitle(row), row);
+        }
         return { sessions, switched };
       } catch (err) {
         emit("trae_sessions_error", { payload: { reason: "list" } });

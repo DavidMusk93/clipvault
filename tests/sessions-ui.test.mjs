@@ -36,6 +36,30 @@ test('sessions.html inline module passes node --check', () => {
   assert.equal(r.status, 0, `SyntaxError in sessions.html:\n${r.stderr || r.stdout}`);
 });
 
+test('list cards show last datetime, source host, and cwd', () => {
+  assert.match(html, /chip host/);
+  assert.match(html, /class="where"/);
+  assert.match(html, /id="sessionWhen"/);
+  assert.match(html, /id="sessionHost"/);
+  assert.match(html, /id="sessionCwd"/);
+  assert.match(html, /const sessionHost =/);
+  assert.match(html, /const sessionCwd =/);
+  assert.match(html, /time\.textContent = localDateTime\(s\.last_ts\)/);
+  assert.doesNotMatch(
+    html,
+    /chip\.time[\s\S]{0,80}relTime\(s\.last_ts\)/,
+    'session item time must be datetime, not 刚刚',
+  );
+  assert.match(html, /host\.textContent = name/);
+  assert.match(html, /where\.textContent = cwd/);
+  assert.match(html, /s\.instance_id \|\| ""/);
+  assert.match(html, /s\.cwd \|\| ""/);
+  const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
+  assert.match(agents, /列卡必须标最后一条/);
+  assert.match(agents, /instance_id/);
+  assert.match(agents, /localDateTime/);
+});
+
 test('list cards copy session id; thread header does not duplicate it', () => {
   assert.match(html, /id="sessionHead"/);
   assert.match(html, /data-copy-sid=/);
@@ -45,7 +69,7 @@ test('list cards copy session id; thread header does not duplicate it', () => {
   assert.match(html, /ev\.stopPropagation\(\)/);
   assert.match(html, /bindCopyButtons\(el\)/);
   assert.doesNotMatch(html, /id="copySid"/);
-  assert.match(html, /html\.embed \.session-head \{ display: none/);
+  assert.match(html, /html\.embed \.session-head \.sid \{ display: none/);
 });
 
 test('copy button press feedback stays short and origin-safe', () => {

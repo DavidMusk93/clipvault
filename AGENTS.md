@@ -268,6 +268,8 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 列语义色：蜂蜜暖度=`fresh/today/week/old`；工具蓝=`xs/s/m/l`。禁止彩虹。默认打开 `last_ts` 最大的会话。用户气泡全展开；工具只在助手侧压缩，最后一条操作始终展开。
 
+列卡必须标最后一条 `localDateTime`（`YYYY-MM-DD HH:mm:ss`）、来源 `instance_id`、工作目录 `cwd`。禁止只用「刚刚」当会话时刻。
+
 禁止：`setInterval` 刷 DOM；每次 hook 整页 `innerHTML`；overlay 盖住后续气泡；embed 窄宽叠成 30vh；用最新 200 条工具当整段历史。
 
 新加载 bug：先补 `tests/session-load.test.mjs` 再改 fetch。
