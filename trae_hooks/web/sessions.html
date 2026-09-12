@@ -539,7 +539,31 @@
     }
     .history-item-body .row { margin: 0; }
     .history-item-body .bubble.tool { max-width: 100%; }
-    .cv-metrics-float { bottom: 64px; }
+    .cv-corner-stack {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      z-index: 9;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .cv-corner-stack > * { pointer-events: auto; }
+    .cv-corner-stack .cv-metrics-float,
+    .cv-corner-stack .cv-mine-float {
+      position: static;
+      right: auto;
+      bottom: auto;
+      z-index: auto;
+    }
+    .cv-corner-stack .follow {
+      position: static;
+      right: auto;
+      bottom: auto;
+      z-index: auto;
+    }
     .follow {
       position: absolute;
       right: 20px;
@@ -619,17 +643,11 @@
     }
     .url-inert.md-link { color: var(--accent); }
     .cv-mine-float {
-      position: absolute;
-      right: 16px;
-      bottom: 52px;
-      z-index: 9;
       display: flex;
       flex-direction: column;
       align-items: flex-end;
       gap: 8px;
-      pointer-events: none;
     }
-    .cv-mine-float > * { pointer-events: auto; }
     .cv-mine-pop {
       width: min(420px, calc(100vw - 36px));
       max-height: min(72vh, 640px);
@@ -837,10 +855,14 @@
       else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 2000);
     };
     const sessRing = [];
+    const cornerMount = document.querySelector(".stage") || document.querySelector(".app") || document.body;
+    const corner = document.createElement("div");
+    corner.className = "cv-corner-stack";
+    cornerMount.appendChild(corner);
     const sessMetricsCtl = globalThis.ClipMetricsPanel && ClipMetricsPanel.create
       ? ClipMetricsPanel.create({
           family: "sessions",
-          mount: document.querySelector(".app") || document.body,
+          mount: corner,
           getLocal: () => sessRing.slice(),
         })
       : null;
@@ -868,7 +890,9 @@
         </div>
       </div>
       <button type="button" class="cv-debug-fab cv-mine-fab" id="mineOpen" aria-label="分析" aria-pressed="false">分析</button>`;
-    (document.querySelector(".app") || document.body).appendChild(mineHost);
+    corner.insertBefore(mineHost, corner.firstChild);
+    const jump = $("jumpBot");
+    if (jump) corner.appendChild(jump);
     const minePop = mineHost.querySelector(".cv-mine-pop");
     const mineBody = mineHost.querySelector("#mineBody");
     const mineDirsEl = mineHost.querySelector("#mineDirs");

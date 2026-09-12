@@ -36,8 +36,11 @@ test('server exposes /api/mine without tool bodies', () => {
 test('analysis fab sits above the debug fab', () => {
   assert.match(html, /id="mineOpen"/);
   assert.match(html, />分析<\/button>/);
-  assert.match(html, /cv-mine-float/);
-  assert.match(html, /bottom:\s*52px/);
+  assert.match(html, /cv-corner-stack/);
+  assert.match(html, /insertBefore\(mineHost, corner\.firstChild\)/);
+  assert.match(html, /cv-corner-stack \.cv-metrics-float/);
+  assert.doesNotMatch(html, /\.cv-metrics-float \{ bottom: 64px/);
+  assert.doesNotMatch(html, /\.cv-mine-float \{[\s\S]{0,80}bottom:\s*52px/);
   assert.match(html, /data-scope="session"/);
   assert.match(html, /data-scope="recent"/);
   assert.match(html, /复制反馈到剪贴板/);
