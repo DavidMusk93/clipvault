@@ -104,7 +104,9 @@ test('save status is labeled and retries on failure', () => {
   assert.match(html, /notes-new-plus/);
   assert.doesNotMatch(html, />新一篇</);
   assert.doesNotMatch(html, /notes-status-dot/);
-  assert.match(html, /id="notesStatus"[\s\S]{0,280}id="notesShare"/);
+  assert.match(html, /id="notesStatus"/);
+  assert.match(html, /id="notesLink"/);
+  assert.match(html, /id="notesShare"/);
   assert.match(html, /\.notes-status\[data-state="saved"\] \{ color: #248A3D; \}/);
   assert.match(html, /\.notes-status\[data-state="dirty"\] \{ color: #C47A2C; \}/);
 });
@@ -129,6 +131,7 @@ test('panel is source + preview split', () => {
 
 test('preview mode keeps the preview pane in a 1fr track', () => {
   assert.match(css, /grid-template-areas:\s*"source split preview"/);
+  assert.match(css, /\[data-mode="split"\] \{\n  grid-template-columns: 0\.46fr 5px 0\.54fr;/);
   assert.match(css, /\[data-mode="preview"\] \{\n  grid-template-columns: 1fr;/);
   assert.doesNotMatch(css, /\[data-mode="preview"\] \{\s*grid-template-columns:\s*0 0 1fr/);
 });
@@ -144,8 +147,40 @@ test('opening a note defaults to preview; new note is source', () => {
   assert.match(html, /\.notes-chrome\.is-preview \.notes-tools \{[\s\S]{0,80}visibility:\s*hidden/);
   assert.match(html, /\.notes-chrome\.is-preview \.notes-status \{[\s\S]{0,40}visibility:\s*hidden/);
   assert.doesNotMatch(html, /tools\.hidden = mode === 'preview'/);
+  assert.match(css, /\.notes-work \{\n  flex: 1;\n  min-height: 0;\n  display: grid;\n  grid-template-columns: 1fr;/);
+  assert.doesNotMatch(css, /\.notes-work \{\n[\s\S]{0,160}grid-template-columns: 0\.46fr/);
 });
 
+test('title-line #tags are searchable; heading syntax is not a tag', () => {
+  assert.match(html, /function extractNoteTags/);
+  assert.doesNotMatch(html, /#\{1,6\}\\s\/\.test\(line\)\) continue/);
+  assert.match(html, /q\.startsWith\('#'\)/);
+  assert.match(html, /id="notesRelated"/);
+  assert.match(html, /function openNotesLinkToast/);
+  const tags = extractNoteTags('# 网关 #auto #gateway\n\nbody #work\n');
+  assert.deepEqual(tags, ['auto', 'gateway', 'work']);
+  assert.deepEqual(extractNoteTags('# 纯标题\n\nhello'), []);
+});
+
+function extractNoteTags(md) {
+  const text = String(md || '');
+  const tags = [];
+  const seen = new Set();
+  let fence = false;
+  for (const line of text.split('\n')) {
+    if (/^\s{0,3}```/.test(line)) { fence = !fence; continue; }
+    if (fence) continue;
+    const re = /(^|[^\w#])#([\p{L}\p{N}_/-]{1,32})/gu;
+    let m;
+    while ((m = re.exec(line))) {
+      const k = m[2].toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      tags.push(m[2]);
+    }
+  }
+  return tags;
+}
 function escapeRegExp(s) {
   return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -228,8 +263,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n26/);
-  assert.match(html, /notes-editor\.css\?v=n26/);
+  assert.match(html, /notes-editor\.js\?v=n27/);
+  assert.match(html, /notes-editor\.css\?v=n27/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {

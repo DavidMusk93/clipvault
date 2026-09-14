@@ -12,20 +12,22 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 0.46fr 5px 0.54fr;
-  grid-template-areas: "source split preview";
+  grid-template-columns: 1fr;
+  grid-template-areas: "source";
   contain: layout paint;
 }
 .notes-source { grid-area: source; }
 .notes-splitter { grid-area: split; }
 .notes-preview { grid-area: preview; }
-.notes-work[data-mode="source"] {
-  grid-template-columns: 1fr;
-  grid-template-areas: "source";
-}
+.notes-work:not([data-mode="split"]):not([data-mode="preview"]) .notes-splitter,
+.notes-work:not([data-mode="split"]):not([data-mode="preview"]) .notes-preview,
 .notes-work[data-mode="source"] .notes-splitter,
 .notes-work[data-mode="source"] .notes-preview {
   display: none;
+}
+.notes-work[data-mode="split"] {
+  grid-template-columns: 0.46fr 5px 0.54fr;
+  grid-template-areas: "source split preview";
 }
 .notes-work[data-mode="preview"] {
   grid-template-columns: 1fr;

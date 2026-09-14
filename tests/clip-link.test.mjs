@@ -101,7 +101,8 @@ test('HTTP write API + GET links; POST does not SSE update', () => {
   const handle = functionBody(web, 'handleClipLink');
   assert.match(handle, /recordLocalClipLink/);
   assert.doesNotMatch(handle, /broadcastSSE/);
-  assert.match(web, /笔记侧关联下期开放|submitClipLink/);
+  assert.match(web, /func handleClipLink/);
+  assert.doesNotMatch(db, /笔记侧关联下期开放/);
 });
 
 test('ClipboardItem carries linkCount; pair_key + cap 32', () => {
@@ -141,6 +142,11 @@ test('web link UI: popover, same-slot button, no wall reset', () => {
   assert.match(html, /function openLinkToast/);
   assert.match(html, /function patchCardLinkState/);
   assert.match(html, /positionAnchoredCard/);
+  assert.match(html, /id="notesLink"/);
+  assert.match(html, /id="notesRelated"/);
+  assert.match(html, /function openNotesLinkToast/);
+  assert.match(html, /function loadNotesRelated/);
+  assert.match(html, /notesOpen\) await closeNotesPanel/);
   const j = html.indexOf('async function jumpToLocator');
   const end = html.indexOf('async function applyAppHash', j);
   const jump = html.slice(j, end > j ? end : j + 2000);

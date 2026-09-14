@@ -171,10 +171,10 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 源码 | JetBrains Mono 14.5 / 1.62 · Xcode Light token | `web/assets/fonts/`，禁止 CDN |
 | 预览正文 | SF / PingFang 17 / 1.65 · **预览模式宽 = 父容器 61.8%**（黄金分割） | 禁止再卡 `38rem`。窄屏 100%。分栏仍 `max-width: 38rem` |
 | 预览代码 | 浅板 `#F5F5F7` + 语言条 + 头栏右簇「换行」「复制」白底浅阴影钮 + Xcode Light | **不是** View 的炭黑井。**默认不换行**（`pre` + 横向滚）。换行是选项。两钮 `gap: 4px`，禁止透明字当按钮、禁止拉开间距 |
-| 模式 | 源码 / 分栏 / 预览；桌面默认分栏 | 窄屏默认源码 |
+| 模式 | 源码 / 分栏 / 预览；**打开默认预览，新建默认源码** | 分栏只手动切。禁止新建默认分栏；CSS 无 `data-mode` 时也是源码单栏 |
 | 分栏滚动 | 块锚点 + 块内进度（VS Code / MarkEdit）。头/底 2px 钉住 max | 禁止全程 `scrollTop/max`。禁止只把视口第一行钉在预览顶。围栏用 `data-source-end-line` 摊到 PRE 内容盒。**预览终局**：lexer 块 hash LRU 编译 + React 18 keyed `.notes-md-block`（`display:contents`，行号在 wrapper）。禁止整页 `innerHTML` 换预览。输入不 `force` remap。图 load 不 remap |
 | 保存态 | 11px 文案 + 6px 点：未保存 / 保存中 / 已保存 / 保存失败将重试 | 禁止只留圆点；失败指数退避 + `online` 重放 |
-| Tag | 标题内金色 `#F5A400` 同字号，不是黄胶囊 | `#auto gateway…`；`# 标题` 不算 tag；筛选时侧栏一颗可关的滤镜钮 |
+| Tag | 标题内金色 `#F5A400` 同字号，不是黄胶囊 | `#auto gateway…`；`# 标题`（井号后空格）不算 tag，**标题行里的 `#tag` 要能筛**；点标题 tag / 侧栏 tag / 搜 `#tag` 同一条 `extractNoteTags`；筛选时侧栏一颗可关的滤镜钮 |
 | 嵌套列表 | Tab 后源码 `a. b. c.`，再一层 `i. ii.`；预览同样 | 每层 4 空格；预览把 `a.`/`i.` 映成 GFM `1.` 再渲染。禁止 `5.1` |
 | 分割线 checkpoint | 源码行写成恰好 `---` 时，下一行自动写入本地 `YYYY-MM-DD HH:mm` | 让多次改动有时间戳。禁止写进围栏代码；已有戳不再盖。`---` 必须单独成行才是 hr |
 | 行内计算 | `1+2=` 后幽灵预览结果；**Tab 写入**，其它键丢掉预览 | 不 `eval()`。Tab 有幽灵时优先于列表缩进。`price=` / `==` / 代码围栏不触发 |
@@ -214,7 +214,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 
 **入口**：不要单独「事件时间线」按钮；用 header 的 **×N 引用徽章** 作为唯一 affordance（单 ref 无徽章、无入口）。
 
-**关联入口**：`action-pair` 里与评价同槽的 32×32 `icon-btn`（`data-link`）；`linkCount>0` 时 `has-ctx`。详情在锚定毛玻璃 popover `#linkToast`（克隆 ×N），lazy GET。禁止 header 第二条 chip、禁止卡片 body 挂关联列表。跳转禁止 `fetchPage({reset:true})`。
+**关联入口**：墙上 `action-pair` 里与评价同槽的 32×32 `icon-btn`（`data-link`）；笔记栏同槽 28×26 链钮 `#notesLink`（与分享并列）。`linkCount>0` 时 `has-ctx`。详情在锚定毛玻璃 popover `#linkToast`（克隆 ×N），lazy GET。笔记有边时纸面工具条下 **一行 24px pill chip**（语义色点 + 预览，不是第二套列表）；点 chip 跳转，溢出「还有 N」开同一 popover。禁止墙卡 header 第二条 chip、禁止卡片 body 挂关联列表。跳转禁止 `fetchPage({reset:true})`。从笔记跳墙卡必须先关霜层。
 
 **落地信标（跳转 / 从 picker 选中）**：墙卡 `.is-flash` = Accent `#0071E3` 描边（`outline` 2px / offset 2px，不改 `border-width`）+ `scale(1.02)` + 抬高 `z-index`，卡片进视口后再亮、持约 850ms 后 transition 收回。两张卡很近时也要一眼能分清落点。禁止 `translateY` / 持久选中态 / 改 border 宽度（会撑 masonry）。`prefers-reduced-motion` 只留描边，去掉 scale。
 
