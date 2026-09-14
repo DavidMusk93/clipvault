@@ -243,8 +243,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     func readBlobFile(hash: String) -> Data? {
-        let h = hash.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard h.count == 64 else { return nil }
+        guard let h = BlobCAS.storageKey(hash) else { return nil }
         var urls: [URL] = [blobFileURL(hash: h)]
         let docs = (fm.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents"))
