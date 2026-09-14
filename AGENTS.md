@@ -314,9 +314,14 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   本机事件
     → CloudDocsSyncService.recordLocal*
     → outbox → trx/{host}/{seq}.json
-    → blob_keys 点名的对象 → live/attach/{sha}.bin
+    → blob_keys 点名的对象 → live/attach/{key}.bin
     → iCloud Drive 运输
     → 对端 pull apply（grow-only 字段：ocr_text 更长才写）
+
+  blob_keys = 64 hex  |  {sha}.rtf  |  {sha}.pdf
+  本地文件   blobs/{key}.bin     （RTF 是 {sha}.rtf.bin，不是 {sha}.bin）
+  readBlobFile 必须认 typed key；count==64 硬拒会把 pull 卡在一条 upsert
+  后面的 compose trx 永远不 apply → 笔记看起来不同步
 ```
 
 ```text
@@ -329,7 +334,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 策略真源：`WallClockPolicy.swift`。回归：`tests/wall_clock_main.swift`（策略 + 440 团块 keyset 必须翻到更早 text；类型 chip 走同一 keyset，禁止只滤第 1 页）。
 
-禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite；OCR/hydrate 拨捕获钟；把 440 张图合成一张卡。
+禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite；OCR/hydrate 拨捕获钟；把 440 张图合成一张卡；`readBlobFile` 用 `count == 64` 丢掉 `{sha}.rtf`/`{sha}.pdf`。
 
 ---
 

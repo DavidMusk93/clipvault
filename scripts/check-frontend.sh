@@ -20,6 +20,9 @@ swiftc -parse-as-library -O tests/compose_notes_main.swift "$SRC/Store/ComposeNo
 echo "[check-frontend] swiftc wall clock (capture vs sync)"
 swiftc -parse-as-library -O tests/wall_clock_main.swift "$SRC/Store/WallClockPolicy.swift" -o /tmp/clipvault-wall-clock-test
 /tmp/clipvault-wall-clock-test
+echo "[check-frontend] swiftc blob CAS keys"
+swiftc -parse-as-library -O tests/blob_cas_main.swift "$SRC/Store/BlobCAS.swift" -o /tmp/clipvault-blob-cas-test
+/tmp/clipvault-blob-cas-test
 echo "[check-frontend] python session mine"
 python3 tests/session_mine_main.py
 echo "[check-frontend] OK"
