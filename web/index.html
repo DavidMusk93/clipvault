@@ -17,8 +17,8 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n26" />
-  <script src="/assets/notes-editor/notes-editor.js?v=n26"></script>
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n27" />
+  <script src="/assets/notes-editor/notes-editor.js?v=n27"></script>
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n13"></script>
   <link rel="stylesheet" href="/assets/metrics-panel.css?v=m4" />
@@ -1952,10 +1952,11 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .notes-title-view { pointer-events: none; }
-    .notes-title-view .notes-tag { color: #f5a400; cursor: default; }
+    .notes-title-view .notes-tag { color: #f5a400; cursor: pointer; pointer-events: auto; }
     .notes-title-wrap.has-value:not(.is-editing) .notes-title {
       color: transparent;
       caret-color: var(--ink);
+      pointer-events: none;
     }
     .notes-title-wrap.has-value:not(.is-editing) .notes-title::placeholder {
       color: transparent;
@@ -2017,14 +2018,48 @@
     .notes-status[data-state="saved"] { color: #248A3D; }
     .notes-status[data-state="error"] { color: #D70015; }
     .notes-status-label { white-space: nowrap; }
-    .notes-share {
+    .notes-share,
+    .notes-link {
       width: 28px; height: 26px; border: 0; border-radius: 6px; flex: none;
       background: transparent; color: var(--ink); cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center;
     }
-    .notes-share:hover { background: rgba(60, 60, 67, 0.08); }
-    .notes-share.is-shared { color: var(--accent, #0071E3); }
+    .notes-share:hover,
+    .notes-link:hover { background: rgba(60, 60, 67, 0.08); }
+    .notes-share:active,
+    .notes-link:active { transform: scale(0.96); }
+    .notes-share.is-shared,
+    .notes-link.has-ctx { color: var(--accent, #0071E3); }
     .notes-share .material-symbols-outlined { font-size: 16px; }
+    .notes-link svg { width: 16px; height: 16px; display: block; }
+    .notes-link[hidden] { display: none; }
+    .notes-related {
+      display: flex; align-items: center; gap: 6px;
+      flex: none; min-height: 0;
+      padding: 0 16px 8px;
+      overflow-x: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .notes-related[hidden] { display: none; }
+    .notes-related-chip {
+      display: inline-flex; align-items: center; gap: 7px;
+      height: 24px; max-width: 200px;
+      padding: 0 9px 0 8px; border: 0; border-radius: 980px;
+      background: rgba(60, 60, 67, 0.06); color: var(--ink);
+      cursor: pointer; flex: none;
+    }
+    .notes-related-chip:active { transform: scale(0.97); }
+    .notes-related-chip.is-more { color: var(--muted); }
+    .notes-related-chip.is-missing { opacity: 0.5; cursor: default; }
+    .notes-related-dot {
+      width: 6px; height: 6px; border-radius: 50%; flex: none;
+      background: var(--type-text);
+    }
+    .notes-related-text {
+      font: 500 12px/24px var(--font-ui); letter-spacing: -0.01em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .notes-merge-hint {
       display: none;
       margin: 0 16px 8px;
@@ -2617,10 +2652,14 @@
         <span class="notes-status" id="notesStatus" data-state="idle" title="保存状态">
           <span class="notes-status-label" id="notesStatusLabel"></span>
         </span>
+        <button type="button" class="notes-link" id="notesLink" hidden title="关联" aria-label="关联">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 1 0-7.07-7.07L9.7 6.23" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M14 11a5 5 0 0 0-7.07 0L5.52 12.41a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
         <button type="button" class="notes-share" id="notesShare" title="复制分享链接" aria-label="分享">
           <span class="material-symbols-outlined">ios_share</span>
         </button>
       </div>
+      <div id="notesRelated" class="notes-related" hidden></div>
       <div id="notesMergeHint" class="notes-merge-hint" hidden></div>
       <div id="notesEditor" class="notes-work"></div>
     </section>
@@ -3140,6 +3179,8 @@ window.ClipViewMasonry = Masonry;
         await openNotesPanel(item.id);
         return;
       }
+      const notesOpen = document.getElementById('notesPanel')?.classList.contains('open');
+      if (notesOpen) await closeNotesPanel();
       if (item.inTrash) {
         toast('目标在回收箱');
         return;
@@ -3431,12 +3472,19 @@ window.ClipViewMasonry = Masonry;
       const n = Math.max(0, Number(patch && patch.linkCount) || 0);
       const idx = clips.findIndex((c) => c.id === itemId);
       if (idx >= 0) clips[idx] = { ...clips[idx], linkCount: n };
+      const ni = notesState.items.findIndex((x) => x.id === itemId);
+      if (ni >= 0) notesState.items[ni] = { ...notesState.items[ni], linkCount: n };
       const btn = cardCache.get(itemId)?.querySelector('[data-link]');
-      if (!btn) return;
-      btn.classList.toggle('has-ctx', n > 0);
-      const label = n > 0 ? `关联（${n}）` : '关联';
-      btn.title = label;
-      btn.setAttribute('aria-label', label);
+      if (btn) {
+        btn.classList.toggle('has-ctx', n > 0);
+        const label = n > 0 ? `关联（${n}）` : '关联';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+      }
+      if (notesState.id === itemId) {
+        paintNotesLinkButton(itemId);
+        loadNotesRelated(itemId);
+      }
     }
 
     async function submitEvaluation() {
@@ -3513,7 +3561,6 @@ window.ClipViewMasonry = Masonry;
       for (const line of text.split('\n')) {
         if (/^\s{0,3}```/.test(line)) { fence = !fence; continue; }
         if (fence) continue;
-        if (/^\s{0,3}#{1,6}\s/.test(line)) continue;
         const re = /(^|[^\w#])#([\p{L}\p{N}_/-]{1,32})/gu;
         let m;
         while ((m = re.exec(line))) {
@@ -3652,6 +3699,81 @@ window.ClipViewMasonry = Masonry;
       document.querySelectorAll('[data-share-id="' + CSS.escape(id) + '"]').forEach((b) => paintShareButton(b, on));
       if (notesState.id === id) paintShareButton(document.getElementById('notesShare'), on);
     }
+    function noteLinkCount(id) {
+      const n = notesState.items.find((x) => x.id === id);
+      return Math.max(0, Number(n && n.linkCount) || 0);
+    }
+    function paintNotesLinkButton(id) {
+      const btn = document.getElementById('notesLink');
+      if (!btn) return;
+      if (!id) {
+        btn.hidden = true;
+        btn.classList.remove('has-ctx');
+        return;
+      }
+      btn.hidden = false;
+      const n = noteLinkCount(id);
+      btn.classList.toggle('has-ctx', n > 0);
+      const label = n > 0 ? `关联（${n}）` : '关联';
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+    }
+    function notesRelatedChipHtml(row, extraClass) {
+      const resolved = (row && row.resolved) || {};
+      const missing = !!resolved.missing;
+      const type = resolved.type || row.type || 'other';
+      const tm = typeMeta(type);
+      const id = resolved.id || row.id || row.toId || '';
+      const hash = resolved.contentHash || row.toHash || row.contentHash || '';
+      const preview = String(resolved.preview || row.preview || '').replace(/\s+/g, ' ').trim() || tm.label;
+      const isNote = !!(resolved.isCompose || type === 'note');
+      return `<button type="button" class="notes-related-chip${missing ? ' is-missing' : ''}${extraClass ? ' ' + extraClass : ''}" data-related-jump="${escAttr(id)}" data-related-hash="${escAttr(hash)}" data-related-note="${isNote ? '1' : '0'}" title="${escAttr(preview)}">
+        <span class="notes-related-dot" style="background:var(--${tm.cls})"></span>
+        <span class="notes-related-text">${esc(preview)}</span>
+      </button>`;
+    }
+    async function loadNotesRelated(id) {
+      const host = document.getElementById('notesRelated');
+      if (!host) return;
+      if (!id || noteLinkCount(id) <= 0) {
+        host.hidden = true;
+        host.replaceChildren();
+        return;
+      }
+      try {
+        const res = await fetch(`${API}/api/items/${encodeURIComponent(id)}/links?limit=32`);
+        const j = await res.json().catch(() => ({}));
+        const links = Array.isArray(j.links) ? j.links : [];
+        const n = Number(j.linkCount != null ? j.linkCount : links.length) || 0;
+        const note = notesState.items.find((x) => x.id === id);
+        if (note) note.linkCount = n;
+        paintNotesLinkButton(id);
+        if (!links.length || notesState.id !== id) {
+          host.hidden = true;
+          host.replaceChildren();
+          return;
+        }
+        const cap = 5;
+        const shown = links.slice(0, cap);
+        let html = shown.map((row) => notesRelatedChipHtml(row)).join('');
+        if (links.length > cap) {
+          html += `<button type="button" class="notes-related-chip is-more" data-related-more="1" title="全部关联">还有 ${links.length - cap}</button>`;
+        }
+        host.innerHTML = html;
+        host.hidden = false;
+      } catch (_) {
+        if (notesState.id === id) {
+          host.hidden = true;
+          host.replaceChildren();
+        }
+      }
+    }
+    async function openNotesLinkToast() {
+      if (!notesState.id) return;
+      linkTab = 'clip';
+      const item = notesState.items.find((x) => x.id === notesState.id) || { id: notesState.id, type: 'note' };
+      await openLinkToast(item, document.getElementById('notesLink'));
+    }
     async function copyShareLink(id) {
       if (!id) return false;
       try {
@@ -3767,16 +3889,19 @@ window.ClipViewMasonry = Masonry;
     }
     function paintNotesList() {
       const t0 = performance.now();
-      const q = (document.getElementById('notesSearch')?.value || '').trim().toLowerCase();
+      const qRaw = (document.getElementById('notesSearch')?.value || '').trim();
+      const q = qRaw.toLowerCase();
+      const qTag = q.startsWith('#') ? q.slice(1) : '';
       const root = document.getElementById('notesList');
       if (!root) return;
-      const wantTag = notesState.tagFilter ? notesState.tagFilter.toLowerCase() : '';
+      const wantTag = (notesState.tagFilter || qTag).toLowerCase();
       const rows = notesState.items.filter(n => {
-        if (q && !(n.textContent || '').toLowerCase().includes(q)) return false;
         if (wantTag) {
           const tags = extractNoteTags(n.textContent || '');
           if (!tags.some((t) => t.toLowerCase() === wantTag)) return false;
+          if (qTag) return true;
         }
+        if (q && !qTag && !(n.textContent || '').toLowerCase().includes(q)) return false;
         return true;
       }).sort((a, b) => {
         const ap = noteIsPinned(a);
@@ -4019,6 +4144,7 @@ window.ClipViewMasonry = Masonry;
         }
         nm('note_save', { dur_ms: dur, ok: true, payload: { bytes: body.length } });
         paintNotesList();
+        paintNotesLinkButton(notesState.id);
         if (notesState.dirty) scheduleNoteSave();
       } catch (e) {
         notesState.dirty = true;
@@ -4046,6 +4172,8 @@ window.ClipViewMasonry = Masonry;
       paintNotesList();
       paintNotesTagBar();
       paintShareControls(id);
+      paintNotesLinkButton(id);
+      loadNotesRelated(id);
       if (String(item.textContent || '').includes('<<<<<<< ')) {
         paintNotesMergeHint('这篇有两处改动已并入，请看源码里的标记');
       } else {
@@ -4069,6 +4197,8 @@ window.ClipViewMasonry = Masonry;
       paintNotesList();
       paintNotesTagBar();
       paintShareButton(document.getElementById('notesShare'), false);
+      paintNotesLinkButton(null);
+      loadNotesRelated(null);
       titleEl?.focus();
       nm('note_new');
     }
@@ -4644,6 +4774,37 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('notesShare')?.addEventListener('click', () => {
       if (notesState.id) toggleShareLink(notesState.id);
     });
+    document.getElementById('notesLink')?.addEventListener('click', () => {
+      openNotesLinkToast();
+    });
+    document.getElementById('notesRelated')?.addEventListener('click', (e) => {
+      const more = e.target.closest('[data-related-more]');
+      if (more) {
+        e.preventDefault();
+        openNotesLinkToast();
+        return;
+      }
+      const chip = e.target.closest('[data-related-jump]');
+      if (!chip || chip.classList.contains('is-missing')) return;
+      e.preventDefault();
+      const id = chip.getAttribute('data-related-jump');
+      const hash = chip.getAttribute('data-related-hash');
+      const isNote = chip.getAttribute('data-related-note') === '1';
+      if (isNote && id) openNoteInPanel(id);
+      else if (hash) jumpToLocator({ kind: 'hash', hash });
+      else if (id) jumpToLocator({ kind: 'id', id });
+    });
+    document.getElementById('notesTitleWrap')?.addEventListener('click', (e) => {
+      const tag = e.target.closest && e.target.closest('.notes-tag');
+      if (tag) {
+        e.preventDefault();
+        setNotesTagFilter(tag.dataset.tag || tag.textContent.replace(/^#/, ''));
+        return;
+      }
+      if (!document.getElementById('notesTitleWrap')?.classList.contains('is-editing')) {
+        document.getElementById('notesTitle')?.focus();
+      }
+    });
     {
       const opts = { capture: true, passive: false };
       document.addEventListener('wheel', notesBackdropEvent, opts);
@@ -4690,6 +4851,7 @@ window.ClipViewMasonry = Masonry;
       const open = document.getElementById('notesPanel')?.classList.contains('open');
       if (!open) return;
       if (e.key === 'Escape') {
+        if (document.getElementById('linkToast')?.classList.contains('open')) return;
         closeNotesPanel();
         return;
       }

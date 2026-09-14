@@ -201,7 +201,7 @@ else:
     pair_key = "hh:" + min(from.hash, to.hash) + ":" + max(...)
 ```
 
-禁止用笔记的 `content_hash` 拼 `hh:`（编辑后即变）。P1 HTTP **拒绝** `from.type==note`（400「笔记侧关联下期开放」），但 **apply/sync 必须能 fold `nh:` / `nn:`**，避免 P2 改协议。
+禁止用笔记的 `content_hash` 拼 `hh:`（编辑后即变）。HTTP **允许** `from.type==note`（笔记栏 `#notesLink`）；apply/sync 折 `nh:` / `nn:`。
 
 `clip_links.pair_key` PRIMARY KEY。unlink 不要求「必须是原来的 from」：站在 B 上取消时，用 B 当 `fromId` 再 `makePairKey`，得到同一无向键。
 
@@ -255,7 +255,8 @@ func submitClipLinkLocked(fromId, toId?, toHash?, kind, linked, source) -> Resul
   from = fetchItemById(fromId)
   if from == nil: 404 找不到卡片
   if from.deletedAt != nil: 400 回收箱里不能关联
-  if from.type == note: 400 笔记侧关联下期开放          # P1 HTTP；apply 不走这条
+  if from.deletedAt != nil: 400 回收箱里不能关联
+  # from.type==note 已允许（笔记栏发起）；apply 同样 fold nh:/nn:
 
   to = resolvePostTarget(toId, toHash)                   # 见下
   if to.missing: 404 找不到要关联的卡片
@@ -538,7 +539,7 @@ POST /api/clips/link
 
 | 字段 | 规则 |
 | --- | --- |
-| `fromId` | 活着的非 note 行（P1） |
+| `fromId` | 活着的行（捕获或笔记） |
 | `toId` / `toHash` | 至少一个 |
 | `toId` 命中捕获 | **采用服务端 `content_hash`** |
 | 仅 `toHash` | exact `findIdByContentHash`；命中 note → 400 |
@@ -916,7 +917,7 @@ swift build --product ClipFlowServer
 | # | 问题 | 默认（已锁定） | 需 Owner？ |
 | --- | --- | --- | --- |
 | Q1 | 零关联时按钮是否仍占 action-pair 一槽 | 是（与评价铅笔一致） | 若嫌挤可再议，首期不做隐藏 |
-| Q2 | 从笔记面板发起关联 | P2。P1 HTTP `from.type==note` → 400；apply 已能 fold `nh:`/`nn:` | 否 |
+| Q2 | 从笔记面板发起关联 | 已开放。HTTP 允许 `from.type==note`；UI = `#notesLink` + 相关 chip；apply 折 `nh:`/`nn:` | 否 |
 | Q3 | 回收箱目标 | 允许边存在；`#h=` / 跳转 toast「目标在回收箱」、**不注入主墙**；popover 显示 inTrash | 否 |
 | Q4 | 硬 cap 32 | 两端都计；可再调 | 否 |
 | Q5 | SSE `clip_linked` 是否进 P1 | **否**。P1 改 `mergeHead` overlay `linkCount`；本 tab 双端 `patchCardLinkState`。SSE 给同机第二 tab，P2 | 否 |

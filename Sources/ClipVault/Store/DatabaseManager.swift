@@ -4011,9 +4011,6 @@ final class DatabaseManager: ObservableObject {
         if from.deletedAt != nil {
             return .failure(.badRequest("回收箱里不能关联"))
         }
-        if from.type == .note {
-            return .failure(.badRequest("笔记侧关联下期开放"))
-        }
         let to: ClipLinkTarget
         switch resolvePostTarget(toId: toId, toHash: toHash) {
         case .failure(let err):

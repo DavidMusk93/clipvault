@@ -165,7 +165,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
   置顶               pinned_at 投影 + trx pin/unpin；JSON 未置顶 pinnedAt:null
   关联               clip_link_ops → clip_links / link_count
                      捕获目标 exact content_hash；笔记目标 UUID
-                     跨机必须 recordLocalClipLink
+                     笔记可作 from（pair_key nh:/nn:）；跨机必须 recordLocalClipLink
 ```
 
 **OCR 是派生字段。** 对端 `refreshRemoteFields` 按更长文本写入。禁止假定对端会自己再跑 Vision。
@@ -225,8 +225,9 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
   #notesPanel
     ├─ 左列表     type=note  置顶复用 pinned_at（不进墙 pin rail）
     └─ 右纸面
-         ├─ 打开 → 预览     新建 → 源码
+         ├─ 打开 → 预览     新建 → 源码（禁止默认分栏）
          ├─ CodeMirror 6  |  marked 块 hash LRU + React 18 keyed
+         ├─ 关联：#notesLink + 相关 chip；popover 复用 #linkToast
          └─ 弹簧揭纸  clip-path inset（数字插值，禁止 tween 字符串）
               结束必须 clearSheetInline
 
