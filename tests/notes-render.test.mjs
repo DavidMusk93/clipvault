@@ -161,3 +161,70 @@ test('index.html styles html/rtf tables and headings in notes-rich', () => {
   assert.match(indexHtml, /\.notes-rich blockquote/);
   assert.match(indexHtml, /html-img-ph/);
 });
+
+const ACTIVE_CONTENT = [
+  '<p>x</p><script>alert(1)</script>',
+  '<svg onload=alert(1)><image href="https://evil/x.png"></image></svg>',
+  '<math><mtext><img src=x onerror=alert(1)></mtext></math>',
+  '<iframe src="https://evil.example"></iframe>',
+  '<audio src="https://evil.example/a.mp3" controls></audio>',
+  '<video src="https://evil.example/v.mp4"></video>',
+  '<input type="image" src="https://evil.example/y.png">',
+  '<form action="https://evil.example"><button formaction="https://evil.example">go</button></form>',
+  '<div onclick="alert(1)">click</div>',
+  '<marquee onstart="alert(1)">m</marquee>',
+  '<details ontoggle="alert(1)">d</details>',
+  '<img src="https://evil.example/z.png" onerror="alert(1)" alt="x">',
+];
+
+test('active content is stripped from card fragments', () => {
+  for (const input of ACTIVE_CONTENT) {
+    const frag = renderNotesFragment(input);
+    assert.ok(!/\son[a-z]+\s*=/i.test(frag), `event handler survived: ${frag}`);
+    assert.ok(
+      !/<(script|svg|math|iframe|audio|video|input|form|button|object|embed|style)\b/i.test(frag),
+      `active tag survived: ${frag}`,
+    );
+    assert.ok(
+      !/\b(src|href|srcset|formaction|srcdoc|xlink:href|action)\s*=/i.test(frag),
+      `fetch/nav attribute survived: ${frag}`,
+    );
+  }
+});
+
+test('presentational attributes drop, structural attributes survive', () => {
+  const frag = renderNotesFragment(
+    '<table width="500"><tr><td colspan="2" rowspan="3" bgcolor="#000">cell</td></tr></table>',
+  );
+  assert.match(frag, /<table/i);
+  assert.match(frag, /colspan="2"/i);
+  assert.match(frag, /rowspan="3"/i);
+  assert.ok(!/width=/i.test(frag), frag);
+  assert.ok(!/bgcolor/i.test(frag), frag);
+});
+
+test('sanitizer helpers are exported and compose safely', async () => {
+  const mod = await import('../web/notes-render.mjs');
+  assert.equal(typeof mod.hardenFragment, 'function');
+  assert.equal(typeof mod.stripDangerousMarkup, 'function');
+  assert.equal(typeof mod.stripEventHandlerAttrs, 'function');
+  assert.ok(Array.isArray(mod.UNSAFE_TAGS) && mod.UNSAFE_TAGS.includes('svg'));
+  assert.ok(mod.ALLOWED_TAGS instanceof Set && mod.ALLOWED_TAGS.has('table'));
+  const cleaned = mod.stripEventHandlerAttrs(
+    mod.stripDangerousMarkup('<svg onload=x></svg><p onclick=y>hi</p>'),
+  );
+  assert.equal(cleaned, '<p>hi</p>');
+});
+
+test('index.html mirrors the sanitizer vocabulary (sync guard)', async () => {
+  const mod = await import('../web/notes-render.mjs');
+  const m = indexHtml.match(/const NOTES_UNSAFE_TAGS = \[([\s\S]*?)\];/);
+  assert.ok(m, 'NOTES_UNSAFE_TAGS array missing from index.html');
+  const tags = [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]);
+  assert.deepEqual(tags, mod.UNSAFE_TAGS, 'inline UNSAFE_TAGS drifted from notes-render.mjs');
+  assert.match(indexHtml, /function hardenNotesFragment/);
+  assert.match(indexHtml, /function stripDangerousMarkup/);
+  assert.match(indexHtml, /function stripEventHandlerAttrs/);
+  assert.match(indexHtml, /hardenNotesFragment\(root\)/);
+  assert.match(indexHtml, /stripEventHandlerAttrs\(stripDangerousMarkup\(root\.innerHTML/);
+});

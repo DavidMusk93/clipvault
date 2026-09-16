@@ -6,7 +6,37 @@
  *  - Apple Notes-ish structure (lists, paragraphs, emphasis)
  *  - Collapse Writer/Cocoa empty spacer holes
  *  - Prose may wrap; empty Cocoa holes collapsed; mono/code pre + highlight
+ *
+ * Security: a card is not a browser. `renderNotesFragment` is the only door into
+ * `innerHTML`, so it strips EVERY executable / navigable / remote-fetching vector
+ * (event handlers, scripts, SVG/MathML, forms, media). Keep the inline copy in
+ * web/index.html byte-for-byte in spirit; tests/notes-render.test.mjs guards both.
  */
+
+/** Tags whose whole subtree must never reach the card (scripts, active content, media). */
+export const UNSAFE_TAGS = [
+  'script', 'style', 'iframe', 'object', 'embed', 'applet', 'form', 'input', 'button',
+  'select', 'textarea', 'option', 'optgroup', 'datalist', 'output', 'link', 'meta',
+  'base', 'title', 'template', 'noscript', 'svg', 'math', 'canvas', 'audio', 'video',
+  'source', 'track', 'picture', 'map', 'area', 'frame', 'frameset', 'portal', 'dialog', 'slot',
+];
+const UNSAFE_TAG_SET = new Set(UNSAFE_TAGS);
+const UNSAFE_TAG_RE = UNSAFE_TAGS.join('|');
+
+/** Presentational structure we keep. Anything else is unwrapped (children survive). */
+export const ALLOWED_TAGS = new Set([
+  'p', 'br', 'div', 'span', 'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'b', 'strong', 'i', 'em',
+  'u', 's', 'strike', 'del', 'ins', 'mark', 'small', 'sub', 'sup', 'h1', 'h2', 'h3', 'h4',
+  'h5', 'h6', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption', 'colgroup',
+  'col', 'blockquote', 'pre', 'code', 'kbd', 'samp', 'var', 'figure', 'figcaption', 'hr',
+  'abbr', 'cite', 'q', 'time', 'ruby', 'rt', 'rp', 'wbr', 'bdi', 'bdo',
+]);
+
+/** Attributes we keep. Everything else (incl. every `on*`/`src`/`href`) is removed. */
+export const ALLOWED_ATTRS = new Set([
+  'class', 'colspan', 'rowspan', 'scope', 'headers', 'start', 'reversed', 'type', 'title',
+  'datetime', 'data-url',
+]);
 
 /** @param {string} s */
 export function normalizePlainText(s) {
@@ -132,6 +162,8 @@ export function renderNotesFragment(html) {
       neutralizeAnchors(root);
       // Cards are not browsers: no remote/data media fetch; keep layout stable.
       replaceMediaPlaceholders(root);
+      // Cards are not browsers: drop active content, unwrap unknown tags, drop on*/src/href.
+      hardenFragment(root);
 
       root.querySelectorAll('p').forEach(p => {
         const t = p.textContent || '';
@@ -153,31 +185,34 @@ export function renderNotesFragment(html) {
         }
       });
 
-      return collapseEmptyHtmlBlocks((root.innerHTML || '').trim());
+      // Defense in depth: re-run the string gate on the serialized DOM so any
+      // parser quirk / mutation artifact is scrubbed before it reaches innerHTML.
+      const serialized = stripEventHandlerAttrs(stripDangerousMarkup(root.innerHTML || ''));
+      return collapseEmptyHtmlBlocks(serialized.trim());
     } catch (_) {
       /* fall through */
     }
   }
 
-  // Regex fallback (Node without DOMParser, or parse failure)
+  // Regex fallback (Node without DOMParser, or parse failure).
+  // Same policy as the DOM path: drop active subtrees first, then scrub attributes.
   let s = raw;
   const body = s.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   if (body) s = body[1];
-  s = s
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
+  s = stripDangerousMarkup(s)
     .replace(/<span class="Apple-tab-span"[^>]*>[\s\S]*?<\/span>/gi, '')
     .replace(/<span class="Apple-converted-space"[^>]*>([\s\S]*?)<\/span>/gi, '$1')
+    .replace(/<p[^>]*>\s*(?:<br\s*\/?>|&nbsp;|\s|<\/?span[^>]*>)*<\/p>/gi, '')
     .replace(/\sclass="(?!is-mono)[^"]*"/gi, '')
-    .replace(/\sstyle=("|')[^"']*\1/gi, '')
-    .replace(/\s(bgcolor|background|color|face|size)=("|')[^"']*\2/gi, '')
+    .replace(/\sstyle\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(bgcolor|background|color|face|size|width|height|align)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/<a\b[^>]*>/gi, '<span class="url-inert">')
     .replace(/<\/a>/gi, '</span>')
     .replace(/<img\b[^>]*>/gi, (m) => {
       const alt = (m.match(/\balt\s*=\s*("|')([^"']*)\1/i) || m.match(/\balt\s*=\s*([^\s>]+)/i) || [])[2] || '';
       return `<span class="html-img-ph">${alt ? `［图：${alt}］` : '［图］'}</span>`;
-    })
-    .replace(/<(video|iframe|object|embed|picture)\b[\s\S]*?<\/\1>/gi, '');
+    });
+  s = stripEventHandlerAttrs(s);
   return collapseEmptyHtmlBlocks(s.trim());
 }
 
@@ -218,11 +253,11 @@ export function neutralizeAnchors(root) {
   });
 }
 
-/** Drop img/video/iframe so masonry height does not jump and cards never fetch. */
+/** Drop media so masonry height does not jump and cards never fetch remote bytes. */
 export function replaceMediaPlaceholders(root) {
   if (!root || !root.querySelectorAll) return;
   const doc = root.ownerDocument || (typeof document !== 'undefined' ? document : null);
-  root.querySelectorAll('img, video, iframe, object, embed, source, picture').forEach(el => {
+  root.querySelectorAll('img, video, audio, iframe, object, embed, source, track, picture, canvas').forEach(el => {
     if (!el || !el.parentNode) return;
     if (el.tagName === 'IMG' && doc) {
       const alt = (el.getAttribute('alt') || '').trim();
@@ -234,6 +269,51 @@ export function replaceMediaPlaceholders(root) {
       el.remove();
     }
   });
+}
+
+/**
+ * Last gate before serialization. Removes every executable/navigable/fetching
+ * vector and unwraps tags that are not part of the card vocabulary.
+ */
+export function hardenFragment(root) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll('*').forEach(el => {
+    if (!el.parentNode) return;
+    for (const attr of [...el.attributes]) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith('on') || !ALLOWED_ATTRS.has(name)) el.removeAttribute(attr.name);
+    }
+    const tag = el.tagName.toLowerCase();
+    if (UNSAFE_TAG_SET.has(tag)) { el.remove(); return; }
+    if (!ALLOWED_TAGS.has(tag)) unwrapElement(el);
+  });
+}
+
+/** Replace an element with its children (used for unknown-but-harmless markup). */
+function unwrapElement(el) {
+  const parent = el.parentNode;
+  if (!parent) return;
+  while (el.firstChild) parent.insertBefore(el.firstChild, el);
+  parent.removeChild(el);
+}
+
+/** Regex fallback twin of `hardenFragment`: delete active subtrees + handlers. */
+export function stripDangerousMarkup(html) {
+  let s = String(html || '');
+  const paired = new RegExp(`<(${UNSAFE_TAG_RE})\\b[\\s\\S]*?<\\/\\1>`, 'gi');
+  const orphan = new RegExp(`<(?:${UNSAFE_TAG_RE})\\b[^>]*\\/?>`, 'gi');
+  let prev = null;
+  let guard = 0;
+  while (s !== prev && guard++ < 4) {
+    prev = s;
+    s = s.replace(paired, '').replace(orphan, '');
+  }
+  return s;
+}
+
+/** Remove every inline event handler (`onclick`, `onerror`, …). */
+export function stripEventHandlerAttrs(html) {
+  return String(html || '').replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
 }
 
 
