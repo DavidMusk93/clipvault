@@ -106,6 +106,15 @@ test('debug drawer explains state: verdict, labels, p95, budgets, server mode', 
   assert.match(html, /\/api\/ui-metrics\/recent\?limit=200/);
 });
 
+test('debug hot table shows a trend sparkline', () => {
+  assert.match(html, /<th>趋势<\/th>/);
+  assert.match(html, /function sparkline\(values, over\)/);
+  assert.match(html, /<polyline points=/);
+  assert.match(html, /a\.points = primary\.slice\(-24\)/);
+  // server `recent` is newest-first -> normalized chronological before aggregating
+  assert.match(html, /debugServerRows\.slice\(\)\.reverse\(\)/);
+});
+
 test('debug drawer shows baseline delta and can copy diagnostics', () => {
   assert.match(html, /id="debugCopy"/);
   assert.match(html, /Δ基线/);
