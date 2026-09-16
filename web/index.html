@@ -2301,6 +2301,8 @@
     }
     .debug-verdict.is-slow { background: rgba(215, 0, 21, 0.08); color: #D70015; }
     .debug-verdict.is-warn { background: rgba(196, 122, 44, 0.14); color: #C47A2C; }
+    .debug-hot .spark { color: var(--muted); vertical-align: middle; }
+    .debug-hot .spark.is-slow { color: var(--danger); }
     .debug-log {
       list-style: none; margin: 0; padding: 0;
       font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -2543,11 +2545,11 @@
       <h3 style="font-size:14px;font-weight:600">进程资源</h3>
       <div class="debug-kv" id="debugProcKv"></div>
       <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
-      <table class="debug-hot" id="debugHot"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHot"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>趋势</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
       <h3 style="font-size:14px;font-weight:600">笔记 Markdown</h3>
-      <table class="debug-hot" id="debugHotNotes"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHotNotes"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>趋势</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
       <h3 style="font-size:14px;font-weight:600">会话</h3>
-      <table class="debug-hot" id="debugHotSessions"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHotSessions"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>趋势</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
       <div class="backup-actions">
         <button type="button" id="debugReload">重测刷新</button>
         <button type="button" class="secondary" id="debugPull">服务器 24h</button>
@@ -9128,6 +9130,17 @@ window.ClipViewMasonry = Masonry;
       const c = Math.min(f + 1, v.length - 1);
       return v[f] + (v[c] - v[f]) * (k - f);
     }
+    /** Compact inline trend of the primary samples (chronological). */
+    function sparkline(values, over) {
+      if (!values || values.length < 3) return '<span class="spark">—</span>';
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const span = (max - min) || 1;
+      const w = 52, h = 14;
+      const step = w / (values.length - 1);
+      const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - 1 - ((v - min) / span) * (h - 2)).toFixed(1)}`).join(' ');
+      return `<svg class="spark${over ? ' is-slow' : ''}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>`;
+    }
     function paintDebugPanel() {
       const kv = document.getElementById('debugSseKv');
       const procKv = document.getElementById('debugProcKv');
@@ -9153,7 +9166,9 @@ window.ClipViewMasonry = Masonry;
           `<span>采样</span><span class="${warn ? 'is-slow' : ''}">SSE ping · ${esc(ageLabel(p.at))}</span>`;
       }
       const localRows = (globalThis.ClipNotesMetrics?.recentLocal?.() || []).slice();
-      const rows = debugServerRows || localRows;
+      // Server `recent` is newest-first; the app ring is oldest-first. Normalize to
+      // chronological so sparklines and the event log read left-to-right.
+      const rows = debugServerRows ? debugServerRows.slice().reverse() : localRows;
       const sourceEl = document.getElementById('debugSource');
       if (sourceEl) {
         sourceEl.textContent = debugServerRows
@@ -9176,6 +9191,7 @@ window.ClipViewMasonry = Masonry;
           a.avg = primary.length ? primary.reduce((s, x) => s + x, 0) / primary.length : null;
           a.p95 = pctl(primary, 0.95);
           a.max = primary.length ? Math.max(...primary) : null;
+          a.points = primary.slice(-24);
         }
         return [...agg.values()].sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1) || b.n - a.n);
       };
@@ -9206,8 +9222,8 @@ window.ClipViewMasonry = Masonry;
           const budget = meta.budget == null ? '—' : meta.budget + (meta.unit === 'cls' || meta.unit === 'count' ? '' : 'ms');
           return `<tr class="${over ? 'is-slow' : ''}"><td title="${esc(r.name)}">${esc(meta.label)}</td><td>${r.n}</td>`
             + `<td>${fmtVal(r.avg, meta.unit)}</td><td>${fmtVal(r.p95, meta.unit)}</td><td>${fmtVal(r.max, meta.unit)}</td>`
-            + deltaCell(r) + `<td>${budget}</td></tr>`;
-        }).join('') : `<tr><td colspan="7">${empty}</td></tr>`;
+            + `<td>${sparkline(r.points, over)}</td>` + deltaCell(r) + `<td>${budget}</td></tr>`;
+        }).join('') : `<tr><td colspan="8">${empty}</td></tr>`;
       };
       const serverPred = (n) => /^(wall_|sse_|sheet_|chrome_shift|proc_sample|db_|backup_|sync_queue_depth)/.test(n);
       fillHot(hot, serverPred, '尚无 wall_/sse_/db_ 打点');
