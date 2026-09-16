@@ -4989,7 +4989,7 @@ window.ClipViewMasonry = Masonry;
           colHeights = null;
           // A fresh page may carry bodies the previous page omitted; allow one retry.
           htmlHydrateTried.clear();
-          htmlHydrateQueue.length = 0;
+          htmlHydratePending.clear();
           rebuildFromData({ preserveScroll: false });
         } else {
           // Only brand-new ids — never re-paint page1 on load-more.
@@ -7433,7 +7433,7 @@ window.ClipViewMasonry = Masonry;
       );
     }
 
-    function repaintCardBody(card, item) {
+    function repaintCardBody(card, item, { relayout = true } = {}) {
       if (!card || !item) return;
       const bodyEl = card.querySelector('.card-body');
       if (!bodyEl) return;
@@ -7447,11 +7447,13 @@ window.ClipViewMasonry = Masonry;
           wireFormatToolbar(card, item);
           highlightCard(card);
           // Re-pack columns with the anchor-preserving relayout (never full rebuild).
-          try {
-            if (window.ClipViewMasonry && typeof window.ClipViewMasonry.relayout === 'function') {
-              window.ClipViewMasonry.relayout();
-            }
-          } catch (_) {}
+          if (relayout) {
+            try {
+              if (window.ClipViewMasonry && typeof window.ClipViewMasonry.relayout === 'function') {
+                window.ClipViewMasonry.relayout();
+              }
+            } catch (_) {}
+          }
         }
       } catch (err) {
         console.warn('repaintCardBody', err);
@@ -7754,9 +7756,11 @@ window.ClipViewMasonry = Masonry;
     const htmlHydrating = new Set();
     /** Ids we already asked for — an empty/archived body must not loop forever. */
     const htmlHydrateTried = new Set();
-    const HTML_HYDRATE_CONCURRENCY = 3;
-    const htmlHydrateQueue = [];
-    let htmlHydrateActive = 0;
+    /** id -> { item, card } waiting for the next batched hydrate request. */
+    const htmlHydratePending = new Map();
+    let htmlHydrateTimer = null;
+    const HTML_HYDRATE_BATCH = 20;
+    const HTML_HYDRATE_DEBOUNCE_MS = 40;
 
     function clipNeedsHtmlHydrate(item) {
       if (!item) return false;
@@ -7768,38 +7772,76 @@ window.ClipViewMasonry = Masonry;
       return item.htmlOmitted !== false;
     }
 
-    /** Large html/rtf bodies are omitted from the list payload; fetch full row by id. */
+    /** Large html/rtf bodies are omitted from the list payload; fetch them by id. */
     function maybeHydrateHtmlClip(item, card) {
       if (!clipNeedsHtmlHydrate(item)) return;
       const id = item.id;
-      if (!id || htmlHydrating.has(id)) return;
+      if (!id || htmlHydrating.has(id) || htmlHydratePending.has(id)) return;
       htmlHydrateTried.add(id);
       htmlHydrating.add(id);
-      htmlHydrateQueue.push({ id, item, card });
-      pumpHtmlHydrate();
+      htmlHydratePending.set(id, { item, card });
+      if (htmlHydratePending.size >= HTML_HYDRATE_BATCH) flushHtmlHydrate();
+      else if (!htmlHydrateTimer) htmlHydrateTimer = setTimeout(flushHtmlHydrate, HTML_HYDRATE_DEBOUNCE_MS);
     }
 
-    /** Bounded worker: a page of tall HTML cards must not fire N parallel fetches. */
-    function pumpHtmlHydrate() {
-      while (htmlHydrateActive < HTML_HYDRATE_CONCURRENCY && htmlHydrateQueue.length) {
-        const job = htmlHydrateQueue.shift();
-        htmlHydrateActive += 1;
-        fetchClipById(job.id).then((full) => {
-          if (!full || !full.htmlContent) return;
-          const idx = clips.findIndex((c) => c.id === job.id);
+    /** One request for a page of omitted bodies — no N-request thundering herd. */
+    function flushHtmlHydrate() {
+      if (htmlHydrateTimer) { clearTimeout(htmlHydrateTimer); htmlHydrateTimer = null; }
+      if (!htmlHydratePending.size) return;
+      const batch = [...htmlHydratePending.entries()];
+      htmlHydratePending.clear();
+      const ids = batch.map(([id]) => id);
+      fetchClipsByIds(ids).then((items) => {
+        const byId = new Map((items || []).map((it) => [it.id, it]));
+        let repainted = false;
+        for (const [id, job] of batch) {
+          htmlHydrating.delete(id);
+          const full = byId.get(id);
+          if (!full || !full.htmlContent) continue;
+          const idx = clips.findIndex((c) => c.id === id);
           const live = Object.assign({}, idx >= 0 ? clips[idx] : job.item, {
             htmlContent: full.htmlContent,
             htmlOmitted: false,
           });
           if (idx >= 0) clips[idx] = live;
-          const el = cardCache.get(job.id) || job.card;
-          if (el) repaintCardBody(el, live);
-        }).catch(() => {}).finally(() => {
-          htmlHydrating.delete(job.id);
-          htmlHydrateActive -= 1;
-          pumpHtmlHydrate();
-        });
+          const el = cardCache.get(id) || job.card;
+          if (el) { repaintCardBody(el, live, { relayout: false }); repainted = true; }
+        }
+        // Re-pack once for the whole batch, not once per card.
+        if (repainted) {
+          try {
+            if (window.ClipViewMasonry && typeof window.ClipViewMasonry.relayout === 'function') {
+              window.ClipViewMasonry.relayout();
+            }
+          } catch (_) {}
+        }
+      }).catch(() => {
+        for (const [id] of batch) htmlHydrating.delete(id);
+      });
+    }
+
+    /** Batch body fetch; falls back to per-id on an old binary or partial failure. */
+    async function fetchClipsByIds(ids) {
+      if (!ids.length) return [];
+      if (ids.length === 1) {
+        const one = await fetchClipById(ids[0]);
+        return one ? [one] : [];
       }
+      try {
+        const res = await liveGet(`${API}/api/clips?ids=${ids.map(encodeURIComponent).join(',')}`);
+        if (res.ok) {
+          const data = await res.json();
+          const items = Array.isArray(data) ? data : (data.items || []);
+          const want = new Set(ids);
+          const got = items.filter((it) => it && want.has(it.id));
+          if (got.length) return got;
+        }
+      } catch (_) {}
+      const out = [];
+      for (const id of ids) {
+        try { const one = await fetchClipById(id); if (one) out.push(one); } catch (_) {}
+      }
+      return out;
     }
 
     /**

@@ -3165,6 +3165,26 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Batch hydrate by id — one queue hop for a page of omitted HTML bodies.
+    /// Uses the full `html_content` column, never the list cap.
+    func fetchItems(ids: [UUID], completion: @escaping ([ClipboardItem]) -> Void) {
+        performRead { [weak self] in
+            guard let self = self else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            let handle = self.readDB ?? self.db
+            var items: [ClipboardItem] = []
+            items.reserveCapacity(ids.count)
+            for id in ids {
+                if let item = self.fetchItemByIdLocked(id.uuidString, on: handle) {
+                    items.append(item)
+                }
+            }
+            DispatchQueue.main.async { completion(items) }
+        }
+    }
+
     /// Exact `content_hash` locator. Does **not** fall back to `text_hash`.
     func fetchItemByContentHash(_ hash: String, completion: @escaping (ClipboardItem?) -> Void) {
         let h = hash.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
