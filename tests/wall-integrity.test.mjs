@@ -147,6 +147,12 @@ test('online backup copies from a read-only snapshot, off the write queue', () =
   assert.doesNotMatch(db, /func onlineBackup\(to destURL: URL[\s\S]{0,80}?dbQueue\.async \{\s*\[weak self\] in\s*guard let self = self, let src = self\.db/);
 });
 
+test('notes editor bundle is loaded lazily, not on wall boot', () => {
+  assert.doesNotMatch(html, /<script src="\/assets\/notes-editor\/notes-editor\.js/);
+  assert.match(html, /function loadNotesEditorBundle\(\)/);
+  assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n27'/);
+});
+
 test('maintenance is bounded and instrumented', () => {
   assert.match(db, /drainDuplicates\(maxBatches: 2\)/);
   assert.match(db, /UiMetrics\.shared\.emit\("db_maint"/);
