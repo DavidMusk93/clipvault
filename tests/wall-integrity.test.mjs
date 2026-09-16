@@ -164,6 +164,14 @@ test('notes editor bundle is loaded lazily, not on wall boot', () => {
   assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n27'/);
 });
 
+test('startup replay decodes off the writer queue and chunks apply', () => {
+  // Old shape: file read + decode inside performSyncWork -> seconds on dbQueue.
+  assert.doesNotMatch(sync, /self\.database\.performSyncWork \{\n                for url in files/);
+  assert.match(sync, /var ops: \[SyncOp\] = \[\]/);
+  assert.match(sync, /stride\(from: 0, to: ops\.count, by: 200\)/);
+  assert.match(sync, /var links: \[\(opId: String/);
+});
+
 test('every write-queue block is timed and names its slow frame', () => {
   assert.match(db, /final class InstrumentedQueue/);
   assert.match(db, /payload: \["kind": "dbq", "reason": reason\]/);
