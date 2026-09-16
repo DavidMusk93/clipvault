@@ -19,7 +19,10 @@
   function isSlow(ev) {
     const name = ev && ev.name || '';
     const dur = Number(ev && ev.dur_ms);
-    if (/_cls$/.test(name)) return Number.isFinite(dur) && dur >= SLOW;
+    if (/_cls$/.test(name)) {
+      const v = Number(ev && ev.value != null ? ev.value : (Number.isFinite(dur) ? dur / 1000 : NaN));
+      return Number.isFinite(v) && v >= 0.1;
+    }
     if (name === 'trae_sessions_error') return true;
     if (name === 'trae_sessions_skip') return true;
     if (/longtask$/.test(name)) return Number.isFinite(dur) && dur >= 50;
@@ -35,7 +38,7 @@
       const name = ev && ev.name;
       if (!name) continue;
       let a = map.get(name);
-      if (!a) a = { name, n: 0, sum: 0, durN: 0, max: 0, last: null, slow: 0 };
+      if (!a) a = { name, n: 0, sum: 0, durN: 0, max: 0, last: null, slow: 0, valSum: 0, valN: 0, valMax: 0 };
       a.n += 1;
       a.last = ev;
       if (ev.dur_ms != null && Number.isFinite(ev.dur_ms)) {
@@ -43,10 +46,18 @@
         a.durN += 1;
         if (ev.dur_ms > a.max) a.max = ev.dur_ms;
       }
+      if (ev.value != null && Number.isFinite(ev.value)) {
+        a.valSum += ev.value;
+        a.valN += 1;
+        if (ev.value > a.valMax) a.valMax = ev.value;
+      }
       if (isSlow(ev)) a.slow += 1;
       map.set(name, a);
     }
-    for (const a of map.values()) a.avg = a.durN ? a.sum / a.durN : null;
+    for (const a of map.values()) {
+      a.avg = a.durN ? a.sum / a.durN : (a.valN ? a.valSum / a.valN : null);
+      if (!a.durN && a.valN) a.max = a.valMax;
+    }
     return map;
   }
   function countField(rows, name, key) {
@@ -66,10 +77,13 @@
     }
     return {};
   }
-  function slimPayload(p) {
-    if (!p || typeof p !== 'object') return '';
-    const keep = ['kind', 'phase', 'reason', 'compiled', 'reused', 'n', 'ratio'];
+  function slimPayload(ev) {
+    const p = (ev && ev.payload) || {};
     const bits = [];
+    if (ev && ev.value != null && Number.isFinite(ev.value)) {
+      bits.push('v=' + Math.round(ev.value * 1000) / 1000);
+    }
+    const keep = ['kind', 'phase', 'reason', 'compiled', 'reused', 'n', 'ratio'];
     for (const k of keep) {
       if (p[k] == null || p[k] === '') continue;
       bits.push(k + '=' + p[k]);
@@ -97,7 +111,7 @@
         items.push({ level: 'warn', title: '复用 ' + reused + '/' + total, why: 'LRU 未命中' });
       }
       const cls = byName.get('notes_cls');
-      if (cls && cls.max >= SLOW) {
+      if (cls && cls.max >= 0.1) {
         const kind = cls.last && cls.last.payload && cls.last.payload.kind;
         items.push({ level: 'slow', title: 'CLS ' + round(cls.max), why: kind || (cls.last && cls.last.payload && cls.last.payload.phase) || '' });
       }
@@ -193,7 +207,7 @@
       const log = $('[data-slot="log"]');
       log.innerHTML = uniq.length ? uniq.map((ev) => {
         const dur = ev.dur_ms != null ? ' ' + round(ev.dur_ms) + 'ms' : '';
-        return `<li class="${isSlow(ev) ? 'is-slow' : ''}">${esc(ev.name)}${esc(dur)}${esc(slimPayload(ev.payload))}</li>`;
+        return `<li class="${isSlow(ev) ? 'is-slow' : ''}">${esc(ev.name)}${esc(dur)}${esc(slimPayload(ev))}</li>`;
       }).join('') : '';
       paintBadge();
     }

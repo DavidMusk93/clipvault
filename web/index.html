@@ -4309,11 +4309,12 @@ window.ClipViewMasonry = Masonry;
           const why = reason || (Math.abs(barDy) >= 2 ? 'top-bar' : (Math.abs(dy) >= 2 ? 'm3-card' : 'none'));
           nm('chrome_shift', {
             dur_ms: performance.now() - t0,
+            value: Math.round(cls * 10000) / 10000,
             ok: Math.abs(dy) < 2 && Math.abs(barDy) < 2 && cls < 0.01,
+            over: cls >= 0.01,
             payload: {
               kind: String(kind || '').slice(0, 16),
               phase: String(phase || '').slice(0, 16),
-              value: Math.round(cls * 10000) / 10000,
               n,
               dy,
               w: after.barY,
@@ -4551,23 +4552,24 @@ window.ClipViewMasonry = Masonry;
         const dur = performance.now() - t0;
         nm('sheet_morph', {
           dur_ms: dur,
+          value,
           ok: value < 0.1 && ltMax < 50 && dur < 2000,
+          over: value >= 0.1 || dur >= 2000,
           payload: {
             kind: String(kind || '').slice(0, 16),
             phase: String(phase || '').slice(0, 16),
-            value,
             n,
             lag: Math.round(ltMax),
           },
         });
         if (value >= 0.01) {
           nm('sheet_cls', {
-            dur_ms: value * 1000,
+            value,
             ok: value < 0.1,
+            over: value >= 0.1,
             payload: {
               kind: String(kind || '').slice(0, 16),
               phase: String(phase || '').slice(0, 16),
-              value,
               n,
             },
           });
@@ -4783,6 +4785,7 @@ window.ClipViewMasonry = Masonry;
       if (notesState.dirty) await saveNoteNow();
       const panel = document.getElementById('notesPanel');
       if (!panel || !panel.classList.contains('open')) return;
+      const closeT0 = performance.now();
       beginSheetUnlock();
       try {
         await playSheet(panel, false, 'notes');
@@ -4798,8 +4801,10 @@ window.ClipViewMasonry = Masonry;
         M.stopObservers();
         M.flush();
       }
+      const animMs = performance.now() - closeT0;
+      nm('notes_close_anim', { dur_ms: animMs, ok: animMs < 300, over: animMs >= 300 });
       const held = notesState.openedAt ? Date.now() - notesState.openedAt : 0;
-      nm('notes_close', { dur_ms: held });
+      nm('notes_close', { value: held, over: held >= 5 * 60 * 1000 });
       teardownNotesMetrics();
       if (parseAppHash().kind === 'notes') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
@@ -8897,20 +8902,27 @@ window.ClipViewMasonry = Masonry;
           const name = ev.name || '';
           if (!pred(name)) continue;
           let a = agg.get(name);
-          if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0 }; agg.set(name, a); }
+          if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0, valSum: 0, valN: 0, valMax: 0 }; agg.set(name, a); }
           a.n += 1;
           if (ev.dur_ms != null && Number.isFinite(ev.dur_ms)) {
             a.sum += ev.dur_ms;
             a.durN += 1;
             if (ev.dur_ms > a.max) a.max = ev.dur_ms;
           }
+          if (ev.value != null && Number.isFinite(ev.value)) {
+            a.valSum += ev.value;
+            a.valN += 1;
+            if (ev.value > a.valMax) a.valMax = ev.value;
+          }
         }
         const hotRows = [...agg.values()].sort((a, b) => b.max - a.max || b.n - a.n);
         tbody.innerHTML = hotRows.length ? hotRows.map((r) => {
-          const avg = r.durN ? Math.round(r.sum / r.durN) : '—';
-          const mx = r.durN ? Math.round(r.max) : '—';
-          const slow = /_cls$/.test(r.name) || r.name === 'chrome_shift' ? r.max >= 80
-            : (r.name === 'sheet_morph' ? (r.max >= 800) : r.max >= 80);
+          const hasDur = r.durN > 0;
+          const avg = hasDur ? Math.round(r.sum / r.durN) : (r.valN ? Math.round(r.valSum / r.valN * 1000) / 1000 : '—');
+          const mx = hasDur ? Math.round(r.max) : (r.valN ? Math.round(r.valMax * 1000) / 1000 : '—');
+          const slow = /_cls$/.test(r.name) ? r.valMax >= 0.1
+            : (r.name === 'chrome_shift' ? (r.valMax >= 0.01 || r.max >= 80)
+            : (r.name === 'sheet_morph' ? (r.max >= 800 || r.valMax >= 0.1) : r.max >= 80));
           return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(r.name)}</td><td>${r.n}</td><td>${avg}</td><td>${mx}</td></tr>`;
         }).join('') : `<tr><td colspan="4">${empty}</td></tr>`;
       };
@@ -9413,11 +9425,12 @@ window.ClipViewMasonry = Masonry;
         const phase = document.body.classList.contains('notes-open')
           ? 'notes'
           : (document.body.classList.contains('sessions-open') ? 'sessions' : 'wall');
+        const clsValue = Math.round(acc * 10000) / 10000;
         nm('wall_cls', {
-          dur_ms: acc * 1000,
-          ok: acc < 0.1,
+          value: clsValue,
+          ok: clsValue < 0.1,
+          over: clsValue >= 0.1,
           payload: {
-            value: Math.round(acc * 10000) / 10000,
             n,
             kind: String(kind || '').slice(0, 32),
             phase,

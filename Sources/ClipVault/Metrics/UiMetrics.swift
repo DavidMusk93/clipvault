@@ -22,6 +22,7 @@ final class UiMetrics {
         "fds", "rss", "unix", "sse", "rlim",
         "route", "proto", "status",
         "compiled", "reused",
+        "trace", "cols", "vp", "vis",
     ])
 
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")
@@ -48,13 +49,21 @@ final class UiMetrics {
           ts INTEGER NOT NULL,
           name TEXT NOT NULL,
           dur_ms REAL,
+          value REAL,
           ok INTEGER,
+          over INTEGER,
           payload TEXT,
-          session TEXT NOT NULL
+          session TEXT NOT NULL,
+          trace TEXT
         );
         """)
+        // Additive migration for pre-v2 databases.
+        ensureColumn("ui_events", "value", "REAL")
+        ensureColumn("ui_events", "over", "INTEGER")
+        ensureColumn("ui_events", "trace", "TEXT")
         exec("CREATE INDEX IF NOT EXISTS ui_events_ts ON ui_events(ts);")
         exec("CREATE INDEX IF NOT EXISTS ui_events_name_ts ON ui_events(name, ts);")
+        exec("CREATE INDEX IF NOT EXISTS ui_events_trace ON ui_events(trace);")
     }
 
     /// Drain clipvault-http JSONL spool into ui_events. Never blocks the hop.
@@ -107,12 +116,24 @@ final class UiMetrics {
         _ = ingest(events: [ev], defaultSession: "sync")
     }
 
+    private struct Row {
+        let ts: Int64
+        let name: String
+        let dur: Double?
+        let value: Double?
+        let ok: Int?
+        let over: Int?
+        let payload: String?
+        let session: String
+        let trace: String?
+    }
+
     /// Returns accepted count and drop reason if the whole request is rejected.
     func ingest(events: [[String: Any]], defaultSession: String) -> (ok: Bool, accepted: Int, message: String?) {
         if events.count > Self.maxEventsPerRequest {
             return (false, 0, "too many events")
         }
-        var rows: [(Int64, String, Double?, Int?, String?, String)] = []
+        var rows: [Row] = []
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         for raw in events {
             guard let name = raw["name"] as? String,
@@ -129,11 +150,6 @@ final class UiMetrics {
             } else {
                 ts = now
             }
-            let dur = Self.finiteDouble(raw["dur_ms"])
-            let ok: Int?
-            if let b = raw["ok"] as? Bool { ok = b ? 1 : 0 }
-            else if let n = raw["ok"] as? Int { ok = n == 0 ? 0 : 1 }
-            else { ok = nil }
             var session = (raw["session"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if session.isEmpty { session = defaultSession }
             if session.count > 80 { session = String(session.prefix(80)) }
@@ -141,23 +157,36 @@ final class UiMetrics {
             if payload == nil, raw["payload"] != nil, !(raw["payload"] is NSNull) {
                 continue
             }
-            rows.append((ts, name, dur, ok, payload, session))
+            rows.append(Row(
+                ts: ts,
+                name: name,
+                dur: Self.finiteDouble(raw["dur_ms"]),
+                value: Self.finiteDouble(raw["value"]),
+                ok: Self.boolInt(raw["ok"]),
+                over: Self.boolInt(raw["over"]),
+                payload: payload,
+                session: session,
+                trace: sanitizeTrace(raw["trace"])
+            ))
         }
         guard !rows.isEmpty else { return (true, 0, nil) }
         queue.sync {
             exec("BEGIN IMMEDIATE;")
-            let sql = "INSERT INTO ui_events(ts, name, dur_ms, ok, payload, session) VALUES (?,?,?,?,?,?);"
+            let sql = "INSERT INTO ui_events(ts, name, dur_ms, value, ok, over, payload, session, trace) VALUES (?,?,?,?,?,?,?,?,?);"
             var stmt: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
                 for row in rows {
                     sqlite3_reset(stmt)
                     sqlite3_clear_bindings(stmt)
-                    sqlite3_bind_int64(stmt, 1, row.0)
-                    sqlite3_bind_text(stmt, 2, (row.1 as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                    if let d = row.2 { sqlite3_bind_double(stmt, 3, d) } else { sqlite3_bind_null(stmt, 3) }
-                    if let o = row.3 { sqlite3_bind_int(stmt, 4, Int32(o)) } else { sqlite3_bind_null(stmt, 4) }
-                    if let p = row.4 { sqlite3_bind_text(stmt, 5, (p as NSString).utf8String, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 5) }
-                    sqlite3_bind_text(stmt, 6, (row.5 as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_int64(stmt, 1, row.ts)
+                    sqlite3_bind_text(stmt, 2, (row.name as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    if let d = row.dur { sqlite3_bind_double(stmt, 3, d) } else { sqlite3_bind_null(stmt, 3) }
+                    if let v = row.value { sqlite3_bind_double(stmt, 4, v) } else { sqlite3_bind_null(stmt, 4) }
+                    if let o = row.ok { sqlite3_bind_int(stmt, 5, Int32(o)) } else { sqlite3_bind_null(stmt, 5) }
+                    if let o = row.over { sqlite3_bind_int(stmt, 6, Int32(o)) } else { sqlite3_bind_null(stmt, 6) }
+                    if let p = row.payload { sqlite3_bind_text(stmt, 7, (p as NSString).utf8String, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 7) }
+                    sqlite3_bind_text(stmt, 8, (row.session as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                    if let t = row.trace { sqlite3_bind_text(stmt, 9, (t as NSString).utf8String, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 9) }
                     sqlite3_step(stmt)
                 }
                 sqlite3_finalize(stmt)
@@ -176,12 +205,16 @@ final class UiMetrics {
         let from = fromMs ?? (to - 24 * 3600 * 1000)
         var names: [[String: Any]] = []
         var total: Int64 = 0
+        var durPct: [String: (Double, Double, Double)] = [:]
+        var valPct: [String: (Double, Double, Double)] = [:]
+        var routes: [[String: Any]] = []
         queue.sync {
             let sql = """
             SELECT name, COUNT(*) AS n,
-                   AVG(dur_ms) AS avg_ms,
-                   MIN(dur_ms) AS min_ms,
-                   MAX(dur_ms) AS max_ms
+                   SUM(CASE WHEN ok IS NULL THEN 0 ELSE 1 END) AS ok_n,
+                   SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_yes,
+                   AVG(dur_ms) AS avg_ms, MIN(dur_ms) AS min_ms, MAX(dur_ms) AS max_ms,
+                   AVG(value) AS avg_v, MIN(value) AS min_v, MAX(value) AS max_v
             FROM ui_events
             WHERE ts >= ? AND ts <= ?
             GROUP BY name
@@ -197,18 +230,37 @@ final class UiMetrics {
                     let n = sqlite3_column_int64(stmt, 1)
                     total += n
                     var row: [String: Any] = ["name": name, "n": Int(n)]
-                    if sqlite3_column_type(stmt, 2) != SQLITE_NULL {
-                        row["avg_ms"] = sqlite3_column_double(stmt, 2)
+                    let okN = sqlite3_column_int64(stmt, 2)
+                    let okYes = sqlite3_column_int64(stmt, 3)
+                    if okN > 0 {
+                        row["ok_n"] = Int(okN)
+                        row["ok_rate"] = Double(okYes) / Double(okN)
                     }
-                    if sqlite3_column_type(stmt, 3) != SQLITE_NULL {
-                        row["min_ms"] = sqlite3_column_double(stmt, 3)
-                    }
-                    if sqlite3_column_type(stmt, 4) != SQLITE_NULL {
-                        row["max_ms"] = sqlite3_column_double(stmt, 4)
-                    }
+                    if let v = Self.columnDouble(stmt, 4) { row["avg_ms"] = v }
+                    if let v = Self.columnDouble(stmt, 5) { row["min_ms"] = v }
+                    if let v = Self.columnDouble(stmt, 6) { row["max_ms"] = v }
+                    if let v = Self.columnDouble(stmt, 7) { row["avg_value"] = v }
+                    if let v = Self.columnDouble(stmt, 8) { row["min_value"] = v }
+                    if let v = Self.columnDouble(stmt, 9) { row["max_value"] = v }
                     names.append(row)
                 }
                 sqlite3_finalize(stmt)
+            }
+            durPct = percentileLocked(column: "dur_ms", from: from, to: to)
+            valPct = percentileLocked(column: "value", from: from, to: to)
+            routes = httpRoutesLocked(from: from, to: to)
+        }
+        for i in names.indices {
+            let name = names[i]["name"] as? String ?? ""
+            if let p = durPct[name] {
+                names[i]["p50_ms"] = p.0
+                names[i]["p95_ms"] = p.1
+                names[i]["p99_ms"] = p.2
+            }
+            if let p = valPct[name] {
+                names[i]["value_p50"] = p.0
+                names[i]["value_p95"] = p.1
+                names[i]["value_p99"] = p.2
             }
         }
         return [
@@ -217,7 +269,77 @@ final class UiMetrics {
             "to": Int(to),
             "total": Int(total),
             "names": names,
+            "routes": routes,
         ]
+    }
+
+    /// Exact p50/p95/p99 for one numeric column, per name, via window functions.
+    private func percentileLocked(column: String, from: Int64, to: Int64) -> [String: (Double, Double, Double)] {
+        var out: [String: (Double, Double, Double)] = [:]
+        let sql = """
+        WITH o AS (
+          SELECT name, \(column) AS v,
+                 ROW_NUMBER() OVER (PARTITION BY name ORDER BY \(column)) AS rn,
+                 COUNT(*) OVER (PARTITION BY name) AS cnt
+          FROM ui_events
+          WHERE ts >= ? AND ts <= ? AND \(column) IS NOT NULL
+        )
+        SELECT name,
+               MAX(CASE WHEN rn = MAX(1, CAST(cnt * 0.50 AS INTEGER)) THEN v END),
+               MAX(CASE WHEN rn = MAX(1, CAST(cnt * 0.95 AS INTEGER)) THEN v END),
+               MAX(CASE WHEN rn = MAX(1, CAST(cnt * 0.99 AS INTEGER)) THEN v END)
+        FROM o GROUP BY name;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+            sqlite3_bind_int64(stmt, 1, from)
+            sqlite3_bind_int64(stmt, 2, to)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let cstr = sqlite3_column_text(stmt, 0) else { continue }
+                let name = String(cString: cstr)
+                let p50 = sqlite3_column_double(stmt, 1)
+                let p95 = sqlite3_column_double(stmt, 2)
+                let p99 = sqlite3_column_double(stmt, 3)
+                out[name] = (p50, p95, p99)
+            }
+            sqlite3_finalize(stmt)
+        }
+        return out
+    }
+
+    /// http_req split by route + status so a slow/erroring endpoint is visible.
+    private func httpRoutesLocked(from: Int64, to: Int64) -> [[String: Any]] {
+        var out: [[String: Any]] = []
+        let sql = """
+        SELECT json_extract(payload, '$.route') AS route,
+               json_extract(payload, '$.n') AS status,
+               COUNT(*) AS n,
+               AVG(dur_ms) AS avg_ms,
+               MAX(dur_ms) AS max_ms,
+               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS errs
+        FROM ui_events
+        WHERE name = 'http_req' AND ts >= ? AND ts <= ? AND payload IS NOT NULL
+        GROUP BY route, status
+        ORDER BY n DESC LIMIT 80;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+            sqlite3_bind_int64(stmt, 1, from)
+            sqlite3_bind_int64(stmt, 2, to)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                var row: [String: Any] = [
+                    "route": sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "—",
+                    "n": Int(sqlite3_column_int64(stmt, 2)),
+                ]
+                if let s = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) { row["status"] = s }
+                if let v = Self.columnDouble(stmt, 3) { row["avg_ms"] = v }
+                if let v = Self.columnDouble(stmt, 4) { row["max_ms"] = v }
+                if let v = Self.columnDouble(stmt, 5) { row["errs"] = v }
+                out.append(row)
+            }
+            sqlite3_finalize(stmt)
+        }
+        return out
     }
 
     /// Last N rows for local debugging. No note body. name must match the ingest regex.
@@ -237,7 +359,7 @@ final class UiMetrics {
         var events: [[String: Any]] = []
         queue.sync {
             var sql = """
-            SELECT ts, name, dur_ms, ok, payload, session
+            SELECT ts, name, dur_ms, value, ok, over, payload, session, trace
             FROM ui_events
             WHERE ts >= ? AND ts <= ?
             """
@@ -257,21 +379,26 @@ final class UiMetrics {
                     var row: [String: Any] = [
                         "ts": Int(sqlite3_column_int64(stmt, 0)),
                         "name": sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "",
-                        "session": sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "",
+                        "session": sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? "",
                     ]
-                    if sqlite3_column_type(stmt, 2) != SQLITE_NULL {
-                        row["dur_ms"] = sqlite3_column_double(stmt, 2)
+                    if let v = Self.columnDouble(stmt, 2) { row["dur_ms"] = v }
+                    if let v = Self.columnDouble(stmt, 3) { row["value"] = v }
+                    if sqlite3_column_type(stmt, 4) != SQLITE_NULL {
+                        row["ok"] = sqlite3_column_int(stmt, 4) != 0
                     }
-                    if sqlite3_column_type(stmt, 3) != SQLITE_NULL {
-                        row["ok"] = sqlite3_column_int(stmt, 3) != 0
+                    if sqlite3_column_type(stmt, 5) != SQLITE_NULL {
+                        row["over"] = sqlite3_column_int(stmt, 5) != 0
                     }
-                    if sqlite3_column_type(stmt, 4) != SQLITE_NULL,
-                       let p = sqlite3_column_text(stmt, 4) {
+                    if sqlite3_column_type(stmt, 6) != SQLITE_NULL,
+                       let p = sqlite3_column_text(stmt, 6) {
                         let raw = String(cString: p)
                         if let data = raw.data(using: .utf8),
                            let obj = try? JSONSerialization.jsonObject(with: data) {
                             row["payload"] = obj
                         }
+                    }
+                    if let t = sqlite3_column_text(stmt, 8).map({ String(cString: $0) }), !t.isEmpty {
+                        row["trace"] = t
                     }
                     events.append(row)
                 }
@@ -327,6 +454,48 @@ final class UiMetrics {
         if let n = raw as? Int { return Double(n) }
         if let n = raw as? NSNumber { return n.doubleValue }
         return nil
+    }
+
+    /// Bool or 0/1 → 0/1, else nil (SQLite has no bool).
+    private static func boolInt(_ raw: Any?) -> Int? {
+        if let b = raw as? Bool { return b ? 1 : 0 }
+        if let n = raw as? Int { return n == 0 ? 0 : 1 }
+        if let n = raw as? NSNumber { return n.intValue == 0 ? 0 : 1 }
+        return nil
+    }
+
+    /// Read a possibly-NULL REAL column.
+    private static func columnDouble(_ stmt: OpaquePointer?, _ index: Int32) -> Double? {
+        guard let stmt, sqlite3_column_type(stmt, index) != SQLITE_NULL else { return nil }
+        return sqlite3_column_double(stmt, index)
+    }
+
+    /// Trace ids are opaque tokens; keep them short and attribute-free.
+    private func sanitizeTrace(_ raw: Any?) -> String? {
+        guard let s = (raw as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !s.isEmpty else { return nil }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        guard s.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        return String(s.prefix(64))
+    }
+
+    /// Additive column migration (older ui-metrics.db files).
+    private func ensureColumn(_ table: String, _ name: String, _ type: String) {
+        guard let db else { return }
+        var has = false
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "PRAGMA table_info(\(table));", -1, &stmt, nil) == SQLITE_OK, let stmt {
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) == name {
+                    has = true
+                    break
+                }
+            }
+            sqlite3_finalize(stmt)
+        }
+        if !has {
+            exec("ALTER TABLE \(table) ADD COLUMN \(name) \(type);")
+        }
     }
 
     private func exec(_ sql: String) {

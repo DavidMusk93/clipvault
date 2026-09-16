@@ -75,7 +75,10 @@
     if (payload === null) return;
     const ev = { name, ts: Date.now(), session: sessionId() };
     if (extra && extra.dur_ms != null && Number.isFinite(extra.dur_ms)) ev.dur_ms = extra.dur_ms;
+    if (extra && extra.value != null && Number.isFinite(extra.value)) ev.value = extra.value;
     if (extra && typeof extra.ok === 'boolean') ev.ok = extra.ok;
+    if (extra && typeof extra.over === 'boolean') ev.over = extra.over;
+    if (extra && extra.trace) ev.trace = String(extra.trace).slice(0, 64);
     if (payload && Object.keys(payload).length) ev.payload = payload;
     queue.push(ev);
     recordLocal(ev);
@@ -123,12 +126,15 @@
                 const klass = (node.getAttribute && node.getAttribute('class')) || '';
                 kind = String(node.id || klass || node.nodeName || '').replace(/\s+/g, '.').slice(0, 32);
               }
+              const v = Math.round(e.value * 10000) / 10000;
               emit('notes_cls', {
-                dur_ms: e.value * 1000,
+                value: v,
+                ok: v < 0.1,
+                over: v >= 0.1,
                 payload: {
-                  value: Math.round(e.value * 10000) / 10000,
                   phase: morphing ? 'morph' : 'live',
                   kind,
+                  n: 1,
                 },
               });
             }
