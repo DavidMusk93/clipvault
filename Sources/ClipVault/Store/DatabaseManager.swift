@@ -428,6 +428,28 @@ final class DatabaseManager: ObservableObject {
           ELSE NULL
         END
         """
+    /// Mirrors `listHtmlSQL`'s trimming so a list row can say *why* it has no body:
+    /// 1 = body exists but was trimmed for budget; 0 = no body to hydrate.
+    private static let listHtmlOmittedSQL = """
+        CASE
+          WHEN html_content IS NULL THEN 0
+          WHEN type IN ('html','rtf') AND html_bytes IS NOT NULL AND html_bytes > \(listHtmlLimitRich) THEN 1
+          WHEN type IN ('html','rtf') AND html_bytes IS NULL AND length(html_content) > \(listHtmlLimitRich) THEN 1
+          WHEN type NOT IN ('html','rtf') AND html_bytes IS NOT NULL AND html_bytes > \(listHtmlLimitOther) THEN 1
+          WHEN type NOT IN ('html','rtf') AND html_bytes IS NULL AND length(html_content) > \(listHtmlLimitOther) THEN 1
+          ELSE 0
+        END
+        """
+    private static let listHtmlOmittedSQLAliased = """
+        CASE
+          WHEN c.html_content IS NULL THEN 0
+          WHEN c.type IN ('html','rtf') AND c.html_bytes IS NOT NULL AND c.html_bytes > \(listHtmlLimitRich) THEN 1
+          WHEN c.type IN ('html','rtf') AND c.html_bytes IS NULL AND length(c.html_content) > \(listHtmlLimitRich) THEN 1
+          WHEN c.type NOT IN ('html','rtf') AND c.html_bytes IS NOT NULL AND c.html_bytes > \(listHtmlLimitOther) THEN 1
+          WHEN c.type NOT IN ('html','rtf') AND c.html_bytes IS NULL AND length(c.html_content) > \(listHtmlLimitOther) THEN 1
+          ELSE 0
+        END
+        """
     /// Shared list tail: `link_count` then `shared`. Never insert columns in the middle
     /// (a missed SELECT would shift archive sha).
     private static let listTailSQL = """
@@ -2083,7 +2105,7 @@ final class DatabaseManager: ObservableObject {
     ) -> [ClipboardItem] {
         var sql = """
         SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, \(Self.listHtmlSQLAliased), c.source_app, c.ocr_text,
-               \(Self.listTailSQLAliased)
+               \(Self.listTailSQLAliased), \(Self.listHtmlOmittedSQLAliased)
         FROM clipboard_fts f
         JOIN clipboard_items c ON c.id = f.id
         WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL
@@ -2125,7 +2147,7 @@ final class DatabaseManager: ObservableObject {
         typeFilter: String? = nil,
         excludeType: String? = nil
     ) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL) FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL), \(Self.listHtmlOmittedSQL) FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
@@ -2169,7 +2191,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func runList(db: OpaquePointer, cursor: ClipCursor?, fetchLimit: Int, trashOnly: Bool = false, typeFilter: String? = nil, excludeType: String? = nil) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL) FROM clipboard_items WHERE "
+        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL), \(Self.listHtmlOmittedSQL) FROM clipboard_items WHERE "
         if trashOnly {
             sql += "deleted_at IS NOT NULL"
         } else {
@@ -2203,7 +2225,7 @@ final class DatabaseManager: ObservableObject {
 
     private func runPinned(db: OpaquePointer, fetchLimit: Int, typeFilter: String? = nil, excludeType: String? = nil) -> [ClipboardItem] {
         var sql = """
-        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL)
+        SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL), \(Self.listHtmlOmittedSQL)
         FROM clipboard_items
         WHERE deleted_at IS NULL AND pinned_at IS NOT NULL
         """
@@ -2291,6 +2313,10 @@ final class DatabaseManager: ObservableObject {
         if colCount >= 21 {
             shared = sqlite3_column_int(stmt, 20) != 0
         }
+        var htmlOmitted: Bool? = nil
+        if colCount >= 22 {
+            htmlOmitted = sqlite3_column_int(stmt, 21) != 0
+        }
 
         return ClipboardItem(
             id: uuid,
@@ -2314,7 +2340,8 @@ final class DatabaseManager: ObservableObject {
             pinnedAt: pinnedAt,
             archiveHtmlSha: archiveHtmlSha,
             linkCount: linkCount,
-            shared: shared
+            shared: shared,
+            htmlOmitted: htmlOmitted
         )
     }
 
