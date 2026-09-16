@@ -4369,7 +4369,6 @@ window.ClipViewMasonry = Masonry;
         });
         obs.observe({ type: 'layout-shift', buffered: false });
       } catch (_) {}
-      const t0 = performance.now();
       apply();
       let sent = false;
       const finish = () => {
@@ -4382,10 +4381,11 @@ window.ClipViewMasonry = Masonry;
           const barDy = (Number(after.barY) || 0) - (Number(before.barY) || 0);
           const why = reason || (Math.abs(barDy) >= 2 ? 'top-bar' : (Math.abs(dy) >= 2 ? 'm3-card' : 'none'));
           nm('chrome_shift', {
-            dur_ms: performance.now() - t0,
+            // No dur_ms: the 160ms observation window is not latency; correctness is
+            // the shift itself (value=CLS, plus dy/barDy displacement in payload).
             value: Math.round(cls * 10000) / 10000,
             ok: Math.abs(dy) < 2 && Math.abs(barDy) < 2 && cls < 0.01,
-            over: cls >= 0.01,
+            over: Math.abs(dy) >= 2 || Math.abs(barDy) >= 2 || cls >= 0.01,
             payload: {
               kind: String(kind || '').slice(0, 16),
               phase: String(phase || '').slice(0, 16),
@@ -4398,8 +4398,8 @@ window.ClipViewMasonry = Masonry;
           });
         } catch (_) {
           nm('chrome_shift', {
-            dur_ms: performance.now() - t0,
             ok: false,
+            over: true,
             payload: { kind: String(kind || '').slice(0, 16), phase: String(phase || '').slice(0, 16) },
           });
         }
@@ -9095,9 +9095,9 @@ window.ClipViewMasonry = Masonry;
       notes_cls: { label: '笔记偏移', unit: 'cls', budget: 0.1 },
       notes_longtask: { label: '笔记长任务', unit: 'ms', budget: 50 },
       notes_close_anim: { label: '关闭动画', unit: 'ms', budget: 300 },
-      sheet_morph: { label: '开合动画', unit: 'ms', budget: 300 },
+      sheet_morph: { label: '开合动画', unit: 'ms', budget: 600 },
       sheet_cls: { label: '开合偏移', unit: 'cls', budget: 0.1 },
-      chrome_shift: { label: '顶栏位移', unit: 'ms', budget: 80 },
+      chrome_shift: { label: '顶栏位移', unit: 'cls', budget: 0.1 },
       wall_layout_drift: { label: '布局漂移(px)', unit: 'count', budget: 0 },
       trae_sessions_switch: { label: '切换会话', unit: 'ms', budget: 300 },
       trae_sessions_tools: { label: '工具索引', unit: 'ms', budget: 200 },

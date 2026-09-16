@@ -106,6 +106,12 @@ test('debug drawer explains state: verdict, labels, p95, budgets, server mode', 
   assert.match(html, /\/api\/ui-metrics\/recent\?limit=200/);
 });
 
+test('chrome_shift reports the shift, not the fixed observation window', () => {
+  assert.doesNotMatch(html, /nm\('chrome_shift', \{\s*dur_ms:/);
+  assert.match(html, /chrome_shift: \{ label: '顶栏位移', unit: 'cls', budget: 0\.1 \}/);
+  assert.match(html, /Math\.abs\(dy\) >= 2 \|\| Math\.abs\(barDy\) >= 2 \|\| cls >= 0\.01/);
+});
+
 test('debug hot table shows a trend sparkline', () => {
   assert.match(html, /<th>趋势<\/th>/);
   assert.match(html, /function sparkline\(values, over\)/);
