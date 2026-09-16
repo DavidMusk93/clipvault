@@ -45,12 +45,58 @@ struct ClipPage {
 /// Runtime: `sqlite-runtime-tricks` — WAL, busy_timeout, ANALYZE, FTS5 trigram,
 /// writer queue + WAL read connection, latest-alive upsert, batched cleanup, online backup.
 /// Never full-scan `html_content` with LIKE; never VACUUM the live writer (skill §3/§4).
+/// Serial writer queue that times every block. A block over `slowMs` emits
+/// `db_write(kind=dbq)` with the top stack frame so a stall names its own cause
+/// instead of only showing up as a point-sample wait spike.
+final class InstrumentedQueue {
+    private let q: DispatchQueue
+    private static let slowMs = 250.0
+
+    init(label: String, qos: DispatchQoS = .unspecified) {
+        q = DispatchQueue(label: label, qos: qos)
+    }
+
+    /// Underlying queue for DispatchSource timers (their handler already re-dispatches
+    /// heavy work as timed `dbQueue.async` blocks).
+    var raw: DispatchQueue { q }
+
+    private func measure(_ work: () -> Void) {
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        work()
+        report(since: t0)
+    }
+
+    private func report(since t0: UInt64) {
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
+        guard ms >= Self.slowMs else { return }
+        let frame = Thread.callStackSymbols.dropFirst(2).first ?? ""
+        let reason = frame.split(separator: " ", omittingEmptySubsequences: true)
+            .last.map { String($0.prefix(32)) } ?? "dbq"
+        UiMetrics.shared.emit("db_write", durMs: ms, ok: true, payload: ["kind": "dbq", "reason": reason])
+    }
+
+    func async(execute work: @escaping () -> Void) {
+        q.async { self.measure(work) }
+    }
+
+    func asyncAfter(deadline: DispatchTime, execute work: @escaping () -> Void) {
+        q.asyncAfter(deadline: deadline) { self.measure(work) }
+    }
+
+    func sync<T>(execute work: () -> T) -> T {
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        let out = q.sync(execute: work)
+        report(since: t0)
+        return out
+    }
+}
+
 final class DatabaseManager: ObservableObject {
     private let appDir: URL
     private let dbPath: URL
     /// Content-addressed blob store: `blobs/{content_hash}.bin` (images/pdf/rtf out of SQLite).
     private let blobsDir: URL
-    private let dbQueue = DispatchQueue(label: "com.clipvault.database", qos: .userInitiated)
+    private let dbQueue = InstrumentedQueue(label: "com.clipvault.database", qos: .userInitiated)
     /// WAL readers must not share the writer handle or sit behind VACUUM/backup on dbQueue.
     private let readQueue = DispatchQueue(label: "com.clipvault.database.read", qos: .userInitiated)
     private var db: OpaquePointer?
@@ -269,7 +315,8 @@ final class DatabaseManager: ObservableObject {
     /// Existence is not enough — symlink/TCC can exist and still be unreadable.
     func importBlobIfNeeded(hash: String, from source: URL) {
         let dest = blobFileURL(hash: hash)
-        if let existing = try? Data(contentsOf: dest), existing.count > 16 { return }
+        if let attrs = try? fm.attributesOfItem(atPath: dest.path),
+           let size = attrs[.size] as? Int, size > 16 { return }
         try? fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
         try? fm.removeItem(at: dest)
         try? fm.copyItem(at: source, to: dest)
@@ -979,7 +1026,7 @@ final class DatabaseManager: ObservableObject {
     private func runOptimize() { execQuiet("PRAGMA optimize;") }
 
     private func startMaintenanceTimer() {
-        let timer = DispatchSource.makeTimerSource(queue: dbQueue)
+        let timer = DispatchSource.makeTimerSource(queue: dbQueue.raw)
         timer.schedule(
             deadline: .now() + Self.maintenanceIntervalSeconds,
             repeating: Self.maintenanceIntervalSeconds

@@ -164,6 +164,13 @@ test('notes editor bundle is loaded lazily, not on wall boot', () => {
   assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n27'/);
 });
 
+test('every write-queue block is timed and names its slow frame', () => {
+  assert.match(db, /final class InstrumentedQueue/);
+  assert.match(db, /payload: \["kind": "dbq", "reason": reason\]/);
+  assert.match(db, /private let dbQueue = InstrumentedQueue\(/);
+  assert.match(db, /var raw: DispatchQueue \{ q \}/);
+});
+
 test('capture + inline-blob file I/O stay off the DB writer queue', () => {
   // existence check must not read the whole blob on dbQueue
   assert.doesNotMatch(db, /try\? Data\(contentsOf: url\), existing\.count > 16/);
