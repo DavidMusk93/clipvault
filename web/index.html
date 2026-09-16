@@ -9034,9 +9034,13 @@ window.ClipViewMasonry = Masonry;
         if (!b || r.p95 == null) return '<td>—</td>';
         const was = b.p95_ms != null ? b.p95_ms : b.value_p95;
         if (was == null || was <= 0) return '<td>—</td>';
+        const meta = metricMeta(r.name);
+        const over = meta.budget != null && r.p95 > meta.budget;
         const pct = Math.round((r.p95 - was) / was * 100);
-        if (Math.abs(pct) < 10) return '<td>—</td>';
-        return `<td class="${pct > 0 ? 'is-slow' : ''}">${pct > 0 ? '+' : ''}${pct}%</td>`;
+        // Sub-budget micro-regressions are noise; only show when over budget or moved enough.
+        if (!over && Math.abs(r.p95 - was) < (meta.unit === 'cls' ? 0.02 : 20)) return '<td>—</td>';
+        if (Math.abs(pct) < 10 && !over) return '<td>—</td>';
+        return `<td class="${over ? 'is-slow' : ''}">${pct > 0 ? '+' : ''}${pct}%</td>`;
       };
       const fillHot = (tbody, pred, empty) => {
         if (!tbody) return;
@@ -9067,8 +9071,10 @@ window.ClipViewMasonry = Masonry;
           for (const r of all) {
             const b = base.names[r.name];
             if (!b) continue;
+            const m = metricMeta(r.name);
             const was = b.p95_ms != null ? b.p95_ms : b.value_p95;
-            if (r.p95 != null && was != null && was > 0 && r.p95 > was * 1.1) regress += 1;
+            const floor = m.unit === 'cls' ? 0.02 : 20;
+            if (r.p95 != null && was != null && was > 0 && r.p95 > was * 1.1 && (r.p95 - was) >= floor) regress += 1;
           }
         }
         if (over.length) {
