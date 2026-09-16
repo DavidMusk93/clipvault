@@ -89,6 +89,17 @@ test('metrics separate latency (dur_ms) from values and budgets', () => {
   assert.match(panelJs, /_cls\$\/\.test\(name\)\) \{[\s\S]{0,160}?ev\.value/);
 });
 
+test('detail is bounded by hourly rollups + incremental vacuum', () => {
+  assert.match(swift, /detailRetentionMs/);
+  assert.match(swift, /CREATE TABLE IF NOT EXISTS ui_rollup/);
+  assert.match(swift, /func rollupLocked/);
+  assert.match(swift, /INSERT OR REPLACE INTO ui_rollup/);
+  assert.match(swift, /func mergeRollupLocked/);
+  assert.match(swift, /rollup_through_hour/);
+  assert.match(swift, /incremental_vacuum/);
+  assert.match(swift, /auto_vacuum=INCREMENTAL/);
+});
+
 test('trace correlation id threads wall vs panel', () => {
   assert.match(html, /function newTrace\(\)/);
   assert.match(html, /let pageTrace = newTrace\(\)/);

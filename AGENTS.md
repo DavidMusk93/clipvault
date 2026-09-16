@@ -381,7 +381,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   卡片只留越阈值 attention + 关键 name 的 n/avg/max + 最近 payload
 ```
 
-**字段语义（禁止混用）：** `dur_ms`=延迟；`value`=量（CLS 值、held ms、bytes、lag…）；`ok`=成功/失败；`over`=是否超预算；`trace`=一次加载/面板开合的关联 id。`summary` 另出 p50/p95/p99、`ok_rate`，并按 route/status 拆 `http_req`。
+**字段语义（禁止混用）：** `dur_ms`=延迟；`value`=量（CLS 值、held ms、bytes、lag…）；`ok`=成功/失败；`over`=是否超预算；`trace`=一次加载/面板开合的关联 id。`summary` 另出 p50/p95/p99、`ok_rate`，并按 route/status 拆 `http_req`。**明细保留 7 天**，更早的折成 `ui_rollup`（小时聚合，保留 30 天，无精确分位）；prune 走 `incremental_vacuum`。p50/p95/p99 只在明细窗口内精确。
 
 | 症状 | name |
 | --- | --- |
