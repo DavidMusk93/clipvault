@@ -71,3 +71,30 @@ test('taste keys keep skill and project names, not bare SKILL.md', () => {
   assert.match(mine, /skill:/);
   assert.match(mine, /禁止只记 SKILL\.md 文件名/);
 });
+
+test('deep mining: failures, redundancy, prompt quality, health', () => {
+  assert.match(mine, /"agent\.failures"/);
+  assert.match(mine, /"agent\.hot"/);
+  assert.match(mine, /"user\.prompt"/);
+  assert.match(mine, /def is_write_tool/);
+  assert.match(mine, /def norm_cmd/);
+  assert.match(mine, /def cmd_label/);
+  assert.match(mine, /redundant_reads/);
+  assert.match(mine, /fail_family/);
+  assert.match(mine, /retry_n/);
+  assert.match(mine, /"health"/);
+  assert.match(mine, /"sev"/);
+  assert.match(mine, /失败没有变成新策略/);
+});
+
+test('analysis sheet keeps dynamic: verdict, severity, live refresh', () => {
+  assert.match(html, /mine-verdict/);
+  assert.match(html, /mine-score/);
+  assert.match(html, /mine-sev/);
+  assert.match(html, /sev-high/);
+  assert.match(html, /mine-tables/);
+  assert.match(html, /scheduleMineRefresh/);
+  assert.match(html, /loadMine\(\{ auto: true \}\)/);
+  assert.match(html, /clipvault-sessions-overlay/);
+  assert.doesNotMatch(html, /setInterval\(/);
+});
