@@ -194,13 +194,23 @@ test('by-id hydrate bypasses the list HTML cap (full row, not listHtmlSQL)', () 
   assert.doesNotMatch(body, /listHtmlSQL/, 'by-id must not apply the list cap');
 });
 
-test('html hydrate is bounded and cannot loop on empty/archived bodies', () => {
+test('html hydrate is batched and cannot loop on empty/archived bodies', () => {
   assert.match(indexHtml, /const htmlHydrateTried = new Set\(\)/);
-  assert.match(indexHtml, /const HTML_HYDRATE_CONCURRENCY = 3/);
-  assert.match(indexHtml, /function pumpHtmlHydrate\(\)/);
+  assert.match(indexHtml, /const htmlHydratePending = new Map\(\)/);
+  assert.match(indexHtml, /const HTML_HYDRATE_BATCH = 20/);
+  assert.match(indexHtml, /function flushHtmlHydrate\(\)/);
+  assert.match(indexHtml, /function fetchClipsByIds\(ids\)/);
+  assert.match(indexHtml, /\/api\/clips\?ids=/);
   assert.match(indexHtml, /if \(item\.archived\) return false;/);
   assert.match(indexHtml, /htmlHydrateTried\.has\(item\.id\)/);
   assert.match(indexHtml, /htmlHydrateTried\.clear\(\)/);
+
+  // Server accepts a comma-separated batch and reads full rows (no list cap).
+  const webServer = fs.readFileSync(path.join(root, 'Sources/ClipVault/HTTP/WebServer.swift'), 'utf8');
+  assert.match(webServer, /name == "ids"/);
+  assert.match(webServer, /database\.fetchItems\(ids:/);
+  const db = fs.readFileSync(path.join(root, 'Sources/ClipVault/Store/DatabaseManager.swift'), 'utf8');
+  assert.match(db, /func fetchItems\(ids: \[UUID\]/);
 
   const fnSrc = extractFunctionSource(indexHtml, 'clipNeedsHtmlHydrate');
   const tried = new Set();

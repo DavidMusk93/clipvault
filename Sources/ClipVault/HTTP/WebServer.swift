@@ -2361,6 +2361,23 @@ class WebServer {
             }
             return
         }
+        if let idsRaw = items.first(where: { $0.name == "ids" })?.value {
+            // Batch hydrate for the wall: many omitted HTML bodies in one round-trip.
+            let uuids = idsRaw
+                .split(separator: ",")
+                .prefix(64)
+                .compactMap { UUID(uuidString: $0.trimmingCharacters(in: .whitespaces)) }
+            guard !uuids.isEmpty else {
+                sendJSON(["items": [], "count": 0, "nextCursor": NSNull()], connection: connection)
+                return
+            }
+            database.fetchItems(ids: uuids) { [weak self] rows in
+                guard let self else { return }
+                let arr = rows.map { self.itemToJSON($0, includeArchiveHTML: false) }
+                self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
+            }
+            return
+        }
         if let hashRaw = items.first(where: { $0.name == "hash" })?.value {
             database.fetchItemByContentHash(hashRaw) { [weak self] item in
                 guard let self else { return }
