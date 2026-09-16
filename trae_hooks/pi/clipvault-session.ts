@@ -23,9 +23,9 @@
  * Config via env (all optional):
  *   CLIPVAULT_PI_HOOK      wrapper path  (default ~/.trae-cn/hooks_env/clipvault_hook.sh)
  *   CLIPVAULT_PI_HOOK_ENV  env override  (default ~/.trae-cn/hooks_env/pi-hooks.env)
- *   CLIPVAULT_PI_INSTANCE  instance_id   (default pi-mac, set in pi-hooks.env)
  *
- * Disable per session:  CLIPVAULT_PI_SESSION_HOOK=0 pi
+ * instance_id stays the Trae env's (e.g. mac-work); pi sessions are told apart
+ * by source=pi. Disable per session:  CLIPVAULT_PI_SESSION_HOOK=0 pi
  */
 
 import { spawn } from "node:child_process";

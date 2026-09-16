@@ -24,10 +24,9 @@ mkdir -p "$PI_EXT_DIR"
 
 cat > "$PI_ENV" <<'EOF'
 # pi -> ClipVault session hook overrides. Sourced by clipvault_hook.sh.
-# Base install (paths, token, spool, python, client) comes from the Trae env;
-# only identity differs so pi sessions are labelled distinctly from Trae.
+# Base install (paths, token, spool, python, client, instance_id) comes from the
+# Trae env; pi keeps the same instance_id and is told apart by source=pi.
 . "$HOOKS_ENV/trae-hooks.env"
-export CLIPVAULT_INSTANCE_ID="${CLIPVAULT_PI_INSTANCE:-pi-mac}"
 export CLIPVAULT_HOOK_SOURCE="pi"
 EOF
 chmod 600 "$PI_ENV"
@@ -38,5 +37,5 @@ echo "wrote  $PI_ENV"
 echo "linked $PI_EXT -> $SRC"
 echo
 echo "Enable in pi: restart pi, or run /reload if the extension was already discovered."
-echo "pi sessions then land as source=pi, instance_id=\${CLIPVAULT_PI_INSTANCE:-pi-mac}."
+echo "pi sessions land as source=pi, instance_id inherited from the Trae env (mac-work)."
 echo "Disable for one run:  CLIPVAULT_PI_SESSION_HOOK=0 pi"

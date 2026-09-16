@@ -49,8 +49,11 @@ test('pi adapter does not block pi and is opt-out', () => {
 
 test('install writes the pi env override and links the extension', () => {
   assert.match(install, /pi-hooks\.env/);
-  assert.match(install, /CLIPVAULT_INSTANCE_ID="\$\{CLIPVAULT_PI_INSTANCE:-pi-mac\}"/);
-  assert.match(install, /CLIPVAULT_HOOK_SOURCE="pi"/);
+  assert.match(install, /\. "\$HOOKS_ENV\/trae-hooks\.env"/);
+  assert.match(install, /export CLIPVAULT_HOOK_SOURCE="pi"/);
+  // instance_id stays the Trae env's (mac-work); source=pi is the differentiator.
+  assert.doesNotMatch(install, /CLIPVAULT_INSTANCE_ID/);
   assert.match(install, /ln -sfn "\$SRC" "\$PI_EXT"/);
   assert.match(docs, /pi 会话/);
+  assert.match(docs, /source=pi/);
 });
