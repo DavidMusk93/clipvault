@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>会话 · ClipVault</title>
+  <script>if (window.parent !== window || /(?:^|[?&])embed(?:[=&]|$)/.test(location.search)) document.documentElement.classList.add("embed");</script>
   <link rel="icon" type="image/jpeg" href="/assets/keepsake-logo.jpg?v=pose1" />
   <meta name="color-scheme" content="light" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css" />
@@ -50,6 +51,7 @@
     }
     body {
       position: relative;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       font-family: var(--font-ui);
@@ -257,7 +259,7 @@
       backdrop-filter: blur(18px);
       border-bottom: 0.5px solid var(--separator);
     }
-    .session-head[hidden] { display: none !important; }
+    .session-head.is-empty { visibility: hidden; pointer-events: none; }
     .session-head .sid {
       flex: 1 1 auto;
       min-width: 0;
@@ -836,7 +838,7 @@
       <div id="sessionList"><div class="empty">暂无会话</div></div>
     </aside>
     <section class="stage">
-      <div class="session-head" id="sessionHead" hidden>
+      <div class="session-head is-empty" id="sessionHead">
         <span class="sid" id="sessionSid"></span>
         <span class="idline">
           <span id="sessionWhen"></span>
@@ -1406,14 +1408,14 @@
       const head = $("sessionHead");
       const row = s || sessionRows.find((x) => x.session_id === sid) || null;
       if (!sid) {
-        head.hidden = true;
+        head.classList.add("is-empty");
         $("sessionSid").textContent = "";
         $("sessionWhen").textContent = "";
         $("sessionHost").textContent = "";
         $("sessionCwd").textContent = "";
         return;
       }
-      head.hidden = false;
+      head.classList.remove("is-empty");
       $("sessionSid").textContent = title || sid;
       $("sessionSid").title = sid;
       $("sessionWhen").textContent = localDateTime(row && row.last_ts) || "";
