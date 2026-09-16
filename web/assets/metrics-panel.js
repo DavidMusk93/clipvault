@@ -11,6 +11,9 @@
       'trae_sessions_skip', 'trae_sessions_paint', 'trae_sessions_md',
       'trae_sessions_ttfp', 'trae_sessions_net', 'trae_sessions_error',
       'trae_sessions_cls', 'trae_sessions_longtask',
+      'trae_sessions_switch', 'trae_sessions_tools', 'trae_sessions_load',
+      'trae_sessions_layout', 'trae_sessions_fsm', 'trae_sessions_list',
+      'trae_sessions_hook', 'trae_sessions_boot', 'trae_sessions_resync',
     ],
   };
 
@@ -18,11 +21,15 @@
     wall_load: '首屏加载', wall_ttfp: '首屏响应', wall_paint: '重排绘制', wall_merge: '合入',
     wall_resync: 'SSE 重同步', wall_fetch: '拉取', wall_hydrate: 'HTML 补体', wall_cls: '布局偏移',
     wall_longtask: '长任务',
-    notes_preview_ms: '预览', notes_md_compile: 'Markdown 编译', notes_cls: '笔记偏移',
+    notes_preview_ms: '预览', notes_preview_paint: '预览绘制', notes_md_compile: 'Markdown 编译',
+    notes_md_error: 'Markdown 错误', notes_input_to_preview: '输入→预览', notes_cls: '笔记偏移',
     notes_longtask: '笔记长任务', notes_inp: '输入响应',
     trae_sessions_skip: '跳过', trae_sessions_paint: '绘制', trae_sessions_md: 'Markdown',
     trae_sessions_ttfp: '首屏', trae_sessions_net: '网络', trae_sessions_error: '错误',
     trae_sessions_cls: '偏移', trae_sessions_longtask: '长任务',
+    trae_sessions_switch: '切换会话', trae_sessions_tools: '工具索引', trae_sessions_load: '加载事件',
+    trae_sessions_layout: '布局', trae_sessions_fsm: 'FSM', trae_sessions_list: '列表',
+    trae_sessions_hook: 'hook', trae_sessions_boot: '启动', trae_sessions_resync: '重同步',
   };
   function labelOf(name) { return LABEL[name] || name; }
   function esc(s) {

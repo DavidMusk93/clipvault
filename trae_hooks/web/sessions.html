@@ -893,11 +893,20 @@
     const METRICS = "http://127.0.0.1:8080/api/ui-metrics";
     const metricQ = [];
     let metricFlush = 0;
+    function newTrace() {
+      try { if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, "").slice(0, 16); } catch (_) {}
+      return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
+    }
+    let sessTrace = newTrace();
     const emit = (name, extra) => {
       if (!/^[a-z][a-z0-9_]{1,63}$/.test(name)) return;
       const ev = { name, ts: Date.now() };
       if (extra && extra.dur_ms != null && Number.isFinite(extra.dur_ms)) ev.dur_ms = extra.dur_ms;
+      if (extra && extra.value != null && Number.isFinite(extra.value)) ev.value = extra.value;
       if (extra && typeof extra.ok === "boolean") ev.ok = extra.ok;
+      if (extra && typeof extra.over === "boolean") ev.over = extra.over;
+      if (extra && extra.trace) ev.trace = String(extra.trace).slice(0, 64);
+      else if (sessTrace) ev.trace = sessTrace;
       if (extra && extra.payload && typeof extra.payload === "object") {
         const p = {};
         for (const [k, v] of Object.entries(extra.payload)) {
@@ -911,9 +920,9 @@
       sessRing.push(ev);
       if (sessRing.length > 80) sessRing.splice(0, sessRing.length - 80);
       sessMetricsCtl?.noteIncoming?.();
-      if (name.startsWith("trae_")) flushMetrics();
-      else if (metricQ.length >= 20) flushMetrics();
-      else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 2000);
+      // Debounced batch instead of one POST per trae_ event.
+      if (metricQ.length >= 60) flushMetrics();
+      else if (!metricFlush) metricFlush = window.setTimeout(flushMetrics, 400);
     };
     const sessRing = [];
     const cornerMount = document.querySelector(".stage") || document.querySelector(".app") || document.body;
@@ -1152,10 +1161,7 @@
       if (layoutNarrow()) return "narrow";
       return "";
     };
-    const flushMetrics = () => {
-      metricFlush = 0;
-      if (!metricQ.length) return;
-      const events = metricQ.splice(0, 100);
+    const sendBatch = (events) => {
       const body = JSON.stringify({ events, session: "trae-sessions" });
       const embedded = window.parent && window.parent !== window;
       try {
@@ -1176,6 +1182,10 @@
         body,
         keepalive: true,
       }).catch(() => {});
+    };
+    const flushMetrics = () => {
+      metricFlush = 0;
+      while (metricQ.length) sendBatch(metricQ.splice(0, 100));
     };
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") flushMetrics();
@@ -1515,6 +1525,8 @@
       if (el.dataset.bound) return;
       el.dataset.bound = "1";
       el.addEventListener("click", () => {
+        const t0 = performance.now();
+        sessTrace = newTrace();
         const id = el.getAttribute("data-id") || "";
         const newest = newestSession(sessionRows);
         followLatest = !!(newest && newest.session_id === id);
@@ -1528,7 +1540,10 @@
         $("sessionList").querySelectorAll(".card").forEach((c) => {
           c.classList.toggle("active", c.getAttribute("data-id") === current);
         });
-        loadThreadPair();
+        Promise.resolve(loadThreadPair()).then(
+          () => emit("trae_sessions_switch", { dur_ms: performance.now() - t0, ok: true }),
+          () => emit("trae_sessions_switch", { dur_ms: performance.now() - t0, ok: false })
+        );
         if (mineState.open) loadMine();
       });
       el.querySelector(".pin-btn")?.addEventListener("click", (ev) => {
@@ -2066,6 +2081,7 @@
     }
 
     async function hydrateSlimTools() {
+      const t0 = performance.now();
       const gen = eventsGen;
       const items = focusImRows(imMessagesFromEvents(liveEvents));
       const ids = [];
@@ -2096,6 +2112,9 @@
         await Promise.all(ids.slice(i, i + pool).map(loadOne));
       }
       if (n && gen === eventsGen) paintFromLive("patch");
+      if (gen === eventsGen && ids.length) {
+        emit("trae_sessions_tools", { dur_ms: performance.now() - t0, ok: n === ids.length, payload: { n: ids.length, kind: "slim" } });
+      }
     }
 
     async function loadEvents(view, opts) {

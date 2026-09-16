@@ -303,7 +303,9 @@ test('session load coalesces hooks and omits bulky tool payloads from the list',
   assert.match(html, /emitLayout/);
   assert.match(html, /embedded/);
   assert.match(html, /b\.key === \"prompt\"/);
-  assert.match(html, /name.startsWith\(\"trae_\"\)/);
+  assert.match(html, /metricQ\.length >= 60/);
+  assert.match(html, /const sendBatch/);
+  assert.match(html, /let sessTrace = newTrace\(\)/);
   assert.match(html, /mergeIncoming/);
   assert.match(html, /params.set\(\"view\", kind\)/);
   assert.match(html, /if \(!pack.open && body.dataset.expandAll !== \"1\"\)/);

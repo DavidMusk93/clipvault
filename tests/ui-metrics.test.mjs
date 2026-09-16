@@ -11,6 +11,9 @@ import { src, root } from './helpers/src.mjs';
 const metricsJs = readFileSync(join(root, 'web/assets/notes-metrics.js'), 'utf8');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const panelJs = readFileSync(join(root, 'web/assets/metrics-panel.js'), 'utf8');
+const sessionsHtml = readFileSync(join(root, 'trae_hooks/web/sessions.html'), 'utf8');
+const notesEntry = readFileSync(join(root, 'web/assets/notes-editor/entry.js'), 'utf8');
+const notesBundle = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.js'), 'utf8');
 const swift = src('UiMetrics.swift');
 const web = src('WebServer.swift');
 const backup = src('CloudDocsBackupService.swift');
@@ -109,6 +112,29 @@ test('debug drawer shows baseline delta and can copy diagnostics', () => {
   assert.match(html, /const deltaCell = /);
   assert.match(html, /navigator\.clipboard\.writeText\(text\)/);
   assert.match(html, /onMore: \(\) => \{ closeNotesPanel\(\); openDebug\(\); \}/);
+});
+
+test('trae session metrics carry value/over/trace and batch', () => {
+  assert.match(sessionsHtml, /ev\.value = extra\.value/);
+  assert.match(sessionsHtml, /ev\.over = extra\.over/);
+  assert.match(sessionsHtml, /let sessTrace = newTrace\(\)/);
+  assert.match(sessionsHtml, /else if \(sessTrace\) ev\.trace = sessTrace/);
+  assert.match(sessionsHtml, /trae_sessions_switch/);
+  assert.match(sessionsHtml, /trae_sessions_tools/);
+  assert.match(sessionsHtml, /metricQ\.length >= 60/);
+  assert.match(sessionsHtml, /const sendBatch/);
+  assert.match(panelJs, /trae_sessions_switch/);
+  assert.match(panelJs, /trae_sessions_tools/);
+});
+
+test('notes markdown metrics split compile/paint/first and reuse ratio', () => {
+  assert.match(notesEntry, /notes_preview_paint/);
+  assert.match(notesEntry, /notes_md_error/);
+  assert.match(notesEntry, /value: ratio/);
+  assert.match(notesEntry, /firstPaintDone/);
+  assert.match(notesBundle, /notes_preview_paint/);
+  assert.match(notesBundle, /notes_md_error/);
+  assert.match(html, /notes_preview_paint/);
 });
 
 test('ingest is self-monitored and exposed on /proc', () => {
