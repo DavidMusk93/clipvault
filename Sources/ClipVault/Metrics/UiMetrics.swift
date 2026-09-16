@@ -30,6 +30,8 @@ final class UiMetrics {
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")
     private var db: OpaquePointer?
     private var ingestCount = 0
+    private var droppedCount = 0
+    private var rejectedCount = 0
 
     private init() {
         let root = DatabaseManager.resolveDataRoot()
@@ -149,13 +151,16 @@ final class UiMetrics {
     /// Returns accepted count and drop reason if the whole request is rejected.
     func ingest(events: [[String: Any]], defaultSession: String) -> (ok: Bool, accepted: Int, message: String?) {
         if events.count > Self.maxEventsPerRequest {
+            queue.sync { rejectedCount += 1 }
             return (false, 0, "too many events")
         }
         var rows: [Row] = []
+        var dropped = 0
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         for raw in events {
             guard let name = raw["name"] as? String,
                   Self.nameRe.firstMatch(in: name, range: NSRange(location: 0, length: name.utf16.count)) != nil else {
+                dropped += 1
                 continue
             }
             let ts: Int64
@@ -173,6 +178,7 @@ final class UiMetrics {
             if session.count > 80 { session = String(session.prefix(80)) }
             let payload = sanitizePayload(raw["payload"])
             if payload == nil, raw["payload"] != nil, !(raw["payload"] is NSNull) {
+                dropped += 1
                 continue
             }
             rows.append(Row(
@@ -187,6 +193,7 @@ final class UiMetrics {
                 trace: sanitizeTrace(raw["trace"])
             ))
         }
+        if dropped > 0 { queue.sync { droppedCount += dropped } }
         guard !rows.isEmpty else { return (true, 0, nil) }
         queue.sync {
             exec("BEGIN IMMEDIATE;")
@@ -231,6 +238,13 @@ final class UiMetrics {
         var minValue: Double?
         var maxValue: Double?
         var valueN = 0
+    }
+
+    /// Ingest health: how many events were dropped (bad name/payload) or rejected (cap).
+    func stats() -> [String: Any] {
+        queue.sync {
+            ["dropped": droppedCount, "rejected": rejectedCount, "ingests": ingestCount]
+        }
     }
 
     func summary(fromMs: Int64?, toMs: Int64?) -> [String: Any] {

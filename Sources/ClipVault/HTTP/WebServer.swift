@@ -609,6 +609,7 @@ class WebServer {
         }
         let session = SSESession(connection)
         sseSessions[ObjectIdentifier(connection)] = session
+        UiMetrics.shared.emit("sse_state", ok: true, payload: ["kind": "wall", "phase": "open", "n": sseSessions.count])
         let id = ObjectIdentifier(connection)
         connection.watchPeerClose { [weak self] in
             self?.sseQueue.async {
@@ -644,6 +645,7 @@ class WebServer {
             session.resyncRequired = true
             session.queue.append(Self.sseResyncFrame)
             flushSSELocked(session)
+            UiMetrics.shared.emit("sse_state", ok: false, payload: ["kind": "wall", "phase": "coalesce", "reason": "overflow"])
             return
         }
         session.queue.append(payload)
@@ -765,6 +767,7 @@ class WebServer {
         session.queue.removeAll()
         sseSessions.removeValue(forKey: ObjectIdentifier(session.connection))
         session.connection.cancel()
+        UiMetrics.shared.emit("sse_state", ok: false, payload: ["kind": "wall", "phase": "drop", "n": sseSessions.count, "reason": "peer"])
         if sseSessions.isEmpty {
             sseHeartbeat?.cancel()
             sseHeartbeat = nil
@@ -1585,7 +1588,9 @@ class WebServer {
             guard let self else { return }
             let s = ProcMetrics.sample(sse: self.sseSessions.count)
             self.lastProc = s.asDict()
-            self.sendJSON(s.asJSON(ok: true), connection: connection)
+            var json = s.asJSON(ok: true)
+            json["metrics"] = UiMetrics.shared.stats()
+            self.sendJSON(json, connection: connection)
         }
     }
 
