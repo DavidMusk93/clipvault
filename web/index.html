@@ -1018,6 +1018,44 @@
     .notes-rich b, .notes-rich strong, .snippet-html b, .snippet-html strong { font-weight: 600; }
     .notes-rich i, .notes-rich em, .snippet-html i, .snippet-html em { font-style: italic; }
     .notes-rich u, .snippet-html u { text-decoration: underline; text-underline-offset: 2px; }
+    .notes-rich table, .snippet-html table {
+      border-collapse: collapse;
+      font-size: 13px;
+      line-height: 1.35;
+      margin: 0.2em 0 0.45em;
+    }
+    .notes-rich th, .notes-rich td,
+    .snippet-html th, .snippet-html td {
+      border: 0.5px solid rgba(60, 60, 67, 0.22);
+      padding: 6px 8px;
+      vertical-align: top;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .notes-rich th, .snippet-html th { font-weight: 600; }
+    .notes-rich h1, .notes-rich h2, .notes-rich h3, .notes-rich h4,
+    .snippet-html h1, .snippet-html h2, .snippet-html h3, .snippet-html h4 {
+      font-weight: 650;
+      letter-spacing: -0.02em;
+      margin: 0.55em 0 0.28em;
+      line-height: 1.25;
+    }
+    .notes-rich h1, .snippet-html h1 { font-size: 1.22em; }
+    .notes-rich h2, .snippet-html h2 { font-size: 1.1em; }
+    .notes-rich h3, .snippet-html h3 { font-size: 1.02em; }
+    .notes-rich h1:first-child, .notes-rich h2:first-child, .notes-rich h3:first-child,
+    .snippet-html h1:first-child, .snippet-html h2:first-child, .snippet-html h3:first-child { margin-top: 0; }
+    .notes-rich blockquote, .snippet-html blockquote {
+      margin: 0.4em 0;
+      padding: 0.12em 0 0.12em 0.75em;
+      border-left: 2.5px solid rgba(60, 60, 67, 0.28);
+    }
+    .notes-rich hr, .snippet-html hr {
+      border: 0;
+      border-top: 0.5px solid var(--separator);
+      margin: 0.55em 0;
+    }
     /* Safety: never paint host page with foreign dark-mode / selection colors */
     .notes-rich *, .snippet-html * {
       background: transparent !important;
@@ -1031,6 +1069,14 @@
       text-decoration: none !important;
       pointer-events: none !important;
       cursor: text !important;
+    }
+    .notes-rich .html-img-ph, .snippet-html .html-img-ph {
+      display: inline-block;
+      font-size: 12px;
+      color: var(--text-secondary, #6e6e73) !important;
+      background: rgba(60, 60, 67, 0.08) !important;
+      padding: 1px 6px;
+      border-radius: 4px;
     }
     /* Mono runs (Notes monospaced paragraphs / code) */
     .notes-rich .is-mono, .snippet-html .is-mono,
@@ -5428,9 +5474,11 @@ window.ClipViewMasonry = Masonry;
           el.removeAttribute('align');
           const keepMono = el.classList && el.classList.contains('is-mono');
           const keepInert = el.classList && el.classList.contains('url-inert');
+          const keepImgPh = el.classList && el.classList.contains('html-img-ph');
           el.removeAttribute('class');
           if (keepMono) el.classList.add('is-mono');
           if (keepInert) el.classList.add('url-inert');
+          if (keepImgPh) el.classList.add('html-img-ph');
         });
         // Neutralize anchors — no clickable URLs in card HTML
         root.querySelectorAll('a').forEach(a => {
@@ -5440,6 +5488,19 @@ window.ClipViewMasonry = Masonry;
           if (href) span.setAttribute('data-url', href);
           span.textContent = a.textContent || href;
           if (a.parentNode) a.parentNode.replaceChild(span, a);
+        });
+        // Cards are not browsers: no media fetch; keep masonry height stable.
+        root.querySelectorAll('img, video, iframe, object, embed, source, picture').forEach(el => {
+          if (!el.parentNode) return;
+          if (el.tagName === 'IMG') {
+            const alt = (el.getAttribute('alt') || '').trim();
+            const span = doc.createElement('span');
+            span.className = 'html-img-ph';
+            span.textContent = alt ? `［图：${alt}］` : '［图］';
+            el.parentNode.replaceChild(span, el);
+          } else {
+            el.remove();
+          }
         });
 
         root.querySelectorAll('p').forEach(p => {
@@ -5475,7 +5536,12 @@ window.ClipViewMasonry = Masonry;
           .replace(/\sstyle=("|')[^"']*\1/gi, '')
           .replace(/\s(bgcolor|background|color|face|size)=("|')[^"']*\2/gi, '')
           .replace(/<a\b[^>]*>/gi, '<span class="url-inert">')
-          .replace(/<\/a>/gi, '</span>');
+          .replace(/<\/a>/gi, '</span>')
+          .replace(/<img\b[^>]*>/gi, (m) => {
+            const alt = (m.match(/\balt\s*=\s*("|')([^"']*)\1/i) || m.match(/\balt\s*=\s*([^\s>]+)/i) || [])[2] || '';
+            return `<span class="html-img-ph">${alt ? `［图：${alt}］` : '［图］'}</span>`;
+          })
+          .replace(/<(video|iframe|object|embed|picture)\b[\s\S]*?<\/\1>/gi, '');
         return collapseEmptyHtmlBlocks(s.trim());
       }
     }
@@ -5483,7 +5549,8 @@ window.ClipViewMasonry = Masonry;
     function notesFragmentUseful(fragment) {
       if (!fragment) return false;
       // Has structure beyond bare text
-      if (/<(ul|ol|li|p|br|b|strong|i|em|u|h[1-6]|table|blockquote)\b/i.test(fragment)) return true;
+      if (/<(ul|ol|li|p|br|b|strong|i|em|u|h[1-6]|table|thead|tbody|tr|td|th|blockquote|hr|pre|code)\b/i.test(fragment)) return true;
+      if (/html-img-ph/.test(fragment)) return true;
       const plain = stripHtmlToText(fragment);
       return plain.length > 0;
     }
@@ -7377,6 +7444,9 @@ window.ClipViewMasonry = Masonry;
         }
         const tinyBase = (plain || plainFromHtml || '');
         const tiny = tinyBase.length > 0 && tinyBase.length <= 80 && !tinyBase.includes('\n') ? ' is-tiny' : '';
+        // HTML/RTF: prefer sanitized fragment even when companion plain looks like code.
+        const preferRich = notesFragmentUseful(fragment)
+          && (item.type === 'html' || item.type === 'rtf' || !looksLikeCode(plain || plainFromHtml));
         // Search: always plain+highlight so matches are visible (incl. text from HTML strip).
         if (searchQuery && plain) {
           body = renderSearchableText(plain, { asCode: looksLikeCode(plain) });
@@ -7384,7 +7454,7 @@ window.ClipViewMasonry = Masonry;
             // Match came mainly from HTML body
             body = '<div class="search-field-badge" style="margin:0 0 6px">命中正文</div>' + body;
           }
-        } else if (notesFragmentUseful(fragment) && !looksLikeCode(plain || plainFromHtml)) {
+        } else if (preferRich) {
           body = `<div class="notes-rich${tiny}"><div class="notes-rich-inner">${fragment}</div></div>`;
         } else if (plain) {
           body = renderPlainBody(plain, ' is-rtf', { itemId: item.id, archived: itemIsArchived(item) });
@@ -7603,12 +7673,42 @@ window.ClipViewMasonry = Masonry;
     function ensureCard(item) {
       let c = cardCache.get(item.id);
       const pinBit = itemIsPinned(item) ? '1' : '0';
-      if (c && c.dataset.pinned === pinBit) return c;
+      if (c && c.dataset.pinned === pinBit) {
+        maybeHydrateHtmlClip(item, c);
+        return c;
+      }
       const next = buildCard(item);
       if (c && c.parentNode) c.parentNode.replaceChild(next, c);
       cardCache.set(item.id, next);
       highlightCard(next);
+      maybeHydrateHtmlClip(item, next);
       return next;
+    }
+
+    const htmlHydrating = new Set();
+    function clipNeedsHtmlHydrate(item) {
+      if (!item) return false;
+      if (item.htmlContent) return false;
+      if (item.type !== 'html' && item.type !== 'rtf') return false;
+      return item.htmlOmitted !== false;
+    }
+    /** Large html/rtf bodies are omitted from the list payload; fetch full row by id. */
+    function maybeHydrateHtmlClip(item, card) {
+      if (!clipNeedsHtmlHydrate(item)) return;
+      const id = item.id;
+      if (!id || htmlHydrating.has(id)) return;
+      htmlHydrating.add(id);
+      fetchClipById(id).then((full) => {
+        if (!full || !full.htmlContent) return;
+        const idx = clips.findIndex((c) => c.id === id);
+        const live = Object.assign({}, idx >= 0 ? clips[idx] : item, {
+          htmlContent: full.htmlContent,
+          htmlOmitted: false,
+        });
+        if (idx >= 0) clips[idx] = live;
+        const el = cardCache.get(id) || card;
+        if (el) repaintCardBody(el, live);
+      }).catch(() => {}).finally(() => { htmlHydrating.delete(id); });
     }
 
     /**

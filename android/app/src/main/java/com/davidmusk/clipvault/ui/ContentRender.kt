@@ -510,6 +510,13 @@ private fun DetailNotesHtml(html: String) {
                   pre,code{font-family:ui-monospace,Menlo,monospace;font-size:13px;}
                   pre{padding:10px;overflow:auto;white-space:pre;background:#eceef0;border-radius:8px;}
                   img{max-width:100%;height:auto;border-radius:8px;}
+                  table{border-collapse:collapse;font-size:13px;margin:0.2em 0 0.45em;}
+                  th,td{border:0.5px solid rgba(60,60,67,0.22);padding:6px 8px;vertical-align:top;}
+                  th{font-weight:600;}
+                  h1,h2,h3{font-weight:650;margin:0.55em 0 0.28em;line-height:1.25;}
+                  h1{font-size:1.22em;} h2{font-size:1.1em;} h3{font-size:1.02em;}
+                  blockquote{margin:0.4em 0;padding:0.12em 0 0.12em 0.75em;border-left:2.5px solid rgba(60,60,67,0.28);}
+                  hr{border:0;border-top:0.5px solid rgba(60,60,67,0.22);margin:0.55em 0;}
                 </style></head><body>$fragment</body></html>
             """.trimIndent()
             web.loadDataWithBaseURL(null, wrapped, "text/html", "utf-8", null)

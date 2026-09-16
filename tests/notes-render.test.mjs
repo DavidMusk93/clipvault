@@ -130,3 +130,34 @@ test('anchors are neutralized (no navigable href)', () => {
   assert.ok(!/<a\b/i.test(frag), frag);
   assert.match(frag, /url-inert|link|example/i);
 });
+
+test('Lark/Chrome table structure survives presentation sanitize', () => {
+  const html = `<meta charset="utf-8"><table class="ace-table" style="width:500px">
+    <tr style="height:39px"><td style="border:1px solid #ccc">功能</td><td>mr</td></tr>
+    <tr><td>对齐采样</td><td><a href="https://example.com/mr">link</a></td></tr>
+  </table>`;
+  const frag = renderNotesFragment(html);
+  assert.match(frag, /<table/i);
+  assert.match(frag, /<td/i);
+  assert.match(frag, /功能/);
+  assert.match(frag, /对齐采样/);
+  assert.ok(!/style=/i.test(frag), frag);
+  assert.ok(!/<a\b/i.test(frag), frag);
+  assert.ok(notesFragmentUseful(frag));
+});
+
+test('clipboard images become placeholders (no remote fetch)', () => {
+  const html = '<p>pic <img src="https://evil.example/x.png" alt="cover"> done</p>';
+  const frag = renderNotesFragment(html);
+  assert.ok(!/<img\b/i.test(frag), frag);
+  assert.match(frag, /html-img-ph/);
+  assert.match(frag, /cover/);
+});
+
+test('index.html styles html/rtf tables and headings in notes-rich', () => {
+  assert.match(indexHtml, /\.notes-rich table[\s\S]{0,180}?border-collapse:\s*collapse/);
+  assert.match(indexHtml, /\.notes-rich th, \.notes-rich td/);
+  assert.match(indexHtml, /\.notes-rich h1, \.notes-rich h2/);
+  assert.match(indexHtml, /\.notes-rich blockquote/);
+  assert.match(indexHtml, /html-img-ph/);
+});
