@@ -1175,17 +1175,24 @@ final class CloudDocsSyncService {
                 files.append(contentsOf: self.listJson(in: hostDir))
             }
             let decoder = JSONDecoder()
-            var n = 0
-            self.database.performSyncWork {
-                for url in files {
-                    guard let data = try? Data(contentsOf: url),
-                          let op = try? decoder.decode(SyncOp.self, from: data),
-                          op.kind == "reader_op" else { continue }
-                    if self.applyOpLocked(op) { n += 1 }
-                }
+            // Decode OFF dbQueue: reading thousands of trx files on the writer queue was
+            // the multi-second db_write(kind=queue) stall during startup replay.
+            var ops: [SyncOp] = []
+            for url in files {
+                guard let data = try? Data(contentsOf: url),
+                      let op = try? decoder.decode(SyncOp.self, from: data),
+                      op.kind == "reader_op" else { continue }
+                ops.append(op)
             }
-            if n > 0 {
-                print("[Sync] replayDiskReaderOps applied \(n)")
+            guard !ops.isEmpty else { return }
+            // Apply in small chunks so captures/writes interleave between blocks.
+            for start in stride(from: 0, to: ops.count, by: 200) {
+                let slice = Array(ops[start..<min(start + 200, ops.count)])
+                self.database.performSyncWork {
+                    var n = 0
+                    for op in slice where self.applyOpLocked(op) { n += 1 }
+                    if n > 0 { print("[Sync] replayDiskReaderOps applied \(n)") }
+                }
             }
         }
     }
@@ -1208,49 +1215,56 @@ final class CloudDocsSyncService {
                 files.append(contentsOf: self.listJson(in: hostDir))
             }
             let decoder = JSONDecoder()
-            var n = 0
+            // Parse OFF dbQueue (file read + JSON), then apply on it.
+            var links: [(opId: String, ts: Double, action: String, fromId: String, toItemId: String?, toHash: String?, toIsNote: Bool, kind: String, pairKey: String, host: String)] = []
+            for url in files {
+                guard let data = try? Data(contentsOf: url),
+                      let op = try? decoder.decode(SyncOp.self, from: data),
+                      op.kind == "clip_link" else { continue }
+                guard let raw = op.note, let noteData = raw.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: noteData) as? [String: Any] else {
+                    continue
+                }
+                links.append((
+                    opId: op.opId, ts: op.wallTs,
+                    action: (obj["action"] as? String) ?? "",
+                    fromId: (obj["from_item_id"] as? String) ?? op.itemId,
+                    toItemId: obj["to_item_id"] as? String,
+                    toHash: (obj["to_content_hash"] as? String) ?? op.contentHash,
+                    toIsNote: DatabaseManager.jsonFlag(obj["to_is_note"]),
+                    kind: (obj["kind"] as? String) ?? "related",
+                    pairKey: (obj["pair_key"] as? String) ?? "",
+                    host: op.host
+                ))
+            }
+            guard !links.isEmpty else { return }
             self.database.performSyncWork {
+                var n = 0
                 var pairKeys = Set<String>()
                 var itemIds = Set<String>()
                 var hashes = Set<String>()
-                for url in files {
-                    guard let data = try? Data(contentsOf: url),
-                          let op = try? decoder.decode(SyncOp.self, from: data),
-                          op.kind == "clip_link" else { continue }
-                    guard let raw = op.note, let noteData = raw.data(using: .utf8),
-                          let obj = try? JSONSerialization.jsonObject(with: noteData) as? [String: Any] else {
-                        continue
-                    }
-                    let pairKey = (obj["pair_key"] as? String) ?? ""
-                    let action = (obj["action"] as? String) ?? ""
-                    let fromId = (obj["from_item_id"] as? String) ?? op.itemId
-                    let toItemId = obj["to_item_id"] as? String
-                    let toHash = (obj["to_content_hash"] as? String) ?? op.contentHash
-                    let toIsNote = DatabaseManager.jsonFlag(obj["to_is_note"])
-                    let kind = (obj["kind"] as? String) ?? "related"
+                for l in links {
                     if let key = self.database.ingestClipLinkReplayLocked(
-                        opId: op.opId,
-                        ts: op.wallTs,
-                        action: action,
-                        fromItemId: fromId,
-                        toContentHash: toHash,
-                        toItemId: toItemId,
-                        toIsNote: toIsNote,
-                        kind: kind,
-                        pairKey: pairKey,
-                        source: "replay:\(op.host)"
+                        opId: l.opId,
+                        ts: l.ts,
+                        action: l.action,
+                        fromItemId: l.fromId,
+                        toContentHash: l.toHash,
+                        toItemId: l.toItemId,
+                        toIsNote: l.toIsNote,
+                        kind: l.kind,
+                        pairKey: l.pairKey,
+                        source: "replay:\(l.host)"
                     ) {
                         n += 1
                         pairKeys.insert(key)
-                        itemIds.insert(UUID(uuidString: fromId)?.uuidString ?? fromId)
-                        if let toItemId { itemIds.insert(UUID(uuidString: toItemId)?.uuidString ?? toItemId) }
-                        if let toHash { hashes.insert(toHash.lowercased()) }
+                        itemIds.insert(UUID(uuidString: l.fromId)?.uuidString ?? l.fromId)
+                        if let toItemId = l.toItemId { itemIds.insert(UUID(uuidString: toItemId)?.uuidString ?? toItemId) }
+                        if let toHash = l.toHash { hashes.insert(toHash.lowercased()) }
                     }
                 }
                 self.database.finishClipLinkReplayLocked(pairKeys: pairKeys, itemIds: itemIds, hashes: hashes)
-            }
-            if n > 0 {
-                print("[Sync] replayDiskClipLinks applied \(n)")
+                if n > 0 { print("[Sync] replayDiskClipLinks applied \(n)") }
             }
         }
     }

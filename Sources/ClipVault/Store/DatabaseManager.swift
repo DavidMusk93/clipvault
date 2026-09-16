@@ -46,8 +46,9 @@ struct ClipPage {
 /// writer queue + WAL read connection, latest-alive upsert, batched cleanup, online backup.
 /// Never full-scan `html_content` with LIKE; never VACUUM the live writer (skill §3/§4).
 /// Serial writer queue that times every block. A block over `slowMs` emits
-/// `db_write(kind=dbq)` with the top stack frame so a stall names its own cause
-/// instead of only showing up as a point-sample wait spike.
+/// `db_write(kind=dbq)` naming the DatabaseManager method that submitted it
+/// (captured on the submitting thread, then demangled) — so a stall explains
+/// itself instead of only showing up as a point-sample queue wait.
 final class InstrumentedQueue {
     private let q: DispatchQueue
     private static let slowMs = 250.0
@@ -56,39 +57,65 @@ final class InstrumentedQueue {
         q = DispatchQueue(label: label, qos: qos)
     }
 
-    /// Underlying queue for DispatchSource timers (their handler already re-dispatches
-    /// heavy work as timed `dbQueue.async` blocks).
-    var raw: DispatchQueue { q }
-
-    private func measure(_ work: () -> Void) {
-        let t0 = DispatchTime.now().uptimeNanoseconds
-        work()
-        report(since: t0)
+    /// First ClipVault frame on the *submitting* thread, demangled to "Class.method".
+    private static func callerReason() -> String {
+        // Skip the instrumenter's own frames; the first real ClipVault frame is the
+        // DatabaseManager method that submitted the block.
+        guard let frame = Thread.callStackSymbols.first(where: {
+            $0.contains("ClipVault") && !$0.contains("InstrumentedQueue")
+        }) else { return "dbq" }
+        let comps = frame.split(separator: " ", omittingEmptySubsequences: true)
+        guard comps.count >= 4 else { return "dbq" }
+        var sym = String(comps[3])
+        if let r = sym.range(of: "ClipVault") { sym = String(sym[r.upperBound...]) }
+        var parts: [String] = []
+        var i = sym.startIndex
+        while i < sym.endIndex, parts.count < 3 {
+            var j = i
+            while j < sym.endIndex, sym[j].isNumber { j = sym.index(after: j) }
+            guard j > i, let n = Int(sym[i..<j]), n > 0, n < 64,
+                  let end = sym.index(j, offsetBy: n, limitedBy: sym.endIndex) else { break }
+            parts.append(String(sym[j..<end]))
+            i = end
+            while i < sym.endIndex, !sym[i].isNumber { i = sym.index(after: i) }
+        }
+        let name = parts.isEmpty ? String(comps[3].suffix(30)) : parts.joined(separator: ".")
+        return String(name.prefix(32))
     }
 
-    private func report(since t0: UInt64) {
+    private func report(since t0: UInt64, reason: String) {
         let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
         guard ms >= Self.slowMs else { return }
-        let frame = Thread.callStackSymbols.dropFirst(2).first ?? ""
-        let reason = frame.split(separator: " ", omittingEmptySubsequences: true)
-            .last.map { String($0.prefix(32)) } ?? "dbq"
         UiMetrics.shared.emit("db_write", durMs: ms, ok: true, payload: ["kind": "dbq", "reason": reason])
     }
 
     func async(execute work: @escaping () -> Void) {
-        q.async { self.measure(work) }
+        let reason = Self.callerReason()
+        q.async {
+            let t0 = DispatchTime.now().uptimeNanoseconds
+            work()
+            self.report(since: t0, reason: reason)
+        }
     }
 
     func asyncAfter(deadline: DispatchTime, execute work: @escaping () -> Void) {
-        q.asyncAfter(deadline: deadline) { self.measure(work) }
+        let reason = Self.callerReason()
+        q.asyncAfter(deadline: deadline) {
+            let t0 = DispatchTime.now().uptimeNanoseconds
+            work()
+            self.report(since: t0, reason: reason)
+        }
     }
 
     func sync<T>(execute work: () -> T) -> T {
+        let reason = Self.callerReason()
         let t0 = DispatchTime.now().uptimeNanoseconds
         let out = q.sync(execute: work)
-        report(since: t0)
+        report(since: t0, reason: reason)
         return out
     }
+
+    var raw: DispatchQueue { q }
 }
 
 final class DatabaseManager: ObservableObject {
