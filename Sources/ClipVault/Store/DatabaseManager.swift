@@ -381,19 +381,30 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Emit a `db_read` row only for slow reads, so the metric stays cheap but
+    /// still surfaces lock waits / big scans.
+    private func timedRead(_ work: () -> Void) {
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        work()
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
+        if ms >= 10 { UiMetrics.shared.emit("db_read", durMs: ms, ok: true) }
+    }
+
     private func performRead(_ work: @escaping () -> Void) {
+        let timed = { self.timedRead(work) }
         if readDB != nil {
-            readQueue.async(execute: work)
+            readQueue.async(execute: timed)
         } else {
-            dbQueue.async(execute: work)
+            dbQueue.async(execute: timed)
         }
     }
 
     private func performReadSync<T>(_ work: () -> T) -> T {
-        if readDB != nil {
-            return readQueue.sync(execute: work)
-        }
-        return dbQueue.sync(execute: work)
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        let out = readDB != nil ? readQueue.sync(execute: work) : dbQueue.sync(execute: work)
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
+        if ms >= 10 { UiMetrics.shared.emit("db_read", durMs: ms, ok: true) }
+        return out
     }
 
     /// List/search never ship archive-sized HTML (skill §7). Use html_bytes so we

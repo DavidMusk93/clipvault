@@ -89,6 +89,22 @@ test('metrics separate latency (dur_ms) from values and budgets', () => {
   assert.match(panelJs, /_cls\$\/\.test\(name\)\) \{[\s\S]{0,160}?ev\.value/);
 });
 
+test('ingest is self-monitored and exposed on /proc', () => {
+  assert.match(swift, /droppedCount/);
+  assert.match(swift, /rejectedCount/);
+  assert.match(swift, /func stats\(\)/);
+  assert.match(web, /json\["metrics"\] = UiMetrics\.shared\.stats\(\)/);
+});
+
+test('server side DB and SSE SLIs exist', () => {
+  const dbm = src('DatabaseManager.swift');
+  assert.match(dbm, /func timedRead/);
+  assert.match(dbm, /UiMetrics\.shared\.emit\("db_read"/);
+  assert.match(web, /func enqueueSSELocked/);
+  assert.match(web, /phase": "coalesce/);
+  assert.match(web, /phase": "drop/);
+});
+
 test('debug snapshot shows p95 and a baseline delta', () => {
   assert.match(html, /id="nmBaseline"/);
   assert.match(html, /NM_BASELINE_KEY/);
