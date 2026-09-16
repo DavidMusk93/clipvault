@@ -31,6 +31,7 @@ test('metrics API and db are local-only', () => {
   assert.match(sync, /UiMetrics\.shared\.emit/);
   assert.match(sync, /sync_cycle/);
   assert.match(sync, /sync_blob_wait/);
+  assert.match(sync, /sync_queue_depth/);
   assert.doesNotMatch(sync, /ui-metrics\.db/);
   assert.doesNotMatch(backup, /ui-metrics\.db/);
   assert.match(backup, /clipflow\.db/);
