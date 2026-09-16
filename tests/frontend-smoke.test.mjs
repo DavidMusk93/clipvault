@@ -15,6 +15,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const indexPath = path.join(__dirname, '../web/index.html');
 const indexHtml = fs.readFileSync(indexPath, 'utf8');
 
+/** Pull one `function name(...) { ... }` out of the inline script (brace-matched). */
+function extractFunctionSource(src, name) {
+  const start = src.indexOf(`function ${name}(`);
+  assert.ok(start >= 0, `${name} not found in index.html`);
+  const open = src.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  throw new Error(`${name} has unbalanced braces`);
+}
+
 function extractInlineScripts(html) {
   const scripts = [];
   const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
@@ -166,6 +183,36 @@ test('list SQL ships html/rtf clipboard HTML up to 48KB', () => {
   assert.match(db, /type IN \('html','rtf'\)/);
   const webServer = fs.readFileSync(path.join(root, 'Sources/ClipVault/HTTP/WebServer.swift'), 'utf8');
   assert.match(webServer, /htmlOmitted/);
+});
+
+test('by-id hydrate bypasses the list HTML cap (full row, not listHtmlSQL)', () => {
+  const db = fs.readFileSync(path.join(root, 'Sources/ClipVault/Store/DatabaseManager.swift'), 'utf8');
+  const start = db.indexOf('private func fetchItemByIdLocked');
+  assert.ok(start >= 0, 'fetchItemByIdLocked missing');
+  const body = db.slice(start, start + 700);
+  assert.match(body, /html_content/, 'by-id must select the real column');
+  assert.doesNotMatch(body, /listHtmlSQL/, 'by-id must not apply the list cap');
+});
+
+test('html hydrate is bounded and cannot loop on empty/archived bodies', () => {
+  assert.match(indexHtml, /const htmlHydrateTried = new Set\(\)/);
+  assert.match(indexHtml, /const HTML_HYDRATE_CONCURRENCY = 3/);
+  assert.match(indexHtml, /function pumpHtmlHydrate\(\)/);
+  assert.match(indexHtml, /if \(item\.archived\) return false;/);
+  assert.match(indexHtml, /htmlHydrateTried\.has\(item\.id\)/);
+  assert.match(indexHtml, /htmlHydrateTried\.clear\(\)/);
+
+  const fnSrc = extractFunctionSource(indexHtml, 'clipNeedsHtmlHydrate');
+  const tried = new Set();
+  const needs = new Function('htmlHydrateTried', `${fnSrc}\nreturn clipNeedsHtmlHydrate;`)(tried);
+  const base = { id: 'x', type: 'html', htmlContent: null, archived: false };
+  assert.equal(needs({ ...base }), true, 'omitted html needs hydrate');
+  assert.equal(needs({ ...base, htmlContent: '<p>x</p>' }), false, 'body already present');
+  assert.equal(needs({ ...base, type: 'text' }), false, 'only html/rtf hydrate');
+  assert.equal(needs({ ...base, archived: true }), false, 'archived never hydrates');
+  assert.equal(needs({ ...base, htmlOmitted: false }), false, 'authoritative false');
+  tried.add('x');
+  assert.equal(needs({ ...base }), false, 'tried once — no infinite retry');
 });
 
 test('search highlight helpers present', () => {
