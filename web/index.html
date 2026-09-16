@@ -2185,7 +2185,9 @@
       background: #fff;
       box-shadow: 0 8px 40px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.04);
     }
-    .sessions-panel .notes-close { top: 22px; right: 26px; }
+    .sessions-panel .notes-close { top: 22px; right: 26px; transition: opacity var(--press), transform var(--press); }
+    /* The analysis sheet has its own close at the same corner; hide the panel close while it is open. */
+    .sessions-panel.is-overlay .notes-close { opacity: 0; pointer-events: none; }
     @media (max-width: 820px) {
       .sessions-shell { padding: 8px; }
     }
@@ -4731,6 +4733,11 @@ window.ClipViewMasonry = Masonry;
     window.addEventListener('message', (ev) => {
       if (ev.origin !== location.origin) return;
       const d = ev.data;
+      if (d && d.type === 'clipvault-sessions-overlay') {
+        const panel = document.getElementById('sessionsPanel');
+        if (panel) panel.classList.toggle('is-overlay', !!d.open);
+        return;
+      }
       if (!d || d.type !== 'clipvault-ui-metrics' || !Array.isArray(d.events)) return;
       const M = globalThis.ClipNotesMetrics;
       if (M && typeof M.record === 'function') {
@@ -4785,6 +4792,7 @@ window.ClipViewMasonry = Masonry;
       }
       panel.classList.add('open');
       panel.classList.remove('is-settled');
+      panel.classList.remove('is-overlay');
       panel.setAttribute('aria-hidden', 'false');
       setSessionsWallLocked(true);
       emitSessionsLayout('open');
@@ -4801,6 +4809,7 @@ window.ClipViewMasonry = Masonry;
       if (!panel || !panel.classList.contains('open')) return;
       sheetTrace = newTrace();
       emitSessionsLayout('close');
+      panel.classList.remove('is-overlay');
       sessionsFrameCtl('clipvault-sessions-pause');
       beginSheetUnlock();
       try {

@@ -141,6 +141,43 @@ def main() -> None:
     phases = out["blocks"]["agent.phases"]
     ok("phase-turns-table", len(phases.get("tables") or []) >= 2)
     ok("summary-work", out["summary"]["work_s"] >= 20)
+    ok("summary-health", "health" in out["summary"] and "score" in out["summary"]["health"])
+    ok("hot-block", len(out["blocks"]["agent.hot"]["tables"]) == 3, str(list(out["blocks"])))
+    ok("feedback-sev", all(f.get("sev") in ("high", "med", "note", "good") for f in out["feedback"]))
+    ok("prompt-axis", "user.prompt" in out["blocks"])
+
+    # Failure + retry + read/write split: a file read by shell is not a write.
+    fail_rows = [
+        {"event_id": "fu", "ts": "10", "hook_event": "UserPromptSubmit", "prompt": "继续 ", "cwd": "/root/p"},
+        {
+            "event_id": "ft1", "ts": "11", "hook_event": "PostToolUse", "tool_name": "RunCommand",
+            "input_head": '{"cmd":"git push origin master","workdir":"/root/p"}',
+            "resp_head": '{"wall_time_seconds":2.0,"exit_code":128,"output":"boom"}',
+        },
+        {
+            "event_id": "ft2", "ts": "12", "hook_event": "PostToolUse", "tool_name": "RunCommand",
+            "input_head": '{"cmd":"git push origin master","workdir":"/root/p"}',
+            "resp_head": '{"wall_time_seconds":2.0,"exit_code":1,"output":"again"}',
+        },
+        {
+            "event_id": "fr", "ts": "13", "hook_event": "PostToolUse", "tool_name": "RunCommand",
+            "input_head": '{"cmd":"sed -n 1,200p /root/p/a/b.cc","workdir":"/root/p"}',
+            "resp_head": '{"wall_time_seconds":0.2,"exit_code":0,"output":"x"}',
+        },
+        {
+            "event_id": "fw", "ts": "14", "hook_event": "PostToolUse", "tool_name": "Write",
+            "input_head": '{"file_path":"/root/p/a/b.cc","content":"int x;"}',
+            "resp_head": '{"wall_time_seconds":0.1,"exit_code":0}',
+        },
+        {"event_id": "fs", "ts": "15", "hook_event": "Stop", "last_assistant_message": "ok"},
+    ]
+    out2 = mine_rows(fail_rows, session_id="f", scope="session")
+    ok("fail-counted", out2["summary"]["fail_n"] == 2, str(out2["summary"]))
+    ok("fail-insight", any("失败" in f["title"] for f in out2["feedback"]), str(out2["feedback"]))
+    fail_fb = [f for f in out2["feedback"] if "失败" in f["title"]]
+    ok("fail-sev", fail_fb and fail_fb[0]["sev"] in ("high", "med"), str(fail_fb))
+    hot_files = {r["path"]: r for r in out2["blocks"]["agent.hot"]["table"]["rows"]}
+    ok("read-not-write", hot_files.get("/root/p/a/b.cc", {}).get("writes") == 1, str(hot_files))
     print("session-mine: all passed")
 
 

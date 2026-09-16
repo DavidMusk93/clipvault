@@ -244,6 +244,15 @@ test('server push carries needs_user for permission and ask', () => {
   assert.match(html, /scheduleHookPaint/);
 });
 
+test('the analysis sheet hides the panel close instead of overlapping it', () => {
+  const indexHtml = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+  assert.match(html, /clipvault-sessions-overlay/);
+  assert.match(html, /cv-mine-sheet/);
+  assert.match(indexHtml, /clipvault-sessions-overlay/);
+  assert.match(indexHtml, /classList\.toggle\('is-overlay'/);
+  assert.match(indexHtml, /\.sessions-panel\.is-overlay \.notes-close/);
+});
+
 test('sessions UI is prefix-aware so ClipVault :8080 can proxy /trae', () => {
   assert.match(html, /from \"\.\/session-render\.mjs\"/);
   assert.match(html, /location\.pathname\.startsWith\(\"\/trae\"\)/);
