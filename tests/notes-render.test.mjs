@@ -216,6 +216,48 @@ test('sanitizer helpers are exported and compose safely', async () => {
   assert.equal(cleaned, '<p>hi</p>');
 });
 
+/** Pull `function name(...) { ... }` out of the index.html inline script. */
+function extractInlineFunction(src, name) {
+  const start = src.indexOf(`function ${name}(`);
+  assert.ok(start >= 0, `${name} not found in index.html`);
+  const open = src.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  throw new Error(`${name} has unbalanced braces`);
+}
+
+test('inline notesFragmentUseful matches the module on every fixture', () => {
+  const inline = new Function(
+    'stripHtmlToText',
+    `${extractInlineFunction(indexHtml, 'notesFragmentUseful')}\nreturn notesFragmentUseful;`,
+  )(stripHtmlToText);
+  const fixtures = [
+    '',
+    'plain text',
+    '<p>hi</p>',
+    '<p><br></p><p>&nbsp;</p>',
+    '<pre></pre>',
+    '<pre>code</pre>',
+    '<td></td>',
+    '<td>x</td>',
+    '<blockquote></blockquote>',
+    '<ul></ul>',
+    '<hr>',
+    '<table></table>',
+    '<table><tr><td>x</td></tr></table>',
+    '<span class="html-img-ph">［图］</span>',
+  ];
+  for (const f of fixtures) {
+    assert.equal(inline(f), notesFragmentUseful(f), `inline/module drift on ${JSON.stringify(f)}`);
+  }
+});
+
 test('index.html mirrors the sanitizer vocabulary (sync guard)', async () => {
   const mod = await import('../web/notes-render.mjs');
   const m = indexHtml.match(/const NOTES_UNSAFE_TAGS = \[([\s\S]*?)\];/);
