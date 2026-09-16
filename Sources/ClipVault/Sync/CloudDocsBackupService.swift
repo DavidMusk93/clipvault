@@ -392,9 +392,16 @@ final class CloudDocsBackupService {
 
     func runNow(completion: ((Bool, String) -> Void)? = nil) {
         queue.async {
+            let t0 = Date().timeIntervalSince1970
             self.dirty = true
             // Manual: always refresh latest + take a named snapshot
             self.performBackup(force: true, wantSnapshot: true) { ok, msg in
+                UiMetrics.shared.emit(
+                    "backup_cycle",
+                    durMs: (Date().timeIntervalSince1970 - t0) * 1000,
+                    ok: ok,
+                    payload: ["reason": String(msg.prefix(32))]
+                )
                 DispatchQueue.main.async { completion?(ok, msg) }
             }
         }

@@ -715,6 +715,10 @@ class WebServer {
                 "rlim": s.rlim,
             ]
         )
+        let writeWait = database.writeQueueWaitMs()
+        if writeWait >= 10 {
+            UiMetrics.shared.emit("db_write", durMs: writeWait, ok: true, payload: ["kind": "queue"])
+        }
     }
 
     private func sseHelloBodyLocked() -> Data {

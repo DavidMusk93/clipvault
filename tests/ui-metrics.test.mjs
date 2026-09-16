@@ -114,9 +114,15 @@ test('server side DB and SSE SLIs exist', () => {
   const dbm = src('DatabaseManager.swift');
   assert.match(dbm, /func timedRead/);
   assert.match(dbm, /UiMetrics\.shared\.emit\("db_read"/);
+  assert.match(dbm, /func writeQueueWaitMs/);
+  assert.match(web, /emit\("db_write"/);
   assert.match(web, /func enqueueSSELocked/);
   assert.match(web, /phase": "coalesce/);
   assert.match(web, /phase": "drop/);
+  const backup = src('CloudDocsBackupService.swift');
+  assert.match(backup, /backup_cycle/);
+  assert.match(html, /DB 写等待/);
+  assert.match(html, /backup_cycle/);
 });
 
 test('debug snapshot shows p95 and a baseline delta', () => {
