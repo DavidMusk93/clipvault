@@ -39,6 +39,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          # Default installs the legacy `tools` package, which Google removed
+          # from the SDK repo -> sdkmanager fails. Only set up cmdline-tools.
+          packages: ''
 
       - name: Cache Gradle
         uses: actions/cache@v4
