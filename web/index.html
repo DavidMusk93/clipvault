@@ -4041,9 +4041,17 @@ window.ClipViewMasonry = Masonry;
       if (status) status.setAttribute('aria-hidden', preview ? 'true' : 'false');
     }
     function nm(name, extra) {
+      const n = String(name || '');
+      const e = extra || {};
+      // Thread a correlation id: wall_* share the page-load trace, notes_/sheet_/chrome
+      // share the panel open/close trace. Explicit e.trace always wins.
+      if (e.trace == null) {
+        if (n.startsWith('wall_') || n.startsWith('sse_') || n === 'proc_sample') e.trace = pageTrace;
+        else if (n.startsWith('notes_') || n.startsWith('sheet_') || n === 'chrome_shift') e.trace = sheetTrace || pageTrace;
+      }
       const M = globalThis.ClipNotesMetrics;
-      if (M) M.emit(name, extra || {});
-      if (String(name || '').startsWith('notes_')) notesMetricsCtl?.noteIncoming?.();
+      if (M) M.emit(n, e);
+      if (n.startsWith('notes_')) notesMetricsCtl?.noteIncoming?.();
       if (debugPaintQueued == null) return;
       scheduleDebugPaint();
     }
@@ -4063,6 +4071,14 @@ window.ClipViewMasonry = Masonry;
       notesMetricsCtl?.destroy?.();
       notesMetricsCtl = null;
     }
+    function newTrace() {
+      try {
+        if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+      } catch (_) {}
+      return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6);
+    }
+    let pageTrace = newTrace();
+    let sheetTrace = '';
     const wallBootAt = performance.now();
     let wallTtfpSent = false;
     let wallLoadSent = false;
@@ -4701,6 +4717,7 @@ window.ClipViewMasonry = Masonry;
       }
       const panel = document.getElementById('sessionsPanel');
       if (!panel) return;
+      sheetTrace = newTrace();
       const origin = readSheetRect(sheetTrigger('sessions'));
       const frame = document.getElementById('sessionsFrame');
       const embedSrc = '/trae/?embed=1&v=s9';
@@ -4725,6 +4742,7 @@ window.ClipViewMasonry = Masonry;
     async function closeSessionsPanel() {
       const panel = document.getElementById('sessionsPanel');
       if (!panel || !panel.classList.contains('open')) return;
+      sheetTrace = newTrace();
       emitSessionsLayout('close');
       sessionsFrameCtl('clipvault-sessions-pause');
       beginSheetUnlock();
@@ -4750,6 +4768,7 @@ window.ClipViewMasonry = Masonry;
       await closeSessionsPanel();
       const panel = document.getElementById('notesPanel');
       if (!panel) return;
+      sheetTrace = newTrace();
       const origin = readSheetRect(sheetTrigger('notes'));
       panel.classList.add('open');
       panel.classList.remove('is-settled');
@@ -4761,6 +4780,7 @@ window.ClipViewMasonry = Masonry;
       const M = globalThis.ClipNotesMetrics;
       if (M) {
         M.setOpen(true);
+        M.setTrace(sheetTrace);
         M.startObservers(panel);
       }
       nm('notes_open');
@@ -4786,6 +4806,7 @@ window.ClipViewMasonry = Masonry;
       if (notesState.dirty) await saveNoteNow();
       const panel = document.getElementById('notesPanel');
       if (!panel || !panel.classList.contains('open')) return;
+      sheetTrace = newTrace();
       const closeT0 = performance.now();
       beginSheetUnlock();
       try {
@@ -4806,6 +4827,8 @@ window.ClipViewMasonry = Masonry;
       nm('notes_close_anim', { dur_ms: animMs, ok: animMs < 300, over: animMs >= 300 });
       const held = notesState.openedAt ? Date.now() - notesState.openedAt : 0;
       nm('notes_close', { value: held, over: held >= 5 * 60 * 1000 });
+      globalThis.ClipNotesMetrics?.setTrace('');
+      sheetTrace = '';
       teardownNotesMetrics();
       if (parseAppHash().kind === 'notes') {
         try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
@@ -4956,6 +4979,7 @@ window.ClipViewMasonry = Masonry;
         fetchGen += 1;
         exhausted = false;
         pendingReset = false;
+        pageTrace = newTrace();
       }
       const gen = fetchGen;
       const cursorForRequest = reset ? null : nextCursor;

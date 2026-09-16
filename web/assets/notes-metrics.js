@@ -48,6 +48,7 @@
   let flushTimer = 0;
   let panelOpen = false;
   let lastInputAt = 0;
+  let currentTrace = '';
   const FLUSH_DEBOUNCE_MS = 400;
   const FLUSH_MAX = 60;
   // High-frequency names are sampled so they cannot dominate the store or HTTP hop.
@@ -99,6 +100,7 @@
     if (extra && typeof extra.ok === 'boolean') ev.ok = extra.ok;
     if (extra && typeof extra.over === 'boolean') ev.over = extra.over;
     if (extra && extra.trace) ev.trace = String(extra.trace).slice(0, 64);
+    else if (currentTrace) ev.trace = currentTrace;
     if (payload && Object.keys(payload).length) ev.payload = payload;
     queue.push(ev);
     recordLocal(ev);
@@ -203,6 +205,7 @@
     flush,
     record: recordLocal,
     setOpen,
+    setTrace(t) { currentTrace = t ? String(t).slice(0, 64) : ''; },
     noteInput,
     startObservers,
     stopObservers,
