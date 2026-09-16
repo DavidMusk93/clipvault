@@ -2272,6 +2272,17 @@
     }
     .debug-hot th { color: var(--muted); font-weight: 600; font-size: 11px; }
     .debug-hot .is-slow { color: var(--danger); font-weight: 650; }
+    .debug-verdict {
+      margin: 0 0 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.45;
+      background: rgba(60, 60, 67, 0.06);
+      color: var(--ink);
+    }
+    .debug-verdict.is-slow { background: rgba(215, 0, 21, 0.08); color: #D70015; }
+    .debug-verdict.is-warn { background: rgba(196, 122, 44, 0.14); color: #C47A2C; }
     .debug-log {
       list-style: none; margin: 0; padding: 0;
       font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -2506,20 +2517,23 @@
       <button type="button" class="btn-icon" id="debugCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。墙慢看 wall_*。笔记 Markdown 看 notes_md_compile / notes_preview_ms。会话看 trae_sessions_paint / trae_sessions_md。打开抖看 sheet_morph / sheet_cls。关笔记顶栏解遮挡看 chrome_shift（phase=close）与长周期 wall_cls（kind=top-bar\|chips）。CLS≥0.1 或 dur≥80 标红。fd/sock 走 SSE ping，不轮询。</p>
+      <p class="backup-label" style="margin:0 0 10px">本机环缓冲 + ui-metrics.db。不含正文。超标按预算（加载/绘制 ms、CLS 值）判定，优先看 p95 而非 max。墙看 wall_* / sheet_morph / chrome_shift，笔记看 notes_md_compile / notes_preview_ms，会话看 trae_sessions_paint / trae_sessions_md。</p>
+      <div class="debug-verdict" id="debugVerdict">—</div>
+      <p class="backup-label" id="debugSource" style="margin:0 0 8px">本页环缓冲</p>
       <h3 style="font-size:14px;font-weight:600">SSE</h3>
       <div class="debug-kv" id="debugSseKv"></div>
       <h3 style="font-size:14px;font-weight:600">进程资源</h3>
       <div class="debug-kv" id="debugProcKv"></div>
       <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
-      <table class="debug-hot" id="debugHot"><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHot"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>预算</th></tr></thead><tbody></tbody></table>
       <h3 style="font-size:14px;font-weight:600">笔记 Markdown</h3>
-      <table class="debug-hot" id="debugHotNotes"><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHotNotes"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>预算</th></tr></thead><tbody></tbody></table>
       <h3 style="font-size:14px;font-weight:600">会话</h3>
-      <table class="debug-hot" id="debugHotSessions"><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHotSessions"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>预算</th></tr></thead><tbody></tbody></table>
       <div class="backup-actions">
         <button type="button" id="debugReload">重测刷新</button>
-        <button type="button" class="secondary" id="debugPull">拉 recent</button>
+        <button type="button" class="secondary" id="debugPull">服务器 24h</button>
+        <button type="button" class="secondary" id="debugLocal">本页</button>
       </div>
       <h3 style="font-size:14px;font-weight:600">最近事件</h3>
       <ul class="debug-log" id="debugLog"><li class="backup-label">尚无本页打点</li></ul>
@@ -8907,6 +8921,49 @@ window.ClipViewMasonry = Masonry;
       if (s < 60) return s + 's';
       return Math.round(s / 60) + 'm';
     }
+    let debugServerRows = null;
+    // Budgets/units per metric so the drawer can say "what good looks like" in plain words.
+    const METRIC_SPEC = {
+      wall_load: { label: '首屏加载', unit: 'ms', budget: 150 },
+      wall_ttfp: { label: '首屏响应', unit: 'ms', budget: 150 },
+      wall_fetch: { label: '拉取', unit: 'ms', budget: 100 },
+      wall_merge: { label: '合入', unit: 'ms', budget: 100 },
+      wall_paint: { label: '重排绘制', unit: 'ms', budget: 50 },
+      wall_resync: { label: 'SSE 重同步', unit: 'ms', budget: 120 },
+      wall_hydrate: { label: 'HTML 补体', unit: 'ms', budget: 200 },
+      wall_cls: { label: '布局偏移', unit: 'cls', budget: 0.1 },
+      wall_longtask: { label: '长任务', unit: 'ms', budget: 200 },
+      notes_preview_ms: { label: '预览', unit: 'ms', budget: 16 },
+      notes_md_compile: { label: 'Markdown 编译', unit: 'ms', budget: 8 },
+      notes_inp: { label: '输入响应', unit: 'ms', budget: 100 },
+      notes_cls: { label: '笔记偏移', unit: 'cls', budget: 0.1 },
+      notes_longtask: { label: '笔记长任务', unit: 'ms', budget: 50 },
+      notes_close_anim: { label: '关闭动画', unit: 'ms', budget: 300 },
+      sheet_morph: { label: '开合动画', unit: 'ms', budget: 300 },
+      sheet_cls: { label: '开合偏移', unit: 'cls', budget: 0.1 },
+      chrome_shift: { label: '顶栏位移', unit: 'ms', budget: 80 },
+      sse_state: { label: 'SSE 状态', unit: 'count', budget: null },
+      proc_sample: { label: '进程采样', unit: 'ms', budget: null },
+    };
+    function metricMeta(name) {
+      if (METRIC_SPEC[name]) return METRIC_SPEC[name];
+      if (/_cls$/.test(name)) return { label: '布局偏移', unit: 'cls', budget: 0.1 };
+      if (/longtask$/.test(name)) return { label: '长任务', unit: 'ms', budget: 50 };
+      if (name.startsWith('trae_sessions_')) return { label: '会话·' + name.slice(14), unit: 'ms', budget: null };
+      if (name.startsWith('notes_')) return { label: '笔记·' + name.slice(6), unit: 'ms', budget: null };
+      if (name.startsWith('wall_')) return { label: '墙·' + name.slice(5), unit: 'ms', budget: null };
+      if (name.startsWith('sse_')) return { label: 'SSE·' + name.slice(4), unit: 'count', budget: null };
+      if (name.startsWith('sync_')) return { label: '同步·' + name.slice(5), unit: 'ms', budget: null };
+      return { label: name, unit: 'ms', budget: null };
+    }
+    function pctl(values, p) {
+      if (!values || !values.length) return null;
+      const v = values.slice().sort((a, b) => a - b);
+      const k = (v.length - 1) * p;
+      const f = Math.floor(k);
+      const c = Math.min(f + 1, v.length - 1);
+      return v[f] + (v[c] - v[f]) * (k - f);
+    }
     function paintDebugPanel() {
       const kv = document.getElementById('debugSseKv');
       const procKv = document.getElementById('debugProcKv');
@@ -8931,48 +8988,94 @@ window.ClipViewMasonry = Masonry;
           `<span>rss</span><span>${p.rss != null ? p.rss + ' MB' : '—'}</span>` +
           `<span>采样</span><span class="${warn ? 'is-slow' : ''}">SSE ping · ${esc(ageLabel(p.at))}</span>`;
       }
-      const rows = (globalThis.ClipNotesMetrics?.recentLocal?.() || []).slice();
-      const fillHot = (tbody, pred, empty) => {
-        if (!tbody) return;
+      const localRows = (globalThis.ClipNotesMetrics?.recentLocal?.() || []).slice();
+      const rows = debugServerRows || localRows;
+      const sourceEl = document.getElementById('debugSource');
+      if (sourceEl) {
+        sourceEl.textContent = debugServerRows
+          ? `服务器 recent · ${debugServerRows.length} 条（点「本页」返回环缓冲）`
+          : `本页环缓冲 · ${localRows.length} 条`;
+      }
+      const aggregate = (pred) => {
         const agg = new Map();
         for (const ev of rows) {
           const name = ev.name || '';
           if (!pred(name)) continue;
           let a = agg.get(name);
-          if (!a) { a = { name, n: 0, sum: 0, max: 0, durN: 0, valSum: 0, valN: 0, valMax: 0 }; agg.set(name, a); }
+          if (!a) { a = { name, n: 0, durs: [], vals: [] }; agg.set(name, a); }
           a.n += 1;
-          if (ev.dur_ms != null && Number.isFinite(ev.dur_ms)) {
-            a.sum += ev.dur_ms;
-            a.durN += 1;
-            if (ev.dur_ms > a.max) a.max = ev.dur_ms;
-          }
-          if (ev.value != null && Number.isFinite(ev.value)) {
-            a.valSum += ev.value;
-            a.valN += 1;
-            if (ev.value > a.valMax) a.valMax = ev.value;
-          }
+          if (ev.dur_ms != null && Number.isFinite(ev.dur_ms)) a.durs.push(ev.dur_ms);
+          if (ev.value != null && Number.isFinite(ev.value)) a.vals.push(ev.value);
         }
-        const hotRows = [...agg.values()].sort((a, b) => b.max - a.max || b.n - a.n);
-        tbody.innerHTML = hotRows.length ? hotRows.map((r) => {
-          const hasDur = r.durN > 0;
-          const avg = hasDur ? Math.round(r.sum / r.durN) : (r.valN ? Math.round(r.valSum / r.valN * 1000) / 1000 : '—');
-          const mx = hasDur ? Math.round(r.max) : (r.valN ? Math.round(r.valMax * 1000) / 1000 : '—');
-          const slow = /_cls$/.test(r.name) ? r.valMax >= 0.1
-            : (r.name === 'chrome_shift' ? (r.valMax >= 0.01 || r.max >= 80)
-            : (r.name === 'sheet_morph' ? (r.max >= 800 || r.valMax >= 0.1) : r.max >= 80));
-          return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(r.name)}</td><td>${r.n}</td><td>${avg}</td><td>${mx}</td></tr>`;
-        }).join('') : `<tr><td colspan="4">${empty}</td></tr>`;
+        for (const a of agg.values()) {
+          const primary = a.durs.length ? a.durs : a.vals;
+          a.avg = primary.length ? primary.reduce((s, x) => s + x, 0) / primary.length : null;
+          a.p95 = pctl(primary, 0.95);
+          a.max = primary.length ? Math.max(...primary) : null;
+        }
+        return [...agg.values()].sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1) || b.n - a.n);
+      };
+      const fmtVal = (v, unit) => {
+        if (v == null || !Number.isFinite(v)) return '—';
+        return unit === 'cls' ? Number(v).toFixed(3) : String(Math.round(v));
+      };
+      const fillHot = (tbody, pred, empty) => {
+        if (!tbody) return;
+        const list = aggregate(pred);
+        tbody.innerHTML = list.length ? list.map((r) => {
+          const meta = metricMeta(r.name);
+          const over = meta.budget != null && r.p95 != null && r.p95 > meta.budget;
+          const budget = meta.budget == null ? '—' : meta.budget + (meta.unit === 'cls' || meta.unit === 'count' ? '' : 'ms');
+          return `<tr class="${over ? 'is-slow' : ''}"><td title="${esc(r.name)}">${esc(meta.label)}</td><td>${r.n}</td>`
+            + `<td>${fmtVal(r.avg, meta.unit)}</td><td>${fmtVal(r.p95, meta.unit)}</td><td>${fmtVal(r.max, meta.unit)}</td>`
+            + `<td>${budget}</td></tr>`;
+        }).join('') : `<tr><td colspan="6">${empty}</td></tr>`;
       };
       fillHot(hot, (n) => /^(wall_|sse_|sheet_|chrome_shift|proc_sample)/.test(n), '尚无 wall_/sse_/sheet_ 打点');
       fillHot(document.getElementById('debugHotNotes')?.querySelector('tbody'), (n) => n.startsWith('notes_'), '尚无 notes_ 打点');
       fillHot(document.getElementById('debugHotSessions')?.querySelector('tbody'), (n) => n.startsWith('trae_sessions_'), '尚无 trae_sessions_ 打点');
+      const verdictEl = document.getElementById('debugVerdict');
+      if (verdictEl) {
+        const all = aggregate(() => true);
+        const over = all.filter((r) => {
+          const m = metricMeta(r.name);
+          return m.budget != null && r.p95 != null && r.p95 > m.budget;
+        });
+        const base = readNmBaseline();
+        let regress = 0;
+        if (base && base.names) {
+          for (const r of all) {
+            const b = base.names[r.name];
+            if (!b) continue;
+            const was = b.p95_ms != null ? b.p95_ms : b.value_p95;
+            if (r.p95 != null && was != null && was > 0 && r.p95 > was * 1.1) regress += 1;
+          }
+        }
+        if (over.length) {
+          verdictEl.className = 'debug-verdict is-slow';
+          verdictEl.innerHTML = `⚠ ${over.length} 项超预算：` + over.slice(0, 3).map((r) => {
+            const m = metricMeta(r.name);
+            return `${esc(m.label)} p95 ${fmtVal(r.p95, m.unit)}`;
+          }).join(' · ');
+        } else if (regress) {
+          verdictEl.className = 'debug-verdict is-warn';
+          verdictEl.textContent = `△ ${regress} 项较基线变慢（≥10%）`;
+        } else {
+          verdictEl.className = 'debug-verdict';
+          verdictEl.textContent = all.length ? `✓ ${all.length} 项关键路径未超预算${base ? '，未劣于基线' : ''}` : '暂无打点';
+        }
+      }
       const latest = rows.slice(-24).reverse();
       log.innerHTML = latest.length ? latest.map((ev) => {
         const tms = new Date(ev.ts || Date.now()).toLocaleTimeString();
-        const dur = ev.dur_ms != null ? ` ${Math.round(ev.dur_ms)}ms` : '';
+        const meta = metricMeta(ev.name || '');
+        let amount = '';
+        if (ev.dur_ms != null) amount = ` ${Math.round(ev.dur_ms)}ms`;
+        else if (ev.value != null) amount = ` ${meta.unit === 'cls' ? Number(ev.value).toFixed(3) : Math.round(ev.value)}`;
+        const tr = ev.trace ? ` [${esc(String(ev.trace).slice(0, 6))}]` : '';
         const p = ev.payload ? ' ' + JSON.stringify(ev.payload) : '';
-        const slow = ev.dur_ms != null && (/_cls$/.test(ev.name || '') ? ev.dur_ms >= 80 : ev.dur_ms >= 200);
-        return `<li class="${slow ? 'is-slow' : ''}">${esc(tms)} ${esc(ev.name)}${esc(dur)}${esc(p)}</li>`;
+        const slow = meta.budget != null && ((ev.dur_ms != null && ev.dur_ms > meta.budget) || (ev.value != null && meta.unit === 'cls' && ev.value > meta.budget));
+        return `<li class="${slow ? 'is-slow' : ''}">${esc(tms)} ${esc(meta.label)}${tr}${esc(amount)}${esc(p)}</li>`;
       }).join('') : '<li class="backup-label">尚无本页打点</li>';
     }
     async function refreshProcOnce() {
@@ -9009,19 +9112,15 @@ window.ClipViewMasonry = Masonry;
     });
     document.getElementById('debugPull')?.addEventListener('click', async () => {
       try {
-        const r = await fetch(API + '/api/ui-metrics/recent?limit=40');
+        const r = await fetch(API + '/api/ui-metrics/recent?limit=200');
         const j = await r.json();
-        const log = document.getElementById('debugLog');
-        const evs = (j && j.events) || [];
-        if (log) {
-          log.innerHTML = evs.map((ev) => {
-            const tms = new Date(ev.ts || Date.now()).toLocaleTimeString();
-            const dur = ev.dur_ms != null ? ` ${Math.round(ev.dur_ms)}ms` : '';
-            const p = ev.payload ? ' ' + JSON.stringify(ev.payload) : '';
-            return `<li>${esc(tms)} ${esc(ev.name || '')}${esc(dur)}${esc(p)}</li>`;
-          }).join('') || '<li class="backup-label">recent 为空</li>';
-        }
+        debugServerRows = (j && j.events) || [];
+        paintDebugPanel();
       } catch (_) {}
+    });
+    document.getElementById('debugLocal')?.addEventListener('click', () => {
+      debugServerRows = null;
+      paintDebugPanel();
     });
     document.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'M' || e.key === 'm')) {

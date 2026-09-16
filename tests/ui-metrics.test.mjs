@@ -90,6 +90,19 @@ test('metrics separate latency (dur_ms) from values and budgets', () => {
   assert.match(panelJs, /_cls\$\/\.test\(name\)\) \{[\s\S]{0,160}?ev\.value/);
 });
 
+test('debug drawer explains state: verdict, labels, p95, budgets, server mode', () => {
+  assert.match(html, /id="debugVerdict"/);
+  assert.match(html, /id="debugSource"/);
+  assert.match(html, /id="debugLocal"/);
+  assert.match(html, /const METRIC_SPEC = \{/);
+  assert.match(html, /function metricMeta\(name\)/);
+  assert.match(html, /function pctl\(values, p\)/);
+  assert.match(html, /<th>p95<\/th>/);
+  assert.match(html, /超预算/);
+  assert.match(html, /debugServerRows/);
+  assert.match(html, /\/api\/ui-metrics\/recent\?limit=200/);
+});
+
 test('ingest is self-monitored and exposed on /proc', () => {
   assert.match(swift, /droppedCount/);
   assert.match(swift, /rejectedCount/);
