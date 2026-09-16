@@ -106,3 +106,28 @@ test('analysis sheet keeps dynamic: verdict, severity, live refresh', () => {
   assert.match(html, /clipvault-sessions-overlay/);
   assert.doesNotMatch(html, /setInterval\(/);
 });
+
+test('auto refresh preserves expanded detail and scroll', () => {
+  assert.match(html, /mineDetailOpen/);
+  assert.match(html, /det\.open = mineDetailOpen/);
+  assert.match(html, /mineBody\.scrollTop = prevScroll/);
+  assert.match(html, /const prevScroll = mineBody\.scrollTop/);
+  assert.match(html, /mineDataSig/);
+  assert.match(html, /auto && mineDataSig\(data\) === mineSig/);
+  assert.match(html, /MINE_AUTO_MIN_MS/);
+  assert.match(html, /mineAutoAt/);
+  assert.match(html, /mineChipSig/);
+  assert.match(html, /minePending/);
+  assert.match(html, /if \(mineDetailOpen\) \{/);
+  assert.match(html, /is-pending/);
+  assert.match(html, /收起明细后更新/);
+});
+
+test('analysis sheet does not repaint the covered thread', () => {
+  assert.match(html, /if \(mineState\.open\) return;/);
+  assert.match(html, /pendingHookIds\.length > 400/);
+  // A full-cover sheet must not use backdrop-filter: blur recomputes on every hook.
+  const sheet = html.slice(html.indexOf('.cv-mine-sheet {'), html.indexOf('.cv-mine-sheet[hidden]'));
+  assert.doesNotMatch(sheet, /backdrop-filter/);
+  assert.match(sheet, /background: #fafafa/);
+});
