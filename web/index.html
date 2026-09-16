@@ -2525,15 +2525,16 @@
       <h3 style="font-size:14px;font-weight:600">进程资源</h3>
       <div class="debug-kv" id="debugProcKv"></div>
       <h3 style="font-size:14px;font-weight:600">本页热路径</h3>
-      <table class="debug-hot" id="debugHot"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>预算</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHot"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
       <h3 style="font-size:14px;font-weight:600">笔记 Markdown</h3>
-      <table class="debug-hot" id="debugHotNotes"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>预算</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHotNotes"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
       <h3 style="font-size:14px;font-weight:600">会话</h3>
-      <table class="debug-hot" id="debugHotSessions"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>预算</th></tr></thead><tbody></tbody></table>
+      <table class="debug-hot" id="debugHotSessions"><thead><tr><th>路径</th><th>n</th><th>avg</th><th>p95</th><th>max</th><th>Δ基线</th><th>预算</th></tr></thead><tbody></tbody></table>
       <div class="backup-actions">
         <button type="button" id="debugReload">重测刷新</button>
         <button type="button" class="secondary" id="debugPull">服务器 24h</button>
         <button type="button" class="secondary" id="debugLocal">本页</button>
+        <button type="button" class="secondary" id="debugCopy">复制诊断</button>
       </div>
       <h3 style="font-size:14px;font-weight:600">最近事件</h3>
       <ul class="debug-log" id="debugLog"><li class="backup-label">尚无本页打点</li></ul>
@@ -4079,6 +4080,7 @@ window.ClipViewMasonry = Masonry;
         family: 'notes',
         mount,
         getLocal: () => globalThis.ClipNotesMetrics?.recentLocal?.() || [],
+        onMore: () => { closeNotesPanel(); openDebug(); },
       });
     }
     function teardownNotesMetrics() {
@@ -8931,6 +8933,10 @@ window.ClipViewMasonry = Masonry;
       wall_paint: { label: '重排绘制', unit: 'ms', budget: 50 },
       wall_resync: { label: 'SSE 重同步', unit: 'ms', budget: 120 },
       wall_hydrate: { label: 'HTML 补体', unit: 'ms', budget: 200 },
+      wall_boot: { label: '启动', unit: 'ms', budget: null },
+      wall_backup: { label: '备份(前端)', unit: 'ms', budget: 60000 },
+      sse_wall: { label: 'SSE 消息', unit: 'count', budget: null },
+      sse_state: { label: 'SSE 状态', unit: 'count', budget: null },
       wall_cls: { label: '布局偏移', unit: 'cls', budget: 0.1 },
       wall_longtask: { label: '长任务', unit: 'ms', budget: 200 },
       notes_preview_ms: { label: '预览', unit: 'ms', budget: 16 },
@@ -8942,7 +8948,6 @@ window.ClipViewMasonry = Masonry;
       sheet_morph: { label: '开合动画', unit: 'ms', budget: 300 },
       sheet_cls: { label: '开合偏移', unit: 'cls', budget: 0.1 },
       chrome_shift: { label: '顶栏位移', unit: 'ms', budget: 80 },
-      sse_state: { label: 'SSE 状态', unit: 'count', budget: null },
       proc_sample: { label: '进程采样', unit: 'ms', budget: null },
       db_read: { label: 'DB 慢读', unit: 'ms', budget: 20 },
       db_write: { label: 'DB 写等待', unit: 'ms', budget: 20 },
@@ -9023,6 +9028,16 @@ window.ClipViewMasonry = Masonry;
         if (v == null || !Number.isFinite(v)) return '—';
         return unit === 'cls' ? Number(v).toFixed(3) : String(Math.round(v));
       };
+      const base = readNmBaseline();
+      const deltaCell = (r) => {
+        const b = base && base.names && base.names[r.name];
+        if (!b || r.p95 == null) return '<td>—</td>';
+        const was = b.p95_ms != null ? b.p95_ms : b.value_p95;
+        if (was == null || was <= 0) return '<td>—</td>';
+        const pct = Math.round((r.p95 - was) / was * 100);
+        if (Math.abs(pct) < 10) return '<td>—</td>';
+        return `<td class="${pct > 0 ? 'is-slow' : ''}">${pct > 0 ? '+' : ''}${pct}%</td>`;
+      };
       const fillHot = (tbody, pred, empty) => {
         if (!tbody) return;
         const list = aggregate(pred);
@@ -9032,8 +9047,8 @@ window.ClipViewMasonry = Masonry;
           const budget = meta.budget == null ? '—' : meta.budget + (meta.unit === 'cls' || meta.unit === 'count' ? '' : 'ms');
           return `<tr class="${over ? 'is-slow' : ''}"><td title="${esc(r.name)}">${esc(meta.label)}</td><td>${r.n}</td>`
             + `<td>${fmtVal(r.avg, meta.unit)}</td><td>${fmtVal(r.p95, meta.unit)}</td><td>${fmtVal(r.max, meta.unit)}</td>`
-            + `<td>${budget}</td></tr>`;
-        }).join('') : `<tr><td colspan="6">${empty}</td></tr>`;
+            + deltaCell(r) + `<td>${budget}</td></tr>`;
+        }).join('') : `<tr><td colspan="7">${empty}</td></tr>`;
       };
       const serverPred = (n) => /^(wall_|sse_|sheet_|chrome_shift|proc_sample|db_|backup_|sync_queue_depth)/.test(n);
       fillHot(hot, serverPred, '尚无 wall_/sse_/db_ 打点');
@@ -9126,6 +9141,20 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('debugLocal')?.addEventListener('click', () => {
       debugServerRows = null;
       paintDebugPanel();
+    });
+    document.getElementById('debugCopy')?.addEventListener('click', async () => {
+      const verdict = document.getElementById('debugVerdict')?.textContent || '';
+      const table = (id, title) => {
+        const rows = [...document.querySelectorAll(`#${id} tbody tr`)].map((tr) => [...tr.children].map((td) => td.textContent).join('\t'));
+        return rows.length ? `${title}\n` + rows.join('\n') : '';
+      };
+      const text = [verdict, table('debugHot', '墙'), table('debugHotNotes', '笔记'), table('debugHotSessions', '会话')].filter(Boolean).join('\n\n');
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('已复制诊断');
+      } catch (_) {
+        toast('复制失败');
+      }
     });
     document.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'M' || e.key === 'm')) {

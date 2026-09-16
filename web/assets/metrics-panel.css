@@ -93,6 +93,16 @@
 .cv-metrics-log li { padding: 3px 0; }
 .cv-metrics-log .is-slow { color: #D70015; }
 .cv-metrics-empty { margin: 0; color: #6e6e73; font-size: 12px; }
+.cv-metrics-pop .cv-metrics-more {
+  margin-top: 8px;
+  padding: 4px 8px;
+  border: 0.5px solid rgba(60, 60, 67, 0.22);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 11px;
+  color: #6e6e73;
+  cursor: pointer;
+}
 @media (prefers-reduced-motion: reduce) {
   .cv-debug-fab:active { transform: none; }
 }

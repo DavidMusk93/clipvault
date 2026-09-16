@@ -103,6 +103,14 @@ test('debug drawer explains state: verdict, labels, p95, budgets, server mode', 
   assert.match(html, /\/api\/ui-metrics\/recent\?limit=200/);
 });
 
+test('debug drawer shows baseline delta and can copy diagnostics', () => {
+  assert.match(html, /id="debugCopy"/);
+  assert.match(html, /Δ基线/);
+  assert.match(html, /const deltaCell = /);
+  assert.match(html, /navigator\.clipboard\.writeText\(text\)/);
+  assert.match(html, /onMore: \(\) => \{ closeNotesPanel\(\); openDebug\(\); \}/);
+});
+
 test('ingest is self-monitored and exposed on /proc', () => {
   assert.match(swift, /droppedCount/);
   assert.match(swift, /rejectedCount/);
