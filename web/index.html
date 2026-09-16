@@ -4065,11 +4065,12 @@ window.ClipViewMasonry = Masonry;
     }
     const wallBootAt = performance.now();
     let wallTtfpSent = false;
+    let wallLoadSent = false;
     let lastWallFetchAt = 0;
     let wallBootInflight = true;
     let debugPaintQueued = 0;
     const sseDebug = {
-      wall: { lastAt: 0, lastKind: '', opens: 0, errors: 0, pings: 0, resyncs: 0, role: '—' },
+      wall: { lastAt: 0, lastKind: '', opens: 0, errors: 0, pings: 0, resyncs: 0, reconnects: 0, role: '—' },
       trae: { lastAt: 0, lastKind: '', opens: 0, errors: 0 },
       proc: null,
     };
@@ -4996,6 +4997,10 @@ window.ClipViewMasonry = Masonry;
           htmlHydrateTried.clear();
           htmlHydratePending.clear();
           rebuildFromData({ preserveScroll: false });
+          if (!wallLoadSent) {
+            wallLoadSent = true;
+            nm('wall_load', { dur_ms: performance.now() - wallBootAt, ok: true, payload: { n: clips.length, cols: lastColCount, bytes } });
+          }
         } else {
           // Only brand-new ids — never re-paint page1 on load-more.
           const added = clips.filter(c => !prevIds.has(c.id));
@@ -7796,6 +7801,7 @@ window.ClipViewMasonry = Masonry;
       const batch = [...htmlHydratePending.entries()];
       htmlHydratePending.clear();
       const ids = batch.map(([id]) => id);
+      const t0 = performance.now();
       fetchClipsByIds(ids).then((items) => {
         const byId = new Map((items || []).map((it) => [it.id, it]));
         let repainted = false;
@@ -7820,8 +7826,11 @@ window.ClipViewMasonry = Masonry;
             }
           } catch (_) {}
         }
+        const bytes = (items || []).reduce((n, it) => n + (it && it.htmlContent ? it.htmlContent.length : 0), 0);
+        nm('wall_hydrate', { dur_ms: performance.now() - t0, ok: true, payload: { n: ids.length, bytes, phase: 'batch' } });
       }).catch(() => {
         for (const [id] of batch) htmlHydrating.delete(id);
+        nm('wall_hydrate', { dur_ms: performance.now() - t0, ok: false, payload: { n: ids.length, phase: 'batch' } });
       });
     }
 
@@ -8653,9 +8662,10 @@ window.ClipViewMasonry = Masonry;
         sseDebug.wall.opens += 1;
         sseDebug.wall.lastAt = Date.now();
         sseDebug.wall.lastKind = 'open';
-        nm('sse_wall', { payload: { phase: 'open', kind: 'wall', n: sseDebug.wall.opens } });
+        const skipBoot = wallBootInflight || (lastWallFetchAt && performance.now() - lastWallFetchAt < 2500);
+        nm('sse_state', { ok: true, payload: { kind: 'wall', phase: 'open', n: sseDebug.wall.opens, reason: skipBoot ? 'skip_boot' : 'resync' } });
         try { sseBc && sseBc.postMessage({ t: 'open', id: sseTabId }); } catch (_) {}
-        if (wallBootInflight || (lastWallFetchAt && performance.now() - lastWallFetchAt < 2500)) {
+        if (skipBoot) {
           nm('wall_resync', { payload: { reason: 'skip_boot', kind: 'open' } });
           return;
         }
@@ -8673,8 +8683,10 @@ window.ClipViewMasonry = Masonry;
         // Native EventSource reconnects via `retry:`. Only reopen if the browser gave up.
         sseDebug.wall.errors += 1;
         sseDebug.wall.lastKind = 'error';
-        nm('sse_wall', { ok: false, payload: { phase: 'error', kind: 'wall', n: sseDebug.wall.errors } });
-        if (es.readyState !== EventSource.CLOSED) return;
+        const closed = es.readyState === EventSource.CLOSED;
+        nm('sse_state', { ok: false, payload: { kind: 'wall', phase: closed ? 'reconnect' : 'error', n: sseDebug.wall.errors, reason: closed ? 'closed' : 'transient' } });
+        if (!closed) return;
+        sseDebug.wall.reconnects += 1;
         if (liveSSE === es) liveSSE = null;
         try { es.close(); } catch (_) {}
         clearTimeout(sseReconnectTimer);
@@ -8694,7 +8706,7 @@ window.ClipViewMasonry = Masonry;
       }
       sseLeader = on;
       sseDebug.wall.role = on ? 'leader' : (sseBc ? 'follow' : 'solo');
-      nm('sse_wall', { payload: { phase: 'role', kind: sseDebug.wall.role } });
+      nm('sse_state', { ok: true, payload: { kind: 'wall', phase: 'role', reason: sseDebug.wall.role } });
       if (on) {
         setupSSE();
         sseBeat();
@@ -8795,7 +8807,7 @@ window.ClipViewMasonry = Masonry;
         if (document.visibilityState === 'hidden') return;
         if (!sseLeader && sseBc) return;
         if (sseIsFresh()) return;
-        nm('sse_wall', { payload: { phase: 'watch', kind: 'stale' } });
+        nm('sse_state', { ok: false, payload: { kind: 'wall', phase: 'watch', reason: 'stale' } });
         setupSSE();
         scheduleResync();
       }, 8000);
@@ -8879,7 +8891,7 @@ window.ClipViewMasonry = Masonry;
       const w = sseDebug.wall;
       const t = sseDebug.trae;
       kv.innerHTML =
-        `<span>墙 SSE</span><span>${esc(w.role || '—')} · ${esc(sseReadyLabel(liveSSE))} · ${esc(w.lastKind || '—')} · ${esc(ageLabel(w.lastAt))} · open ${w.opens} · err ${w.errors} · ping ${w.pings} · resync ${w.resyncs}</span>` +
+        `<span>墙 SSE</span><span>${esc(w.role || '—')} · ${esc(sseReadyLabel(liveSSE))} · ${esc(w.lastKind || '—')} · ${esc(ageLabel(w.lastAt))} · open ${w.opens} · err ${w.errors} · reconn ${w.reconnects || 0} · ping ${w.pings} · resync ${w.resyncs}</span>` +
         `<span>会话 ask</span><span>mux→wall · ${esc(t.lastKind || '—')} · ${esc(ageLabel(t.lastAt))}</span>` +
         `<span>本页 ttfp</span><span>${wallTtfpSent ? '已报' : '未报'} · boot ${Math.round(performance.now() - wallBootAt)}ms</span>`;
       if (procKv) {

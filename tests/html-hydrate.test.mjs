@@ -47,6 +47,7 @@ function buildFlush(state) {
     'cardCache',
     'repaintCardBody',
     'window',
+    'nm',
     `${flushSrc}\nreturn flushHtmlHydrate;`,
   );
   return factory(
@@ -58,6 +59,7 @@ function buildFlush(state) {
     state.cardCache,
     state.repaintCardBody,
     state.window,
+    state.nm || (() => {}),
   );
 }
 
@@ -88,6 +90,7 @@ test('one batch repaints every body and re-packs masonry a single time', async (
   const cardCache = new Map([['a', {}], ['b', {}]]);
   const relayout = traceRelayout();
   const repainted = [];
+  const emitted = [];
   buildFlush({
     pending,
     hydrating,
@@ -99,9 +102,11 @@ test('one batch repaints every body and re-packs masonry a single time', async (
     ],
     repaintCardBody: (el, live) => repainted.push(live.id),
     window: relayout.window,
+    nm: (name) => emitted.push(name),
   })();
   await tick();
   assert.deepEqual(repainted.sort(), ['a', 'b']);
+  assert.ok(emitted.includes('wall_hydrate'), 'batch hydrate is instrumented');
   assert.equal(clips[0].htmlContent, '<p>A</p>');
   assert.equal(clips[1].htmlContent, '<p>B</p>');
   assert.equal(clips[0].htmlOmitted, false);
