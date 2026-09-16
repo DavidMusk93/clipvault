@@ -8944,6 +8944,10 @@ window.ClipViewMasonry = Masonry;
       chrome_shift: { label: '顶栏位移', unit: 'ms', budget: 80 },
       sse_state: { label: 'SSE 状态', unit: 'count', budget: null },
       proc_sample: { label: '进程采样', unit: 'ms', budget: null },
+      db_read: { label: 'DB 慢读', unit: 'ms', budget: 20 },
+      db_write: { label: 'DB 写等待', unit: 'ms', budget: 20 },
+      backup_cycle: { label: '备份', unit: 'ms', budget: 60000 },
+      sync_queue_depth: { label: '同步积压', unit: 'count', budget: 0 },
     };
     function metricMeta(name) {
       if (METRIC_SPEC[name]) return METRIC_SPEC[name];
@@ -9031,7 +9035,8 @@ window.ClipViewMasonry = Masonry;
             + `<td>${budget}</td></tr>`;
         }).join('') : `<tr><td colspan="6">${empty}</td></tr>`;
       };
-      fillHot(hot, (n) => /^(wall_|sse_|sheet_|chrome_shift|proc_sample)/.test(n), '尚无 wall_/sse_/sheet_ 打点');
+      const serverPred = (n) => /^(wall_|sse_|sheet_|chrome_shift|proc_sample|db_|backup_|sync_queue_depth)/.test(n);
+      fillHot(hot, serverPred, '尚无 wall_/sse_/db_ 打点');
       fillHot(document.getElementById('debugHotNotes')?.querySelector('tbody'), (n) => n.startsWith('notes_'), '尚无 notes_ 打点');
       fillHot(document.getElementById('debugHotSessions')?.querySelector('tbody'), (n) => n.startsWith('trae_sessions_'), '尚无 trae_sessions_ 打点');
       const verdictEl = document.getElementById('debugVerdict');

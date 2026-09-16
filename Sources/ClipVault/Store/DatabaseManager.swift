@@ -399,6 +399,14 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Write-queue congestion probe: time to enqueue a no-op on dbQueue. Called from a
+    /// different queue so a backed-up writer shows up as `db_write` (kind=queue).
+    func writeQueueWaitMs() -> Double {
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        dbQueue.sync {}
+        return Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
+    }
+
     private func performReadSync<T>(_ work: () -> T) -> T {
         let t0 = DispatchTime.now().uptimeNanoseconds
         let out = readDB != nil ? readQueue.sync(execute: work) : dbQueue.sync(execute: work)
