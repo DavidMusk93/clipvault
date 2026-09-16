@@ -36,6 +36,14 @@ test('popover keeps skip/paint and compile/preview, drops 24h essays', () => {
   assert.doesNotMatch(css, /\.cv-debug-row/);
 });
 
+test('floating panel labels paths and offers a full-panel jump', () => {
+  assert.match(js, /const LABEL = \{/);
+  assert.match(js, /function labelOf\(name\)/);
+  assert.match(js, /cv-metrics-more/);
+  assert.match(js, /onMore/);
+  assert.doesNotMatch(js, /p95/);
+});
+
 test('wall family stays a lightweight popover family', () => {
   assert.match(js, /wall: \[/);
   assert.match(js, /wall_hydrate/);

@@ -14,6 +14,17 @@
     ],
   };
 
+  const LABEL = {
+    wall_load: '首屏加载', wall_ttfp: '首屏响应', wall_paint: '重排绘制', wall_merge: '合入',
+    wall_resync: 'SSE 重同步', wall_fetch: '拉取', wall_hydrate: 'HTML 补体', wall_cls: '布局偏移',
+    wall_longtask: '长任务',
+    notes_preview_ms: '预览', notes_md_compile: 'Markdown 编译', notes_cls: '笔记偏移',
+    notes_longtask: '笔记长任务', notes_inp: '输入响应',
+    trae_sessions_skip: '跳过', trae_sessions_paint: '绘制', trae_sessions_md: 'Markdown',
+    trae_sessions_ttfp: '首屏', trae_sessions_net: '网络', trae_sessions_error: '错误',
+    trae_sessions_cls: '偏移', trae_sessions_longtask: '长任务',
+  };
+  function labelOf(name) { return LABEL[name] || name; }
   function esc(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
@@ -182,9 +193,16 @@
         '<div data-slot="att"></div>' +
         '<div data-slot="table"></div>' +
         '<ul class="cv-metrics-log" data-slot="log"></ul>' +
+        '<button type="button" class="cv-metrics-more" data-slot="more">完整面板</button>' +
       '</div>' +
       '<button type="button" class="cv-debug-fab" aria-label="调试" aria-pressed="false">调试</button>';
     mount.appendChild(wrap);
+    const onMore = opts && typeof opts.onMore === 'function' ? opts.onMore : null;
+    const moreBtn = wrap.querySelector('[data-slot="more"]');
+    if (moreBtn) {
+      if (onMore) moreBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); onMore(); });
+      else moreBtn.remove();
+    }
     const fab = wrap.querySelector('.cv-debug-fab');
     const pop = wrap.querySelector('.cv-metrics-pop');
     const $ = (sel) => wrap.querySelector(sel);
@@ -205,10 +223,10 @@
       if (!tableRows.length) {
         table.innerHTML = '<p class="cv-metrics-empty">无关键打点</p>';
       } else {
-        table.innerHTML = `<table><thead><tr><th>name</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody>${
+        table.innerHTML = `<table><thead><tr><th>路径</th><th>n</th><th>avg</th><th>max</th></tr></thead><tbody>${
           tableRows.map((r) => {
             const slow = r.max >= SLOW || r.slow > 0;
-            return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(r.name)}</td><td>${r.n}</td><td>${round(r.avg)}</td><td>${round(r.max)}</td></tr>`;
+            return `<tr class="${slow ? 'is-slow' : ''}"><td>${esc(labelOf(r.name))}</td><td>${r.n}</td><td>${round(r.avg)}</td><td>${round(r.max)}</td></tr>`;
           }).join('')
         }</tbody></table>`;
       }
@@ -223,8 +241,10 @@
       }
       const log = $('[data-slot="log"]');
       log.innerHTML = uniq.length ? uniq.map((ev) => {
-        const dur = ev.dur_ms != null ? ' ' + round(ev.dur_ms) + 'ms' : '';
-        return `<li class="${isSlow(ev) ? 'is-slow' : ''}">${esc(ev.name)}${esc(dur)}${esc(slimPayload(ev))}</li>`;
+        let amount = '';
+        if (ev.dur_ms != null) amount = ' ' + round(ev.dur_ms) + 'ms';
+        else if (ev.value != null && Number.isFinite(ev.value)) amount = ' ' + Math.round(ev.value * 1000) / 1000;
+        return `<li class="${isSlow(ev) ? 'is-slow' : ''}">${esc(labelOf(ev.name))}${esc(amount)}${esc(slimPayload(ev))}</li>`;
       }).join('') : '';
       paintBadge();
     }
