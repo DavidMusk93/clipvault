@@ -50,7 +50,9 @@ test('payload forbids note content keys', () => {
   assert.match(metricsJs, /'reused'/);
   assert.match(metricsJs, /recentLocal/);
   assert.match(metricsJs, /recordLocal/);
-  assert.match(metricsJs, /startsWith\('notes_'\)/);
+  assert.match(metricsJs, /function shouldEmit/);
+  assert.match(metricsJs, /const SAMPLE = /);
+  assert.match(metricsJs, /function scheduleFlush/);
   assert.match(metricsJs, /FORBIDDEN/);
   assert.match(metricsJs, /body\|title\|markdown/);
   assert.doesNotMatch(metricsJs, /textContent|getMarkdown\(\)/);
@@ -125,7 +127,7 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(html, /function snapshotWallChrome/);
   assert.match(metricsJs, /phase: morphing \? 'morph' : 'live'/);
   assert.match(metricsJs, /'dy'/);
-  assert.match(metricsJs, /name === 'chrome_shift'/);
+  assert.match(metricsJs, /const FLUSH_DEBOUNCE_MS = 400/);
   assert.match(metricsJs, /e\.duration < 40/);
   assert.match(metricsJs, /over\$\|out\$\|enter\$\|leave\$/);
   assert.match(html, /ok: value < 0\.1 && ltMax < 50 && dur < 2000/);
@@ -146,7 +148,7 @@ test('frontend wires metrics without sending titles', () => {
   assert.match(html, /debugProcKv/);
   assert.match(html, /d\.fds/);
   assert.match(metricsJs, /'fds'/);
-  assert.match(metricsJs, /proc_sample/);
+  assert.match(metricsJs, /'rlim'/);
   assert.doesNotMatch(html, /nm\([^)]*title/);
   assert.doesNotMatch(html, /payload:\s*\{[^}]*title/);
 });
@@ -158,7 +160,8 @@ test('AGENTS.md requires metrics-based UI iteration', () => {
   assert.match(agents, /chrome_shift/);
   assert.match(agents, /wall_cls/);
   assert.match(agents, /先补点，再改/);
-  assert.match(agents, /notes_close\.dur_ms` = 开着墙钟/);
+  assert.match(agents, /notes_close\.value` = 开着多久/);
+  assert.match(agents, /summary` 另出 p50\/p95\/p99/);
   assert.match(agents, /notes_md_compile/);
   assert.match(agents, /trae_sessions_md/);
 });

@@ -105,12 +105,13 @@ final class UiMetrics {
     }
 
     /// Server-side emit (sync cycles). Same sanitizer as HTTP ingest. Never synced.
-    func emit(_ name: String, durMs: Double? = nil, ok: Bool? = nil, payload: [String: Any]? = nil) {
+    func emit(_ name: String, durMs: Double? = nil, value: Double? = nil, ok: Bool? = nil, payload: [String: Any]? = nil) {
         var ev: [String: Any] = [
             "name": name,
             "ts": Int64(Date().timeIntervalSince1970 * 1000),
         ]
         if let durMs { ev["dur_ms"] = durMs }
+        if let value { ev["value"] = value }
         if let ok { ev["ok"] = ok }
         if let payload { ev["payload"] = payload }
         _ = ingest(events: [ev], defaultSession: "sync")
