@@ -164,6 +164,18 @@ test('notes editor bundle is loaded lazily, not on wall boot', () => {
   assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n27'/);
 });
 
+test('capture + inline-blob file I/O stay off the DB writer queue', () => {
+  // existence check must not read the whole blob on dbQueue
+  assert.doesNotMatch(db, /try\? Data\(contentsOf: url\), existing\.count > 16/);
+  assert.match(db, /attributesOfItem\(atPath: url\.path\)/);
+  // capture blobs persisted before dbQueue; slow captures attributed
+  assert.match(db, /func persistItemBlobs/);
+  assert.match(db, /persistItemBlobs\(item\)/);
+  assert.match(db, /payload: \["kind": "capture"\]/);
+  // inline-blob migration writes CAS on backupQueue, then clears on dbQueue
+  assert.match(db, /backupQueue\.async \{ \[weak self\] in[\s\S]{0,600}?self\.writeBlobFile/);
+});
+
 test('maintenance is bounded and instrumented', () => {
   assert.match(db, /drainDuplicates\(maxBatches: 2\)/);
   assert.match(db, /UiMetrics\.shared\.emit\("db_maint"/);
