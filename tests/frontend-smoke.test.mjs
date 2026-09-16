@@ -155,6 +155,17 @@ test('html/rtf restores notes-rich for structure; plain uses hljs path', () => {
   assert.match(indexHtml, /function detectCodeLang/);
   assert.match(indexHtml, /hljs\.highlightElement/);
   assert.match(indexHtml, /renderSearchableText|highlightEscaped/);
+  assert.match(indexHtml, /preferRich/, 'html/rtf prefer sanitized fragment over code path');
+  assert.match(indexHtml, /function maybeHydrateHtmlClip/);
+  assert.match(indexHtml, /htmlOmitted/);
+});
+
+test('list SQL ships html/rtf clipboard HTML up to 48KB', () => {
+  const db = fs.readFileSync(path.join(root, 'Sources/ClipVault/Store/DatabaseManager.swift'), 'utf8');
+  assert.match(db, /listHtmlLimitRich = 49152/);
+  assert.match(db, /type IN \('html','rtf'\)/);
+  const webServer = fs.readFileSync(path.join(root, 'Sources/ClipVault/HTTP/WebServer.swift'), 'utf8');
+  assert.match(webServer, /htmlOmitted/);
 });
 
 test('search highlight helpers present', () => {

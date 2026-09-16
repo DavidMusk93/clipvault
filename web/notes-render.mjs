@@ -130,6 +130,8 @@ export function renderNotesFragment(html) {
       sanitizePresentation(root);
       // Never render navigable links in the card (public-misclick risk).
       neutralizeAnchors(root);
+      // Cards are not browsers: no remote/data media fetch; keep layout stable.
+      replaceMediaPlaceholders(root);
 
       root.querySelectorAll('p').forEach(p => {
         const t = p.textContent || '';
@@ -170,7 +172,12 @@ export function renderNotesFragment(html) {
     .replace(/\sstyle=("|')[^"']*\1/gi, '')
     .replace(/\s(bgcolor|background|color|face|size)=("|')[^"']*\2/gi, '')
     .replace(/<a\b[^>]*>/gi, '<span class="url-inert">')
-    .replace(/<\/a>/gi, '</span>');
+    .replace(/<\/a>/gi, '</span>')
+    .replace(/<img\b[^>]*>/gi, (m) => {
+      const alt = (m.match(/\balt\s*=\s*("|')([^"']*)\1/i) || m.match(/\balt\s*=\s*([^\s>]+)/i) || [])[2] || '';
+      return `<span class="html-img-ph">${alt ? `［图：${alt}］` : '［图］'}</span>`;
+    })
+    .replace(/<(video|iframe|object|embed|picture)\b[\s\S]*?<\/\1>/gi, '');
   return collapseEmptyHtmlBlocks(s.trim());
 }
 
@@ -187,12 +194,14 @@ export function sanitizePresentation(root) {
     el.removeAttribute('width');
     el.removeAttribute('height');
     el.removeAttribute('align');
-    // Drop foreign classes; keep is-mono if present
+    // Drop foreign classes; keep is-mono / inert / image placeholders
     const keepMono = el.classList && el.classList.contains('is-mono');
     const keepInert = el.classList && el.classList.contains('url-inert');
+    const keepImgPh = el.classList && el.classList.contains('html-img-ph');
     el.removeAttribute('class');
     if (keepMono) el.classList.add('is-mono');
     if (keepInert) el.classList.add('url-inert');
+    if (keepImgPh) el.classList.add('html-img-ph');
   });
 }
 
@@ -209,12 +218,30 @@ export function neutralizeAnchors(root) {
   });
 }
 
+/** Drop img/video/iframe so masonry height does not jump and cards never fetch. */
+export function replaceMediaPlaceholders(root) {
+  if (!root || !root.querySelectorAll) return;
+  const doc = root.ownerDocument || (typeof document !== 'undefined' ? document : null);
+  root.querySelectorAll('img, video, iframe, object, embed, source, picture').forEach(el => {
+    if (!el || !el.parentNode) return;
+    if (el.tagName === 'IMG' && doc) {
+      const alt = (el.getAttribute('alt') || '').trim();
+      const span = doc.createElement('span');
+      span.className = 'html-img-ph';
+      span.textContent = alt ? `［图：${alt}］` : '［图］';
+      el.parentNode.replaceChild(span, el);
+    } else {
+      el.remove();
+    }
+  });
+}
+
 
 export function notesFragmentUseful(fragment) {
   if (!fragment) return false;
-  if (/<(ul|ol|li|p|br|b|strong|i|em|u|h[1-6]|table|blockquote)\b/i.test(fragment)) {
+  if (/<(ul|ol|li|p|br|b|strong|i|em|u|h[1-6]|table|thead|tbody|tr|td|th|blockquote|hr|pre|code)\b/i.test(fragment)) {
     const plain = stripHtmlToText(fragment);
-    return plain.length > 0 || /<(ul|ol|img|table)\b/i.test(fragment);
+    return plain.length > 0 || /<(ul|ol|table|hr)\b/i.test(fragment) || /html-img-ph/.test(fragment);
   }
   return stripHtmlToText(fragment).length > 0;
 }

@@ -398,21 +398,33 @@ final class DatabaseManager: ObservableObject {
 
     /// List/search never ship archive-sized HTML (skill §7). Use html_bytes so we
     /// do not `length()` overflow pages on every page fetch.
+    /// html/rtf clipboard snippets (Lark tables, Chrome copy) are often 8–48KB;
+    /// those must reach the wall renderer. Bigger bodies hydrate via GET ?id=.
+    private static let listHtmlLimitRich = 49152
+    private static let listHtmlLimitOther = 8192
     private static let listHtmlSQL = """
         CASE
           WHEN html_content IS NULL THEN NULL
-          WHEN html_bytes IS NOT NULL AND html_bytes > 8192 THEN NULL
+          WHEN type IN ('html','rtf') AND html_bytes IS NOT NULL AND html_bytes > \(listHtmlLimitRich) THEN NULL
+          WHEN type IN ('html','rtf') AND html_bytes IS NOT NULL THEN html_content
+          WHEN type IN ('html','rtf') AND length(html_content) <= \(listHtmlLimitRich) THEN html_content
+          WHEN type IN ('html','rtf') THEN NULL
+          WHEN html_bytes IS NOT NULL AND html_bytes > \(listHtmlLimitOther) THEN NULL
           WHEN html_bytes IS NOT NULL THEN html_content
-          WHEN length(html_content) <= 8192 THEN html_content
+          WHEN length(html_content) <= \(listHtmlLimitOther) THEN html_content
           ELSE NULL
         END
         """
     private static let listHtmlSQLAliased = """
         CASE
           WHEN c.html_content IS NULL THEN NULL
-          WHEN c.html_bytes IS NOT NULL AND c.html_bytes > 8192 THEN NULL
+          WHEN c.type IN ('html','rtf') AND c.html_bytes IS NOT NULL AND c.html_bytes > \(listHtmlLimitRich) THEN NULL
+          WHEN c.type IN ('html','rtf') AND c.html_bytes IS NOT NULL THEN c.html_content
+          WHEN c.type IN ('html','rtf') AND length(c.html_content) <= \(listHtmlLimitRich) THEN c.html_content
+          WHEN c.type IN ('html','rtf') THEN NULL
+          WHEN c.html_bytes IS NOT NULL AND c.html_bytes > \(listHtmlLimitOther) THEN NULL
           WHEN c.html_bytes IS NOT NULL THEN c.html_content
-          WHEN length(c.html_content) <= 8192 THEN c.html_content
+          WHEN length(c.html_content) <= \(listHtmlLimitOther) THEN c.html_content
           ELSE NULL
         END
         """

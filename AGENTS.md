@@ -201,6 +201,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | cursor 怎么走，clips/DOM 就怎么留 | 为「列表轻」砍 cursor 刚拉到的更旧行（CLIENT_CAP 砍尾） |
 | 类型 chip 改 `type=` 后 `fetchPage({reset:true})` 走完整 keyset | 只 `clientFilter` 内存里的 30 条 |
 | html chip `IN ('html','rtf')`（Notes 粘贴） | html 把 rtf 当丢失 |
+| html/rtf 墙卡 `notes-rich`（表/标题/引言）；>48KB 按 id hydrate | 当浏览器（信任 `style` / 可点 `<a>` / 远程 `<img>`） |
 | 有序列 shortest-col 绝对定位；prepend 重算坐标 | 新卡堆某一列 / flex 空列一条线 |
 | 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
 | 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
