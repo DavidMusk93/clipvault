@@ -7446,10 +7446,9 @@ window.ClipViewMasonry = Masonry;
           // preserve dataset force markers none — mode is in clipDisplayMode
           wireFormatToolbar(card, item);
           highlightCard(card);
-          // remeasure masonry if available
+          // Re-pack columns with the anchor-preserving relayout (never full rebuild).
           try {
-            if (typeof scheduleMasonry === 'function') scheduleMasonry();
-            else if (window.ClipViewMasonry && typeof window.ClipViewMasonry.relayout === 'function') {
+            if (window.ClipViewMasonry && typeof window.ClipViewMasonry.relayout === 'function') {
               window.ClipViewMasonry.relayout();
             }
           } catch (_) {}
