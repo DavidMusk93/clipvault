@@ -48,11 +48,20 @@
   let flushTimer = 0;
   let panelOpen = false;
   let lastInputAt = 0;
+  const FLUSH_DEBOUNCE_MS = 400;
+  const FLUSH_MAX = 60;
+  // High-frequency names are sampled so they cannot dominate the store or HTTP hop.
+  const SAMPLE = { notes_preview_ms: 4, notes_paint_list: 4, notes_inp: 2 };
+  const sampleSeen = Object.create(null);
 
-  function flush() {
-    flushTimer = 0;
-    if (!queue.length) return;
-    const events = queue.splice(0, 100);
+  function shouldEmit(name) {
+    const every = SAMPLE[name];
+    if (!every) return true;
+    sampleSeen[name] = (sampleSeen[name] || 0) + 1;
+    return sampleSeen[name] % every === 0;
+  }
+
+  function sendEvents(events) {
     const api = (typeof API === 'string' ? API : '') + '/api/ui-metrics';
     const body = JSON.stringify({ events, session: sessionId() });
     try {
@@ -69,8 +78,19 @@
     }).catch(() => {});
   }
 
+  function flush() {
+    flushTimer = 0;
+    while (queue.length) sendEvents(queue.splice(0, 100));
+  }
+
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(flush, FLUSH_DEBOUNCE_MS);
+  }
+
   function emit(name, extra) {
     if (!NAME.test(name)) return;
+    if (!shouldEmit(name)) return;
     const payload = extra && extra.payload !== undefined ? cleanPayload(extra.payload) : undefined;
     if (payload === null) return;
     const ev = { name, ts: Date.now(), session: sessionId() };
@@ -82,12 +102,9 @@
     if (payload && Object.keys(payload).length) ev.payload = payload;
     queue.push(ev);
     recordLocal(ev);
-    const hot = name.startsWith('trae_') || name.startsWith('wall_') || name.startsWith('sse_')
-      || name.startsWith('sheet_') || name.startsWith('notes_')
-      || name === 'chrome_shift' || name === 'proc_sample';
-    if (hot) flush();
-    else if (queue.length >= 20) flush();
-    else if (!flushTimer) flushTimer = setTimeout(flush, 2000);
+    // One debounced beacon for the burst instead of one request per hot event.
+    if (queue.length >= FLUSH_MAX) flush();
+    else scheduleFlush();
   }
 
   function recordLocal(ev) {

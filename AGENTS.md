@@ -381,6 +381,8 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   卡片只留越阈值 attention + 关键 name 的 n/avg/max + 最近 payload
 ```
 
+**字段语义（禁止混用）：** `dur_ms`=延迟；`value`=量（CLS 值、held ms、bytes、lag…）；`ok`=成功/失败；`over`=是否超预算；`trace`=一次加载/面板开合的关联 id。`summary` 另出 p50/p95/p99、`ok_rate`，并按 route/status 拆 `http_req`。
+
 | 症状 | name |
 | --- | --- |
 | 墙刷新 | `wall_fetch` `wall_merge` `wall_paint` `wall_resync` |
@@ -388,6 +390,8 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 墙长任务 | `wall_longtask` phase=loaf\|longtask + kind/reason/host |
 | 开合 sheet | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` |
 | 开合笔记顶栏跳 | `chrome_shift` phase=open\|close dy/reason；长周期 `wall_cls` |
+| 墙加载/补体 | `wall_load`（首屏 span）；`wall_hydrate`（?ids= 批量补体 n/bytes） |
+| SSE 生命周期 | `sse_state` phase=open/error/reconnect/role/watch + reason；`sse_wall` 只留逐条吞吐 |
 | 笔记输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` |
 | 笔记 Markdown | `notes_md_compile` vs `notes_preview_ms`；payload `compiled`/`reused`/`n`/`ratio` |
 | 会话白屏 | `trae_sessions_skip` vs `trae_sessions_paint` `trae_sessions_layout` |
@@ -395,7 +399,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 资源泄漏 / 502 | `proc_sample`（fds/rss/unix/sse/rlim）；SSE `ping` 同字段；`GET /api/ui-metrics/proc` |
 | HTTP 边车 | `http_req` dur=总时间；`lag`=origin；`n`=status；`route` 去 query/id；`proto` h1/h2；`phase` ok/stream/origin_* |
 
-`notes_close.dur_ms` = 开着墙钟，不是关动画。关动画看 `sheet_morph` phase=close。Agent 自己拉 metrics。笔记/会话入口是右下角「调试」悬浮卡，只看关键 name。
+`notes_close.value` = 开着多久（墙钟，不是延迟）；关动画看 `notes_close_anim` 或 `sheet_morph` phase=close。CLS 一律用 `value`（`wall_cls`/`notes_cls`/`sheet_cls`）。Agent 自己拉 metrics。笔记/会话入口是右下角「调试」悬浮卡，只看关键 name。
 
 备份徽章走 SSE `backup_status` + `?lite=1`，禁止 30s 轮询 `/api/backup/status`。
 

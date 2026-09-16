@@ -649,14 +649,15 @@ final class CloudDocsSyncService {
             payload: ["n": pushed.n + pulled.n, "reason": reason]
         )
         let st = buildStatus()
-        for p in st.peers {
+        // One row per cycle (worst peer), not one per peer — lag is a value, not a duration.
+        if let worst = st.peers.max(by: { $0.lag < $1.lag }) {
             UiMetrics.shared.emit(
                 "sync_peer_lag",
-                ok: p.lag == 0,
+                value: Double(worst.lag),
+                ok: worst.lag == 0,
                 payload: [
-                    "lag": p.lag,
-                    "n": 1,
-                    "host": String(p.host.prefix(8)),
+                    "n": st.peers.count,
+                    "host": String(worst.host.prefix(8)),
                 ]
             )
         }
