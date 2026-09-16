@@ -5261,67 +5261,102 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    private let backupQueue = DispatchQueue(label: "com.clipvault.database.backup", qos: .utility)
+
     func onlineBackup(to destURL: URL, completion: @escaping (Result<Void, Error>) -> Void) {
-        dbQueue.async { [weak self] in
-            guard let self = self, let src = self.db else {
+        // Copy from a dedicated READ-ONLY connection on its own queue: WAL gives the reader
+        // a consistent snapshot, so a 40MB+ backup no longer blocks user writes on dbQueue
+        // (that was the db_write 1–3s spike).
+        backupQueue.async { [weak self] in
+            guard let self = self else {
                 completion(.failure(DBFileError.notOpen))
                 return
             }
-            try? FileManager.default.createDirectory(
-                at: destURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            if FileManager.default.fileExists(atPath: destURL.path) {
-                try? FileManager.default.removeItem(at: destURL)
-            }
-
-            var dest: OpaquePointer?
-            if sqlite3_open(destURL.path, &dest) != SQLITE_OK {
-                let msg = dest.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
-                if let dest { sqlite3_close(dest) }
-                completion(.failure(DBFileError.openFailed(msg)))
-                return
-            }
-            guard let destDB = dest else {
-                completion(.failure(DBFileError.openFailed("nil handle")))
-                return
-            }
-
-            guard let backup = sqlite3_backup_init(destDB, "main", src, "main") else {
-                let msg = String(cString: sqlite3_errmsg(destDB))
-                sqlite3_close(destDB)
-                completion(.failure(DBFileError.backupFailed(msg)))
-                return
-            }
-
-            var rc: Int32 = SQLITE_OK
-            repeat {
-                rc = sqlite3_backup_step(backup, 64)
-                if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {
-                    sqlite3_sleep(25)
-                    continue
+            let started = Date().timeIntervalSince1970
+            var src: OpaquePointer?
+            if sqlite3_open_v2(self.dbPath.path, &src, SQLITE_OPEN_READONLY, nil) != SQLITE_OK || src == nil {
+                if let s = src { sqlite3_close(s) }
+                self.dbQueue.async {
+                    self.onlineBackupCopy(from: self.db, destURL: destURL, startedAt: started, completion: completion)
                 }
-            } while rc == SQLITE_OK || rc == SQLITE_BUSY || rc == SQLITE_LOCKED
-
-            let finishRC = sqlite3_backup_finish(backup)
-            if rc != SQLITE_DONE {
-                let msg = String(cString: sqlite3_errmsg(destDB))
-                sqlite3_close(destDB)
-                try? FileManager.default.removeItem(at: destURL)
-                completion(.failure(DBFileError.backupFailed("step=\(rc) finish=\(finishRC) \(msg)")))
                 return
             }
-            sqlite3_exec(destDB, "PRAGMA wal_checkpoint(FULL);", nil, nil, nil)
+            self.onlineBackupCopy(from: src, destURL: destURL, startedAt: started) { result in
+                if let s = src { sqlite3_close(s) }
+                completion(result)
+            }
+        }
+    }
+
+    /// Copy `src` into `destURL`. Deliberately queue-agnostic: the source may be a read-only
+    /// snapshot connection, so this must not assume it owns dbQueue.
+    private func onlineBackupCopy(
+        from src: OpaquePointer?,
+        destURL: URL,
+        startedAt: Double,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard let src else {
+            completion(.failure(DBFileError.notOpen))
+            return
+        }
+        try? FileManager.default.createDirectory(
+            at: destURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            try? FileManager.default.removeItem(at: destURL)
+        }
+        var dest: OpaquePointer?
+        if sqlite3_open(destURL.path, &dest) != SQLITE_OK {
+            let msg = dest.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            if let dest { sqlite3_close(dest) }
+            completion(.failure(DBFileError.openFailed(msg)))
+            return
+        }
+        guard let destDB = dest else {
+            completion(.failure(DBFileError.openFailed("nil handle")))
+            return
+        }
+        guard let backup = sqlite3_backup_init(destDB, "main", src, "main") else {
+            let msg = String(cString: sqlite3_errmsg(destDB))
             sqlite3_close(destDB)
-            self.appendOperationLogSync(
+            completion(.failure(DBFileError.backupFailed(msg)))
+            return
+        }
+        var rc: Int32 = SQLITE_OK
+        repeat {
+            rc = sqlite3_backup_step(backup, 64)
+            if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {
+                sqlite3_sleep(25)
+                continue
+            }
+        } while rc == SQLITE_OK || rc == SQLITE_BUSY || rc == SQLITE_LOCKED
+        let finishRC = sqlite3_backup_finish(backup)
+        if rc != SQLITE_DONE {
+            let msg = String(cString: sqlite3_errmsg(destDB))
+            sqlite3_close(destDB)
+            try? FileManager.default.removeItem(at: destURL)
+            completion(.failure(DBFileError.backupFailed("step=\(rc) finish=\(finishRC) \(msg)")))
+            return
+        }
+        // Checkpoint the DESTINATION only — never the live source.
+        sqlite3_exec(destDB, "PRAGMA wal_checkpoint(FULL);", nil, nil, nil)
+        sqlite3_close(destDB)
+        let ms = (Date().timeIntervalSince1970 - startedAt) * 1000
+        if ms >= 200 {
+            UiMetrics.shared.emit("db_write", durMs: ms, ok: true, payload: ["kind": "backup"])
+        }
+        self.dbQueue.async {
+            _ = self.appendOperationLogSync(
                 action: "backup",
                 itemId: nil,
                 contentHash: nil,
                 detail: "dest=\(destURL.lastPathComponent)",
                 source: "backup"
             )
-            completion(.success(()))
         }
+        completion(.success(()))
     }
 
     func itemCount(completion: @escaping (Int) -> Void) {

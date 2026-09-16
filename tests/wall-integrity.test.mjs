@@ -129,6 +129,17 @@ test('card media is height-locked and late growth is reconciled, not rebuilt', (
   assert.match(html, /wireThumb\(card, item\);/);
 });
 
+test('online backup copies from a read-only snapshot, off the write queue', () => {
+  assert.match(db, /backupQueue = DispatchQueue\(label: "com\.clipvault\.database\.backup"/);
+  assert.match(db, /sqlite3_open_v2\(self\.dbPath\.path, &src, SQLITE_OPEN_READONLY/);
+  assert.match(db, /private func onlineBackupCopy\(/);
+  // Full checkpoint must only touch the destination file, never the live source.
+  assert.match(db, /sqlite3_exec\(destDB, "PRAGMA wal_checkpoint\(FULL\);"[\s\S]{0,120}?sqlite3_close\(destDB\)/);
+  assert.match(db, /payload: \["kind": "backup"\]/);
+  // The old path ran the copy directly on dbQueue with the writer handle.
+  assert.doesNotMatch(db, /func onlineBackup\(to destURL: URL[\s\S]{0,80}?dbQueue\.async \{\s*\[weak self\] in\s*guard let self = self, let src = self\.db/);
+});
+
 test('440-image peer clump stays 440 cards on a capture-time keyset', () => {
   const rows = [];
   for (let i = 0; i < 20; i++) rows.push({ id: `T1-${String(i).padStart(3, '0')}`, ts: 3000 - i * 0.01, type: 'text' });
