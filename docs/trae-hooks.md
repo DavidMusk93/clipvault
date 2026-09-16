@@ -194,7 +194,7 @@ bash trae_hooks/pi/install_pi_hook.sh
 # symlink ~/.pi/agent/extensions/clipvault-session.ts -> repo
 ```
 
-然后重启 pi（或 `/reload`）。pi 会话以 `source=pi`、`instance_id=pi-mac` 落库，与 Trae 的 `mac-work` 区分。单次关闭：`CLIPVAULT_PI_SESSION_HOOK=0 pi`。
+然后重启 pi（或 `/reload`）。pi 会话与 Trae 共用 `instance_id`（`mac-work`），靠 `source=pi` 区分。单次关闭：`CLIPVAULT_PI_SESSION_HOOK=0 pi`。
 
 **不影响 pi 主流程**：适配器 spawn 包装器后立即 `unref()`，不 await；包装器自身失败也 `exit 0`。
 
