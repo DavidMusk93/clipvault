@@ -118,7 +118,7 @@ jobs:
           KEEPSAKE_VERSION_CODE: ${{ github.run_number }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :app:assembleRelease
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: clipvault-android-ci-${{ github.run_number }}
