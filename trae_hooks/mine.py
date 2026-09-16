@@ -17,6 +17,8 @@ DIRECTIONS: list[dict[str, str]] = [
     {"id": "user.git", "axis": "user", "title": "Git 库"},
     {"id": "user.taste", "axis": "user", "title": "Taste / 规范"},
     {"id": "user.prompt", "axis": "user", "title": "任务描述"},
+    {"id": "user.reminders", "axis": "user", "title": "用户提醒"},
+    {"id": "user.flow", "axis": "user", "title": "操作流程"},
     {"id": "agent.files", "axis": "agent", "title": "读写文件"},
     {"id": "agent.tools", "axis": "agent", "title": "工具调用"},
     {"id": "agent.failures", "axis": "agent", "title": "失败/重试"},
@@ -226,6 +228,56 @@ def prompt_has_repo(text: str | None) -> bool:
     return bool(_RE_PROMPT_REPO.search(str(text or "")))
 
 
+_RE_CONTINUE = re.compile(r"^(?:继续|接着|往下|go on|next|ok|好)[。.!！~ ]*$", re.I)
+
+# What the user keeps having to say. A theme that repeats should become an
+# AGENTS.md gate instead of a spoken reminder every turn.
+_GATE_DRAFT = {
+    "纠正": "- 动手前先用一句话复述需求与验收标准，确认后再改。",
+    "重申约束": "- 把「注意/必须/禁止」类约束固化进 AGENTS.md，执行前自查。",
+    "催促": "- 长任务每完成一个子目标先给进展与结论，再继续。",
+    "没看到": "- 交付前自查：结果/日志/run 是否可见、可复现。",
+    "沉淀提醒": "- 非琐碎结论默认 memory_add，不等用户催。",
+    "加载上下文": "- 开工先加载相关 AGENTS / skill / nmem，再动手。",
+    "重新执行": "- 失败先读错误再改，禁止原样重跑。",
+    "推进": "- 长任务自驱到阶段结论再停，不要一步一等。",
+}
+
+
+def reminder_hits(text: str | None) -> list[str]:
+    """Themes that signal the user is reminding / correcting / nudging."""
+    t = str(text or "")
+    low = t.lower()
+    hits: list[str] = []
+    if re.search(r"认知错误|搞错|不对|不正确|有误|不是.{0,8}而是|不符合预期|太浅|有问题", t):
+        hits.append("纠正")
+    if re.search(r"注意|记得|必须|一定要|禁止|唯一|只能|不要|别|不需要|无需|不用|应该", t):
+        hits.append("重申约束")
+    if re.search(r"为什么|怎么还|多久|尽快|还没|没有结果|太慢|用了这么多时间|尚未", t):
+        hits.append("催促")
+    if re.search(r"没看到|没有看到|都丢了|丢了|不见了|停了|挂了|崩了|没结果", t):
+        hits.append("没看到")
+    if ("nmem" in low or "memory" in low) and re.search(r"写入|记录|整理|梳理|沉淀|结构化|落到|落盘|存(?:入|到)|更新到|补充到|写到", t):
+        hits.append("沉淀提醒")
+    if re.search(r"从\s*nmem|加载|guideline|上下文|taste|规范|读取", t, re.I):
+        hits.append("加载上下文")
+    if re.search(r"重新|再次|重跑|再测|再来|重试", t):
+        hits.append("重新执行")
+    if re.search(r"继续|接着|往下|go on|next", t, re.I):
+        hits.append("推进")
+    return hits
+
+
+def prompt_is_nudge(text: str | None) -> bool:
+    """Short, content-free push: “继续” / “继续吧” / “ok”."""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    if _RE_CONTINUE.match(t):
+        return True
+    return len(t) <= 8 and not prompt_has_path(t) and not prompt_has_repo(t)
+
+
 def git_from_path(path: str | None) -> tuple[str, str] | None:
     p = str(path or "").replace("\\", "/")
     if not p:
@@ -361,6 +413,12 @@ def mine_rows(
     phase_s: dict[str, float] = defaultdict(float)
     phase_work: dict[str, float] = defaultdict(float)
     ts_vals: list[float] = []
+    prompt_n = 0
+    prompt_chars: list[int] = []
+    reminder_n: Counter[str] = Counter()
+    reminder_samples: dict[str, list[str]] = defaultdict(list)
+    nudge_n = 0
+    structured_n = 0
     wait_s = 0.0
     work_s = 0.0
     fail_s = 0.0
@@ -385,6 +443,18 @@ def mine_rows(
                     git_branch[g[0]][g[1]] += 1
         if hook != "PostToolUse":
             prompt = str(raw.get("prompt") or "")
+            if hook == "UserPromptSubmit" and prompt.strip():
+                text = prompt.strip()
+                prompt_n += 1
+                prompt_chars.append(len(text))
+                for theme in reminder_hits(text):
+                    reminder_n[theme] += 1
+                    if len(reminder_samples[theme]) < 3:
+                        reminder_samples[theme].append(first_line(text, 140))
+                if prompt_is_nudge(text):
+                    nudge_n += 1
+                if "\n" in text or re.search(r"^\s*[-*•]|\b1\.[^0-9]", text, re.M):
+                    structured_n += 1
             for key in taste_keys(prompt, cwd):
                 taste_n[key] += 1
             if re.search(r"\btaste\b|风格|规范", prompt, re.I) and not taste_keys(prompt, cwd):
@@ -720,6 +790,57 @@ def mine_rows(
             [_table(rows_pr, [("ts", "时间"), ("phase", "阶段"), ("tools", "工具"), ("path", "路径"), ("repo", "仓库"), ("prompt", "首行")], "回合 prompt 质量")],
         )
 
+    avg_prompt = round(sum(prompt_chars) / prompt_n, 1) if prompt_n else 0.0
+    correction_n = reminder_n.get("纠正", 0)
+    push_n = reminder_n.get("催促", 0)
+    sink_n = reminder_n.get("沉淀提醒", 0)
+    reminder_total = sum(reminder_n.values())
+    extra_trips = nudge_n + correction_n + push_n
+    if "user.reminders" in want:
+        rows_rem = [{
+            "theme": k,
+            "n": v,
+            "share": round(100 * v / max(1, prompt_n), 1),
+        } for k, v in reminder_n.most_common()]
+        sample_rows = []
+        for k, _ in reminder_n.most_common(6):
+            for s in reminder_samples.get(k, [])[:2]:
+                sample_rows.append({"theme": k, "prompt": s})
+        blocks["user.reminders"] = _block(
+            "用户提醒",
+            "user",
+            f"{prompt_n} 条 prompt 出现 {reminder_total} 处提醒/纠正信号。反复出现的主题要变成 AGENTS 闸门，而不是每次口头重申。",
+            [
+                _table(rows_rem, [("theme", "主题"), ("n", "次"), ("share", "占比%")], "提醒主题"),
+                _table(sample_rows, [("theme", "主题"), ("prompt", "样本首行")], "重复提醒样本"),
+            ],
+        )
+    if "user.flow" in want:
+        metrics = [
+            {"metric": "prompt 数", "value": prompt_n},
+            {"metric": "平均字数", "value": avg_prompt},
+            {"metric": "≤8 字短催", "value": nudge_n},
+            {"metric": "结构化(多行/列表)", "value": structured_n},
+            {"metric": "纠正", "value": correction_n},
+            {"metric": "催促", "value": push_n},
+            {"metric": "沉淀提醒", "value": sink_n},
+            {"metric": "额外往返(短催+纠正+催促)", "value": extra_trips},
+        ]
+        bucket_ranges = [(0, 8), (9, 40), (41, 120), (121, 400), (401, 10**9)]
+        bucket_rows = []
+        for lo, hi in bucket_ranges:
+            label = f"≤{hi}" if lo == 0 else (f"{lo}-{hi}" if hi < 10**9 else f">{lo - 1}")
+            bucket_rows.append({"bucket": label, "n": sum(1 for c in prompt_chars if lo <= c <= hi)})
+        blocks["user.flow"] = _block(
+            "操作流程",
+            "user",
+            f"额外往返 {extra_trips} 次（短催 {nudge_n} + 纠正 {correction_n} + 催促 {push_n}）。首条 prompt 给全 cwd/仓库/目标/验收，并要求「阶段结论再停」，能直接砍掉这些往返。",
+            [
+                _table(metrics, [("metric", "指标"), ("value", "值")], "流程摩擦"),
+                _table(bucket_rows, [("bucket", "字数"), ("n", "条")], "prompt 长度分布"),
+            ],
+        )
+
     summary = {
         "n_rows": len(rows),
         "n_turns": len(turns),
@@ -737,6 +858,18 @@ def mine_rows(
         "duration_s": duration_s,
         "idle_s": idle_s,
         "health": health,
+        "flow": {
+            "prompt_n": prompt_n,
+            "avg_chars": avg_prompt,
+            "nudge_n": nudge_n,
+            "correction_n": correction_n,
+            "push_n": push_n,
+            "sink_n": sink_n,
+            "structured_n": structured_n,
+            "reminder_total": reminder_total,
+            "extra_roundtrips": extra_trips,
+            "reminders": dict(reminder_n),
+        },
         "instances": [{"id": k, "n": v} for k, v in inst_n.most_common()],
         "span": f"{ordered[0].get('ts') if ordered else ''} → {ordered[-1].get('ts') if ordered else ''}",
     }
@@ -765,6 +898,14 @@ def mine_rows(
         retry_n=retry_n,
         redundant_reads=redundant_reads,
         waste_pct=waste_pct,
+        prompt_n=prompt_n,
+        reminder_n=reminder_n,
+        reminder_samples=reminder_samples,
+        nudge_n=nudge_n,
+        correction_n=correction_n,
+        push_n=push_n,
+        structured_n=structured_n,
+        avg_prompt=avg_prompt,
         summary=summary,
     )
     return {
@@ -805,6 +946,14 @@ def _insights(**kw: Any) -> list[dict[str, str]]:
     retry_n: int = kw.get("retry_n", 0)
     redundant_reads: int = kw.get("redundant_reads", 0)
     waste_pct: float = kw.get("waste_pct", 0.0)
+    prompt_n: int = kw.get("prompt_n", 0)
+    reminder_n: Counter[str] = kw.get("reminder_n", Counter())
+    reminder_samples: dict[str, list[str]] = kw.get("reminder_samples", {})
+    nudge_n: int = kw.get("nudge_n", 0)
+    correction_n: int = kw.get("correction_n", 0)
+    push_n: int = kw.get("push_n", 0)
+    structured_n: int = kw.get("structured_n", 0)
+    avg_prompt: float = kw.get("avg_prompt", 0.0)
 
     total_tools = sum(tool_n.values()) or 1
     work_total = sum(phase_work.values()) or (work_s or 1.0)
@@ -1004,6 +1153,78 @@ def _insights(**kw: Any) -> list[dict[str, str]]:
                 "- 首条 prompt 给 cwd + 仓库根 + 目标文件。",
                 sev="med",
             )
+    # --- user input: what they keep saying, and the flow it costs ---
+    if prompt_n and reminder_n:
+        theme, cnt = reminder_n.most_common(1)[0]
+        if cnt >= 3 or cnt / prompt_n >= 0.4:
+            samples = "；".join(reminder_samples.get(theme, [])[:2])
+            add(
+                "user", "prompt",
+                f"反复提醒：{theme}",
+                (
+                    f"{prompt_n} 条 prompt 里「{theme}」出现 {cnt} 次（占 {round(100 * cnt / prompt_n)}%）。"
+                    + (f"样本：{samples}。" if samples else "")
+                    + " 把它固化成 AGENTS 闸门，别再口头重申。"
+                ),
+                f"reminders={dict(reminder_n)}",
+                _GATE_DRAFT.get(theme, ""),
+                sev="med",
+            )
+    if prompt_n >= 4 and nudge_n >= 3:
+        add(
+            "user", "prompt",
+            "用户靠「继续」推进",
+            (
+                f"{nudge_n}/{prompt_n} 条 prompt 是短催（≤8 字，平均 {avg_prompt} 字），如「继续」。"
+                f"这 {nudge_n} 次是纯流程损耗：长任务应自驱到阶段结论再停。"
+            ),
+            f"nudge={nudge_n}/{prompt_n} avg_chars={avg_prompt} structured={structured_n}",
+            "- 长任务不要一步一停：完成子目标先给结论+下一步，再等确认。",
+            sev="med",
+        )
+    if correction_n >= 2 and prompt_n and correction_n / prompt_n >= 0.2:
+        add(
+            "agent", "agents.md",
+            "方向被反复纠正",
+            (
+                f"{correction_n}/{prompt_n} 条 prompt 在纠正方向（认知错误/不符合预期）。"
+                "动手前先复述理解与验收标准，确认后再改。"
+            ),
+            f"correction={correction_n}/{prompt_n} reminders={dict(reminder_n)}",
+            _GATE_DRAFT["纠正"],
+            sev="high" if correction_n >= 3 else "med",
+        )
+    if prompt_n >= 4 and push_n >= 3:
+        add(
+            "user", "prompt",
+            "用户多次催进度",
+            f"催促信号 {push_n} 次（为什么/还没/尽快/太慢）。长任务缺少中间结论，用户只能追问。",
+            f"push={push_n}/{prompt_n}",
+            "- 每完成一个子目标先给进展与结论，再继续。",
+            sev="med",
+        )
+    sink_n = reminder_n.get("沉淀提醒", 0)
+    if sink_n >= 2:
+        add(
+            "agent", "agents.md",
+            "用户反复要求写 nmem",
+            f"「沉淀提醒」出现 {sink_n} 次。知识沉淀应是默认动作，而不是被催。",
+            f"sink={sink_n} reminders={dict(reminder_n)}",
+            _GATE_DRAFT["沉淀提醒"],
+            sev="med",
+        )
+    extra_trips = nudge_n + correction_n + push_n
+    if prompt_n >= 3 and extra_trips >= 3:
+        add(
+            "user", "prompt",
+            "操作流程：减少口头往返",
+            (
+                f"{prompt_n} 条 prompt 带来 {extra_trips} 次额外往返（短催 {nudge_n}、纠正 {correction_n}、催促 {push_n}）。"
+                "首条 prompt 给 cwd/仓库/目标/验收，并要求「阶段结论再停」。"
+            ),
+            f"prompt_n={prompt_n} nudge={nudge_n} corr={correction_n} push={push_n} structured={structured_n}",
+            sev="med",
+        )
     if fail_n == 0 and total_tools >= 20:
         add(
             "agent", "agents.md",

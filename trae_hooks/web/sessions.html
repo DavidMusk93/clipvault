@@ -1139,7 +1139,7 @@
         </div>
         <div class="mine-dirs" id="mineDirs"></div>
       </div>
-      <div class="mine-scroll" id="mineBody"><p class="mine-empty">打开后按工作目录、Git 库、工具、MCP 与阶段挖资产。</p></div>`;
+      <div class="mine-scroll" id="mineBody"><p class="mine-empty">打开后按用户提醒/操作流程、工作目录、Git 库、失败/冗余与阶段挖资产。</p></div>`;
     cornerMount.appendChild(mineSheet);
     const mineBody = mineSheet.querySelector("#mineBody");
     const mineDirsEl = mineSheet.querySelector("#mineDirs");
@@ -1208,6 +1208,8 @@
         ["等待秒", s.wait_s ?? 0],
         ["失败", s.fail_n ?? 0],
         ["冗余读", s.redundant_reads ?? 0],
+        ["prompt", s.flow?.prompt_n ?? 0],
+        ["额外往返", s.flow?.extra_roundtrips ?? 0],
         ["目录/仓库", `${s.distinct_cwd ?? 0}/${s.distinct_repo ?? 0}`],
         ["跨度", mineSpan(s.duration_s)],
         ["空档", mineSpan(s.idle_s)],

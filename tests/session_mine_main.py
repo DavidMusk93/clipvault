@@ -178,6 +178,31 @@ def main() -> None:
     ok("fail-sev", fail_fb and fail_fb[0]["sev"] in ("high", "med"), str(fail_fb))
     hot_files = {r["path"]: r for r in out2["blocks"]["agent.hot"]["table"]["rows"]}
     ok("read-not-write", hot_files.get("/root/p/a/b.cc", {}).get("writes") == 1, str(hot_files))
+
+    # User input: repeated reminders + flow friction.
+    flow_rows = [
+        {"event_id": "p1", "ts": "20", "hook_event": "UserPromptSubmit", "prompt": "继续。"},
+        {"event_id": "p2", "ts": "21", "hook_event": "UserPromptSubmit", "prompt": "注意 review，不要跳过测试。"},
+        {"event_id": "p3", "ts": "22", "hook_event": "UserPromptSubmit", "prompt": "这里存在认知错误，应该先复述需求。"},
+        {"event_id": "p3b", "ts": "22.5", "hook_event": "UserPromptSubmit", "prompt": "又搞错了，方向不对。"},
+        {"event_id": "p4", "ts": "23", "hook_event": "UserPromptSubmit", "prompt": "为什么用了这么多时间？还没结果。"},
+        {"event_id": "p5", "ts": "24", "hook_event": "UserPromptSubmit", "prompt": "把这个结论整理写入nmem。"},
+        {"event_id": "p6", "ts": "25", "hook_event": "UserPromptSubmit", "prompt": "从nmem 中加载上下文再改。"},
+        {"event_id": "p7", "ts": "26", "hook_event": "UserPromptSubmit", "prompt": "重新测试一下。"},
+        {"event_id": "p8", "ts": "27", "hook_event": "UserPromptSubmit", "prompt": "还是不对，重新看。"},
+        {"event_id": "p9", "ts": "28", "hook_event": "UserPromptSubmit", "prompt": "继续"},
+    ]
+    out3 = mine_rows(flow_rows, session_id="flow", scope="session")
+    rem_themes = {r["theme"]: r["n"] for r in out3["blocks"]["user.reminders"]["table"]["rows"]}
+    ok("reminder-themes", "纠正" in rem_themes and "重申约束" in rem_themes and "催促" in rem_themes, str(rem_themes))
+    ok("reminder-sink", rem_themes.get("沉淀提醒", 0) >= 1, str(rem_themes))
+    ok("reminder-load", rem_themes.get("加载上下文", 0) >= 1, str(rem_themes))
+    ok("flow-nudge", out3["summary"]["flow"]["nudge_n"] >= 2, str(out3["summary"]["flow"]))
+    ok("flow-trips", out3["summary"]["flow"]["extra_roundtrips"] >= 4, str(out3["summary"]["flow"]))
+    titles3 = " ".join(f["title"] for f in out3["feedback"])
+    ok("reminder-insight", "反复提醒" in titles3, titles3)
+    ok("flow-insight", "操作流程" in titles3, titles3)
+    ok("gate-draft", any(f.get("draft", "").startswith("- ") for f in out3["feedback"]), str(out3["feedback"]))
     print("session-mine: all passed")
 
 

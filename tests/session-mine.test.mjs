@@ -76,15 +76,23 @@ test('deep mining: failures, redundancy, prompt quality, health', () => {
   assert.match(mine, /"agent\.failures"/);
   assert.match(mine, /"agent\.hot"/);
   assert.match(mine, /"user\.prompt"/);
+  assert.match(mine, /"user\.reminders"/);
+  assert.match(mine, /"user\.flow"/);
   assert.match(mine, /def is_write_tool/);
   assert.match(mine, /def norm_cmd/);
   assert.match(mine, /def cmd_label/);
+  assert.match(mine, /def reminder_hits/);
+  assert.match(mine, /def prompt_is_nudge/);
   assert.match(mine, /redundant_reads/);
   assert.match(mine, /fail_family/);
   assert.match(mine, /retry_n/);
   assert.match(mine, /"health"/);
+  assert.match(mine, /"flow"/);
+  assert.match(mine, /extra_roundtrips/);
   assert.match(mine, /"sev"/);
   assert.match(mine, /失败没有变成新策略/);
+  assert.match(mine, /反复提醒/);
+  assert.match(mine, /操作流程：减少口头往返/);
 });
 
 test('analysis sheet keeps dynamic: verdict, severity, live refresh', () => {
