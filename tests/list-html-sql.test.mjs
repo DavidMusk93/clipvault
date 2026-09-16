@@ -12,7 +12,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
+
+// node:sqlite is unflagged on Node 24 but needs --experimental-sqlite on some 22.x.
+// Skip cleanly there instead of failing the whole gate.
+let DatabaseSync = null;
+try {
+  ({ DatabaseSync } = await import('node:sqlite'));
+} catch (_) {
+  DatabaseSync = null;
+}
+const skipSqlite = DatabaseSync ? false : 'node:sqlite unavailable on this runtime';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbSrc = fs.readFileSync(
@@ -71,7 +80,7 @@ test('listSqlLiteral defaults are the documented budgets', () => {
   assert.equal(otherLimit, 8192);
 });
 
-test('listHtmlSQL trims html/rtf at the rich cap and others at the light cap', () => {
+test('listHtmlSQL trims html/rtf at the rich cap and others at the light cap', { skip: skipSqlite }, () => {
   const db = makeDb();
   const rows = db
     .prepare(`SELECT id, ${listSql} AS body FROM clipboard_items ORDER BY id`)
@@ -88,7 +97,7 @@ test('listHtmlSQL trims html/rtf at the rich cap and others at the light cap', (
   db.close();
 });
 
-test('listHtmlOmittedSQL distinguishes a trimmed body from an empty row', () => {
+test('listHtmlOmittedSQL distinguishes a trimmed body from an empty row', { skip: skipSqlite }, () => {
   const db = makeDb();
   const rows = db
     .prepare(`SELECT id, ${listOmittedSql} AS omitted FROM clipboard_items ORDER BY id`)
@@ -105,7 +114,7 @@ test('listHtmlOmittedSQL distinguishes a trimmed body from an empty row', () => 
   db.close();
 });
 
-test('aliased CASEs (FTS join) agree with the base CASEs', () => {
+test('aliased CASEs (FTS join) agree with the base CASEs', { skip: skipSqlite }, () => {
   const db = makeDb();
   const base = db
     .prepare(
