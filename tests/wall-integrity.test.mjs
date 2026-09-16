@@ -114,6 +114,21 @@ test('masonry must not collapse into one occupied column', () => {
   );
 });
 
+test('card media is height-locked and late growth is reconciled, not rebuilt', () => {
+  // A stray image in a note/preview card must not grow the packed card height.
+  assert.match(html, /\.md-preview img \{ max-width: 100%; max-height: /);
+  assert.match(html, /\.card-body img \{ max-width: 100%; height: auto; \}/);
+  // Packed height is recorded, a ResizeObserver detects drift and re-packs the column.
+  assert.match(html, /card\.dataset\.packedH = String\(Math\.round\(Number\(heights\[i\]\) \|\| 0\)\)/);
+  assert.match(html, /new ResizeObserver\(\(entries\) => \{/);
+  assert.match(html, /if \(Math\.abs\(delta\) < 2\) continue;/);
+  assert.match(html, /nm\('wall_layout_drift'/);
+  assert.doesNotMatch(html, /addEventListener\('load', \(\) => rebuildFromData/);
+  // Repaint must re-wire thumb click/error, not leave a dead image box.
+  assert.match(html, /function wireThumb\(card, item\)/);
+  assert.match(html, /wireThumb\(card, item\);/);
+});
+
 test('440-image peer clump stays 440 cards on a capture-time keyset', () => {
   const rows = [];
   for (let i = 0; i < 20; i++) rows.push({ id: `T1-${String(i).padStart(3, '0')}`, ts: 3000 - i * 0.01, type: 'text' });
