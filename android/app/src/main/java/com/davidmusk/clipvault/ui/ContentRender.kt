@@ -540,7 +540,7 @@ private val NOTES_UNSAFE_TAGS = listOf(
 )
 
 /** Regex twin of web/notes-render.mjs `stripDangerousMarkup`. */
-private fun stripUnsafeNotesTags(html: String): String {
+internal fun stripUnsafeNotesTags(html: String): String {
     val names = NOTES_UNSAFE_TAGS.joinToString("|")
     val paired = Regex("(?is)<($names)\\b.*?</\\1>")
     val orphan = Regex("(?is)</?(?:$names)\\b[^>]*>")
@@ -558,7 +558,7 @@ private fun stripUnsafeNotesTags(html: String): String {
  * Extract body + drop Writer chrome (style/spacer), keep list structure.
  * Cards are not browsers: no `on*`, no navigable `<a>`, no remote media, no trusted style.
  */
-private fun notesHtmlFragment(html: String): String {
+internal fun notesHtmlFragment(html: String): String {
     var s = html
     val body = Regex("(?is)<body[^>]*>(.*)</body>").find(s)?.groupValues?.getOrNull(1)
     if (body != null) s = body

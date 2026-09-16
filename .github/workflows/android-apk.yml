@@ -77,7 +77,7 @@ jobs:
           CLIPVAULT_KEY_PASSWORD: keepsake-ci
           CLIPVAULT_KEY_ALIAS: keepsake
         run: |
-          ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
 
       - name: Stage artifacts
         run: |
