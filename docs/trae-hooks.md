@@ -169,6 +169,37 @@ hook 失败必须 **exit 0**。排障看远端 `/var/tmp/clipvault-hooks/wrapper
 
 ---
 
+## pi 会话（可选）
+
+pi 没有 `hooks.json`，用 **extension** 当适配器，把 pi 生命周期事件映射成 ClipVault hook 契约，再走同一个 `clipvault_hook.sh`（spool + Quack + SSE）。
+
+```text
+  pi 事件                  ClipVault hook_event   映射
+  ----------------------  ---------------------  ----------------------------------
+  session_start            SessionStart           startup / new / resume / fork
+  before_agent_start       UserPromptSubmit       prompt（input.source=extension 的不算）
+  tool_execution_start     PreToolUse             tool_name / tool_input
+  tool_result              PostToolUse            wall_time_seconds + isError->exit_code
+  agent_settled            Stop                   last_assistant_message
+  ui_prompt_start          Notification           pi 在等人（ask_user_question）
+```
+
+工具名归一化到 `mine.py` 能认的名字：`bash`→`RunCommand`，`read/write/edit` 原样，`grep/find/ls`→`RunCommand` 并合成 shell 形态的 `cmd`，`nmem_*`→`mcp__nowledge-mem__*`（这样 MCP 只读不沉降的分析也能用）。
+
+装（Mac store 已在时）：
+
+```bash
+bash trae_hooks/pi/install_pi_hook.sh
+# 写 ~/.trae-cn/hooks_env/pi-hooks.env（source trae env 后只改 identity）
+# symlink ~/.pi/agent/extensions/clipvault-session.ts -> repo
+```
+
+然后重启 pi（或 `/reload`）。pi 会话以 `source=pi`、`instance_id=pi-mac` 落库，与 Trae 的 `mac-work` 区分。单次关闭：`CLIPVAULT_PI_SESSION_HOOK=0 pi`。
+
+**不影响 pi 主流程**：适配器 spawn 包装器后立即 `unref()`，不 await；包装器自身失败也 `exit 0`。
+
+---
+
 ## 代码
 
 | 路径 | 职责 |
