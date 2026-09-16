@@ -659,9 +659,8 @@
       flex-direction: column;
       min-width: 0;
       min-height: 0;
-      background: rgba(250, 250, 250, 0.98);
-      backdrop-filter: blur(22px) saturate(160%);
-      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      background: #fafafa;
+      /* Opaque cover: any blur here would recompute on every hook behind the sheet. */
       border: 0.5px solid var(--separator);
       border-radius: 16px;
       box-shadow: 0 16px 48px rgba(0, 0, 0, 0.16);
@@ -811,7 +810,8 @@
       color: var(--honey);
       border-color: var(--honey);
     }
-    .cv-mine-sheet.is-updating .mine-scroll::before {
+    .cv-mine-sheet.is-updating .mine-scroll::before,
+    .cv-mine-sheet.is-pending .mine-scroll::before {
       content: "有新事件 · 更新中…";
       position: sticky;
       top: 0;
@@ -825,6 +825,7 @@
       font-size: 11.5px;
       font-weight: 600;
     }
+    .cv-mine-sheet.is-pending .mine-scroll::before { content: "有新事件 · 收起明细后更新"; }
     .cv-mine-sheet .mine-verdict {
       display: flex;
       flex-wrap: wrap;
@@ -1145,12 +1146,21 @@
     const mineDirsEl = mineSheet.querySelector("#mineDirs");
     let mineLast = null;
     let mineRefreshTimer = 0;
+    let mineChipSig = "";
+    let mineDetailOpen = false;
+    let mineSig = "";
+    let mineAutoAt = 0;
+    let minePending = false;
+    const MINE_AUTO_MIN_MS = 5000;
     const persistMine = () => {
       try { localStorage.setItem(MINE_KEY, JSON.stringify({ scope: mineState.scope, dirs: mineState.dirs })); } catch (_) {}
     };
     const escMine = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const paintMineChips = (directions) => {
       const dirs = directions || (mineLast && mineLast.directions) || [];
+      const sig = JSON.stringify([mineState.scope, mineState.dirs, dirs.map((d) => d.id)]);
+      if (sig === mineChipSig) return;
+      mineChipSig = sig;
       mineDirsEl.innerHTML = dirs.map((d) => {
         const on = !mineState.dirs.length || mineState.dirs.includes(d.id);
         return `<button type="button" class="mine-chip${on ? " is-on" : ""}" data-dir="${escMine(d.id)}">${escMine(d.title)}</button>`;
@@ -1222,9 +1232,25 @@
           <div class="mine-healthbar"><i style="--v:${waste}%"></i><span>浪费 ${escMine(h.waste_pct ?? 0)}% · 失败率 ${escMine(h.fail_rate ?? 0)}%</span></div>
         </div>`;
     };
-    const renderMine = (data) => {
+    const mineDataSig = (data) => {
+      const s = (data && data.summary) || {};
+      const fl = s.flow || {};
+      return JSON.stringify([
+        s.n_rows, s.n_turns, s.n_tools, s.work_s, s.wait_s, s.fail_n, s.redundant_reads,
+        s.health && s.health.score,
+        fl.prompt_n, fl.extra_roundtrips, fl.correction_n,
+        ((data && data.feedback) || []).map((f) => `${f.sev || ""}:${f.title || ""}:${f.draft || ""}`),
+        (data && data.active) || null,
+      ]);
+    };
+    const renderMine = (data, { auto = false } = {}) => {
+      // Auto refresh must not repaint identical content: it would drop scroll
+      // and collapse the user's expanded 方向明细.
+      if (auto && mineDataSig(data) === mineSig) return;
+      mineSig = mineDataSig(data);
       mineLast = data;
       paintMineChips(data.directions);
+      const prevScroll = mineBody.scrollTop;
       const sum = mineSheet.querySelector("#mineSum");
       const s = data && data.summary;
       if (sum) {
@@ -1267,31 +1293,62 @@
         ? `<details class="mine-tables"><summary>方向明细 · ${blocks.length} 组</summary>${sections}</details>`
         : "";
       mineBody.innerHTML = renderHealth(s) + findings + detail;
+      const det = mineBody.querySelector(".mine-tables");
+      if (det) {
+        det.open = mineDetailOpen;
+        det.addEventListener("toggle", () => {
+          mineDetailOpen = det.open;
+          // Don't wipe an expanded detail under the user; refresh once collapsed.
+          if (!det.open && minePending) {
+            minePending = false;
+            mineSheet.classList.remove("is-pending");
+            scheduleMineRefresh();
+          }
+        });
+      }
+      mineBody.scrollTop = prevScroll;
     };
     const loadMine = async ({ auto = false } = {}) => {
       if (!mineState.open || mineState.loading) return;
       mineState.loading = true;
-      if (auto) mineSheet.classList.add("is-updating");
-      else mineBody.innerHTML = '<p class="mine-empty">分析中…</p>';
+      let updTimer = 0;
+      if (auto) {
+        // Surface the pill only when the round-trip is slow; avoids flicker.
+        updTimer = window.setTimeout(() => mineSheet.classList.add("is-updating"), 500);
+      } else {
+        minePending = false;
+        mineSheet.classList.remove("is-pending");
+        mineBody.innerHTML = '<p class="mine-empty">分析中…</p>';
+      }
       const params = new URLSearchParams({ scope: mineState.scope });
       if (mineState.scope === "session" && current) params.set("session_id", current);
       if (mineState.dirs.length) params.set("dirs", mineState.dirs.join(","));
       try {
         const data = await netJson("mine", apiUrl("/api/mine?" + params.toString()));
-        if (mineState.open) renderMine(data);
+        if (mineState.open) renderMine(data, { auto });
       } catch (err) {
         if (mineState.open && !auto) mineBody.innerHTML = `<p class="mine-empty">分析失败${err && err.message ? " · " + escMine(err.message) : ""}</p>`;
       } finally {
         mineState.loading = false;
+        if (updTimer) window.clearTimeout(updTimer);
         mineSheet.classList.remove("is-updating");
       }
     };
     const scheduleMineRefresh = () => {
       if (!mineState.open || mineRefreshTimer) return;
+      // Coalesce: at most one recompute per MINE_AUTO_MIN_MS while events stream in.
+      const wait = Math.max(2000, MINE_AUTO_MIN_MS - (Date.now() - mineAutoAt));
       mineRefreshTimer = window.setTimeout(() => {
         mineRefreshTimer = 0;
+        if (mineDetailOpen) {
+          // User is reading an expanded 方向明细: mark stale, don't repaint.
+          minePending = true;
+          mineSheet.classList.add("is-pending");
+          return;
+        }
+        mineAutoAt = Date.now();
         loadMine({ auto: true });
-      }, 1500);
+      }, wait);
     };
     const notifyOverlay = () => {
       if (!inFrame) return;
@@ -1307,6 +1364,12 @@
         try { sessMetricsCtl?.setOpen?.(false); } catch (_) {}
         paintMineChips();
         loadMine();
+      } else {
+        minePending = false;
+        mineSheet.classList.remove("is-pending");
+        // Flush hooks queued while the sheet covered the thread.
+        if (pendingHookIds.length > 400) scheduleResync();
+        else scheduleHookPaint();
       }
     };
     mineHost.querySelector("#mineOpen").addEventListener("click", (ev) => {
@@ -2515,9 +2578,12 @@
       if (!canIngest(load) || hookPaintTimer) return;
       hookPaintTimer = setTimeout(() => {
         hookPaintTimer = 0;
+        scheduleList();
+        // The analysis sheet fully covers the thread; keep it quiet behind the
+        // sheet and flush the queued hooks when the sheet closes.
+        if (mineState.open) return;
         const ids = pendingHookIds;
         pendingHookIds = [];
-        scheduleList();
         ingestHookIds(ids);
       }, 40);
     };

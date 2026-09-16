@@ -281,6 +281,8 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 禁止：`setInterval` 刷 DOM；每次 hook 整页 `innerHTML`；overlay 盖住后续气泡；embed 窄宽叠成 30vh；用最新 200 条工具当整段历史。
 
+**分析 sheet 不是直播墙。** 自动刷新（SSE `hook_event` 去抖，最少 5s 一次）必须保留用户的**展开态 + 滚动位**；用户展开「方向明细」时暂停重绘，只标 stale（`is-pending`），收起后再刷。内容未变（signature 相同）不得重绘。sheet 铺满线程时，**线程 hook 排队不 patch**（关 sheet 再 flush；积压 >400 走 resync），且覆盖层**禁止 `backdrop-filter`**（blur 会在每次 hook 背后重算 = 肉眼可见的重绘）。回归：`tests/session-mine.test.mjs`。
+
 新加载 bug：先补 `tests/session-load.test.mjs` 再改 fetch。
 
 ---
