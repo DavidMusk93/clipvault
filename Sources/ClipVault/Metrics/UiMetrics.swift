@@ -8,7 +8,9 @@ final class UiMetrics {
     static let fileName = "ui-metrics.db"
     static let maxEventsPerRequest = 100
     static let maxPayloadBytes = 2048
+    /// Rollup window (aggregates survive this long). Raw detail is shorter.
     static let retentionMs: Int64 = 30 * 24 * 3600 * 1000
+    static let detailRetentionMs: Int64 = 7 * 24 * 3600 * 1000
 
     private static let nameRe = try! NSRegularExpression(pattern: "^[a-z][a-z0-9_]{1,63}$")
     private static let forbiddenPayload = Set([
@@ -43,6 +45,7 @@ final class UiMetrics {
         exec("PRAGMA synchronous=NORMAL;")
         exec("PRAGMA busy_timeout=5000;")
         exec("PRAGMA temp_store=MEMORY;")
+        exec("PRAGMA auto_vacuum=INCREMENTAL;")
         exec("""
         CREATE TABLE IF NOT EXISTS ui_events (
           id INTEGER PRIMARY KEY,
@@ -64,6 +67,20 @@ final class UiMetrics {
         exec("CREATE INDEX IF NOT EXISTS ui_events_ts ON ui_events(ts);")
         exec("CREATE INDEX IF NOT EXISTS ui_events_name_ts ON ui_events(name, ts);")
         exec("CREATE INDEX IF NOT EXISTS ui_events_trace ON ui_events(trace);")
+        exec("""
+        CREATE TABLE IF NOT EXISTS ui_rollup (
+          hour INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          n INTEGER NOT NULL,
+          ok_n INTEGER NOT NULL,
+          ok_yes INTEGER NOT NULL,
+          over_n INTEGER NOT NULL,
+          sum_dur REAL, min_dur REAL, max_dur REAL, dur_n INTEGER NOT NULL DEFAULT 0,
+          sum_value REAL, min_value REAL, max_value REAL, value_n INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (hour, name)
+        );
+        """)
+        exec("CREATE TABLE IF NOT EXISTS ui_meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL);")
     }
 
     /// Drain clipvault-http JSONL spool into ui_events. Never blocks the hop.
@@ -201,77 +218,149 @@ final class UiMetrics {
         return (true, rows.count, nil)
     }
 
+    private struct Agg {
+        var n = 0
+        var okN = 0
+        var okYes = 0
+        var overN = 0
+        var sumDur = 0.0
+        var minDur: Double?
+        var maxDur: Double?
+        var durN = 0
+        var sumValue = 0.0
+        var minValue: Double?
+        var maxValue: Double?
+        var valueN = 0
+    }
+
     func summary(fromMs: Int64?, toMs: Int64?) -> [String: Any] {
         let to = toMs ?? Int64(Date().timeIntervalSince1970 * 1000)
         let from = fromMs ?? (to - 24 * 3600 * 1000)
-        var names: [[String: Any]] = []
-        var total: Int64 = 0
+        var agg: [String: Agg] = [:]
         var durPct: [String: (Double, Double, Double)] = [:]
         var valPct: [String: (Double, Double, Double)] = [:]
         var routes: [[String: Any]] = []
         queue.sync {
-            let sql = """
+            // Recent detail (exact) …
+            let detailSQL = """
             SELECT name, COUNT(*) AS n,
                    SUM(CASE WHEN ok IS NULL THEN 0 ELSE 1 END) AS ok_n,
                    SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok_yes,
-                   AVG(dur_ms) AS avg_ms, MIN(dur_ms) AS min_ms, MAX(dur_ms) AS max_ms,
-                   AVG(value) AS avg_v, MIN(value) AS min_v, MAX(value) AS max_v
+                   SUM(CASE WHEN over = 1 THEN 1 ELSE 0 END) AS over_n,
+                   SUM(dur_ms), MIN(dur_ms), MAX(dur_ms),
+                   SUM(CASE WHEN dur_ms IS NULL THEN 0 ELSE 1 END),
+                   SUM(value), MIN(value), MAX(value),
+                   SUM(CASE WHEN value IS NULL THEN 0 ELSE 1 END)
             FROM ui_events
             WHERE ts >= ? AND ts <= ?
-            GROUP BY name
-            ORDER BY n DESC;
+            GROUP BY name;
             """
             var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+            if sqlite3_prepare_v2(db, detailSQL, -1, &stmt, nil) == SQLITE_OK, let stmt {
                 sqlite3_bind_int64(stmt, 1, from)
                 sqlite3_bind_int64(stmt, 2, to)
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     guard let cstr = sqlite3_column_text(stmt, 0) else { continue }
-                    let name = String(cString: cstr)
-                    let n = sqlite3_column_int64(stmt, 1)
-                    total += n
-                    var row: [String: Any] = ["name": name, "n": Int(n)]
-                    let okN = sqlite3_column_int64(stmt, 2)
-                    let okYes = sqlite3_column_int64(stmt, 3)
-                    if okN > 0 {
-                        row["ok_n"] = Int(okN)
-                        row["ok_rate"] = Double(okYes) / Double(okN)
-                    }
-                    if let v = Self.columnDouble(stmt, 4) { row["avg_ms"] = v }
-                    if let v = Self.columnDouble(stmt, 5) { row["min_ms"] = v }
-                    if let v = Self.columnDouble(stmt, 6) { row["max_ms"] = v }
-                    if let v = Self.columnDouble(stmt, 7) { row["avg_value"] = v }
-                    if let v = Self.columnDouble(stmt, 8) { row["min_value"] = v }
-                    if let v = Self.columnDouble(stmt, 9) { row["max_value"] = v }
-                    names.append(row)
+                    var a = Agg()
+                    a.n = Int(sqlite3_column_int64(stmt, 1))
+                    a.okN = Int(sqlite3_column_int64(stmt, 2))
+                    a.okYes = Int(sqlite3_column_int64(stmt, 3))
+                    a.overN = Int(sqlite3_column_int64(stmt, 4))
+                    a.sumDur = Self.columnDouble(stmt, 5) ?? 0
+                    a.minDur = Self.columnDouble(stmt, 6)
+                    a.maxDur = Self.columnDouble(stmt, 7)
+                    a.durN = Int(sqlite3_column_int64(stmt, 8))
+                    a.sumValue = Self.columnDouble(stmt, 9) ?? 0
+                    a.minValue = Self.columnDouble(stmt, 10)
+                    a.maxValue = Self.columnDouble(stmt, 11)
+                    a.valueN = Int(sqlite3_column_int64(stmt, 12))
+                    agg[String(cString: cstr)] = a
                 }
                 sqlite3_finalize(stmt)
             }
+            // … plus older hourly rollups (aggregates; no exact percentiles).
+            mergeRollupLocked(from: from, to: to, into: &agg)
             durPct = percentileLocked(column: "dur_ms", from: from, to: to)
             valPct = percentileLocked(column: "value", from: from, to: to)
             routes = httpRoutesLocked(from: from, to: to)
         }
-        for i in names.indices {
-            let name = names[i]["name"] as? String ?? ""
+        var names: [[String: Any]] = []
+        var total = 0
+        for (name, a) in agg {
+            total += a.n
+            var row: [String: Any] = ["name": name, "n": a.n]
+            if a.okN > 0 {
+                row["ok_n"] = a.okN
+                row["ok_rate"] = Double(a.okYes) / Double(a.okN)
+            }
+            if a.overN > 0 { row["over_n"] = a.overN }
+            if a.durN > 0 {
+                row["avg_ms"] = a.sumDur / Double(a.durN)
+                if let mn = a.minDur { row["min_ms"] = mn }
+                if let mx = a.maxDur { row["max_ms"] = mx }
+            }
+            if a.valueN > 0 {
+                row["avg_value"] = a.sumValue / Double(a.valueN)
+                if let mn = a.minValue { row["min_value"] = mn }
+                if let mx = a.maxValue { row["max_value"] = mx }
+            }
             if let p = durPct[name] {
-                names[i]["p50_ms"] = p.0
-                names[i]["p95_ms"] = p.1
-                names[i]["p99_ms"] = p.2
+                row["p50_ms"] = p.0
+                row["p95_ms"] = p.1
+                row["p99_ms"] = p.2
             }
             if let p = valPct[name] {
-                names[i]["value_p50"] = p.0
-                names[i]["value_p95"] = p.1
-                names[i]["value_p99"] = p.2
+                row["value_p50"] = p.0
+                row["value_p95"] = p.1
+                row["value_p99"] = p.2
             }
+            names.append(row)
         }
+        names.sort { ($0["n"] as? Int ?? 0) > ($1["n"] as? Int ?? 0) }
         return [
             "ok": true,
             "from": Int(from),
             "to": Int(to),
-            "total": Int(total),
+            "total": total,
             "names": names,
             "routes": routes,
         ]
+    }
+
+    private func mergeRollupLocked(from: Int64, to: Int64, into agg: inout [String: Agg]) {
+        let fromHour = from / 3_600_000
+        let toHour = to / 3_600_000
+        let sql = """
+        SELECT name, SUM(n), SUM(ok_n), SUM(ok_yes), SUM(over_n),
+               SUM(sum_dur), MIN(min_dur), MAX(max_dur), SUM(dur_n),
+               SUM(sum_value), MIN(min_value), MAX(max_value), SUM(value_n)
+        FROM ui_rollup WHERE hour >= ? AND hour <= ?
+        GROUP BY name;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+            sqlite3_bind_int64(stmt, 1, fromHour)
+            sqlite3_bind_int64(stmt, 2, toHour)
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let cstr = sqlite3_column_text(stmt, 0) else { continue }
+                let name = String(cString: cstr)
+                var a = agg[name] ?? Agg()
+                a.n += Int(sqlite3_column_int64(stmt, 1))
+                a.okN += Int(sqlite3_column_int64(stmt, 2))
+                a.okYes += Int(sqlite3_column_int64(stmt, 3))
+                a.overN += Int(sqlite3_column_int64(stmt, 4))
+                a.sumDur += Self.columnDouble(stmt, 5) ?? 0
+                if let mn = Self.columnDouble(stmt, 6) { a.minDur = a.minDur.map { Swift.min($0, mn) } ?? mn }
+                if let mx = Self.columnDouble(stmt, 7) { a.maxDur = a.maxDur.map { Swift.max($0, mx) } ?? mx }
+                a.durN += Int(sqlite3_column_int64(stmt, 8))
+                a.sumValue += Self.columnDouble(stmt, 9) ?? 0
+                if let mn = Self.columnDouble(stmt, 10) { a.minValue = a.minValue.map { Swift.min($0, mn) } ?? mn }
+                if let mx = Self.columnDouble(stmt, 11) { a.maxValue = a.maxValue.map { Swift.max($0, mx) } ?? mx }
+                a.valueN += Int(sqlite3_column_int64(stmt, 12))
+                agg[name] = a
+            }
+            sqlite3_finalize(stmt)
+        }
     }
 
     /// Exact p50/p95/p99 for one numeric column, per name, via window functions.
@@ -416,10 +505,63 @@ final class UiMetrics {
     }
 
     private func pruneLocked() {
-        let cut = Int64(Date().timeIntervalSince1970 * 1000) - Self.retentionMs
+        rollupLocked()
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        exec("DELETE FROM ui_events WHERE ts < \(now - Self.detailRetentionMs);")
+        let rollupCutHour = (now - Self.retentionMs) / 3_600_000
+        exec("DELETE FROM ui_rollup WHERE hour < \(rollupCutHour);")
+        exec("PRAGMA incremental_vacuum(500);")
+    }
+
+    /// Fold complete hours outside the detail window into hourly rollups, then let
+    /// prune drop the raw rows. Idempotent per hour (INSERT OR REPLACE + meta).
+    private func rollupLocked() {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let completeHour = (now - Self.detailRetentionMs) / 3_600_000
+        let through = metaInt("rollup_through_hour") ?? (completeHour - 1)
+        guard completeHour - 1 > through else { return }
+        let from = (through + 1) * 3_600_000
+        let to = completeHour * 3_600_000
+        let sql = """
+        INSERT OR REPLACE INTO ui_rollup
+          (hour, name, n, ok_n, ok_yes, over_n, sum_dur, min_dur, max_dur, dur_n,
+           sum_value, min_value, max_value, value_n)
+        SELECT ts / 3600000 AS hour, name, COUNT(*),
+               SUM(CASE WHEN ok IS NULL THEN 0 ELSE 1 END),
+               SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END),
+               SUM(CASE WHEN over = 1 THEN 1 ELSE 0 END),
+               SUM(dur_ms), MIN(dur_ms), MAX(dur_ms),
+               SUM(CASE WHEN dur_ms IS NULL THEN 0 ELSE 1 END),
+               SUM(value), MIN(value), MAX(value),
+               SUM(CASE WHEN value IS NULL THEN 0 ELSE 1 END)
+        FROM ui_events
+        WHERE ts >= ? AND ts < ?
+        GROUP BY hour, name;
+        """
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM ui_events WHERE ts < ? LIMIT 500;", -1, &stmt, nil) == SQLITE_OK, let stmt {
-            sqlite3_bind_int64(stmt, 1, cut)
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+            sqlite3_bind_int64(stmt, 1, from)
+            sqlite3_bind_int64(stmt, 2, to)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
+        setMetaInt("rollup_through_hour", completeHour - 1)
+    }
+
+    private func metaInt(_ key: String) -> Int64? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT v FROM ui_meta WHERE k = ?;", -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
+        sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        defer { sqlite3_finalize(stmt) }
+        if sqlite3_step(stmt) == SQLITE_ROW { return sqlite3_column_int64(stmt, 0) }
+        return nil
+    }
+
+    private func setMetaInt(_ key: String, _ value: Int64) {
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO ui_meta(k, v) VALUES (?, ?);", -1, &stmt, nil) == SQLITE_OK, let stmt {
+            sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int64(stmt, 2, value)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
         }
