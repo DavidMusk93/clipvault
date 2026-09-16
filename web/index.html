@@ -2477,6 +2477,7 @@
       <ul class="snap-list" id="syMetricList"></ul>
       <div class="backup-actions">
         <button type="button" class="secondary" id="nmRefresh">刷新指标</button>
+        <button type="button" class="secondary" id="nmBaseline">标记基线</button>
       </div>
     </div>
   </aside>
@@ -9333,6 +9334,11 @@ window.ClipViewMasonry = Masonry;
     });
     document.getElementById('bkRefresh')?.addEventListener('click', refreshBackupStatus);
 
+    const NM_BASELINE_KEY = 'clipvault.metrics.baseline.v1';
+    let currentSummary = null;
+    function readNmBaseline() {
+      try { const raw = localStorage.getItem(NM_BASELINE_KEY); return raw ? JSON.parse(raw) : null; } catch (_) { return null; }
+    }
     async function refreshNotesMetrics() {
       const totalEl = document.getElementById('nmTotal');
       const listEl = document.getElementById('nmList');
@@ -9341,11 +9347,24 @@ window.ClipViewMasonry = Masonry;
         const r = await fetch(API + '/api/ui-metrics/summary');
         const j = await r.json();
         if (!j.ok) { totalEl.textContent = '—'; return; }
+        currentSummary = j;
         totalEl.textContent = String(j.total || 0);
         const names = Array.isArray(j.names) ? j.names : [];
+        const base = readNmBaseline();
         const line = (row) => {
-          const avg = row.avg_ms != null ? `${Math.round(row.avg_ms)}ms` : '—';
-          return `<li class="snap-meta">${esc(row.name)} · ${row.n} · avg ${avg}</li>`;
+          const avg = row.avg_ms != null ? `${Math.round(row.avg_ms)}ms` : (row.avg_value != null ? `v ${Number(row.avg_value).toFixed(3)}` : '—');
+          const p95 = row.p95_ms != null ? `p95 ${Math.round(row.p95_ms)}ms` : (row.value_p95 != null ? `p95v ${Number(row.value_p95).toFixed(3)}` : '');
+          let delta = '';
+          const b = base && base.names && base.names[row.name];
+          if (b) {
+            const cur = row.p95_ms != null ? row.p95_ms : row.value_p95;
+            const was = b.p95_ms != null ? b.p95_ms : b.value_p95;
+            if (cur != null && was != null && was > 0) {
+              const pct = Math.round((cur - was) / was * 100);
+              if (Math.abs(pct) >= 10) delta = ` <span style="color:${pct > 0 ? '#D70015' : '#1a7f37'}">Δ${pct > 0 ? '+' : ''}${pct}%</span>`;
+            }
+          }
+          return `<li class="snap-meta">${esc(row.name)} · ${row.n} · avg ${avg}${p95 ? ' · ' + p95 : ''}${delta}</li>`;
         };
         const head = (title) => `<li class="snap-meta" style="font-weight:650;color:var(--ink)">${title}</li>`;
         const take = (pred) => names.filter((row) => pred(String(row.name || '')));
@@ -9371,6 +9390,16 @@ window.ClipViewMasonry = Masonry;
       }
     }
     document.getElementById('nmRefresh')?.addEventListener('click', refreshNotesMetrics);
+    document.getElementById('nmBaseline')?.addEventListener('click', () => {
+      if (!currentSummary) { refreshNotesMetrics(); return; }
+      const names = {};
+      for (const row of (currentSummary.names || [])) {
+        names[row.name] = { p95_ms: row.p95_ms ?? null, value_p95: row.value_p95 ?? null, avg_ms: row.avg_ms ?? null };
+      }
+      try { localStorage.setItem(NM_BASELINE_KEY, JSON.stringify({ at: Date.now(), names })); } catch (_) {}
+      toast('已标记性能基线');
+      refreshNotesMetrics();
+    });
     const backupDrawerEl = document.getElementById('backupDrawer');
     if (backupDrawerEl) {
       const mo = new MutationObserver(() => {

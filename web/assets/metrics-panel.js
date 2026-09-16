@@ -2,6 +2,10 @@
 (function () {
   const SLOW = 80;
   const KEY = {
+    wall: [
+      'wall_load', 'wall_ttfp', 'wall_paint', 'wall_merge', 'wall_resync',
+      'wall_fetch', 'wall_hydrate', 'wall_cls', 'wall_longtask',
+    ],
     notes: ['notes_preview_ms', 'notes_md_compile', 'notes_cls', 'notes_longtask', 'notes_inp'],
     sessions: [
       'trae_sessions_skip', 'trae_sessions_paint', 'trae_sessions_md',
@@ -147,13 +151,26 @@
       const cls = byName.get('trae_sessions_cls');
       if (cls && cls.max >= SLOW) items.push({ level: 'slow', title: 'CLS ' + round(cls.max), why: '' });
     }
+    if (family === 'wall') {
+      const paint = byName.get('wall_paint');
+      if (paint && paint.max >= SLOW) items.push({ level: 'slow', title: 'paint ' + round(paint.max) + 'ms', why: 'layout' });
+      const merge = byName.get('wall_merge');
+      if (merge && merge.max >= SLOW) items.push({ level: 'slow', title: 'merge ' + round(merge.max) + 'ms', why: '' });
+      const cls = byName.get('wall_cls');
+      if (cls && cls.max >= 0.1) {
+        const kind = cls.last && cls.last.payload && cls.last.payload.kind;
+        items.push({ level: 'slow', title: 'CLS ' + round(cls.max * 100) / 100, why: kind || '' });
+      }
+      const lt = byName.get('wall_longtask');
+      if (lt && lt.max >= 50) items.push({ level: 'warn', title: 'longtask ' + round(lt.max) + 'ms', why: '' });
+    }
     return items;
   }
 
   function create(opts) {
     const mount = opts && opts.mount;
     if (!mount) return null;
-    const family = opts.family === 'sessions' ? 'sessions' : 'notes';
+    const family = opts.family === 'sessions' ? 'sessions' : (opts.family === 'wall' ? 'wall' : 'notes');
     const getLocal = opts.getLocal || (() => []);
     const keys = KEY[family];
     const state = { open: false, timer: 0 };

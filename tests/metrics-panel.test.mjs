@@ -36,6 +36,13 @@ test('popover keeps skip/paint and compile/preview, drops 24h essays', () => {
   assert.doesNotMatch(css, /\.cv-debug-row/);
 });
 
+test('wall family stays a lightweight popover family', () => {
+  assert.match(js, /wall: \[/);
+  assert.match(js, /wall_hydrate/);
+  assert.match(js, /family === 'wall'/);
+  assert.doesNotMatch(js, /p95/);
+});
+
 test('notes and sessions mount a bottom-right debug fab, not a full paper', () => {
   assert.match(js, /function destroy/);
   assert.match(html, /function ensureNotesMetrics/);
