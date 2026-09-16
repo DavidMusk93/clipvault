@@ -779,7 +779,9 @@
     .md-preview table { border-collapse: collapse; width: max-content; max-width: 100%; margin: 0.45em 0 0.8em; font-size: 13px; display: block; overflow-x: auto; }
     .md-preview th, .md-preview td { border: 0.5px solid var(--separator-strong); padding: 6px 10px; text-align: left; }
     .md-preview th { background: rgba(120, 120, 128, 0.10); font-weight: 600; }
-    .md-preview img { max-width: 100%; height: auto; border-radius: 8px; margin: 0.35em 0; }
+    .md-preview img { max-width: 100%; max-height: min(40vh, 320px); width: auto; height: auto; object-fit: contain; background: var(--fill); border-radius: 8px; margin: 0.35em 0; }
+    /* Any stray image inside a card body must not grow the packed height after layout. */
+    .card-body img { max-width: 100%; height: auto; }
     .fmt-btn[data-archive-url].is-busy { opacity: 0.65; pointer-events: none; }
     .md-preview .url-inert, .md-preview .md-link {
       color: var(--accent) !important; text-decoration: underline dotted;
@@ -7182,6 +7184,8 @@ window.ClipViewMasonry = Masonry;
       const before = old ? Masonry.measureHeight(old) : 0;
       const next = buildCard(item);
       cardCache.set(item.id, next);
+      observeCard(next);
+      wireThumb(next, item);
       highlightCard(next);
       if (old && old.parentNode) {
         old.parentNode.replaceChild(next, old);
@@ -7495,6 +7499,7 @@ window.ClipViewMasonry = Masonry;
         if (nb) {
           bodyEl.innerHTML = nb.innerHTML;
           // preserve dataset force markers none — mode is in clipDisplayMode
+          wireThumb(card, item);
           wireFormatToolbar(card, item);
           highlightCard(card);
           // Re-pack columns with the anchor-preserving relayout (never full rebuild).
@@ -7735,16 +7740,7 @@ window.ClipViewMasonry = Masonry;
           sourceApp: btn.getAttribute('data-source-app') || '',
         }, btn);
       });
-      const wrap = card.querySelector('.thumb-wrap');
-      if (wrap) {
-        wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview'), item));
-        const img = wrap.querySelector('img');
-        // Thumb box has locked aspect-ratio — successful decode must not reflow masonry.
-        // Only broken images collapse the box; patch that column's height, never full rebuild.
-        img?.addEventListener('error', () => {
-          onThumbBroken(card, wrap);
-        }, { once: true });
-      }
+      wireThumb(card, item);
       wireFormatToolbar(card, item);
 
       return card;
@@ -7793,12 +7789,14 @@ window.ClipViewMasonry = Masonry;
       let c = cardCache.get(item.id);
       const pinBit = itemIsPinned(item) ? '1' : '0';
       if (c && c.dataset.pinned === pinBit) {
+        observeCard(c);
         maybeHydrateHtmlClip(item, c);
         return c;
       }
       const next = buildCard(item);
       if (c && c.parentNode) c.parentNode.replaceChild(next, c);
       cardCache.set(item.id, next);
+      observeCard(next);
       highlightCard(next);
       maybeHydrateHtmlClip(item, next);
       return next;
@@ -7921,6 +7919,7 @@ window.ClipViewMasonry = Masonry;
       const applyRemove = () => {
         if (!cardCache.has(id) && !card.isConnected) return;
         const host = document.getElementById('grid');
+        unobserveCard(card);
         card.remove();
         cardCache.delete(id);
         if (host) layoutMasonry(host, wallRestCards(), { preserveScroll: true });
@@ -8010,6 +8009,59 @@ window.ClipViewMasonry = Masonry;
      * Place cards by packing the ordered list. Identity stays; only left/top/width
      * change. Prefix-stable: appending older items does not move earlier cards.
      */
+    // ---- Late-height reconciliation -------------------------------------------------
+    // Cards are absolutely positioned from a measured height. If content grows AFTER the
+    // pack (an image in a note card, a late font, OCR), the card used to overlap its
+    // neighbour. A single ResizeObserver compares live height to `packedH` and re-packs
+    // the column (preserve scroll) — never a full rebuild / never `img.onload → rebuild`.
+    let cardResizeObs = null;
+    let driftTimer = 0;
+    let driftAcc = { n: 0, max: 0, kind: '' };
+    function ensureCardResizeObserver() {
+      if (cardResizeObs || typeof ResizeObserver === 'undefined') return;
+      cardResizeObs = new ResizeObserver((entries) => {
+        for (const en of entries) {
+          const el = en.target;
+          const packed = Number(el.dataset.packedH);
+          if (!Number.isFinite(packed)) continue;
+          const h = Math.round(en.borderBoxSize && en.borderBoxSize[0]
+            ? en.borderBoxSize[0].blockSize
+            : el.getBoundingClientRect().height);
+          const delta = h - packed;
+          if (Math.abs(delta) < 2) continue;
+          driftAcc.n += 1;
+          if (Math.abs(delta) > Math.abs(driftAcc.max)) driftAcc.max = delta;
+          if (!driftAcc.kind) {
+            driftAcc.kind = el.querySelector('.thumb-wrap img, .md-preview img, img') ? 'image'
+              : (el.querySelector('table') ? 'table' : 'content');
+          }
+        }
+        if (driftAcc.n && !driftTimer) {
+          driftTimer = window.setTimeout(() => {
+            driftTimer = 0;
+            const acc = driftAcc;
+            driftAcc = { n: 0, max: 0, kind: '' };
+            nm('wall_layout_drift', {
+              value: Math.abs(Math.round(acc.max)),
+              ok: false,
+              over: true,
+              payload: { n: acc.n, kind: acc.kind },
+            });
+            const host = document.getElementById('grid');
+            if (host) layoutMasonry(host, wallRestCards(), { preserveScroll: true });
+          }, 120);
+        }
+      });
+    }
+    function observeCard(card) {
+      if (!card) return;
+      ensureCardResizeObserver();
+      try { cardResizeObs && cardResizeObs.observe(card); } catch (_) {}
+    }
+    function unobserveCard(card) {
+      try { cardResizeObs && card && cardResizeObs.unobserve(card); } catch (_) {}
+    }
+
     function layoutMasonry(host, orderedCards, { preserveScroll = true } = {}) {
       if (!host) return;
       const seenEl = new Set();
@@ -8098,6 +8150,8 @@ window.ClipViewMasonry = Masonry;
         const card = cards[i];
         card.style.left = (col * (colW + gap)) + 'px';
         card.style.top = (ys[i] || 0) + 'px';
+        // Remember the packed height so the ResizeObserver can tell a late drift.
+        card.dataset.packedH = String(Math.round(Number(heights[i]) || 0));
       }
       const maxH = Math.max(0, ...packed.colHeights);
       host.style.height = maxH + 'px';
@@ -8244,6 +8298,16 @@ window.ClipViewMasonry = Masonry;
           window.scrollTo(0, Math.max(0, y));
         }
       }
+    }
+
+    /** Bind thumb click (lightbox) + broken-image patch. Re-run after a body repaint. */
+    function wireThumb(card, item) {
+      const wrap = card.querySelector('.thumb-wrap');
+      if (!wrap || wrap.dataset.wired === '1') return;
+      wrap.dataset.wired = '1';
+      wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview'), item));
+      const img = wrap.querySelector('img');
+      img?.addEventListener('error', () => onThumbBroken(card, wrap), { once: true });
     }
 
     function onThumbBroken(card, wrap) {
@@ -8951,6 +9015,7 @@ window.ClipViewMasonry = Masonry;
       sheet_morph: { label: '开合动画', unit: 'ms', budget: 300 },
       sheet_cls: { label: '开合偏移', unit: 'cls', budget: 0.1 },
       chrome_shift: { label: '顶栏位移', unit: 'ms', budget: 80 },
+      wall_layout_drift: { label: '布局漂移(px)', unit: 'count', budget: 0 },
       trae_sessions_switch: { label: '切换会话', unit: 'ms', budget: 300 },
       trae_sessions_tools: { label: '工具索引', unit: 'ms', budget: 200 },
       trae_sessions_load: { label: '加载事件', unit: 'ms', budget: 150 },
