@@ -89,6 +89,14 @@ test('metrics separate latency (dur_ms) from values and budgets', () => {
   assert.match(panelJs, /_cls\$\/\.test\(name\)\) \{[\s\S]{0,160}?ev\.value/);
 });
 
+test('debug snapshot shows p95 and a baseline delta', () => {
+  assert.match(html, /id="nmBaseline"/);
+  assert.match(html, /NM_BASELINE_KEY/);
+  assert.match(html, /readNmBaseline/);
+  assert.match(html, /p95_ms/);
+  assert.match(html, /currentSummary/);
+});
+
 test('detail is bounded by hourly rollups + incremental vacuum', () => {
   assert.match(swift, /detailRetentionMs/);
   assert.match(swift, /CREATE TABLE IF NOT EXISTS ui_rollup/);
