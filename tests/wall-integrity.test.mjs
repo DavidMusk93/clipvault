@@ -147,6 +147,11 @@ test('online backup copies from a read-only snapshot, off the write queue', () =
   assert.doesNotMatch(db, /func onlineBackup\(to destURL: URL[\s\S]{0,80}?dbQueue\.async \{\s*\[weak self\] in\s*guard let self = self, let src = self\.db/);
 });
 
+test('icon glyph box is fixed so the webfont swap cannot shift layout', () => {
+  assert.match(html, /\.material-symbols-outlined \{[\s\S]{0,300}?width: 1em;[\s\S]{0,80}?height: 1em;[\s\S]{0,80}?overflow: hidden;/);
+  assert.match(html, /Material\+Symbols\+Outlined[^"]*&display=block/);
+});
+
 test('highlight.js loads on demand, not on wall boot', () => {
   assert.doesNotMatch(html, /<script src="https:\/\/cdnjs[^"]*highlight\.min\.js/);
   assert.match(html, /function loadHljs\(\)/);
