@@ -230,7 +230,10 @@ final class DatabaseManager: ObservableObject {
     @discardableResult
     func writeBlobFile(hash: String, data: Data) -> Bool {
         let url = blobFileURL(hash: hash)
-        if let existing = try? Data(contentsOf: url), existing.count > 16 { return true }
+        // Existence check must NOT read the whole blob (this is called on dbQueue for
+        // image/rtf/pdf captures; a full File read used to stall the writer for seconds).
+        if let attrs = try? fm.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int, size > 16 { return true }
         do {
             try fm.createDirectory(at: blobsDir, withIntermediateDirectories: true)
             try? fm.removeItem(at: url)
@@ -780,36 +783,30 @@ final class DatabaseManager: ObservableObject {
         }
         sqlite3_finalize(stmt)
 
-        var done = 0
-        for (id, hash, img, rtf, pdf) in ids {
-            // Primary payload for images is content_hash-named; rtf/pdf use suffix keys.
-            if let img = img {
-                _ = writeBlobFile(hash: hash, data: img)
+        guard !ids.isEmpty else { return 0 }
+        // Blob file writes are I/O; do them off dbQueue, then clear the columns back on it.
+        backupQueue.async { [weak self] in
+            guard let self = self else { return }
+            for (_, hash, img, rtf, pdf) in ids {
+                if let img = img { _ = self.writeBlobFile(hash: hash, data: img) }
+                if let rtf = rtf { _ = self.writeBlobFile(hash: hash + ".rtf", data: rtf) }
+                if let pdf = pdf { _ = self.writeBlobFile(hash: hash + ".pdf", data: pdf) }
             }
-            if let rtf = rtf {
-                _ = writeBlobFile(hash: hash + ".rtf", data: rtf)
+            self.dbQueue.async {
+                guard let db = self.db else { return }
+                let upd = "UPDATE clipboard_items SET image_data=NULL, rtf_data=NULL, pdf_data=NULL WHERE id=?;"
+                var u: OpaquePointer?
+                guard sqlite3_prepare_v2(db, upd, -1, &u, nil) == SQLITE_OK else { return }
+                for (id, _, _, _, _) in ids {
+                    sqlite3_reset(u)
+                    sqlite3_clear_bindings(u)
+                    self.bindText(u, 1, id)
+                    _ = sqlite3_step(u)
+                }
+                sqlite3_finalize(u)
             }
-            if let pdf = pdf {
-                _ = writeBlobFile(hash: hash + ".pdf", data: pdf)
-            }
-            let upd = """
-            UPDATE clipboard_items SET
-              image_data = NULL,
-              rtf_data = CASE WHEN rtf_data IS NOT NULL THEN NULL ELSE rtf_data END,
-              pdf_data = CASE WHEN pdf_data IS NOT NULL THEN NULL ELSE pdf_data END
-            WHERE id = ?;
-            """
-            // Always null the large columns we externalized
-            let upd2 = "UPDATE clipboard_items SET image_data=NULL, rtf_data=NULL, pdf_data=NULL WHERE id=?;"
-            var u: OpaquePointer?
-            if sqlite3_prepare_v2(db, upd2, -1, &u, nil) == SQLITE_OK {
-                bindText(u, 1, id)
-                if sqlite3_step(u) == SQLITE_DONE { done += 1 }
-            }
-            sqlite3_finalize(u)
-            _ = upd
         }
-        return done
+        return ids.count
     }
 
     /// Archive bodies live in CAS. Drop the duplicate TEXT so list scans stay narrow.
@@ -1489,12 +1486,22 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Persist an item's CAS blobs (file I/O) before it reaches the DB writer queue.
+    func persistItemBlobs(_ item: ClipboardItem) {
+        if let img = item.imageData, !img.isEmpty { _ = writeBlobFile(hash: item.contentHash, data: img) }
+        if let rtf = item.rtfData, !rtf.isEmpty { _ = writeBlobFile(hash: item.contentHash + ".rtf", data: rtf) }
+        if let pdf = item.pdfData, !pdf.isEmpty { _ = writeBlobFile(hash: item.contentHash + ".pdf", data: pdf) }
+    }
+
     func saveItemDetailed(_ item: ClipboardItem, completion: ((ItemSaveResult) -> Void)? = nil) {
+        // File I/O first, off dbQueue, so the writer only does SQLite work.
+        persistItemBlobs(item)
         dbQueue.async { [weak self] in
             guard let self = self, let db = self.db else {
                 DispatchQueue.main.async { completion?(.failed) }
                 return
             }
+            let t0 = Date().timeIntervalSince1970
 
             var existingId = self.findIdByContentHash(item.contentHash)
             if existingId == nil,
@@ -1516,6 +1523,10 @@ final class DatabaseManager: ObservableObject {
             }
 
             let ok = self.insertNewItem(item, db: db)
+            let ms = (Date().timeIntervalSince1970 - t0) * 1000
+            if ms >= 100 {
+                UiMetrics.shared.emit("db_write", durMs: ms, ok: true, payload: ["kind": "capture"])
+            }
             DispatchQueue.main.async { completion?(ok ? .inserted : .failed) }
         }
     }
