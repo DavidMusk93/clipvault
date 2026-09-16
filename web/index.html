@@ -10,7 +10,6 @@
   <link rel="apple-touch-icon" href="/assets/keepsake-logo.jpg?v=pose1" />
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-beautify/1.15.1/beautify-html.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sql-formatter@2.3.4/dist/sql-formatter.min.js"></script>
@@ -7769,11 +7768,31 @@ window.ClipViewMasonry = Masonry;
     // task during load; the ResizeObserver reconciles any height change it causes.
     const highlightQueue = [];
     let highlightScheduled = false;
+    let hljsLoading = null;
+    /** highlight.js is ~120KB; load it on first highlight demand, not on wall boot. */
+    function loadHljs() {
+      if (globalThis.hljs) return Promise.resolve(globalThis.hljs);
+      if (hljsLoading) return hljsLoading;
+      hljsLoading = new Promise((resolve) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js';
+        s.async = true;
+        s.onload = () => resolve(globalThis.hljs);
+        s.onerror = () => resolve(null);
+        document.head.appendChild(s);
+      });
+      return hljsLoading;
+    }
     function scheduleHighlightRun() {
       if (highlightScheduled) return;
       highlightScheduled = true;
       const run = () => {
         highlightScheduled = false;
+        if (typeof hljs === 'undefined') {
+          // First demand: fetch the lib, then drain the queue that accumulated.
+          loadHljs().then((h) => { if (h && highlightQueue.length) scheduleHighlightRun(); });
+          return;
+        }
         let budget = 3;
         while (budget-- > 0 && highlightQueue.length) {
           const card = highlightQueue.shift();
