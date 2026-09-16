@@ -204,6 +204,9 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | html/rtf 墙卡 `notes-rich`（表/标题/引言）；>48KB 按 id hydrate（one-shot，空体禁止循环重拉） | 当浏览器（信任 `style` / 可点 `<a>` / 远程 `<img>` / `on*` / SVG / 表单） |
 | 有序列 shortest-col 绝对定位；prepend 重算坐标 | 新卡堆某一列 / flex 空列一条线 |
 | 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
+| 卡片晚到高度（图片/表格/OCR/字体）→ `dataset.packedH` + ResizeObserver 只 repack 该列 | 全量 rebuild；预览 `img` 不限高（`.md-preview img` 必须 max-height） |
+| 745KB 笔记编辑器首屏不加载；打开笔记才拉 `notes-editor.js` | 把编辑器 bundle 塞进 `<head>` 挡墙首屏 |
+
 | 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
 
 ### URL 双面（只在这里写一遍）
