@@ -431,7 +431,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 ## Android
 
-路径 `android/`。备份阅读器 + 前台粘贴/分享；**不做**后台剪贴板监听。SAF 优先 `ClipVault/cvbak`。发布 `.github/workflows/android-apk.yml`。
+路径 `android/`。备份阅读器 + 前台粘贴/分享；**不做**后台剪贴板监听。SAF 优先 `ClipVault/cvbak`。发布 `.github/workflows/android-apk.yml`。详情 WebView：JS 关；与墙同一策略——不信任 `style`、不渲染可点 `<a>`、不拉远程 `<img>`、删 `on*`/SVG/表单。
 
 ---
 

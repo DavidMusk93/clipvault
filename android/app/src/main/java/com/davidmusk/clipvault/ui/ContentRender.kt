@@ -506,7 +506,8 @@ private fun DetailNotesHtml(html: String) {
                   ul ul ul{list-style-type:square;}
                   li{margin:0.14em 0;line-height:1.38;}
                   b,strong{font-weight:600;}
-                  a{color:#0071e3;text-decoration:none;}
+                  .url-inert{color:inherit;text-decoration:none;}
+                  .html-img-ph{display:inline-block;font-size:12px;color:#6e6e73;background:rgba(60,60,67,0.08);padding:1px 6px;border-radius:4px;}
                   pre,code{font-family:ui-monospace,Menlo,monospace;font-size:13px;}
                   pre{padding:10px;overflow:auto;white-space:pre;background:#eceef0;border-radius:8px;}
                   img{max-width:100%;height:auto;border-radius:8px;}
@@ -530,20 +531,58 @@ private fun DetailNotesHtml(html: String) {
     )
 }
 
-/** Extract body + drop Writer chrome (style/spacer), keep list structure. */
+/** Active/remote tags whose whole subtree must not reach the detail WebView. */
+private val NOTES_UNSAFE_TAGS = listOf(
+    "script", "style", "iframe", "object", "embed", "applet", "form", "input", "button",
+    "select", "textarea", "option", "optgroup", "datalist", "output", "link", "meta",
+    "base", "title", "template", "noscript", "svg", "math", "canvas", "audio", "video",
+    "source", "track", "picture", "map", "area", "frame", "frameset", "portal", "dialog", "slot",
+)
+
+/** Regex twin of web/notes-render.mjs `stripDangerousMarkup`. */
+private fun stripUnsafeNotesTags(html: String): String {
+    val names = NOTES_UNSAFE_TAGS.joinToString("|")
+    val paired = Regex("(?is)<($names)\\b.*?</\\1>")
+    val orphan = Regex("(?is)</?(?:$names)\\b[^>]*>")
+    var s = html
+    var prev: String
+    var guard = 0
+    do {
+        prev = s
+        s = s.replace(paired, "").replace(orphan, "")
+    } while (s != prev && guard++ < 4)
+    return s
+}
+
+/**
+ * Extract body + drop Writer chrome (style/spacer), keep list structure.
+ * Cards are not browsers: no `on*`, no navigable `<a>`, no remote media, no trusted style.
+ */
 private fun notesHtmlFragment(html: String): String {
     var s = html
     val body = Regex("(?is)<body[^>]*>(.*)</body>").find(s)?.groupValues?.getOrNull(1)
     if (body != null) s = body
+    s = stripUnsafeNotesTags(s)
     s = s
-        .replace(Regex("(?is)<style[^>]*>.*?</style>"), "")
-        .replace(Regex("(?is)<script[^>]*>.*?</script>"), "")
         .replace(Regex("(?is)<span[^>]*Apple-tab-span[^>]*>.*?</span>"), "")
         .replace(Regex("(?is)<span[^>]*Apple-converted-space[^>]*>(.*?)</span>"), "$1")
         .replace(Regex("(?is)<p[^>]*>\\s*(?:<br\\s*/?>|&nbsp;|\\s|</?span[^>]*>)*</p>"), "")
-        .replace(Regex("\\sclass=\"[^\"]*\""), "")
-        .replace(Regex("\\sstyle=\"[^\"]*\""), "")
+        // Presentation: quoted + unquoted, class, and every inline event handler.
+        .replace(Regex("(?i)\\sclass\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"), "")
+        .replace(Regex("(?i)\\sstyle\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"), "")
+        .replace(Regex("(?i)\\s(bgcolor|background|color|face|size|width|height|align)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"), "")
+        .replace(Regex("(?i)\\son[a-z]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"), "")
+        // No navigable links; media collapses to a layout-stable placeholder.
+        .replace(Regex("(?is)<a\\b[^>]*>"), "<span class=\"url-inert\">")
+        .replace(Regex("(?is)</a>"), "</span>")
+        .replace(Regex("(?is)<img\\b[^>]*>")) { m -> notesImagePlaceholder(m.value) }
     return s.trim()
+}
+
+private fun notesImagePlaceholder(tag: String): String {
+    val g = Regex("(?i)\\balt\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s>]+))").find(tag)?.groupValues
+    val alt = listOfNotNull(g?.getOrNull(2), g?.getOrNull(3), g?.getOrNull(4)).firstOrNull { it.isNotEmpty() } ?: ""
+    return if (alt.isNotEmpty()) "<span class=\"html-img-ph\">［图：$alt］</span>" else "<span class=\"html-img-ph\">［图］</span>"
 }
 
 @Composable
