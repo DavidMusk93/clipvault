@@ -87,6 +87,16 @@ test('metrics separate latency (dur_ms) from values and budgets', () => {
   assert.match(panelJs, /_cls\$\/\.test\(name\)\) \{[\s\S]{0,160}?ev\.value/);
 });
 
+test('wall load/hydrate and SSE lifecycle are instrumented', () => {
+  assert.match(html, /nm\('wall_load', \{ dur_ms: performance\.now\(\) - wallBootAt/);
+  assert.match(html, /wallLoadSent/);
+  assert.match(html, /nm\('wall_hydrate', \{ dur_ms: performance\.now\(\) - t0/);
+  assert.match(html, /nm\('sse_state', \{ ok: true, payload: \{ kind: 'wall', phase: 'open'/);
+  assert.match(html, /nm\('sse_state', \{ ok: false, payload: \{ kind: 'wall', phase: closed \? 'reconnect' : 'error'/);
+  assert.match(html, /nm\('sse_state', \{ ok: false, payload: \{ kind: 'wall', phase: 'watch'/);
+  assert.match(html, /reconnects/);
+});
+
 test('frontend wires metrics without sending titles', () => {
   assert.match(html, /assets\/notes-metrics\.js/);
   assert.match(html, /ClipNotesMetrics/);
