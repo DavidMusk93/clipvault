@@ -518,7 +518,8 @@ final class UiMetrics {
     private func rollupLocked() {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let completeHour = (now - Self.detailRetentionMs) / 3_600_000
-        let through = metaInt("rollup_through_hour") ?? (completeHour - 1)
+        // -1 = never rolled: first pass folds every hour older than the detail window.
+        let through = metaInt("rollup_through_hour") ?? -1
         guard completeHour - 1 > through else { return }
         let from = (through + 1) * 3_600_000
         let to = completeHour * 3_600_000

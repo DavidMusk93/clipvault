@@ -96,6 +96,8 @@ test('detail is bounded by hourly rollups + incremental vacuum', () => {
   assert.match(swift, /INSERT OR REPLACE INTO ui_rollup/);
   assert.match(swift, /func mergeRollupLocked/);
   assert.match(swift, /rollup_through_hour/);
+  // First pass must fold history, not no-op on a completeHour-1 default.
+  assert.match(swift, /metaInt\("rollup_through_hour"\) \?\? -1/);
   assert.match(swift, /incremental_vacuum/);
   assert.match(swift, /auto_vacuum=INCREMENTAL/);
 });
