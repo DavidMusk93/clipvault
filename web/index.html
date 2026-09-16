@@ -7186,7 +7186,7 @@ window.ClipViewMasonry = Masonry;
       cardCache.set(item.id, next);
       observeCard(next);
       wireThumb(next, item);
-      highlightCard(next);
+      scheduleHighlight(next);
       if (old && old.parentNode) {
         old.parentNode.replaceChild(next, old);
         const after = Masonry.measureHeight(next);
@@ -7501,7 +7501,7 @@ window.ClipViewMasonry = Masonry;
           // preserve dataset force markers none — mode is in clipDisplayMode
           wireThumb(card, item);
           wireFormatToolbar(card, item);
-          highlightCard(card);
+          scheduleHighlight(card);
           // Re-pack columns with the anchor-preserving relayout (never full rebuild).
           if (relayout) {
             try {
@@ -7746,6 +7746,31 @@ window.ClipViewMasonry = Masonry;
       return card;
     }
 
+    // Defer syntax highlighting to idle so a page of code cards does not become one long
+    // task during load; the ResizeObserver reconciles any height change it causes.
+    const highlightQueue = [];
+    let highlightScheduled = false;
+    function scheduleHighlightRun() {
+      if (highlightScheduled) return;
+      highlightScheduled = true;
+      const run = () => {
+        highlightScheduled = false;
+        let budget = 3;
+        while (budget-- > 0 && highlightQueue.length) {
+          const card = highlightQueue.shift();
+          if (card && card.isConnected) highlightCard(card);
+        }
+        if (highlightQueue.length) scheduleHighlightRun();
+      };
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 250 });
+      else window.setTimeout(run, 60);
+    }
+    function scheduleHighlight(card) {
+      if (!card) return;
+      highlightQueue.push(card);
+      scheduleHighlightRun();
+    }
+
     function highlightCard(card) {
       if (typeof hljs === 'undefined') return;
       card.querySelectorAll('pre code:not([data-hljs]), .md-preview pre code:not([data-hljs])').forEach(block => {
@@ -7797,7 +7822,7 @@ window.ClipViewMasonry = Masonry;
       if (c && c.parentNode) c.parentNode.replaceChild(next, c);
       cardCache.set(item.id, next);
       observeCard(next);
-      highlightCard(next);
+      scheduleHighlight(next);
       maybeHydrateHtmlClip(item, next);
       return next;
     }

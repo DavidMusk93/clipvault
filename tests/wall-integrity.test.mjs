@@ -129,7 +129,7 @@ test('card media is height-locked and late growth is reconciled, not rebuilt', (
   assert.match(html, /wireThumb\(card, item\);/);
 });
 
-test('online backup copies from a read-only snapshot, off the write queue', () => {
+test('syntax highlighting is deferred to idle, not run during card build', () => {\n  assert.match(html, /function scheduleHighlight\\(card\\)/);\n  assert.match(html, /requestIdleCallback\\(run, \\{ timeout: 250 \\}\\)/);\n  assert.match(html, /scheduleHighlight\\(next\\)/);\n  assert.doesNotMatch(html, /observeCard\\(next\\);\\n\\s*highlightCard\\(next\\);/);\n});\n\ntest('online backup copies from a read-only snapshot, off the write queue', () => {"}]
   assert.match(db, /backupQueue = DispatchQueue\(label: "com\.clipvault\.database\.backup"/);
   assert.match(db, /sqlite3_open_v2\(self\.dbPath\.path, &src, SQLITE_OPEN_READONLY/);
   assert.match(db, /private func onlineBackupCopy\(/);
