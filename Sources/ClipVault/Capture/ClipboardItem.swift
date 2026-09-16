@@ -58,6 +58,9 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let linkCount: Int
     /// Active public share_links row exists. Judgment overlay, not capture.
     let shared: Bool
+    /// Set by list/search reads when the row's `html_content` was trimmed for payload
+    /// budget. nil = unknown (by-id, non-list), false = no body to hydrate.
+    let htmlOmitted: Bool?
     
     init(id: UUID = UUID(),
          timestamp: Date = Date(),
@@ -83,7 +86,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
          pinnedAt: Date? = nil,
          archiveHtmlSha: String? = nil,
          linkCount: Int = 0,
-         shared: Bool = false) {
+         shared: Bool = false,
+         htmlOmitted: Bool? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.type = type
@@ -109,6 +113,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.archiveHtmlSha = archiveHtmlSha
         self.linkCount = max(0, linkCount)
         self.shared = shared
+        self.htmlOmitted = htmlOmitted
     }
 
     /// Visible-text identity for latest-alive. RTF/HTML wrappers must not mint a new row.

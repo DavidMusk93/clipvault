@@ -1507,9 +1507,10 @@ class WebServer {
         dict["archived"] = archived
         if item.type != .url, let html = item.htmlContent, !archived {
             dict["htmlContent"] = html
-        } else if !archived, item.type == .html || item.type == .rtf, item.htmlContent == nil {
-            // List SQL omitted a large clipboard HTML body; wall hydrates via GET ?id=.
-            dict["htmlOmitted"] = true
+        } else if !archived, item.type == .html || item.type == .rtf {
+            // true  = list trimmed a large body (>cap); wall hydrates via GET ?id=.
+            // false = genuinely no body; wall must not re-fetch an empty row.
+            dict["htmlOmitted"] = item.htmlOmitted == true
         }
         _ = includeArchiveHTML
         if let ocr = item.ocrText { dict["ocrText"] = ocr }

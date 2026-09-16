@@ -185,6 +185,20 @@ test('list SQL ships html/rtf clipboard HTML up to 48KB', () => {
   assert.match(webServer, /htmlOmitted/);
 });
 
+test('htmlOmitted is explicit: trimmed body vs empty row', () => {
+  const db = fs.readFileSync(path.join(root, 'Sources/ClipVault/Store/DatabaseManager.swift'), 'utf8');
+  assert.match(db, /private static let listHtmlOmittedSQL =/);
+  assert.match(db, /private static let listHtmlOmittedSQLAliased =/);
+  const tailUses = (db.match(/\\\(Self\.listTailSQL\), \\\(Self\.listHtmlOmittedSQL\)/g) || []).length;
+  assert.equal(tailUses, 3, 'runSearchLike/runList/runPinned must append the omitted flag');
+  assert.match(db, /listTailSQLAliased\), \\\(Self\.listHtmlOmittedSQLAliased\)/);
+  assert.match(db, /if colCount >= 22 \{\s*htmlOmitted = sqlite3_column_int\(stmt, 21\) != 0/);
+  const item = fs.readFileSync(path.join(root, 'Sources/ClipVault/Capture/ClipboardItem.swift'), 'utf8');
+  assert.match(item, /let htmlOmitted: Bool\?/);
+  const webServer = fs.readFileSync(path.join(root, 'Sources/ClipVault/HTTP/WebServer.swift'), 'utf8');
+  assert.match(webServer, /dict\["htmlOmitted"\] = item\.htmlOmitted == true/);
+});
+
 test('by-id hydrate bypasses the list HTML cap (full row, not listHtmlSQL)', () => {
   const db = fs.readFileSync(path.join(root, 'Sources/ClipVault/Store/DatabaseManager.swift'), 'utf8');
   const start = db.indexOf('private func fetchItemByIdLocked');
