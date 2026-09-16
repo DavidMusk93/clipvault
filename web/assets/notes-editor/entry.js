@@ -494,6 +494,7 @@ async function mount(root, opts) {
   let split = loadSplit()
   let syncing = false
   let paintingPreview = false
+  let firstPaintDone = false
 
   function metric(name, extra) {
     if (onMetric) onMetric(name, extra || {})
@@ -617,8 +618,10 @@ async function mount(root, opts) {
     let reused = 0
     let blocks = []
     let compileMs = 0
+    let compileOk = true
     if (text.trim()) {
       const r = compileMarkdownBlocks(text, { marked, purify: DOMPurify }, { enhance: enhancePreview })
+      compileOk = !!r.ok
       blocks = r.ok ? r.blocks : []
       compiled = r.stats ? r.stats.compiled : 0
       reused = r.stats ? r.stats.reused : 0
@@ -626,9 +629,12 @@ async function mount(root, opts) {
     }
     const total = compiled + reused
     const ratio = total ? Math.round((reused / total) * 100) / 100 : 0
+    const renderKind = firstPaintDone ? 'keystroke' : 'first'
+    firstPaintDone = true
     const mdPayload = { chars: text.length, n: blocks.length, compiled, reused, ratio }
     if (text.trim()) {
-      metric('notes_md_compile', { dur_ms: compileMs, payload: { ...mdPayload, phase: 'compile' } })
+      metric('notes_md_compile', { dur_ms: compileMs, value: ratio, payload: { ...mdPayload, phase: 'compile', kind: renderKind } })
+      if (!compileOk) metric('notes_md_error', { ok: false, payload: { reason: 'compile', n: blocks.length } })
     }
     preview.render(blocks, {
       scrollEl: previewEl,
@@ -637,10 +643,12 @@ async function mount(root, opts) {
       onPainted: finish,
     })
     const dur = performance.now() - t
+    const paintMs = Math.max(0, dur - compileMs)
     metric('notes_preview_ms', {
       dur_ms: dur,
-      payload: { ...mdPayload, phase: 'paint' },
+      payload: { ...mdPayload, phase: 'paint', kind: renderKind },
     })
+    if (paintMs >= 4) metric('notes_preview_paint', { dur_ms: paintMs, payload: { n: blocks.length, phase: 'paint', kind: renderKind } })
     if (dur > 16) metric('notes_input_to_preview', { dur_ms: dur })
   }
 
