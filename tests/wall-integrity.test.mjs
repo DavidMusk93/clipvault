@@ -147,6 +147,15 @@ test('online backup copies from a read-only snapshot, off the write queue', () =
   assert.doesNotMatch(db, /func onlineBackup\(to destURL: URL[\s\S]{0,80}?dbQueue\.async \{\s*\[weak self\] in\s*guard let self = self, let src = self\.db/);
 });
 
+test('maintenance is bounded and instrumented', () => {
+  assert.match(db, /drainDuplicates\(maxBatches: 2\)/);
+  assert.match(db, /UiMetrics\.shared\.emit\("db_maint"/);
+  assert.match(db, /payload: \["kind": "tick"/);
+  assert.match(db, /payload: \["kind": "optimize"\]/);
+  // Heavy row-scan work moved to its own dbQueue block.
+  assert.match(db, /guard let self, self\.db != nil else \{ return \}\n            _ = self\.peelArchiveHtmlOutOfRow\(\)/);
+});
+
 test('440-image peer clump stays 440 cards on a capture-time keyset', () => {
   const rows = [];
   for (let i = 0; i < 20; i++) rows.push({ id: `T1-${String(i).padStart(3, '0')}`, ts: 3000 - i * 0.01, type: 'text' });

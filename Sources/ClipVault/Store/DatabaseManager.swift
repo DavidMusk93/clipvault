@@ -999,8 +999,11 @@ final class DatabaseManager: ObservableObject {
     private func runMaintenanceTick(forceOptimize: Bool) {
         guard db != nil else { return }
         maintenanceTicks += 1
+        let tickStart = Date().timeIntervalSince1970
 
-        let removed = drainDuplicates(maxBatches: 4)
+        // Fast, bounded steps only — keep the contiguous dbQueue block short so user writes
+        // interleave instead of waiting behind a multi-second maintenance run.
+        let removed = drainDuplicates(maxBatches: 2)
         if removed > 0 {
             print("[DatabaseManager] maintenance: dedupe_removed=\(removed)")
         }
@@ -1009,25 +1012,40 @@ final class DatabaseManager: ObservableObject {
         if purged > 0 {
             print("[DatabaseManager] maintenance: trash_purged=\(purged)")
         }
-        _ = pruneOperationLogs(maxAgeDays: 90, limit: 500)
+        let pruned = pruneOperationLogs(maxAgeDays: 90, limit: 500)
 
-        // Passive WAL checkpoint every tick (cheap).
+        // Passive WAL checkpoint every tick (cheap; never blocks writers).
         execQuiet("PRAGMA wal_checkpoint(PASSIVE);")
+        _ = migrateInlineBlobsBatch(limit: 2)
 
-        // Keep peeling any residual inline BLOBs (new code paths should not insert them).
-        _ = migrateInlineBlobsBatch(limit: 4)
-        _ = peelArchiveHtmlOutOfRow()
-        // incremental_vacuum is a no-op unless auto_vacuum=INCREMENTAL (2). Never full VACUUM.
-        let autoVac = scalarInt64("PRAGMA auto_vacuum;") ?? 0
-        if autoVac == 2 {
-            _ = execQuiet("PRAGMA incremental_vacuum(32);")
+        // Heavier row-scan / vacuum work is a separate queue block so a write can run between.
+        dbQueue.async { [weak self] in
+            guard let self, self.db != nil else { return }
+            _ = self.peelArchiveHtmlOutOfRow()
+            let autoVac = self.scalarInt64("PRAGMA auto_vacuum;") ?? 0
+            if autoVac == 2 {
+                _ = self.execQuiet("PRAGMA incremental_vacuum(32);")
+            }
+            let ms = (Date().timeIntervalSince1970 - tickStart) * 1000
+            if ms >= 200 {
+                UiMetrics.shared.emit("db_maint", durMs: ms, ok: true,
+                                      payload: ["kind": "tick", "n": removed + purged + pruned])
+            }
         }
 
         if forceOptimize || maintenanceTicks % Self.optimizeEveryNMaintenances == 0 {
-            runOptimize()
-            // Occasional FTS optimize (merge segments) — also batched by SQLite internally.
-            execQuiet("INSERT INTO clipboard_fts(clipboard_fts) VALUES('optimize');")
-            runAnalyze()
+            // FTS/ANALYZE are the most expensive maintenance steps — own block, own metric.
+            dbQueue.async { [weak self] in
+                guard let self, self.db != nil else { return }
+                let o0 = Date().timeIntervalSince1970
+                self.runOptimize()
+                self.execQuiet("INSERT INTO clipboard_fts(clipboard_fts) VALUES('optimize');")
+                self.runAnalyze()
+                let ms = (Date().timeIntervalSince1970 - o0) * 1000
+                if ms >= 200 {
+                    UiMetrics.shared.emit("db_maint", durMs: ms, ok: true, payload: ["kind": "optimize"])
+                }
+            }
         }
     }
 
