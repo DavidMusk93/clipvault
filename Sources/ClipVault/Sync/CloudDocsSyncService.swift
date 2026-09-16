@@ -649,6 +649,13 @@ final class CloudDocsSyncService {
             payload: ["n": pushed.n + pulled.n, "reason": reason]
         )
         let st = buildStatus()
+        // Outbox backlog is a value, not a duration.
+        UiMetrics.shared.emit(
+            "sync_queue_depth",
+            value: Double(st.outboxPending),
+            ok: st.outboxPending == 0,
+            payload: ["n": st.peers.count]
+        )
         // One row per cycle (worst peer), not one per peer — lag is a value, not a duration.
         if let worst = st.peers.max(by: { $0.lag < $1.lag }) {
             UiMetrics.shared.emit(
