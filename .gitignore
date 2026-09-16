@@ -27,6 +27,10 @@ http-front/target/
 /build/
 build/DerivedData/
 
+## Node (web test deps only; app ships via ClipVaultServer)
+node_modules/
+npm-debug.log*
+
 ## Python virtual environments & caches
 tools/paddleocr_venv/
 **/__pycache__/

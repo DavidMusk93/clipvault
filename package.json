@@ -1,0 +1,13 @@
+{
+  "name": "clipvault-web-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Dev-only Node deps for ClipVault web regression tests. Not shipped; the app is served by ClipVaultServer.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
