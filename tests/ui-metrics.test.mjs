@@ -89,6 +89,18 @@ test('metrics separate latency (dur_ms) from values and budgets', () => {
   assert.match(panelJs, /_cls\$\/\.test\(name\)\) \{[\s\S]{0,160}?ev\.value/);
 });
 
+test('trace correlation id threads wall vs panel', () => {
+  assert.match(html, /function newTrace\(\)/);
+  assert.match(html, /let pageTrace = newTrace\(\)/);
+  assert.match(html, /let sheetTrace = ''/);
+  assert.match(html, /n\.startsWith\('wall_'\)[\s\S]{0,140}?e\.trace = pageTrace/);
+  assert.match(html, /n\.startsWith\('notes_'\)[\s\S]{0,140}?e\.trace = sheetTrace \|\| pageTrace/);
+  assert.match(html, /M\.setTrace\(sheetTrace\)/);
+  assert.match(metricsJs, /setTrace\(t\)/);
+  assert.match(swift, /func sanitizeTrace/);
+  assert.match(swift, /trace TEXT/);
+});
+
 test('wall load/hydrate and SSE lifecycle are instrumented', () => {
   assert.match(html, /nm\('wall_load', \{ dur_ms: performance\.now\(\) - wallBootAt/);
   assert.match(html, /wallLoadSent/);
