@@ -7827,18 +7827,21 @@ window.ClipViewMasonry = Masonry;
         const one = await fetchClipById(ids[0]);
         return one ? [one] : [];
       }
+      const byId = new Map();
       try {
         const res = await liveGet(`${API}/api/clips?ids=${ids.map(encodeURIComponent).join(',')}`);
         if (res.ok) {
           const data = await res.json();
           const items = Array.isArray(data) ? data : (data.items || []);
           const want = new Set(ids);
-          const got = items.filter((it) => it && want.has(it.id));
-          if (got.length) return got;
+          for (const it of items) if (it && want.has(it.id)) byId.set(it.id, it);
         }
       } catch (_) {}
+      // Old binary ignores ?ids=, or a body is missing — fill only the gaps by id.
       const out = [];
       for (const id of ids) {
+        const hit = byId.get(id);
+        if (hit) { out.push(hit); continue; }
         try { const one = await fetchClipById(id); if (one) out.push(one); } catch (_) {}
       }
       return out;

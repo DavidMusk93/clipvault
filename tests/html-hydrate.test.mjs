@@ -16,13 +16,15 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const indexHtml = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
 
-/** Pull `function name(...) { ... }` out of the inline script (brace-matched). */
+/** Pull `[async] function name(...) { ... }` out of the inline script (brace-matched). */
 function extractFunctionSource(src, name) {
-  const start = src.indexOf(`function ${name}(`);
+  const asyncAt = src.indexOf(`async function ${name}(`);
+  const start = asyncAt >= 0 ? asyncAt : src.indexOf(`function ${name}(`);
   assert.ok(start >= 0, `${name} not found in index.html`);
   const open = src.indexOf('{', start);
   let depth = 0;
   for (let i = open; i < src.length; i++) {
+
     if (src[i] === '{') depth++;
     else if (src[i] === '}') {
       depth--;
@@ -33,6 +35,7 @@ function extractFunctionSource(src, name) {
 }
 
 const flushSrc = extractFunctionSource(indexHtml, 'flushHtmlHydrate');
+const fetchByIdsSrc = extractFunctionSource(indexHtml, 'fetchClipsByIds');
 
 function buildFlush(state) {
   const factory = new Function(
@@ -188,4 +191,73 @@ test('an empty pending map short-circuits without fetching', async () => {
   })();
   await tick();
   assert.equal(fetched, 0);
+});
+
+function buildFetchClipsByIds(state) {
+  const factory = new Function(
+    'liveGet',
+    'fetchClipById',
+    'API',
+    `${fetchByIdsSrc}\nreturn fetchClipsByIds;`,
+  );
+  return factory(state.liveGet, state.fetchClipById, state.API ?? '/api');
+}
+
+test('a complete batch is one request with no per-id fallback', async () => {
+  let batch = 0;
+  let perId = 0;
+  const fn = buildFetchClipsByIds({
+    liveGet: async (url) => {
+      batch += 1;
+      assert.match(url, /\?ids=a,b/);
+      return {
+        ok: true,
+        json: async () => ({ items: [{ id: 'a', htmlContent: '<p>A</p>' }, { id: 'b', htmlContent: '<p>B</p>' }] }),
+      };
+    },
+    fetchClipById: async (id) => { perId += 1; return { id }; },
+  });
+  const out = await fn(['a', 'b']);
+  assert.deepEqual(out.map((i) => i.id), ['a', 'b']);
+  assert.equal(batch, 1);
+  assert.equal(perId, 0);
+});
+
+test('ids missing from a partial batch are filled per-id (old binary)', async () => {
+  let batch = 0;
+  const perId = [];
+  const fn = buildFetchClipsByIds({
+    liveGet: async () => {
+      batch += 1;
+      return { ok: true, json: async () => ({ items: [{ id: 'a', htmlContent: '<p>A</p>' }] }) };
+    },
+    fetchClipById: async (id) => { perId.push(id); return { id, htmlContent: `<p>${id}</p>` }; },
+  });
+  const out = await fn(['a', 'b', 'c']);
+  assert.deepEqual(out.map((i) => i.id).sort(), ['a', 'b', 'c']);
+  assert.deepEqual(perId, ['b', 'c'], 'only the gaps are re-fetched');
+  assert.equal(batch, 1);
+});
+
+test('a failed batch falls back to per-id for every id', async () => {
+  const perId = [];
+  const fn = buildFetchClipsByIds({
+    liveGet: async () => { throw new Error('network'); },
+    fetchClipById: async (id) => { perId.push(id); return { id, htmlContent: `<p>${id}</p>` }; },
+  });
+  const out = await fn(['a', 'b']);
+  assert.deepEqual(out.map((i) => i.id), ['a', 'b']);
+  assert.deepEqual(perId, ['a', 'b']);
+});
+
+test('a per-id failure yields a partial result without throwing', async () => {
+  const fn = buildFetchClipsByIds({
+    liveGet: async () => { throw new Error('network'); },
+    fetchClipById: async (id) => {
+      if (id === 'b') throw new Error('gone');
+      return { id, htmlContent: `<p>${id}</p>` };
+    },
+  });
+  const out = await fn(['a', 'b', 'c']);
+  assert.deepEqual(out.map((i) => i.id), ['a', 'c']);
 });
