@@ -4987,6 +4987,9 @@ window.ClipViewMasonry = Masonry;
         if (reset) {
           cardCache.clear();
           colHeights = null;
+          // A fresh page may carry bodies the previous page omitted; allow one retry.
+          htmlHydrateTried.clear();
+          htmlHydrateQueue.length = 0;
           rebuildFromData({ preserveScroll: false });
         } else {
           // Only brand-new ids — never re-paint page1 on load-more.
@@ -7750,29 +7753,54 @@ window.ClipViewMasonry = Masonry;
     }
 
     const htmlHydrating = new Set();
+    /** Ids we already asked for — an empty/archived body must not loop forever. */
+    const htmlHydrateTried = new Set();
+    const HTML_HYDRATE_CONCURRENCY = 3;
+    const htmlHydrateQueue = [];
+    let htmlHydrateActive = 0;
+
     function clipNeedsHtmlHydrate(item) {
       if (!item) return false;
       if (item.htmlContent) return false;
       if (item.type !== 'html' && item.type !== 'rtf') return false;
+      // Archived rows never expose their capture HTML on the wall.
+      if (item.archived) return false;
+      if (htmlHydrateTried.has(item.id)) return false;
       return item.htmlOmitted !== false;
     }
+
     /** Large html/rtf bodies are omitted from the list payload; fetch full row by id. */
     function maybeHydrateHtmlClip(item, card) {
       if (!clipNeedsHtmlHydrate(item)) return;
       const id = item.id;
       if (!id || htmlHydrating.has(id)) return;
+      htmlHydrateTried.add(id);
       htmlHydrating.add(id);
-      fetchClipById(id).then((full) => {
-        if (!full || !full.htmlContent) return;
-        const idx = clips.findIndex((c) => c.id === id);
-        const live = Object.assign({}, idx >= 0 ? clips[idx] : item, {
-          htmlContent: full.htmlContent,
-          htmlOmitted: false,
+      htmlHydrateQueue.push({ id, item, card });
+      pumpHtmlHydrate();
+    }
+
+    /** Bounded worker: a page of tall HTML cards must not fire N parallel fetches. */
+    function pumpHtmlHydrate() {
+      while (htmlHydrateActive < HTML_HYDRATE_CONCURRENCY && htmlHydrateQueue.length) {
+        const job = htmlHydrateQueue.shift();
+        htmlHydrateActive += 1;
+        fetchClipById(job.id).then((full) => {
+          if (!full || !full.htmlContent) return;
+          const idx = clips.findIndex((c) => c.id === job.id);
+          const live = Object.assign({}, idx >= 0 ? clips[idx] : job.item, {
+            htmlContent: full.htmlContent,
+            htmlOmitted: false,
+          });
+          if (idx >= 0) clips[idx] = live;
+          const el = cardCache.get(job.id) || job.card;
+          if (el) repaintCardBody(el, live);
+        }).catch(() => {}).finally(() => {
+          htmlHydrating.delete(job.id);
+          htmlHydrateActive -= 1;
+          pumpHtmlHydrate();
         });
-        if (idx >= 0) clips[idx] = live;
-        const el = cardCache.get(id) || card;
-        if (el) repaintCardBody(el, live);
-      }).catch(() => {}).finally(() => { htmlHydrating.delete(id); });
+      }
     }
 
     /**
