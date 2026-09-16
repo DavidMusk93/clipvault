@@ -10,6 +10,7 @@ import { src, root } from './helpers/src.mjs';
 
 const metricsJs = readFileSync(join(root, 'web/assets/notes-metrics.js'), 'utf8');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
+const panelJs = readFileSync(join(root, 'web/assets/metrics-panel.js'), 'utf8');
 const swift = src('UiMetrics.swift');
 const web = src('WebServer.swift');
 const backup = src('CloudDocsBackupService.swift');
@@ -53,6 +54,37 @@ test('payload forbids note content keys', () => {
   assert.match(metricsJs, /FORBIDDEN/);
   assert.match(metricsJs, /body\|title\|markdown/);
   assert.doesNotMatch(metricsJs, /textContent|getMarkdown\(\)/);
+});
+
+test('metrics separate latency (dur_ms) from values and budgets', () => {
+  // Store columns + additive migration.
+  assert.match(swift, /value REAL/);
+  assert.match(swift, /over INTEGER/);
+  assert.match(swift, /trace TEXT/);
+  assert.match(swift, /ensureColumn\("ui_events", "value", "REAL"\)/);
+  assert.match(swift, /func percentileLocked\(column: String/);
+  assert.match(swift, /p95_ms/);
+  assert.match(swift, /ok_rate/);
+  assert.match(swift, /func httpRoutesLocked/);
+
+  // Wire format carries value/over/trace.
+  assert.match(metricsJs, /ev\.value = extra\.value/);
+  assert.match(metricsJs, /ev\.over = extra\.over/);
+  assert.match(metricsJs, /ev\.trace = String\(extra\.trace\)/);
+
+  // CLS is a value, not a fake duration.
+  assert.match(metricsJs, /emit\('notes_cls', \{\s*value: v,/);
+  assert.doesNotMatch(metricsJs, /notes_cls', \{\s*dur_ms: e\.value \* 1000/);
+  assert.match(html, /nm\('wall_cls', \{\s*value: clsValue,/);
+  assert.doesNotMatch(html, /nm\('wall_cls', \{\s*dur_ms: acc \* 1000/);
+  assert.match(html, /nm\('sheet_cls', \{\s*value,/);
+
+  // notes_close reports held time as a value; animation has its own latency.
+  assert.match(html, /nm\('notes_close', \{ value: held/);
+  assert.match(html, /nm\('notes_close_anim', \{ dur_ms: animMs/);
+
+  // Consumer uses `value` for CLS thresholds.
+  assert.match(panelJs, /_cls\$\/\.test\(name\)\) \{[\s\S]{0,160}?ev\.value/);
 });
 
 test('frontend wires metrics without sending titles', () => {
