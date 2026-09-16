@@ -25,6 +25,16 @@ function extractInlineScripts(src) {
   return scripts;
 }
 
+test('sessions embed mode + header reserve space before first paint (no CLS)', () => {
+  // embed class must be set in <head>, before .top renders, or .app grows 52px late.
+  assert.match(html, /<title>[\s\S]{0,200}?classList\.add\("embed"\)/);
+  // header keeps its space via visibility, not display:none, so showing it cannot shift .thread.
+  assert.match(html, /\.session-head\.is-empty \{ visibility: hidden/);
+  assert.match(html, /head\.classList\.add\("is-empty"\)/);
+  assert.match(html, /head\.classList\.remove\("is-empty"\)/);
+  assert.match(html, /min-height: 100vh/);
+});
+
 test('sessions.html inline module passes node --check', () => {
   const scripts = extractInlineScripts(html);
   assert.ok(scripts.length >= 1, 'expected inline module script');
