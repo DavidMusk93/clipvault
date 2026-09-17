@@ -3772,6 +3772,39 @@ final class DatabaseManager: ObservableObject {
         "scroll_checkpoint", "highlight_add", "highlight_update", "highlight_delete", "comment",
     ]
 
+    /// Wall resume affordance: last scroll position per item, read from the
+    /// `reader_state` cache in one IN(...) query. Missing row = never opened in
+    /// the View. Only returns entries worth resuming (3%–96%) so a card that was
+    /// merely peeked at stays a plain「查看」.
+    func readerProgressMap(ids: [UUID]) -> [String: [String: Any]] {
+        guard !ids.isEmpty else { return [:] }
+        var out: [String: [String: Any]] = [:]
+        performReadSync {
+            guard let db = self.readDB ?? self.db else { return }
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            var stmt: OpaquePointer?
+            let sql = "SELECT id, reader_state FROM clipboard_items WHERE id IN (\(placeholders));"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            for (i, id) in ids.enumerated() { self.bindText(stmt, Int32(i + 1), id.uuidString) }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                      let raw = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }),
+                      let data = raw.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let pos = obj["pos"] as? [String: Any] else { continue }
+                let ratio = (pos["ratio"] as? Double) ?? (pos["ratio"] as? NSNumber)?.doubleValue ?? 0
+                let pct = Int((ratio * 100).rounded())
+                guard pct >= 3, pct <= 96 else { continue }
+                var entry: [String: Any] = ["pct": pct]
+                if let h = pos["headingText"] as? String, !h.isEmpty { entry["heading"] = h }
+                else if let q = pos["quote"] as? String, !q.isEmpty { entry["quote"] = q }
+                out[idStr] = entry
+            }
+        }
+        return out
+    }
+
     func fetchReaderBundle(id: UUID) -> (state: [String: Any], ops: [[String: Any]]) {
         var state: [String: Any] = [:]
         var ops: [[String: Any]] = []

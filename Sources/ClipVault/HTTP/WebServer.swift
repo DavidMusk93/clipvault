@@ -1452,7 +1452,7 @@ class WebServer {
         """
     }
     
-    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false, headOnly: Bool = false) -> [String: Any] {
+    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false, headOnly: Bool = false, read: [String: Any]? = nil) -> [String: Any] {
         if headOnly {
             var head: [String: Any] = [
                 "id": item.id.uuidString,
@@ -1512,6 +1512,8 @@ class WebServer {
             archived = true
         }
         dict["archived"] = archived
+        // Wall resume: last reading position, never on trash rows.
+        if let read, item.deletedAt == nil { dict["read"] = read }
         if item.type != .url, let html = item.htmlContent, !archived {
             dict["htmlContent"] = html
         } else if !archived, item.type == .html || item.type == .rtf {
@@ -2366,7 +2368,8 @@ class WebServer {
             database.fetchItem(id: uuid) { [weak self] item in
                 guard let self else { return }
                 // View document is GET /api/archive/view — never ship article HTML in clip JSON.
-                let arr = item.map { [self.itemToJSON($0, includeArchiveHTML: false)] } ?? []
+                let readMap = self.database.readerProgressMap(ids: [uuid])
+                let arr = item.map { [self.itemToJSON($0, includeArchiveHTML: false, read: readMap[$0.id.uuidString])] } ?? []
                 self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
             }
             return
@@ -2383,7 +2386,8 @@ class WebServer {
             }
             database.fetchItems(ids: uuids) { [weak self] rows in
                 guard let self else { return }
-                let arr = rows.map { self.itemToJSON($0, includeArchiveHTML: false) }
+                let readMap = self.database.readerProgressMap(ids: uuids)
+                let arr = rows.map { self.itemToJSON($0, includeArchiveHTML: false, read: readMap[$0.id.uuidString]) }
                 self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
             }
             return
@@ -2399,7 +2403,8 @@ class WebServer {
 
         database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType) { [weak self] page in
             guard let self = self else { return }
-            let jsonItems = page.items.map { self.itemToJSON($0, headOnly: headOnly) }
+            let readMap = self.database.readerProgressMap(ids: page.items.map { $0.id })
+            let jsonItems = page.items.map { self.itemToJSON($0, headOnly: headOnly, read: readMap[$0.id.uuidString]) }
             var payload: [String: Any] = [
                 "items": jsonItems,
                 "nextCursor": page.nextCursor?.encode() as Any
