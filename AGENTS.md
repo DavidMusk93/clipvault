@@ -407,6 +407,9 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 会话 Markdown | `trae_sessions_md`（paint 内 md 块耗时合计） |
 | 资源泄漏 / 502 | `proc_sample`（fds/rss/unix/sse/rlim）；SSE `ping` 同字段；`GET /api/ui-metrics/proc` |
 | HTTP 边车 | `http_req` dur=总时间；`lag`=origin；`n`=status；`route` 去 query/id；`proto` h1/h2；`phase` ok/stream/origin_* |
+| 交互行为 | `ui_interact` payload `zone`/`action`/`target`/`via`（点击/切换/输入/快捷键）；`target` 是 DOM 句柄，禁止元素文本 |
+
+**交互打点是 UI 优化输入。** `web/assets/ui-track.js` 用委托监听把 click/change/keydown 归一成 `ui_interact`；`target` 取 `data-ui` → `id` → 动作属性（`data-pin`/`data-del`…）→ class → tag，`action` 由动作属性映射成动词，`zone` 由最近的 `[data-ui-zone]` 决定。禁止把元素文本/输入值/搜索词写进 payload；禁止每页各自 new 一套点击监听。
 
 `notes_close.value` = 开着多久（墙钟，不是延迟）；关动画看 `notes_close_anim` 或 `sheet_morph` phase=close。CLS 一律用 `value`（`wall_cls`/`notes_cls`/`sheet_cls`）。Agent 自己拉 metrics。笔记/会话入口是右下角「调试」悬浮卡，只看关键 name。
 

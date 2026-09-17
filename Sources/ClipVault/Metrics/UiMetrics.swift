@@ -24,6 +24,7 @@ final class UiMetrics {
         "fds", "rss", "unix", "sse", "rlim",
         "route", "proto", "status",
         "compiled", "reused",
+        "zone", "action", "target", "via",
         "trace", "cols", "vp", "vis",
     ])
 
