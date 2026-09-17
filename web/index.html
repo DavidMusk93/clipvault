@@ -6999,6 +6999,21 @@ window.ClipViewMasonry = Masonry;
       return false;
     }
 
+    /**
+     * Resume affordance for an archived card. Server sends `read: { pct, heading? }`
+     * only for 3%–96%; anything else stays a plain「查看」. Never on trash rows.
+     */
+    function itemReadProgress(itemId) {
+      if (!itemId) return null;
+      const item = clips.find((c) => c.id === itemId);
+      if (!item || item.inTrash || item.deletedAt) return null;
+      const read = item.read;
+      if (!read) return null;
+      const pct = Math.round(Number(read.pct));
+      if (!Number.isFinite(pct) || pct < 3 || pct > 96) return null;
+      return { pct, label: read.heading || read.quote || '' };
+    }
+
     function itemUrlHref(item) {
       const candidates = [
         item && item.textContent,
@@ -7175,6 +7190,7 @@ window.ClipViewMasonry = Masonry;
 
     let archiveReaderHref = '';
     let archiveReaderViewHref = '';
+    let archiveReaderItemId = '';
 
     function archiveViewHref(id, embed) {
       return API + '/api/archive/view?id=' + encodeURIComponent(id) + (embed ? '&embed=1' : '');
@@ -7189,6 +7205,7 @@ window.ClipViewMasonry = Masonry;
       const src = String(item.textContent || (item.archive && item.archive.sourceUrl) || '').trim();
       archiveReaderHref = src;
       archiveReaderViewHref = archiveViewHref(item.id, false);
+      archiveReaderItemId = item.id;
       titleEl.textContent = (item.archive && item.archive.title) || '归档';
       urlEl.textContent = src;
       urlEl.title = src;
@@ -7203,12 +7220,17 @@ window.ClipViewMasonry = Masonry;
       const sheet = document.getElementById('archiveReader');
       const frame = document.getElementById('archiveReaderFrame');
       if (!sheet) return;
+      const itemId = archiveReaderItemId;
       sheet.classList.remove('open');
       sheet.setAttribute('aria-hidden', 'true');
       if (frame) frame.src = 'about:blank';
       archiveReaderHref = '';
       archiveReaderViewHref = '';
+      archiveReaderItemId = '';
       document.body.style.overflow = '';
+      // The iframe force-saves its checkpoint on pagehide; refresh once the
+      // local POST has landed so the card label reflects the new position.
+      if (itemId) setTimeout(() => refreshClipInPlace(itemId), 400);
     }
 
     function wireArchiveReaderOnce() {
@@ -7351,8 +7373,13 @@ window.ClipViewMasonry = Masonry;
         );
         if (itemId && archived) {
           // Same slot / same fmt-btn size as「归档网页」. Do not keep a clickable archive control.
+          // Resume reuses the single slot: one button, label morphs by progress.
+          const resume = itemReadProgress(itemId);
+          const viewTitle = resume
+            ? `继续阅读 · 上次读到 ${resume.pct}%` + (resume.label ? ` · ${resume.label}` : '')
+            : '查看归档正文';
           bits.push(
-            `<button type="button" class="fmt-btn" data-view-archive="${escAttr(itemId)}" title="查看归档正文"><span class="material-symbols-outlined">visibility</span>查看</button>`
+            `<button type="button" class="fmt-btn" data-view-archive="${escAttr(itemId)}" title="${escAttr(viewTitle)}"><span class="material-symbols-outlined">${resume ? 'play_circle' : 'visibility'}</span>${resume ? '继续 ' + resume.pct + '%' : '查看'}</button>`
           );
           bits.push(
             `<button type="button" class="fmt-btn" data-clear-archive="${escAttr(itemId)}" title="只去掉归档，保留这条网址"><span class="material-symbols-outlined">scan_delete</span>清除</button>`

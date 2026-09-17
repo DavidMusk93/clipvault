@@ -157,6 +157,10 @@ Readability 会剥掉出版商 `<style>` 和 Chroma/Shiki class，只留下灰 `
 
 X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic `MEDIA`，entity 只有 `mediaId`，真 URL 在 `article.media_entities[].media_info.original_img_url`。重建必须按 id 拼 `<figure><img>`。禁止只认 entity `src`/`url`（会只剩封面、正文图全丢）。`DIVIDER` 画 `<hr>`。正文 URL / LINK / `@` 画 `<a href>`（仅 http(s)，新标签），用已有 `.cv-article a[href]` Accent 下划线。有标题时 `header-*` 下移一级。其余解析不到的 atomic 必须留下 `.cv-x-dropped`，禁止省略。`entityMap` 按 `key` 查。手册：`docs/archive-render.md`。
 
+## 归档续读（墙卡）
+
+归档 View 的 `scroll_checkpoint` 落进 `reader_state`；墙卡**复用「查看」那一颗槽**，读到 3%–96% 时标签变「继续 N%」+ `play_circle`，其余仍是「查看」。禁止再加第二颗「继续阅读」按钮（同一槽规则，同 分享 / 取消分享）。关闭 View 后约 400ms 就地刷新该卡，让标签跟上新位置。阈值真源：`DatabaseManager.readerProgressMap` + 前端 `itemReadProgress`（两端都夹 3–96；回收箱不出）。
+
 ## Compose 纸面（笔记编辑器）
 
 独立 `#notesPanel`。列表在左，纸面在右。Markdown **源码和预览分开**，不要 WYSIWYG 揉在同一块 DOM。
