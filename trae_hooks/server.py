@@ -475,6 +475,7 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                            s.hook_kinds,
                            s.cwd,
                            s.instance_id,
+                           s.source,
                            s.last_prompt,
                            p.pinned_at AS pinned_at
                     FROM (
@@ -485,6 +486,7 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                                count(DISTINCT hook_event) AS hook_kinds,
                                arg_max(cwd, ts) AS cwd,
                                arg_max(instance_id, ts) AS instance_id,
+                               arg_max(source, ts) AS source,
                                arg_max(prompt, CASE WHEN coalesce(prompt, '') = '' THEN NULL ELSE ts END) AS last_prompt
                         FROM hook_events
                         GROUP BY session_id
