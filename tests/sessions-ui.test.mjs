@@ -70,6 +70,32 @@ test('list cards show last datetime, source host, and cwd', () => {
   assert.match(agents, /localDateTime/);
 });
 
+test('list cards label the agent source so pi/trae/grok/codex differ', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
+  assert.match(server, /arg_max\(source, ts\) AS source/);
+  assert.match(server, /s\.source,/);
+  assert.match(html, /chip source/);
+  assert.match(html, /id="sessionSource"/);
+  assert.match(html, /const sessionSource =/);
+  assert.match(html, /const sourceLabel =/);
+  assert.match(html, /trae: "Trae"/);
+  assert.match(html, /pi: "pi"/);
+  assert.match(html, /grok: "Grok"/);
+  assert.match(html, /codex: "Codex"/);
+  assert.match(html, /source\.dataset\.src = raw/);
+  assert.match(html, /source\.textContent = label/);
+  assert.match(html, /source\.hidden = !label/);
+  assert.match(html, /srcEl\.textContent = sourceLabel\(rawSrc\)/);
+  assert.match(html, /data-src="pi"/);
+  assert.match(html, /data-src="grok"/);
+  assert.match(html, /data-src="codex"/);
+  const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
+  assert.match(taste, /agent 来源/);
+  assert.match(taste, /sourceLabel/);
+  const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
+  assert.match(agents, /agent 来源 `source`/);
+});
+
 test('list cards copy session id; thread header does not duplicate it', () => {
   assert.match(html, /id="sessionHead"/);
   assert.match(html, /data-copy-sid=/);

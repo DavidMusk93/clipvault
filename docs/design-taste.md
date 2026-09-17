@@ -86,14 +86,15 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 **实时**：Trae 页走 nmem SSE 契约（`GET /api/stream`：`retry: 3000`、15s ping、满 32 发 `resync_required`、浏览器原生重连）。禁止 `setInterval` 整页重绘。加载是显式状态机，不是一堆 timer。打开面板 **先画上次快照**（`localStorage` `cv.trae.snap.v1` stale-while-revalidate），再 SSE 确认；禁止把缓存当真源，禁止写入 tool 正文。首屏只画用户/助手/Ask（`view=beats`）；工具目录关闭时不砌子行。`trae_sessions_ttfp` / `trae_sessions_net` / `trae_sessions_paint` 立即上报。**线程按 `event_id` keyed 调和**（同笔记预览：禁止每次 SSE `innerHTML` 整页换上）。新事件 `GET /api/event?id=` 追加再 patch。`/api/events` 列表不含 tool_input/tool_response（Ask 除外）；`view=tools` 必须是全量 stub，禁止 LIMIT 200 砍尾。每次 hook 禁止重拉 `/api/sessions` + 全量 events（列表 1s 合并）。工具 hook 用 SSE stub，禁止每条再拉 `/api/event`。会话面板关闭 pause iframe。笔记列表失败禁止开空白新笔记。bundle 项 **延迟加载正文**；点开一条不得重绘其它条。目录项就地展开，禁止 overlay 盖住对话。抖动用本机 `ui-metrics` 的 `trae_sessions_ttfp` / `trae_sessions_net` / `trae_sessions_cls` / `trae_sessions_paint` / `trae_sessions_load` / `trae_sessions_fsm` / `trae_sessions_error` / `trae_sessions_longtask` 追溯。
 
-**聊天 chrome**：左栏 `#F2F2F7` 会话行（标题=最近 prompt，不是整段 uuid）；列卡还要最后一条本地 `YYYY-MM-DD HH:mm:ss`、来源 `instance_id`、工作目录 `cwd`。右栏 IM 气泡。工具默认折叠。用户/助手气泡不套第二层 max-height 滚动。会话「分析」先给**损耗判定 + 分量 KPI**，再给按严重度配色的反馈卡（蜂蜜=注意，暖红=需处理），方向表收进可折叠明细；不是彩虹仪表盘。分析 sheet 铺满线程时用**不透明底**（禁止 `backdrop-filter`，否则每次 hook 都在背后重算 = 整页重绘），自动刷新保留展开/滚动，展开明细时暂停重绘。
+**聊天 chrome**：左栏 `#F2F2F7` 会话行（标题=最近 prompt，不是整段 uuid）；列卡还要最后一条本地 `YYYY-MM-DD HH:mm:ss`、实例 `instance_id`、agent 来源 `source`、工作目录 `cwd`。右栏 IM 气泡。工具默认折叠。用户/助手气泡不套第二层 max-height 滚动。会话「分析」先给**损耗判定 + 分量 KPI**，再给按严重度配色的反馈卡（蜂蜜=注意，暖红=需处理），方向表收进可折叠明细；不是彩虹仪表盘。分析 sheet 铺满线程时用**不透明底**（禁止 `backdrop-filter`，否则每次 hook 都在背后重算 = 整页重绘），自动刷新保留展开/滚动，展开明细时暂停重绘。
 
-**会话列属性色**：每张卡用柔和语义色表达两个独立属性，禁止彩虹装饰。色 = 信息通道。
+**会话列属性色**：每张卡用柔和语义色表达三个独立属性，禁止彩虹装饰。色 = 信息通道。
 
 | 属性 | 通道 | 档位 |
 | --- | --- | --- |
 | 更新时间 | 暖度（Honey 家族 → 雾） | `fresh` &lt;1h 蜂蜜 `#C47A2C`；`today` &lt;24h 浅蜜 `#C9955A`；`week` &lt;7d 鼠尾绿 `#5B8A72`；`old` 雾灰 `#8E8E93`。卡底 `color-mix` 约 11%，时间 chip 同色 16% 软底 |
 | 消息量级 | 工具蓝浓度 | 左 3px 轨 + 「N 条」chip。`xs` &lt;20 / `s` ≥20 / `m` ≥80 / `l` ≥200，α 约 16%→64% |
+| agent 来源 | 中性 pill + 6px 来源色点 | `source`：`trae` 雾灰 `#8E8E93`、`pi` 紫 `#6E56CF`、`grok` 墨 `#3A3A3C`、`codex` 青 `#2F8F83`；未知来源中性灰。标签用 `sourceLabel` 首字母大写；卡与 head 同步 |
 | 置顶 | Accent 图钉 + 蜂蜜实底 | 钉在列顶。本机 DuckDB `session_pins`。**不进**墙 pin rail，不走 `POST /api/clips/pin` |
 
 禁止灰底灰字一锅炖；禁止用位移/scale 表达量级。跟最新会话仍按 `last_ts` 最大，不按置顶后的第一张。

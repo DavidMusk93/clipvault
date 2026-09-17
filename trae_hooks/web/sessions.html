@@ -198,6 +198,26 @@
       color: var(--ink);
       background: rgba(120, 120, 128, 0.12);
     }
+    /* agent source: neutral pill + one muted dot per agent (色 = 信息通道). */
+    .chip.source {
+      color: var(--ink);
+      background: rgba(120, 120, 128, 0.12);
+    }
+    .chip.source::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 5px;
+      background: var(--src, #8e8e93);
+    }
+    .chip.source[data-src="trae"] { --src: #8e8e93; }
+    .chip.source[data-src="pi"] { --src: #6e56cf; }
+    .chip.source[data-src="grok"] { --src: #3a3a3c; }
+    .chip.source[data-src="codex"] { --src: #2f8f83; }
+    .chip.source[data-src="claude"] { --src: #c47a2c; }
+    .chip.source[data-src="cursor"] { --src: #1565c0; }
+    .chip.source:empty { display: none; }
     .card .where {
       margin-top: 4px;
       font-size: 11px;
@@ -1011,6 +1031,7 @@
         <span class="sid" id="sessionSid"></span>
         <span class="idline">
           <span id="sessionWhen"></span>
+          <span id="sessionSource"></span>
           <span id="sessionHost"></span>
           <span class="cwd" id="sessionCwd"></span>
         </span>
@@ -1714,6 +1735,9 @@
       }
     };
     const sessionHost = (s) => String((s && s.instance_id) || "").trim();
+    const sessionSource = (s) => String((s && s.source) || "").trim().toLowerCase();
+    const SOURCE_LABEL = { trae: "Trae", pi: "pi", grok: "Grok", codex: "Codex", claude: "Claude", cursor: "Cursor" };
+    const sourceLabel = (raw) => SOURCE_LABEL[raw] || (raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "");
     const sessionCwd = (s) => String((s && s.cwd) || "").replace(/\/$/, "");
     const showSessionHead = (sid, title, s) => {
       const head = $("sessionHead");
@@ -1722,6 +1746,7 @@
         head.classList.add("is-empty");
         $("sessionSid").textContent = "";
         $("sessionWhen").textContent = "";
+        $("sessionSource").textContent = "";
         $("sessionHost").textContent = "";
         $("sessionCwd").textContent = "";
         return;
@@ -1730,6 +1755,10 @@
       $("sessionSid").textContent = title || sid;
       $("sessionSid").title = sid;
       $("sessionWhen").textContent = localDateTime(row && row.last_ts) || "";
+      const rawSrc = sessionSource(row);
+      const srcEl = $("sessionSource");
+      srcEl.textContent = sourceLabel(rawSrc) ? `agent ${sourceLabel(rawSrc)}` : "";
+      srcEl.title = rawSrc ? `agent 来源：${rawSrc}` : "";
       $("sessionHost").textContent = sessionHost(row);
       const cwd = sessionCwd(row);
       $("sessionCwd").textContent = cwd;
@@ -1793,6 +1822,12 @@
         t.title = s.session_id || "";
       }
       const meta = el.querySelector(".meta");
+      if (meta && !el.querySelector(".chip.source")) {
+        const srcChip = document.createElement("span");
+        srcChip.className = "chip source";
+        const hostChip = meta.querySelector(".chip.host");
+        meta.insertBefore(srcChip, hostChip || meta.querySelector(".chip.vol"));
+      }
       if (meta && !el.querySelector(".chip.host")) {
         const hostChip = document.createElement("span");
         hostChip.className = "chip host";
@@ -1809,6 +1844,16 @@
       if (time) {
         time.textContent = localDateTime(s.last_ts) || "—";
         time.title = relTime(s.last_ts) || "";
+      }
+      const source = el.querySelector(".chip.source");
+      if (source) {
+        const raw = sessionSource(s);
+        const label = sourceLabel(raw);
+        source.textContent = label || "—";
+        if (raw) source.dataset.src = raw;
+        else source.removeAttribute("data-src");
+        source.title = raw ? `agent 来源：${raw}` : "";
+        source.hidden = !label;
       }
       const host = el.querySelector(".chip.host");
       if (host) {
@@ -1878,7 +1923,7 @@
             <button type="button" class="pin-btn" title="置顶" aria-label="置顶">${PIN_ICON}</button>
             ${s.session_id ? `<button type="button" class="copy-id" data-copy-sid="${sid}" title="复制 session id" aria-label="复制 session id">复制</button>` : ""}
           </div>
-          <div class="meta"><span class="chip time"></span><span class="chip host"></span><span class="chip vol"></span></div>
+          <div class="meta"><span class="chip time"></span><span class="chip source"></span><span class="chip host"></span><span class="chip vol"></span></div>
           <div class="where" hidden></div>`;
       fillSessionCard(el, s);
       bindSessionCard(el);
