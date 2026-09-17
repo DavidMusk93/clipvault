@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n27" />
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n13"></script>
+  <script src="/assets/ui-track.js?v=u1"></script>
   <link rel="stylesheet" href="/assets/metrics-panel.css?v=m4" />
   <script src="/assets/metrics-panel.js?v=m4"></script>
   <style>
@@ -2399,8 +2400,8 @@
   </style>
 </head>
 <body>
-  <div class="wall-scene" id="wallScene">
-  <header class="top-bar">
+  <div class="wall-scene" id="wallScene" data-ui-zone="wall">
+  <header class="top-bar" data-ui-zone="topbar">
     <div class="brand">
       <div class="brand-logo" title="ClipVault">
         <img src="/assets/keepsake-logo.jpg?v=pose1" width="40" height="40" alt="ClipVault" />
@@ -2533,7 +2534,7 @@
   </aside>
 
   <div class="backup-scrim" id="debugScrim"></div>
-  <aside class="backup-drawer debug-drawer" id="debugDrawer" aria-label="SSE 与指标">
+  <aside class="backup-drawer debug-drawer" id="debugDrawer" aria-label="SSE 与指标" data-ui-zone="debug">
     <header>
       <h2>调试 · SSE / 指标</h2>
       <button type="button" class="btn-icon" id="debugCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
@@ -2563,7 +2564,7 @@
     </div>
   </aside>
 
-  <div class="chips">
+  <div class="chips" data-ui-zone="chips">
 <button class="chip active" data-type="all" data-view="library"><span class="material-symbols-outlined">grid_view</span>全部</button>
     <button class="chip" data-type="text" data-view="library"><span class="material-symbols-outlined">description</span>纯文本</button>
     <button class="chip" data-type="html" data-view="library"><span class="material-symbols-outlined">code</span>富文本/HTML</button>
@@ -2571,7 +2572,7 @@
     <button class="chip is-trash" data-type="all" data-view="trash"><span class="material-symbols-outlined">delete</span>回收箱</button>
   </div>
 
-  <main>
+  <main data-ui-zone="wall">
     <section id="pinRail" class="pin-rail" hidden>
       <div id="gridPinned" class="masonry" aria-label="置顶"></div>
       <div class="feed-split" role="separator" aria-label="以下为时间线">
@@ -2680,7 +2681,7 @@
     <span class="material-symbols-outlined">edit_note</span>笔记
   </button>
 
-  <div id="sessionsPanel" class="notes-panel sessions-panel" aria-hidden="true">
+  <div id="sessionsPanel" class="notes-panel sessions-panel" aria-hidden="true" data-ui-zone="sessions">
     <div class="notes-frost" aria-hidden="true"></div>
     <div class="sessions-shell">
       <button type="button" class="notes-close" id="sessionsClose" title="关闭" aria-label="关闭">
@@ -2690,7 +2691,7 @@
     </div>
   </div>
 
-  <div id="notesPanel" class="notes-panel" aria-hidden="true">
+  <div id="notesPanel" class="notes-panel" aria-hidden="true" data-ui-zone="notes">
     <div class="notes-frost" aria-hidden="true"></div>
     <div class="notes-shell">
     <aside class="notes-rail">
@@ -4093,6 +4094,8 @@ window.ClipViewMasonry = Masonry;
       if (debugPaintQueued == null) return;
       scheduleDebugPaint();
     }
+    // Interaction telemetry: delegated clicks / changes / shortcuts -> ui_interact.
+    globalThis.ClipUiTrack?.install(nm, { zone: 'wall' });
     let notesMetricsCtl = null;
     function ensureNotesMetrics() {
       if (notesMetricsCtl || !globalThis.ClipMetricsPanel?.create) return;
@@ -9119,6 +9122,7 @@ window.ClipViewMasonry = Masonry;
       db_maint: { label: 'DB 维护', unit: 'ms', budget: 500 },
       backup_cycle: { label: '备份', unit: 'ms', budget: 60000 },
       sync_queue_depth: { label: '同步积压', unit: 'count', budget: 0 },
+      ui_interact: { label: '交互', unit: 'count', budget: null },
     };
     function metricMeta(name) {
       if (METRIC_SPEC[name]) return METRIC_SPEC[name];

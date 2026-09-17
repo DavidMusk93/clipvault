@@ -4,9 +4,9 @@
   const KEY = {
     wall: [
       'wall_load', 'wall_ttfp', 'wall_paint', 'wall_merge', 'wall_resync',
-      'wall_fetch', 'wall_hydrate', 'wall_cls', 'wall_longtask',
+      'wall_fetch', 'wall_hydrate', 'wall_cls', 'wall_longtask', 'ui_interact',
     ],
-    notes: ['notes_preview_ms', 'notes_md_compile', 'notes_cls', 'notes_longtask', 'notes_inp'],
+    notes: ['notes_preview_ms', 'notes_md_compile', 'notes_cls', 'notes_longtask', 'notes_inp', 'ui_interact'],
     sessions: [
       'trae_sessions_skip', 'trae_sessions_paint', 'trae_sessions_md',
       'trae_sessions_ttfp', 'trae_sessions_net', 'trae_sessions_error',
@@ -14,6 +14,7 @@
       'trae_sessions_switch', 'trae_sessions_tools', 'trae_sessions_load',
       'trae_sessions_layout', 'trae_sessions_fsm', 'trae_sessions_list',
       'trae_sessions_hook', 'trae_sessions_boot', 'trae_sessions_resync',
+      'ui_interact',
     ],
   };
 
@@ -30,6 +31,7 @@
     trae_sessions_switch: '切换会话', trae_sessions_tools: '工具索引', trae_sessions_load: '加载事件',
     trae_sessions_layout: '布局', trae_sessions_fsm: 'FSM', trae_sessions_list: '列表',
     trae_sessions_hook: 'hook', trae_sessions_boot: '启动', trae_sessions_resync: '重同步',
+    ui_interact: '交互',
   };
   function labelOf(name) { return LABEL[name] || name; }
   function esc(s) {

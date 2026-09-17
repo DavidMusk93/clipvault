@@ -7,6 +7,7 @@
     'fds', 'rss', 'unix', 'sse', 'rlim',
     'route', 'proto', 'status',
     'compiled', 'reused',
+    'zone', 'action', 'target', 'via',
   ]);
   const NAME = /^[a-z][a-z0-9_]{1,63}$/;
   const SESSION_KEY = 'clipvault.metrics.session';
