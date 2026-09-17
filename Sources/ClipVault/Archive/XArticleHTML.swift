@@ -110,6 +110,16 @@ enum XArticleHTML {
         var title: String = ""
     }
 
+    /// A quoted tweet resolved from a Draft.js `TWEET` atomic (`data.tweetId`).
+    /// Text/author come from fxtwitter; a missing ref still renders a link card.
+    struct TweetRef {
+        var id: String
+        var name: String
+        var handle: String
+        var text: String
+        var url: String
+    }
+
     static func enrich(url: String, html: String, title: String) -> (html: String, title: String, engine: String, coverage: Coverage)? {
         guard isXURL(url), looksFlattened(html) else { return nil }
         if let got = archive(url: url), isUsableArticleHTML(got.rendered.html) {
@@ -125,10 +135,14 @@ enum XArticleHTML {
 
     /// Article Draft.js first; else full note-tweet text (vxtwitter) + quote.
     static func archive(url: String) -> (title: String, rendered: Rendered)? {
-        if let fetched = fetchArticle(url: url),
-           let rendered = renderDocument(article: fetched.article),
-           isUsableArticleHTML(rendered.html) {
-            return (fetched.title, rendered)
+        if let fetched = fetchArticle(url: url) {
+            // Quoted tweets are atomic TWEET blocks, not images. Resolve them so
+            // the body shows the card instead of 「未归档的介质（TWEET）」.
+            let tweets = tweetIndex(article: fetched.article)
+            if let rendered = renderDocument(article: fetched.article, tweets: tweets),
+               isUsableArticleHTML(rendered.html) {
+                return (fetched.title, rendered)
+            }
         }
         guard let post = fetchStatus(url: url) else { return nil }
         guard let rendered = renderStatus(
@@ -148,7 +162,7 @@ enum XArticleHTML {
         renderDocument(article: article)?.html
     }
 
-    static func renderDocument(article: [String: Any]) -> Rendered? {
+    static func renderDocument(article: [String: Any], tweets: [String: TweetRef] = [:]) -> Rendered? {
         let content = article["content"] as? [String: Any] ?? article
         let blocks = content["blocks"] as? [[String: Any]] ?? []
         guard !blocks.isEmpty else { return nil }
@@ -171,6 +185,7 @@ enum XArticleHTML {
             blocks,
             entityMap: entityMap,
             media: media,
+            tweets: tweets,
             coverage: &cov,
             headingShift: headingShift
         )
@@ -257,15 +272,16 @@ enum XArticleHTML {
         return t
     }
 
-    static func renderBlocks(_ blocks: [[String: Any]], entityMap: Any?, media: [String: String] = [:]) -> String {
+    static func renderBlocks(_ blocks: [[String: Any]], entityMap: Any?, media: [String: String] = [:], tweets: [String: TweetRef] = [:]) -> String {
         var cov = Coverage()
-        return renderBlocks(blocks, entityMap: entityMap, media: media, coverage: &cov)
+        return renderBlocks(blocks, entityMap: entityMap, media: media, tweets: tweets, coverage: &cov)
     }
 
     static func renderBlocks(
         _ blocks: [[String: Any]],
         entityMap: Any?,
         media: [String: String] = [:],
+        tweets: [String: TweetRef] = [:],
         coverage: inout Coverage,
         headingShift: Int = 0
     ) -> String {
@@ -306,7 +322,7 @@ enum XArticleHTML {
                 out += "<pre><code>\(escape((block["text"] as? String) ?? ""))</code></pre>\n"
             case "atomic":
                 coverage.atomicExpected += 1
-                let piece = renderAtomic(block, entityMap: entityMap, media: media, coverage: &coverage)
+                let piece = renderAtomic(block, entityMap: entityMap, media: media, tweets: tweets, coverage: &coverage)
                 out += piece
                 if !piece.hasSuffix("\n") { out += "\n" }
             default:
@@ -645,6 +661,7 @@ enum XArticleHTML {
         _ block: [String: Any],
         entityMap: Any?,
         media: [String: String],
+        tweets: [String: TweetRef],
         coverage: inout Coverage
     ) -> String {
         let ranges = block["entityRanges"] as? [[String: Any]] ?? []
@@ -683,7 +700,48 @@ enum XArticleHTML {
             let detail = ids.isEmpty ? type.lowercased() : "mediaId=\(ids.joined(separator: ","))"
             return droppedFigure(entity: type, detail: detail, coverage: &coverage)
         }
+        // Quoted tweet: Draft.js TWEET atomic carries only `data.tweetId`.
+        // `tweets` holds the resolved author/text; without it we still draw a
+        // working link card instead of dropping the block.
+        if type == "TWEET" {
+            let data = ent["data"]
+            let tid = dictString(data, "tweetId")
+                ?? dictString(data, "tweet_id")
+                ?? dictString(data, "id")
+                ?? ""
+            guard !tid.isEmpty else {
+                return droppedFigure(entity: "TWEET", detail: nil, coverage: &coverage)
+            }
+            coverage.atomicRendered += 1
+            return tweetFigure(id: tid, ref: tweets[tid])
+        }
         return droppedFigure(entity: type.isEmpty ? "atomic" : type, detail: nil, coverage: &coverage)
+    }
+
+    /// Card for a quoted tweet. Metadata ref (if any) fills the quote body;
+    /// otherwise a single link keeps the block readable and never `cv-x-dropped`.
+    private static func tweetFigure(id: String, ref: TweetRef?) -> String {
+        let raw = (ref?.url.isEmpty == false ? ref!.url : "https://x.com/i/status/\(id)")
+        let link = safeHTTPURL(raw) ?? "https://x.com/i/status/\(id)"
+        var out = "<figure class=\"cv-x-quote cv-x-tweet\" data-tweet=\"\(escape(id))\">"
+        let text = (ref?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if let ref, !text.isEmpty {
+            let who = ref.handle.isEmpty ? ref.name : "@\(ref.handle)"
+            let cap = ref.name.isEmpty ? who : "\(ref.name) \(who)"
+            let label = cap.trimmingCharacters(in: .whitespaces)
+            if !label.isEmpty {
+                out += "<figcaption>\(anchorOpen(link))\(escape(label))</a></figcaption>"
+            }
+            out += "<blockquote>"
+            for para in paragraphs(text) {
+                out += "<p>\(inlineBreaks(para))</p>"
+            }
+            out += "</blockquote>"
+        } else {
+            out += "<figcaption>\(anchorOpen(link))引用推文</a></figcaption>"
+        }
+        out += "</figure>\n"
+        return out
     }
 
     private static func droppedFigure(entity: String, detail: String?, coverage: inout Coverage) -> String {
@@ -695,6 +753,73 @@ enum XArticleHTML {
             cap = "未归档的介质（\(escape(entity))）"
         }
         return "<figure class=\"cv-x-dropped\" data-entity=\"\(escape(entity))\"><figcaption>\(cap)</figcaption></figure>\n"
+    }
+
+    /// Resolve every `TWEET` atomic (quoted tweet) to a small card. Bounded:
+    /// quotes are content, but a wall of them must not stall the archive job.
+    static func tweetIndex(article: [String: Any]) -> [String: TweetRef] {
+        let content = article["content"] as? [String: Any] ?? article
+        let entityMap = content["entityMap"]
+        var ids: [String] = []
+        var seen = Set<String>()
+        eachEntity(entityMap) { ent in
+            guard ((ent["type"] as? String) ?? "").uppercased() == "TWEET" else { return }
+            let data = ent["data"]
+            let id = dictString(data, "tweetId")
+                ?? dictString(data, "tweet_id")
+                ?? dictString(data, "id")
+                ?? ""
+            guard !id.isEmpty, !seen.contains(id) else { return }
+            seen.insert(id)
+            ids.append(id)
+        }
+        var out: [String: TweetRef] = [:]
+        for id in ids.prefix(12) {
+            if let ref = fetchTweetRef(id: id) { out[id] = ref }
+        }
+        return out
+    }
+
+    /// Quote-card body for a resolved tweet. X Articles have empty `text`; fall
+    /// back to the article title + preview so the card is not blank.
+    static func tweetText(from tweet: [String: Any]) -> String {
+        var text = (tweet["text"] as? String) ?? ""
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let article = tweet["article"] as? [String: Any]
+            let title = (article?["title"] as? String) ?? ""
+            let preview = (article?["preview_text"] as? String) ?? ""
+            text = [title, preview]
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .joined(separator: "\n\n")
+        }
+        return text.count > 400 ? String(text.prefix(400)) : text
+    }
+
+    static func fetchTweetRef(id: String) -> TweetRef? {
+        guard !id.isEmpty, id.allSatisfy(\.isNumber) else { return nil }
+        let endpoints = [
+            "https://api.fxtwitter.com/status/\(id)",
+            "https://api.fxtwitter.com/i/status/\(id)",
+        ]
+        for ep in endpoints {
+            guard let data = getJSON(ep),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            let tweet = (obj["tweet"] as? [String: Any]) ?? obj
+            let author = tweet["author"] as? [String: Any] ?? [:]
+            let text = tweetText(from: tweet)
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, author.isEmpty { continue }
+            let url = (tweet["url"] as? String) ?? "https://x.com/i/status/\(id)"
+            return TweetRef(
+                id: id,
+                name: (author["name"] as? String) ?? "",
+                handle: (author["screen_name"] as? String) ?? "",
+                text: text,
+                url: url
+            )
+        }
+        return nil
     }
 
     private static func mediaIds(from data: Any?) -> [String] {

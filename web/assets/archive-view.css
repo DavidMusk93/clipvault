@@ -102,6 +102,10 @@ main.cv-article {
 }
 .cv-article figure.cv-x-quote p { margin: 0.45rem 0; }
 .cv-article figure.cv-x-quote figcaption { margin-bottom: 0.35rem; }
+/* Inline quoted tweet (Draft.js TWEET atomic) sits mid-article, so keep a bottom gap. */
+.cv-article figure.cv-x-tweet { margin: 1.5rem 0; }
+.cv-article figure.cv-x-tweet figcaption a { color: inherit; font-weight: 590; text-decoration: none; }
+.cv-article figure.cv-x-tweet figcaption a:hover { text-decoration: underline; }
 
 /* Readability keeps callouts as nested <article> and drops the publisher chrome. */
 .cv-callout {

@@ -35,6 +35,7 @@ POST /api/archive
   ├─ x.com / twitter.com ?
   │    是 → XArticleHTML.archive
   │         1. fxtwitter article.content.blocks（X Article / Draft.js）
+  │            TWEET atomic → tweetIndex（fxtwitter 补作者/正文）
   │         2. 否则 vxtwitter 全文（Note / 长帖；fxtwitter text 常被截到 ~140）
   │            `\n\n` → <p>；headingLike → <h2>；qrt → blockquote.cv-x-quote
   │         可用（cv-x-article 且够长）→ 跳过 Readability
@@ -92,6 +93,7 @@ blocks[]                  entityMap[]（乱序 {key,value}）
 | `MARKDOWN` | 围栏代码 | `renderFence` → `pre>code` |
 | `DIVIDER`（别名 `HR` / `HORIZONTAL_RULE`） | 装饰分割线，`data` 为空 | **`<hr>`**。不是丢图 |
 | `LINK` | inline `entityRanges`，偶尔 atomic | `<a href>`（只 http/https；`rel=noreferrer` `target=_blank`）。`javascript:` 丢掉属性，留纯文本 |
+| `TWEET` | 引用推文，`data.tweetId` | `<figure class="cv-x-quote cv-x-tweet" data-tweet=ID>`：`tweetIndex` 用 fxtwitter 补作者/正文（上限 12 条）；取不到也画「引用推文」链接卡，**不算 dropped** |
 | 其它（`TWITTER_CARD`…） | 未建模 | `.cv-x-dropped` +「未归档的介质（TYPE）」 |
 
 inline 还认：
