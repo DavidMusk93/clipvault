@@ -71,6 +71,22 @@ test('closing the View refreshes the card once the checkpoint lands', () => {
   assert.match(html, /refreshClipInPlace\(itemId\), 400\)/, 'post-pagehide refresh');
 });
 
+test('reader sheet reveals from the card rect with clip-path, never transform', () => {
+  assert.match(html, /function revealReaderSheet\(sheet, originEl\)/, 'origin-aware reveal exists');
+  assert.match(html, /sheet\.querySelector\('\.archive-reader-card'\)/, 'clips the sheet card');
+  assert.match(html, /cardEl\.style\.clipPath = inset/, 'animates clip-path');
+  assert.match(html, /openArchiveReader\(live, card\)/, '归档 button passes its card as origin');
+  assert.match(html, /openArchiveReader\(item, card\)/, '查看 button passes its card as origin');
+  // Guard the documented WebKit rule: a transformed iframe goes blank.
+  const fnStart = html.indexOf('function revealReaderSheet(');
+  const fnEnd = html.indexOf('\n    function openArchiveReader(', fnStart);
+  assert.ok(fnStart >= 0 && fnEnd > fnStart, 'reveal function is bounded');
+  const body = html.slice(fnStart, fnEnd);
+  assert.match(body, /prefers-reduced-motion: reduce/, 'reduced motion falls back to the plain fade');
+  assert.doesNotMatch(body, /\.style\.transform/, 'never transform the card (blanks the iframe)');
+  assert.doesNotMatch(body, /scale\(/, 'no scale on the iframe card');
+});
+
 test('wall API ships read progress on page, id and ids paths', () => {
   assert.match(swiftWeb, /read: \[String: Any\]\? = nil/, 'itemToJSON accepts read');
   assert.match(swiftWeb, /if let read, item\.deletedAt == nil \{ dict\["read"\] = read \}/, 'never attach read to trash');
