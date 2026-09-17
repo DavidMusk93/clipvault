@@ -136,12 +136,13 @@ test('preview mode keeps the preview pane in a 1fr track', () => {
   assert.doesNotMatch(css, /\[data-mode="preview"\] \{\s*grid-template-columns:\s*0 0 1fr/);
 });
 
-test('opening a note defaults to preview; new note is source', () => {
+test('opening a note defaults to preview; new note is split', () => {
   assert.match(entry, /function loadMode\(\) \{\n  return 'preview'\n\}/);
   assert.match(entry, /opts\.mode && MODES\.includes\(opts\.mode\)/);
   assert.doesNotMatch(entry, /localStorage\.getItem\(MODE_KEY\)/);
   assert.match(html, /ensureNotesEditor\(noteStripTitle\(item\.textContent \|\| '', t\), 'preview'\)/);
-  assert.match(html, /ensureNotesEditor\('', 'source'\)/);
+  assert.match(html, /ensureNotesEditor\('', 'split'\)/);
+  assert.doesNotMatch(html, /ensureNotesEditor\('', 'source'\)/);
   assert.match(html, /applyNotesMode\('preview'\)/);
   assert.match(html, /notes-chrome'\)\?\.classList\.toggle\('is-preview'/);
   assert.match(html, /\.notes-chrome\.is-preview \.notes-tools \{[\s\S]{0,80}visibility:\s*hidden/);
