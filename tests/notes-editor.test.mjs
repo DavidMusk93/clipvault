@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import test from 'node:test';
+import { JSDOM } from 'jsdom';
 import { src, root } from './helpers/src.mjs';
 
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
@@ -109,6 +110,54 @@ test('save status is labeled and retries on failure', () => {
   assert.match(html, /id="notesShare"/);
   assert.match(html, /\.notes-status\[data-state="saved"\] \{ color: #248A3D; \}/);
   assert.match(html, /\.notes-status\[data-state="dirty"\] \{ color: #C47A2C; \}/);
+  // Save-state text morph (#20, restrained): cross-fade + numeric width tween so
+  // the toolbar buttons beside the label never jump. No blur at 11px.
+  assert.match(html, /transition: width 0\.18s var\(--spring\)/, 'slot width tweens');
+  assert.match(html, /\.notes-status-label\.is-swapping \{ opacity: 0; transition: none; \}/, 'label cross-fade');
+  assert.match(html, /next !== prevState/, 'morph only on state change — error countdown must not flicker');
+  assert.match(html, /prefers-reduced-motion: reduce\)\s*\{\s*\.notes-status \{ transition: color/, 'reduced motion drops the width tween');
+});
+
+test('save status morphs on state change and only swaps text on same state', () => {
+  const start = html.indexOf('function notesStatus(');
+  assert.ok(start >= 0, 'notesStatus not found');
+  const open = html.indexOf('{', start);
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < html.length; i++) {
+    if (html[i] === '{') depth++;
+    else if (html[i] === '}') {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  const fnSrc = html.slice(start, end);
+  const dom = new JSDOM('<!DOCTYPE html><body><span class="notes-status" id="notesStatus" data-state="idle"><span class="notes-status-label" id="notesStatusLabel"></span></span></body>');
+  const { document } = dom.window;
+  const el = document.getElementById('notesStatus');
+  const label = document.getElementById('notesStatusLabel');
+  const notesStatus = new Function('document', `${fnSrc}; return notesStatus;`)(document);
+
+  notesStatus('dirty');
+  assert.equal(el.dataset.state, 'dirty');
+  assert.equal(label.textContent, '未保存');
+  assert.equal(el.title, '未保存');
+
+  notesStatus('saving');
+  assert.equal(label.textContent, '保存中');
+  notesStatus('saved');
+  assert.equal(label.textContent, '已保存');
+
+  // Error countdown re-paints the same state: text swaps, morph class must not linger.
+  notesStatus('error', '保存失败，5s 后重试');
+  assert.equal(el.dataset.state, 'error');
+  assert.equal(label.textContent, '保存失败，5s 后重试');
+  notesStatus('error', '保存失败，4s 后重试');
+  assert.equal(label.textContent, '保存失败，4s 后重试');
+  assert.equal(label.classList.contains('is-swapping'), false);
+
+  notesStatus('idle');
+  assert.equal(label.textContent, '');
 });
 
 test('panel is source + preview split', () => {
