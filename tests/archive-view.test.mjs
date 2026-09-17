@@ -78,6 +78,11 @@ test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', ()
   assert.match(xhtml, /cv-x-dropped/);
   assert.match(xhtml, /DIVIDER/);
   assert.match(xhtml, /<hr>/);
+  // Quoted tweets: TWEET atomic -> cv-x-tweet card, never dropped.
+  assert.match(xhtml, /type == "TWEET"/);
+  assert.match(xhtml, /tweetIndex/);
+  assert.match(xhtml, /cv-x-tweet/);
+  assert.match(viewCss, /figure\.cv-x-tweet/);
   assert.match(xhtml, /target=\\"_blank\\"/);
   assert.match(xhtml, /safeHTTPURL/);
   assert.match(xhtml, /headingShift/);

@@ -203,6 +203,59 @@ enum XArticleHTMLTests {
         let unknown = XArticleHTML.renderBlocks(unknownBlocks, entityMap: unknownMap)
         ok("unknown-dropped", unknown.contains("cv-x-dropped") && unknown.contains("data-entity=\"TWITTER_CARD\""))
 
+        // Quoted tweet: Draft.js TWEET atomic carries only data.tweetId. Must
+        // render a card (resolved or link-only), never 「未归档的介质（TWEET）」.
+        let tweetBlocks: [[String: Any]] = [[
+            "type": "atomic",
+            "text": " ",
+            "entityRanges": [["key": 0, "length": 1, "offset": 0]],
+        ]]
+        let tweetMap: [[String: Any]] = [[
+            "key": 0,
+            "value": ["type": "TWEET", "data": ["tweetId": "2099485951701721585"]],
+        ]]
+        let tweetLink = XArticleHTML.renderBlocks(tweetBlocks, entityMap: tweetMap)
+        ok("tweet-link-no-drop", !tweetLink.contains("cv-x-dropped") && tweetLink.contains("cv-x-tweet"))
+        ok("tweet-link-href", tweetLink.contains("href=\"https://x.com/i/status/2099485951701721585\""))
+        let tweetDoc = XArticleHTML.renderDocument(article: [
+            "title": "tweet-fixture",
+            "content": ["blocks": tweetBlocks, "entityMap": tweetMap],
+        ], tweets: [
+            "2099485951701721585": XArticleHTML.TweetRef(
+                id: "2099485951701721585",
+                name: "Adrian Punk",
+                handle: "AdrianPunk115",
+                text: "本文分为上下两册。\n\n第二段。",
+                url: "https://x.com/AdrianPunk115/status/2099485951701721585"
+            ),
+        ])!
+        ok("tweet-rendered", tweetDoc.html.contains("cv-x-tweet") && !tweetDoc.html.contains("cv-x-dropped"))
+        ok("tweet-author", tweetDoc.html.contains("Adrian Punk @AdrianPunk115"))
+        ok("tweet-text", tweetDoc.html.contains("<p>本文分为上下两册。</p>") && tweetDoc.html.contains("<p>第二段。</p>"))
+        ok("tweet-cov", tweetDoc.coverage.atomicExpected == 1
+            && tweetDoc.coverage.atomicRendered == 1
+            && tweetDoc.coverage.atomicDropped == 0
+            && tweetDoc.coverage.warnings.isEmpty)
+        let tweetNoId = XArticleHTML.renderBlocks([[
+            "type": "atomic",
+            "text": " ",
+            "entityRanges": [["key": 0, "length": 1, "offset": 0]],
+        ]], entityMap: [[ "key": 0, "value": ["type": "TWEET", "data": [:] as [String: Any]] ]])
+        ok("tweet-no-id-dropped", tweetNoId.contains("cv-x-dropped") && tweetNoId.contains("data-entity=\"TWEET\""))
+
+        // Quoted X Article has empty tweet.text; fall back to article title + preview.
+        let articleTweet: [String: Any] = [
+            "text": "",
+            "article": ["title": "视觉词典（上篇）", "preview_text": "很多人让 AI 做网页时只会说：帮我做一个高级的网站。"],
+        ]
+        let articleText = XArticleHTML.tweetText(from: articleTweet)
+        ok("tweet-text-article-title", articleText.contains("视觉词典（上篇）"))
+        ok("tweet-text-article-preview", articleText.contains("帮我做一个高级的网站"))
+        let plainTweet: [String: Any] = ["text": "本文分为上下两册。"]
+        ok("tweet-text-plain", XArticleHTML.tweetText(from: plainTweet) == "本文分为上下两册。")
+        let longTweet: [String: Any] = ["text": String(repeating: "x", count: 500)]
+        ok("tweet-text-cap", XArticleHTML.tweetText(from: longTweet).count == 400)
+
         // fxtwitter entityMap is a shuffled {key,value} list, not a dense array.
         // AdrianPunk 2088543211656753278: key 10 = DIVIDER, array index 10 = MEDIA.
         let dividerBlocks: [[String: Any]] = [
