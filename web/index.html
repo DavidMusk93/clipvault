@@ -2075,14 +2075,26 @@
     .notes-tools button:active { transform: scale(0.96); }
     .notes-tools button .material-symbols-outlined { font-size: 16px; }
     .notes-status {
-      display: inline-flex; align-items: center; flex: none;
+      display: inline-flex; align-items: center; flex: none; overflow: hidden;
       font: 500 11px/26px var(--font-ui); letter-spacing: -0.01em; color: var(--muted);
+      /* Width tween is numeric (no layout animation): neighbors never jump when
+         the label grows from 未保存 to 保存失败，将重试. */
+      transition: width 0.18s var(--spring), color 0.18s ease;
     }
     .notes-status[data-state="dirty"] { color: #C47A2C; }
     .notes-status[data-state="saving"] { color: #0071E3; }
     .notes-status[data-state="saved"] { color: #248A3D; }
     .notes-status[data-state="error"] { color: #D70015; }
-    .notes-status-label { white-space: nowrap; }
+    .notes-status-label {
+      white-space: nowrap;
+      /* Text morph (light): cross-fade only — no blur at 11px. */
+      transition: opacity 0.12s ease;
+    }
+    .notes-status-label.is-swapping { opacity: 0; transition: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .notes-status { transition: color 0.18s ease; }
+      .notes-status-label { transition: none; }
+    }
     .notes-share,
     .notes-link {
       width: 28px; height: 26px; border: 0; border-radius: 6px; flex: none;
@@ -4053,15 +4065,38 @@ window.ClipViewMasonry = Masonry;
     function notesStatus(state, detail) {
       const el = document.getElementById('notesStatus');
       const label = document.getElementById('notesStatusLabel');
-      if (el) el.dataset.state = state || 'idle';
+      const prevState = el ? el.dataset.state : '';
+      const next = state || 'idle';
+      if (el) el.dataset.state = next;
       const text = {
         idle: '',
         dirty: '未保存',
         saving: '保存中',
         saved: '已保存',
         error: detail || '保存失败，将重试',
-      }[state || 'idle'];
-      if (label) label.textContent = text || '';
+      }[next] || '';
+      if (label && label.textContent !== text) {
+        // Morph only on a real state change. The error countdown re-paints the
+        // same state every second — those just swap text, no flicker.
+        if (next !== prevState) {
+          label.classList.add('is-swapping');
+          const prevW = el ? el.getBoundingClientRect().width : 0;
+          label.textContent = text;
+          if (el) {
+            el.style.width = '';
+            const nextW = el.getBoundingClientRect().width;
+            el.style.width = prevW + 'px';
+            void el.offsetWidth;
+            el.style.width = nextW + 'px';
+            clearTimeout(el._wTimer);
+            el._wTimer = setTimeout(() => { el.style.width = ''; }, 240);
+          }
+          void label.offsetWidth;
+          label.classList.remove('is-swapping');
+        } else {
+          label.textContent = text;
+        }
+      }
       if (el) el.title = text || '保存状态';
     }
     function paintNotesModes() {

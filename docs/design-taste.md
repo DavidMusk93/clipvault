@@ -178,7 +178,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 预览代码 | 浅板 `#F5F5F7` + 语言条 + 头栏右簇「换行」「复制」白底浅阴影钮 + Xcode Light | **不是** View 的炭黑井。**默认不换行**（`pre` + 横向滚）。换行是选项。两钮 `gap: 4px`，禁止透明字当按钮、禁止拉开间距 |
 | 模式 | 源码 / 分栏 / 预览；**打开默认预览，新建默认分栏** | 打开已有笔记默认预览；新建进入分栏（源码左 / 预览右），用户可再手动切。CSS 无 `data-mode` 时仍是源码单栏 |
 | 分栏滚动 | 块锚点 + 块内进度（VS Code / MarkEdit）。头/底 2px 钉住 max | 禁止全程 `scrollTop/max`。禁止只把视口第一行钉在预览顶。围栏用 `data-source-end-line` 摊到 PRE 内容盒。**预览终局**：lexer 块 hash LRU 编译 + React 18 keyed `.notes-md-block`（`display:contents`，行号在 wrapper）。禁止整页 `innerHTML` 换预览。输入不 `force` remap。图 load 不 remap |
-| 保存态 | 11px 文案 + 6px 点：未保存 / 保存中 / 已保存 / 保存失败将重试 | 禁止只留圆点；失败指数退避 + `online` 重放 |
+| 保存态 | 11px 文案：未保存 / 保存中 / 已保存 / 保存失败将重试；**仅 state 变化时**做一次交叉淡化 + 槽宽数值 tween（同态只换字，error 倒计时不闪） | 禁止只留圆点；相邻按钮不得跳动（宽度 tween，不是布局动画）；11px 不加 blur；`prefers-reduced-motion` 去掉宽度 tween；失败指数退避 + `online` 重放 |
 | Tag | 标题内金色 `#F5A400` 同字号，不是黄胶囊 | `#auto gateway…`；`# 标题`（井号后空格）不算 tag，**标题行里的 `#tag` 要能筛**；点标题 tag / 侧栏 tag / 搜 `#tag` 同一条 `extractNoteTags`；筛选时侧栏一颗可关的滤镜钮 |
 | 嵌套列表 | Tab 后源码 `a. b. c.`，再一层 `i. ii.`；预览同样 | 每层 4 空格；预览把 `a.`/`i.` 映成 GFM `1.` 再渲染。禁止 `5.1` |
 | 分割线 checkpoint | 源码行写成恰好 `---` 时，下一行自动写入本地 `YYYY-MM-DD HH:mm` | 让多次改动有时间戳。禁止写进围栏代码；已有戳不再盖。`---` 必须单独成行才是 hr |
