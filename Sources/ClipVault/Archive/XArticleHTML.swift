@@ -116,8 +116,11 @@ enum XArticleHTML {
         var id: String
         var name: String
         var handle: String
+        var avatar: String
         var text: String
         var url: String
+        var articleTitle: String
+        var cover: String
     }
 
     static func enrich(url: String, html: String, title: String) -> (html: String, title: String, engine: String, coverage: Coverage)? {
@@ -718,27 +721,39 @@ enum XArticleHTML {
         return droppedFigure(entity: type.isEmpty ? "atomic" : type, detail: nil, coverage: &coverage)
     }
 
-    /// Card for a quoted tweet. Metadata ref (if any) fills the quote body;
-    /// otherwise a single link keeps the block readable and never `cv-x-dropped`.
+    /// Card for a quoted tweet (or quoted X Article), styled like an embedded
+    /// post: avatar + author row, optional article cover, then title / body.
+    /// Without metadata a single link keeps the block readable, never dropped.
     private static func tweetFigure(id: String, ref: TweetRef?) -> String {
         let raw = (ref?.url.isEmpty == false ? ref!.url : "https://x.com/i/status/\(id)")
         let link = safeHTTPURL(raw) ?? "https://x.com/i/status/\(id)"
         var out = "<figure class=\"cv-x-quote cv-x-tweet\" data-tweet=\"\(escape(id))\">"
-        let text = (ref?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if let ref, !text.isEmpty {
-            let who = ref.handle.isEmpty ? ref.name : "@\(ref.handle)"
-            let cap = ref.name.isEmpty ? who : "\(ref.name) \(who)"
-            let label = cap.trimmingCharacters(in: .whitespaces)
-            if !label.isEmpty {
-                out += "<figcaption>\(anchorOpen(link))\(escape(label))</a></figcaption>"
-            }
+        guard let ref else {
+            out += "<figcaption>\(anchorOpen(link))引用推文</a></figcaption></figure>\n"
+            return out
+        }
+        var who = ""
+        if !ref.name.isEmpty { who += "<strong>\(escape(ref.name))</strong>" }
+        if !ref.handle.isEmpty { who += "<span class=\"cv-x-tweet-handle\">@\(escape(ref.handle))</span>" }
+        let avatar = ref.avatar.isEmpty
+            ? ""
+            : "<img class=\"cv-x-tweet-avatar\" src=\"\(escape(ref.avatar))\" alt=\"\">"
+        out += "<figcaption><a class=\"cv-x-tweet-head\" href=\"\(escape(link))\" rel=\"noreferrer\" target=\"_blank\">"
+        out += "\(avatar)<span class=\"cv-x-tweet-who\">\(who)</span></a></figcaption>"
+        if !ref.cover.isEmpty {
+            out += "<a class=\"cv-x-tweet-cover\" href=\"\(escape(link))\" rel=\"noreferrer\" target=\"_blank\">"
+            out += "<img src=\"\(escape(ref.cover))\" alt=\"\"></a>"
+        }
+        if !ref.articleTitle.isEmpty {
+            out += "<p class=\"cv-x-tweet-title\">\(escape(ref.articleTitle))</p>"
+        }
+        let text = ref.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
             out += "<blockquote>"
             for para in paragraphs(text) {
                 out += "<p>\(inlineBreaks(para))</p>"
             }
             out += "</blockquote>"
-        } else {
-            out += "<figcaption>\(anchorOpen(link))引用推文</a></figcaption>"
         }
         out += "</figure>\n"
         return out
@@ -780,19 +795,30 @@ enum XArticleHTML {
         return out
     }
 
-    /// Quote-card body for a resolved tweet. X Articles have empty `text`; fall
-    /// back to the article title + preview so the card is not blank.
-    static func tweetText(from tweet: [String: Any]) -> String {
+    struct TweetParts {
+        var text: String
+        var articleTitle: String
+        var cover: String
+        var avatar: String
+    }
+
+    /// Pure extraction of a quote card's parts. A quoted X Article ships no
+    /// tweet text (or just the article URL); fall back to title + preview so
+    /// the card draws a real headline instead of a bare link.
+    static func tweetParts(from tweet: [String: Any]) -> TweetParts {
+        let author = tweet["author"] as? [String: Any] ?? [:]
+        let article = tweet["article"] as? [String: Any]
+        let title = (article?["title"] as? String) ?? ""
+        let preview = (article?["preview_text"] as? String) ?? ""
+        let cover = ((article?["cover_media"] as? [String: Any])?["media_info"] as? [String: Any])?["original_img_url"] as? String ?? ""
+        let avatar = (author["avatar_url"] as? String) ?? ""
         var text = (tweet["text"] as? String) ?? ""
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let article = tweet["article"] as? [String: Any]
-            let title = (article?["title"] as? String) ?? ""
-            let preview = (article?["preview_text"] as? String) ?? ""
-            text = [title, preview]
-                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                .joined(separator: "\n\n")
-        }
-        return text.count > 400 ? String(text.prefix(400)) : text
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let urlOnly = trimmed.lowercased().hasPrefix("http") && !trimmed.contains(" ")
+        if !title.isEmpty, trimmed.isEmpty || urlOnly { text = preview }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { text = preview }
+        if text.count > 400 { text = String(text.prefix(400)) }
+        return TweetParts(text: text, articleTitle: title, cover: cover, avatar: avatar)
     }
 
     static func fetchTweetRef(id: String) -> TweetRef? {
@@ -808,15 +834,18 @@ enum XArticleHTML {
             }
             let tweet = (obj["tweet"] as? [String: Any]) ?? obj
             let author = tweet["author"] as? [String: Any] ?? [:]
-            let text = tweetText(from: tweet)
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, author.isEmpty { continue }
+            let parts = tweetParts(from: tweet)
+            if parts.text.isEmpty, parts.articleTitle.isEmpty, author.isEmpty { continue }
             let url = (tweet["url"] as? String) ?? "https://x.com/i/status/\(id)"
             return TweetRef(
                 id: id,
                 name: (author["name"] as? String) ?? "",
                 handle: (author["screen_name"] as? String) ?? "",
-                text: text,
-                url: url
+                avatar: parts.avatar,
+                text: parts.text,
+                url: url,
+                articleTitle: parts.articleTitle,
+                cover: parts.cover
             )
         }
         return nil

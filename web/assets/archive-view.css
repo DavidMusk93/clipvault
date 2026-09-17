@@ -102,10 +102,52 @@ main.cv-article {
 }
 .cv-article figure.cv-x-quote p { margin: 0.45rem 0; }
 .cv-article figure.cv-x-quote figcaption { margin-bottom: 0.35rem; }
-/* Inline quoted tweet (Draft.js TWEET atomic) sits mid-article, so keep a bottom gap. */
-.cv-article figure.cv-x-tweet { margin: 1.5rem 0; }
-.cv-article figure.cv-x-tweet figcaption a { color: inherit; font-weight: 590; text-decoration: none; }
-.cv-article figure.cv-x-tweet figcaption a:hover { text-decoration: underline; }
+/* Inline quoted tweet (Draft.js TWEET atomic) — embedded-post card: avatar,
+   author row, optional article cover + headline, then body. */
+.cv-article figure.cv-x-tweet { margin: 1.5rem 0; padding: 0; }
+.cv-article figure.cv-x-tweet figcaption {
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  border-top: 0;
+  color: #1d1d1f;
+}
+.cv-article figure.cv-x-tweet .cv-x-tweet-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px 7px;
+  text-decoration: none;
+  color: inherit;
+}
+.cv-article figure.cv-x-tweet .cv-x-tweet-head:hover .cv-x-tweet-who strong { text-decoration: underline; }
+.cv-article figure.cv-x-tweet img.cv-x-tweet-avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  display: block;
+  background: #e5e5ea;
+}
+.cv-article figure.cv-x-tweet .cv-x-tweet-who { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.cv-article figure.cv-x-tweet .cv-x-tweet-who strong { font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; }
+.cv-article figure.cv-x-tweet .cv-x-tweet-handle { font-size: 12.5px; color: #6e6e73; }
+.cv-article figure.cv-x-tweet a.cv-x-tweet-cover { display: block; margin: 0 13px 8px; }
+.cv-article figure.cv-x-tweet a.cv-x-tweet-cover img {
+  width: 100%;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  display: block;
+  border-radius: 10px;
+  background: #ececf0;
+}
+.cv-article figure.cv-x-tweet .cv-x-tweet-title { margin: 0 13px 4px; font-weight: 650; letter-spacing: -0.01em; }
+.cv-article figure.cv-x-tweet blockquote { margin: 0; padding: 0 13px 12px; border: 0; color: #1d1d1f; }
+.cv-article figure.cv-x-tweet blockquote p { margin: 0.35rem 0; }
 
 /* Readability keeps callouts as nested <article> and drops the publisher chrome. */
 .cv-callout {
