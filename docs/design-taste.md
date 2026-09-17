@@ -161,6 +161,8 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 
 归档 View 的 `scroll_checkpoint` 落进 `reader_state`；墙卡**复用「查看」那一颗槽**，读到 3%–96% 时标签变「继续 N%」+ `play_circle`，其余仍是「查看」。禁止再加第二颗「继续阅读」按钮（同一槽规则，同 分享 / 取消分享）。关闭 View 后约 400ms 就地刷新该卡，让标签跟上新位置。阈值真源：`DatabaseManager.readerProgressMap` + 前端 `itemReadProgress`（两端都夹 3–96；回收箱不出）。
 
+打开 View 时，sheet 用 **clip-path** 从被点卡片矩形长到全纸（视觉词典下篇 #76），空间来源 = 卡片，不是屏幕中心。**禁止 transform 卡片**——WebKit 会把里面的 iframe 变空白（同 `.sessions-shell` 的处理）。`prefers-reduced-motion` 或程序化打开（无卡片矩形）退回普通淡入。
+
 ## Compose 纸面（笔记编辑器）
 
 独立 `#notesPanel`。列表在左，纸面在右。Markdown **源码和预览分开**，不要 WYSIWYG 揉在同一块 DOM。

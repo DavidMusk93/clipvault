@@ -7074,7 +7074,7 @@ window.ClipViewMasonry = Masonry;
     async function requestArchivePage(href, itemId, btn) {
       const existing = itemId && clips.find((c) => c.id === itemId);
       if (existing && existing.archived) {
-        openArchiveReader(existing);
+        openArchiveReader(existing, btn);
         return;
       }
       const raw = String(href || '').trim();
@@ -7226,12 +7226,68 @@ window.ClipViewMasonry = Masonry;
     let archiveReaderHref = '';
     let archiveReaderViewHref = '';
     let archiveReaderItemId = '';
+    let archiveRevealRaf = 0;
+
+    /**
+     * Origin-aware reveal for the reader sheet: clip-path grows from the wall
+     * card's rect to the sheet's rect (视觉词典下篇 #76). Clip-path only — the
+     * sheet card is never transformed, because WebKit blanks a transformed
+     * iframe. Reduced motion / programmatic opens keep the plain opacity fade.
+     */
+    function revealReaderSheet(sheet, originEl) {
+      const cardEl = sheet && sheet.querySelector('.archive-reader-card');
+      if (!cardEl) return;
+      if (archiveRevealRaf) { cancelAnimationFrame(archiveRevealRaf); archiveRevealRaf = 0; }
+      cardEl.style.clipPath = '';
+      cardEl.style.webkitClipPath = '';
+      cardEl.style.willChange = '';
+      cardEl.style.transition = '';
+      cardEl.style.opacity = '';
+      let reduce = false;
+      try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+      if (reduce || !originEl || !originEl.getBoundingClientRect) return;
+      const from = originEl.getBoundingClientRect();
+      const to = cardEl.getBoundingClientRect();
+      if (from.width < 1 || from.height < 1 || to.width < 1 || to.height < 1) return;
+      const clip = {
+        t: Math.max(0, from.top - to.top),
+        r: Math.max(0, to.right - from.right),
+        b: Math.max(0, to.bottom - from.bottom),
+        l: Math.max(0, from.left - to.left),
+      };
+      const rad = Math.min(from.width, from.height) / 2;
+      const dur = 300;
+      const t0 = performance.now();
+      const ease = (t) => 1 - Math.pow(1 - t, 3);
+      // Reveal is the only motion here — snap the fade so it does not double up.
+      cardEl.style.transition = 'none';
+      cardEl.style.opacity = '1';
+      cardEl.style.willChange = 'clip-path';
+      const tick = (now) => {
+        const u = Math.min(1, (now - t0) / dur);
+        const k = ease(u);
+        const inset = `inset(${(clip.t * (1 - k)).toFixed(2)}px ${(clip.r * (1 - k)).toFixed(2)}px ${(clip.b * (1 - k)).toFixed(2)}px ${(clip.l * (1 - k)).toFixed(2)}px round ${(rad + (18 - rad) * k).toFixed(2)}px)`;
+        cardEl.style.clipPath = inset;
+        cardEl.style.webkitClipPath = inset;
+        if (u < 1) {
+          archiveRevealRaf = requestAnimationFrame(tick);
+        } else {
+          archiveRevealRaf = 0;
+          cardEl.style.clipPath = '';
+          cardEl.style.webkitClipPath = '';
+          cardEl.style.willChange = '';
+          cardEl.style.transition = '';
+          cardEl.style.opacity = '';
+        }
+      };
+      archiveRevealRaf = requestAnimationFrame(tick);
+    }
 
     function archiveViewHref(id, embed) {
       return API + '/api/archive/view?id=' + encodeURIComponent(id) + (embed ? '&embed=1' : '');
     }
 
-    function openArchiveReader(item) {
+    function openArchiveReader(item, originEl) {
       const sheet = document.getElementById('archiveReader');
       const frame = document.getElementById('archiveReaderFrame');
       const titleEl = document.getElementById('archiveReaderTitle');
@@ -7249,6 +7305,7 @@ window.ClipViewMasonry = Masonry;
       document.body.style.overflow = 'hidden';
       // Real document URL — same engine as a standalone tab. Never srcdoc.
       frame.src = archiveViewHref(item.id, true);
+      revealReaderSheet(sheet, originEl);
     }
 
     function closeArchiveReader() {
@@ -7256,6 +7313,15 @@ window.ClipViewMasonry = Masonry;
       const frame = document.getElementById('archiveReaderFrame');
       if (!sheet) return;
       const itemId = archiveReaderItemId;
+      if (archiveRevealRaf) { cancelAnimationFrame(archiveRevealRaf); archiveRevealRaf = 0; }
+      const revealCard = sheet.querySelector('.archive-reader-card');
+      if (revealCard) {
+        revealCard.style.clipPath = '';
+        revealCard.style.webkitClipPath = '';
+        revealCard.style.willChange = '';
+        revealCard.style.transition = '';
+        revealCard.style.opacity = '';
+      }
       sheet.classList.remove('open');
       sheet.setAttribute('aria-hidden', 'true');
       if (frame) frame.src = 'about:blank';
@@ -7575,7 +7641,7 @@ window.ClipViewMasonry = Masonry;
             const id = (card && card.dataset.id) || archBtn.getAttribute('data-item-id');
             const live = clips.find((c) => c.id === id);
             if (live && live.archived) {
-              openArchiveReader(live);
+              openArchiveReader(live, card);
               return;
             }
             requestArchivePage(href, id, archBtn);
@@ -7586,7 +7652,7 @@ window.ClipViewMasonry = Masonry;
             e.stopPropagation();
             const id = viewBtn.getAttribute('data-view-archive') || (card && card.dataset.id);
             const item = clips.find((c) => c.id === id) || { id };
-            openArchiveReader(item);
+            openArchiveReader(item, card);
             return;
           }
           if (clearBtn) {
