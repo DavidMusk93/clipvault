@@ -226,6 +226,18 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 **落地信标（跳转 / 从 picker 选中）**：墙卡 `.is-flash` = Accent `#0071E3` 描边（`outline` 2px / offset 2px，不改 `border-width`）+ `scale(1.02)` + 抬高 `z-index`，卡片进视口后再亮、持约 850ms 后 transition 收回。两张卡很近时也要一眼能分清落点。禁止 `translateY` / 持久选中态 / 改 border 宽度（会撑 masonry）。`prefers-reduced-motion` 只留描边，去掉 scale。
 
 
+## 墙反馈（失败 / 空 / 重试）
+
+| 状态 | Do | Don't |
+| --- | --- | --- |
+| 刷新失败 | 屏上有卡片 → 保留 + toast；屏上为空才画 error 态 | 清空 `#grid` 只留一句「加载失败，请刷新」 |
+| 错误态 | icon + 文案 + 语义色（`.empty.is-error`）+ `role="alert"` + 「重试」`[data-wall-retry]` | 只有红色 / 只有错误码 / 无下一步 |
+| 加载更多失败 | 底部留「重试」`[data-wall-retry-more]`（`loadMoreFailed` 挡住 finally 隐藏） | 只 `console.error` 静默卡住 |
+| 空态 | 按原因分文案：回收箱 / 搜索（带词 + 「清除搜索」）/ 类型筛（「显示全部」）/ 真空库（说明内容怎么来） | 一律「没有匹配的记录」且无下一步 |
+| 骨架屏 | **不装**。`wall_load` 均值 ~67ms，骨架只会闪 | 为「完整」预渲染占位 DOM |
+
+规则：重试 / 清除动作一律委托（`[data-wall-retry]` / `[data-wall-retry-more]` / `[data-wall-clear]`），挺过 masonry 重建（禁止每渲染绑一遍）。卡片上屏时 `layoutMasonry` 清掉所有非卡片子节点（包括 boot 的「加载中…」`.empty`），否则占位会留在卡片底下。
+
 ## 紧凑布局 + 锚定 popover
 
 | Do | Don't |

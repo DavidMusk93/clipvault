@@ -41,3 +41,55 @@ test('retry buttons are delegated, not per-render', () => {
   assert.match(html, /closest\('\[data-wall-retry\]'\)[\s\S]{0,80}fetchPage\(\{ reset: true \}\)/, 'reset retry');
   assert.match(html, /closest\('\[data-wall-retry-more\]'\)[\s\S]{0,80}fetchPage\(\{ reset: false \}\)/, 'load-more retry');
 });
+
+function extractFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.ok(start >= 0, `${name} not found`);
+  const open = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}') {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`${name} unbalanced`);
+}
+
+test('empty wall explains the reason and offers the matching next step', () => {
+  const fnSrc = extractFunction(html, 'wallEmptyMarkup');
+  const mk = (searchQuery, currentFilter, trash) =>
+    new Function('searchQuery', 'currentFilter', 'esc', `${fnSrc}; return wallEmptyMarkup;`)(
+      searchQuery, currentFilter, (s) => String(s)
+    )(trash);
+
+  assert.match(mk('', 'all', true), /回收箱是空的/, 'trash has its own copy');
+  assert.match(mk('', 'all', true), /保留 30 天/, 'and explains retention');
+
+  assert.match(mk('kafka lag', 'all', false), /没有匹配「kafka lag」的记录/, 'search names the query');
+  assert.match(mk('kafka lag', 'all', false), /清除搜索/, 'search can be cleared');
+
+  assert.match(mk('', 'image', false), /没有这种类型的记录/, 'type filter has its own copy');
+  assert.match(mk('', 'image', false), /显示全部/, 'filter can be dropped');
+
+  assert.match(mk('', 'all', false), /还没有记录/, 'truly empty library');
+  assert.match(mk('', 'all', false), /复制任意文字或图片/, 'says how content arrives');
+
+  // The old generic copy and the stuck「加载中…」branch are gone.
+  assert.doesNotMatch(html, /没有匹配的记录/, 'generic copy removed');
+  assert.match(html, /host\.innerHTML = wallEmptyMarkup\(inTrash\)/, 'empty branch uses the helper');
+});
+
+test('clear-filter escape hatch resets every wall filter and reloads', () => {
+  assert.match(html, /function clearWallFilters\(\)/, 'helper exists');
+  assert.match(html, /searchQuery = '';\s*currentFilter = 'all';\s*currentView = 'library';/, 'resets all three');
+  assert.match(html, /input\.value = ''/, 'clears the search box');
+  assert.match(html, /closest\('\[data-wall-clear\]'\)[\s\S]{0,60}clearWallFilters\(\)/, 'delegated');
+});
+
+test('cards paint removes stale placeholders (boot loader must not linger)', () => {
+  // layoutMasonry used to keep `.empty`, so the「加载中…」block survived under the cards.
+  assert.doesNotMatch(html, /!cards\.includes\(ch\) && !ch\.classList\.contains\('empty'\)/, 'old keep-empty guard gone');
+  assert.match(html, /only cards live here/, 'documented');
+});

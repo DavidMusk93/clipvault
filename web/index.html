@@ -8223,6 +8223,50 @@ window.ClipViewMasonry = Masonry;
      * Load-more must use appendCardsIncremental to avoid scroll jump that looks like dups.
      * Delete/restore must use removeCardFromMasonry (differential) — not this.
      */
+    /**
+     * Empty wall, explained (视觉词典下篇 #56): why it is empty and the next
+     * step. A search/filter miss can clear itself; a truly empty library just
+     * says how content arrives.
+     */
+    function wallEmptyMarkup(trash) {
+      if (trash) {
+        return `<div class="empty"><span class="material-symbols-outlined" style="font-size:48px;opacity:.5">delete</span>
+          <p style="margin-top:12px">回收箱是空的</p>
+          <p class="empty-sub">删除的记录会在这里保留 30 天</p></div>`;
+      }
+      if (searchQuery) {
+        return `<div class="empty"><span class="material-symbols-outlined" style="font-size:48px;opacity:.5">search_off</span>
+          <p style="margin-top:12px">没有匹配「${esc(searchQuery)}」的记录</p>
+          <button type="button" class="empty-action" data-wall-clear>清除搜索</button></div>`;
+      }
+      if (currentFilter && currentFilter !== 'all') {
+        return `<div class="empty"><span class="material-symbols-outlined" style="font-size:48px;opacity:.5">filter_alt_off</span>
+          <p style="margin-top:12px">没有这种类型的记录</p>
+          <button type="button" class="empty-action" data-wall-clear>显示全部</button></div>`;
+      }
+      return `<div class="empty"><span class="material-symbols-outlined" style="font-size:48px;opacity:.5">inbox</span>
+        <p style="margin-top:12px">还没有记录</p>
+        <p class="empty-sub">复制任意文字或图片，会自动出现在这里</p></div>`;
+    }
+
+    /** Reset every wall filter and reload — the empty state's escape hatch. */
+    function clearWallFilters() {
+      searchQuery = '';
+      currentFilter = 'all';
+      currentView = 'library';
+      const input = document.getElementById('searchInput');
+      if (input) input.value = '';
+      document.querySelectorAll('.chip').forEach((b) => {
+        const on = (b.dataset.view || 'library') !== 'trash' && (b.dataset.type || 'all') === 'all';
+        b.classList.toggle('active', on);
+      });
+      nextCursor = null;
+      exhausted = false;
+      cardCache.clear();
+      colHeights = null;
+      fetchPage({ reset: true });
+    }
+
     function rebuildFromData({ preserveScroll = true } = {}) {
       const t0 = performance.now();
       const host = document.getElementById('grid');
@@ -8238,8 +8282,7 @@ window.ClipViewMasonry = Masonry;
         colHeights = null;
         if (pinRail) pinRail.hidden = true;
         if (pinHost) pinHost.innerHTML = '';
-        host.innerHTML = `<div class="empty"><span class="material-symbols-outlined" style="font-size:48px;opacity:.5">inbox</span>
-          <p style="margin-top:12px">${loading ? '加载中…' : '没有匹配的记录'}</p></div>`;
+        host.innerHTML = wallEmptyMarkup(inTrash);
         lastColCount = 0;
         nm('wall_paint', { dur_ms: performance.now() - t0, payload: { kind: 'empty', n: 0 } });
         return;
@@ -8382,7 +8425,8 @@ window.ClipViewMasonry = Masonry;
         if (card.parentNode !== host) host.appendChild(card);
       }
       for (const ch of [...host.children]) {
-        if (!cards.includes(ch) && !ch.classList.contains('empty')) ch.remove();
+        // Drop stale placeholders (the boot「加载中…」block, skeletons); only cards live here.
+        if (!cards.includes(ch)) ch.remove();
       }
 
       const cols = Masonry.columnCountForWidth(host.clientWidth || window.innerWidth);
@@ -8813,7 +8857,8 @@ window.ClipViewMasonry = Masonry;
       const t = e.target;
       if (!t || !t.closest) return;
       if (t.closest('[data-wall-retry]')) { e.preventDefault(); fetchPage({ reset: true }); return; }
-      if (t.closest('[data-wall-retry-more]')) { e.preventDefault(); fetchPage({ reset: false }); }
+      if (t.closest('[data-wall-retry-more]')) { e.preventDefault(); fetchPage({ reset: false }); return; }
+      if (t.closest('[data-wall-clear]')) { e.preventDefault(); clearWallFilters(); }
     });
     document.querySelectorAll('.chip').forEach(btn => {
       btn.addEventListener('click', () => {
