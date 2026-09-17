@@ -163,6 +163,16 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 
 打开 View 时，sheet 用 **clip-path** 从被点卡片矩形长到全纸（视觉词典下篇 #76），空间来源 = 卡片，不是屏幕中心。**禁止 transform 卡片**——WebKit 会把里面的 iframe 变空白（同 `.sessions-shell` 的处理）。`prefers-reduced-motion` 或程序化打开（无卡片矩形）退回普通淡入。
 
+## 页面 / 详情转场（View Transitions）
+
+| 场景 | 手段 | 禁止 |
+| --- | --- | --- |
+| 墙缩略图 → 灯箱大图 | 同 document View Transition：缩略图与灯箱 `img` 共用 `view-transition-name: cv-lightbox-cover`，320ms | 从屏幕中心 `scale`；旧 `materialize` 只作降级 |
+| 墙卡 → 归档 View | clip-path 揭示（iframe 不能参与 VT） | 给归档 iframe 设 `view-transition-name` |
+| 墙卡 → 笔记纸面 / 会话 | 复用 notes/sessions 的 clip-path sheet 引擎 | 再造一套 |
+
+规则：`startViewTransition` 必须 feature-detect + `prefers-reduced-motion` 跳过 + `finished.catch().finally()` 清 name（重复 name 会锁死下一次过渡）。等真像素：`img.decode()` vs 800ms 赛跑，别让过渡挂在没加载的图上。
+
 ## Compose 纸面（笔记编辑器）
 
 独立 `#notesPanel`。列表在左，纸面在右。Markdown **源码和预览分开**，不要 WYSIWYG 揉在同一块 DOM。
