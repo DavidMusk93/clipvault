@@ -1738,6 +1738,20 @@
       backdrop-filter: blur(18px) saturate(140%);
     }
     .lightbox.open { display: flex; }
+    /* #78 View Transitions: the thumbnail grows into the lightbox image.
+       Fallback (unsupported / reduced motion) keeps the materialize keyframe. */
+    ::view-transition-group(cv-lightbox-cover) {
+      animation-duration: 320ms;
+      animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    ::view-transition-old(cv-lightbox-cover),
+    ::view-transition-new(cv-lightbox-cover) { animation-duration: 320ms; }
+    .lightbox.vt .lightbox-inner { animation: none; }
+    @media (prefers-reduced-motion: reduce) {
+      ::view-transition-group(*),
+      ::view-transition-old(*),
+      ::view-transition-new(*) { animation: none !important; }
+    }
     .lightbox-inner {
       position: relative; max-width: min(96vw, 1400px); max-height: 92vh;
       min-height: 0;
@@ -8619,7 +8633,7 @@ window.ClipViewMasonry = Masonry;
       const wrap = card.querySelector('.thumb-wrap');
       if (!wrap || wrap.dataset.wired === '1') return;
       wrap.dataset.wired = '1';
-      wrap.addEventListener('click', () => openLightbox(wrap.getAttribute('data-preview'), item));
+      wrap.addEventListener('click', () => openLightboxWithTransition(wrap.getAttribute('data-preview'), item, wrap));
       const img = wrap.querySelector('img');
       img?.addEventListener('error', () => onThumbBroken(card, wrap), { once: true });
     }
@@ -8642,6 +8656,60 @@ window.ClipViewMasonry = Masonry;
 
 
     // --- Lightbox ---
+    let lightboxVtOrigin = null;
+
+    function lightboxCoverEl(scope) {
+      return (scope && scope.querySelector && scope.querySelector('img')) || scope;
+    }
+    function clearLightboxVtNames() {
+      const cover = lightboxCoverEl(lightboxVtOrigin);
+      if (cover && cover.style) cover.style.viewTransitionName = '';
+      const img = document.getElementById('lightboxImg');
+      if (img && img.style) img.style.viewTransitionName = '';
+      lightboxVtOrigin = null;
+      document.getElementById('lightbox')?.classList.remove('vt');
+    }
+
+    /**
+     * #78 View Transition: the thumbnail grows into the lightbox image (list → detail).
+     * Same-document only — an iframe (the archive View) cannot share a
+     * view-transition-name, which is why that sheet uses a clip-path reveal.
+     * Unsupported browsers / reduced motion fall back to the materialize keyframe.
+     */
+    function openLightboxWithTransition(url, item, originEl) {
+      const canVT = typeof document !== 'undefined' && typeof document.startViewTransition === 'function';
+      if (!url || !canVT || sheetReduce() || !originEl) { openLightbox(url, item); return; }
+      const cover = lightboxCoverEl(originEl);
+      if (!cover || !cover.style) { openLightbox(url, item); return; }
+      lightboxVtOrigin = originEl;
+      cover.style.viewTransitionName = 'cv-lightbox-cover';
+      let vt = null;
+      try {
+        vt = document.startViewTransition(async () => {
+          try {
+            openLightbox(url, item);
+            const img = document.getElementById('lightboxImg');
+            if (img) {
+              img.style.viewTransitionName = 'cv-lightbox-cover';
+              // Real pixels before the "new" snapshot, else the morph lands on a blank.
+              const ready = img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+              await Promise.race([ready, new Promise((r) => setTimeout(r, 800))]);
+            }
+            cover.style.viewTransitionName = '';
+            document.getElementById('lightbox')?.classList.add('vt');
+          } catch (_) {}
+        });
+      } catch (_) {
+        clearLightboxVtNames();
+        openLightbox(url, item);
+        return;
+      }
+      // An aborted transition (rapid clicks) rejects `ready`/`finished` — swallow both.
+      if (vt && vt.ready && vt.ready.catch) vt.ready.catch(() => {});
+      if (vt && vt.finished && vt.finished.finally) vt.finished.catch(() => {}).finally(clearLightboxVtNames);
+      else clearLightboxVtNames();
+    }
+
     function openLightbox(url, item) {
       if (!url) return;
       fullUrlForLightbox = url;
@@ -8675,6 +8743,7 @@ window.ClipViewMasonry = Masonry;
       document.body.style.overflow = 'hidden';
     }
     function closeLightbox() {
+      clearLightboxVtNames();
       const lb = document.getElementById('lightbox');
       lb.classList.remove('open');
       const img = document.getElementById('lightboxImg');
