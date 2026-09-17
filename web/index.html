@@ -554,6 +554,19 @@
       text-align: center; padding: 18px; color: var(--muted);
       font-size: 13px; letter-spacing: -0.01em;
     }
+    .empty-sub { margin-top: 6px; font-size: 13px; color: var(--muted); }
+    .empty.is-error .material-symbols-outlined { color: var(--danger); opacity: 0.8; }
+    .empty-action {
+      margin-top: 16px; height: 34px; padding: 0 18px;
+      border: 0.5px solid var(--separator-strong); border-radius: 980px;
+      background: #fff; color: var(--ink); font: 600 13px/32px var(--font-ui);
+      letter-spacing: -0.01em; cursor: pointer;
+      transition: background var(--press), transform var(--press);
+    }
+    .empty-action:hover { background: var(--fill); }
+    .empty-action:active { transform: scale(0.97); }
+    .loading-more .empty-action { margin-top: 10px; height: 28px; line-height: 26px; font-size: 12px; }
+    @media (prefers-reduced-motion: reduce) { .empty-action:active { transform: none; } }
 
     /* Cards — material surface, no hover displacement (AGENTS) */
     .m3-card {
@@ -3061,6 +3074,7 @@ window.ClipViewMasonry = Masonry;
     let clips = [];
     let nextCursor = null;
     let loading = false;
+    let loadMoreFailed = false;
     let pendingReset = false;
     let exhausted = false;
     /** Bumps on reset so late load-more responses cannot append into a fresh list. */
@@ -5089,6 +5103,11 @@ window.ClipViewMasonry = Masonry;
       const cursorForRequest = reset ? null : nextCursor;
 
       loading = true;
+      if (!reset) {
+        const lm = document.getElementById('loadingMore');
+        if (lm) { lm.hidden = false; lm.textContent = '加载更多…'; }
+        loadMoreFailed = false;
+      }
       document.getElementById('loadingMore').hidden = reset;
       if (reset) wallBootInflight = true;
       const t0 = performance.now();
@@ -5152,15 +5171,22 @@ window.ClipViewMasonry = Masonry;
           ok: false,
           payload: { kind: reset ? 'reset' : 'more', phase: 'error' },
         });
-        if (reset && gen === fetchGen) {
-          document.getElementById('grid').innerHTML =
-            `<div class="empty"><p>加载失败，请刷新</p></div>`;
+        if (gen === fetchGen) {
+          if (reset) {
+            // A refresh miss must never blank the wall. Keep what is on screen
+            // and surface a persistent error + Retry only when there is nothing.
+            if (clips.length) toast('刷新失败，保留当前内容');
+            else renderWallError();
+          } else {
+            loadMoreFailed = true;
+            renderLoadMoreRetry();
+          }
         }
       } finally {
         loading = false;
         lastWallFetchAt = performance.now();
         if (reset) wallBootInflight = false;
-        if (gen === fetchGen) {
+        if (gen === fetchGen && !loadMoreFailed) {
           document.getElementById('loadingMore').hidden = true;
         }
         if (pendingReset) {
@@ -5174,6 +5200,27 @@ window.ClipViewMasonry = Masonry;
       if (!item) return false;
       if (item.pinned === false) return false;
       return !!(item.pinned || item.pinnedAt);
+    }
+
+    /** Wall failure with nothing to show: explain, then offer Retry. */
+    function renderWallError(reason) {
+      const host = document.getElementById('grid');
+      if (!host) return;
+      const sub = reason ? `<p class="empty-sub">${esc(reason)}</p>` : '';
+      host.innerHTML = `<div class="empty is-error" role="alert">
+        <span class="material-symbols-outlined" style="font-size:48px;opacity:.6">cloud_off</span>
+        <p style="margin-top:12px">内容暂时无法加载</p>
+        ${sub}
+        <button type="button" class="empty-action" data-wall-retry>重试</button>
+      </div>`;
+    }
+
+    /** Load-more miss: stay at the bottom, keep the retry in view. */
+    function renderLoadMoreRetry() {
+      const el = document.getElementById('loadingMore');
+      if (!el) return;
+      el.hidden = false;
+      el.innerHTML = '加载更多失败 <button type="button" class="empty-action" data-wall-retry-more>重试</button>';
     }
 
     function pinFieldsFrom(src) {
@@ -8762,6 +8809,12 @@ window.ClipViewMasonry = Masonry;
     }
 
     // Filters + library/trash view
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      if (t.closest('[data-wall-retry]')) { e.preventDefault(); fetchPage({ reset: true }); return; }
+      if (t.closest('[data-wall-retry-more]')) { e.preventDefault(); fetchPage({ reset: false }); }
+    });
     document.querySelectorAll('.chip').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.chip').forEach(b => b.classList.remove('active'));
