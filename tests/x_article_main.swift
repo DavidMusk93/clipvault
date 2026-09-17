@@ -225,12 +225,19 @@ enum XArticleHTMLTests {
                 id: "2099485951701721585",
                 name: "Adrian Punk",
                 handle: "AdrianPunk115",
+                avatar: "https://pbs.twimg.com/profile_images/1/a.jpg",
                 text: "本文分为上下两册。\n\n第二段。",
-                url: "https://x.com/AdrianPunk115/status/2099485951701721585"
+                url: "https://x.com/AdrianPunk115/status/2099485951701721585",
+                articleTitle: "Vibe Coding 网页动效词典（中篇）",
+                cover: "https://pbs.twimg.com/media/cover.jpg"
             ),
         ])!
         ok("tweet-rendered", tweetDoc.html.contains("cv-x-tweet") && !tweetDoc.html.contains("cv-x-dropped"))
-        ok("tweet-author", tweetDoc.html.contains("Adrian Punk @AdrianPunk115"))
+        ok("tweet-author", tweetDoc.html.contains("<strong>Adrian Punk</strong>")
+            && tweetDoc.html.contains("cv-x-tweet-handle\">@AdrianPunk115"))
+        ok("tweet-avatar", tweetDoc.html.contains("cv-x-tweet-avatar\" src=\"https://pbs.twimg.com/profile_images/1/a.jpg\""))
+        ok("tweet-cover", tweetDoc.html.contains("cv-x-tweet-cover") && tweetDoc.html.contains("src=\"https://pbs.twimg.com/media/cover.jpg\""))
+        ok("tweet-title", tweetDoc.html.contains("cv-x-tweet-title\">Vibe Coding 网页动效词典（中篇）"))
         ok("tweet-text", tweetDoc.html.contains("<p>本文分为上下两册。</p>") && tweetDoc.html.contains("<p>第二段。</p>"))
         ok("tweet-cov", tweetDoc.coverage.atomicExpected == 1
             && tweetDoc.coverage.atomicRendered == 1
@@ -243,18 +250,33 @@ enum XArticleHTMLTests {
         ]], entityMap: [[ "key": 0, "value": ["type": "TWEET", "data": [:] as [String: Any]] ]])
         ok("tweet-no-id-dropped", tweetNoId.contains("cv-x-dropped") && tweetNoId.contains("data-entity=\"TWEET\""))
 
-        // Quoted X Article has empty tweet.text; fall back to article title + preview.
-        let articleTweet: [String: Any] = [
+        // Quoted X Article: empty tweet.text and bare-URL tweet.text both fall
+        // back to the article preview; title/cover ride along as separate parts.
+        let emptyArticle: [String: Any] = [
             "text": "",
-            "article": ["title": "视觉词典（上篇）", "preview_text": "很多人让 AI 做网页时只会说：帮我做一个高级的网站。"],
+            "author": ["avatar_url": "https://pbs.twimg.com/profile_images/1/a.jpg"],
+            "article": [
+                "title": "视觉词典（上篇）",
+                "preview_text": "很多人让 AI 做网页时只会说：帮我做一个高级的网站。",
+                "cover_media": ["media_info": ["original_img_url": "https://pbs.twimg.com/media/up.jpg"]],
+            ],
         ]
-        let articleText = XArticleHTML.tweetText(from: articleTweet)
-        ok("tweet-text-article-title", articleText.contains("视觉词典（上篇）"))
-        ok("tweet-text-article-preview", articleText.contains("帮我做一个高级的网站"))
+        let emptyParts = XArticleHTML.tweetParts(from: emptyArticle)
+        ok("tweet-parts-title", emptyParts.articleTitle == "视觉词典（上篇）")
+        ok("tweet-parts-preview", emptyParts.text.contains("帮我做一个高级的网站"))
+        ok("tweet-parts-cover", emptyParts.cover == "https://pbs.twimg.com/media/up.jpg")
+        ok("tweet-parts-avatar", emptyParts.avatar == "https://pbs.twimg.com/profile_images/1/a.jpg")
+        let urlArticle: [String: Any] = [
+            "text": "https://x.com/i/article/2096201150643257344",
+            "article": ["title": "AI网站前端设计工作流", "preview_text": "从结构到组件。"],
+        ]
+        let urlParts = XArticleHTML.tweetParts(from: urlArticle)
+        ok("tweet-parts-url-only-drops-url", !urlParts.text.contains("x.com/i/article"))
+        ok("tweet-parts-url-only-uses-preview", urlParts.text == "从结构到组件。")
         let plainTweet: [String: Any] = ["text": "本文分为上下两册。"]
-        ok("tweet-text-plain", XArticleHTML.tweetText(from: plainTweet) == "本文分为上下两册。")
+        ok("tweet-parts-plain", XArticleHTML.tweetParts(from: plainTweet).text == "本文分为上下两册。")
         let longTweet: [String: Any] = ["text": String(repeating: "x", count: 500)]
-        ok("tweet-text-cap", XArticleHTML.tweetText(from: longTweet).count == 400)
+        ok("tweet-parts-cap", XArticleHTML.tweetParts(from: longTweet).text.count == 400)
 
         // fxtwitter entityMap is a shuffled {key,value} list, not a dense array.
         // AdrianPunk 2088543211656753278: key 10 = DIVIDER, array index 10 = MEDIA.
