@@ -4313,7 +4313,7 @@ window.ClipViewMasonry = Masonry;
       if (titleEl) titleEl.value = '';
       paintNotesTitleView();
       notesStatus('idle');
-      await ensureNotesEditor('', 'source');
+      await ensureNotesEditor('', 'split');
       document.getElementById('notesPanel')?.classList.add('is-writing');
       try { history.replaceState(null, '', '#notes'); } catch (_) {}
       paintNotesList();

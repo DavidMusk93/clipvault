@@ -229,7 +229,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
   #notesPanel
     ├─ 左列表     type=note  置顶复用 pinned_at（不进墙 pin rail）
     └─ 右纸面
-         ├─ 打开 → 预览     新建 → 源码（禁止默认分栏）
+         ├─ 打开 → 预览     新建 → 分栏（源码左 / 预览右）
          ├─ CodeMirror 6  |  marked 块 hash LRU + React 18 keyed
          ├─ 关联：#notesLink + 相关 chip；popover 复用 #linkToast
          └─ 弹簧揭纸  clip-path inset（数字插值，禁止 tween 字符串）
