@@ -78,10 +78,26 @@ def sql_lit(value) -> str:
     return "'" + text.replace("'", "''") + "'"
 
 
+def _values_tuple(row: dict) -> str:
+    return "(" + ", ".join(sql_lit(row.get(c)) for c in INSERT_COLS) + ")"
+
+
 def build_insert_sql(row: dict) -> str:
     cols = ", ".join(INSERT_COLS)
-    vals = ", ".join(sql_lit(row.get(c)) for c in INSERT_COLS)
-    return f"INSERT INTO hook_events ({cols}) VALUES ({vals}) ON CONFLICT (event_id) DO NOTHING"
+    return (
+        f"INSERT INTO hook_events ({cols}) VALUES {_values_tuple(row)} "
+        "ON CONFLICT (event_id) DO NOTHING"
+    )
+
+
+def build_insert_many_sql(rows: list[dict]) -> str:
+    """One multi-row INSERT. Flush batches cut Quack round trips ~100x."""
+    cols = ", ".join(INSERT_COLS)
+    values = ",".join(_values_tuple(row) for row in rows)
+    return (
+        f"INSERT INTO hook_events ({cols}) VALUES {values} "
+        "ON CONFLICT (event_id) DO NOTHING"
+    )
 
 
 def quack_uris() -> list[str]:
@@ -149,12 +165,11 @@ def open_quack_client() -> object:
     return con
 
 
-def quack_insert(row: dict, uri: str, token: str, con: object | None = None) -> None:
+def quack_exec(sql: str, uri: str, token: str, con: object | None = None) -> None:
     own = con is None
     if own:
         con = open_quack_client()
     try:
-        sql = build_insert_sql(row)
         con.execute(
             "FROM quack_query(?, ?, token := ?, disable_ssl := true)",
             [uri, sql, token],
@@ -162,6 +177,18 @@ def quack_insert(row: dict, uri: str, token: str, con: object | None = None) -> 
     finally:
         if own:
             con.close()
+
+
+def quack_insert(row: dict, uri: str, token: str, con: object | None = None) -> None:
+    quack_exec(build_insert_sql(row), uri, token, con=con)
+
+
+def quack_insert_many(
+    rows: list[dict], uri: str, token: str, con: object | None = None
+) -> None:
+    if not rows:
+        return
+    quack_exec(build_insert_many_sql(rows), uri, token, con=con)
 
 
 def ping_sse(row: dict) -> None:
