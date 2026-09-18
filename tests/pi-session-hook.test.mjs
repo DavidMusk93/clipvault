@@ -13,6 +13,10 @@ const adapter = readFileSync(join(root, 'trae_hooks/pi/clipvault-session.ts'), '
 const install = readFileSync(join(root, 'trae_hooks/pi/install_pi_hook.sh'), 'utf8');
 const mine = readFileSync(join(root, 'trae_hooks/mine.py'), 'utf8');
 const docs = readFileSync(join(root, 'docs/trae-hooks.md'), 'utf8');
+const remoteInstall = readFileSync(join(root, 'trae_hooks/pi/install_pi_hook_remote.sh'), 'utf8');
+const installRemote = readFileSync(join(root, 'trae_hooks/install_remote.sh'), 'utf8');
+const hookClient = readFileSync(join(root, 'trae_hooks/hook_client.py'), 'utf8');
+const spoolFlush = readFileSync(join(root, 'trae_hooks/spool_flush.py'), 'utf8');
 
 test('pi adapter maps lifecycle to the ClipVault hook contract', () => {
   for (const ev of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'Notification']) {
@@ -56,4 +60,32 @@ test('install writes the pi env override and links the extension', () => {
   assert.match(install, /ln -sfn "\$SRC" "\$PI_EXT"/);
   assert.match(docs, /pi 会话/);
   assert.match(docs, /source=pi/);
+});
+
+test('remote installer deploys the pi adapter over ssh', () => {
+  assert.match(remoteInstall, /CLIPVAULT_REMOTE_SSH/);
+  assert.match(remoteInstall, /pi-hooks\.env/);
+  assert.match(remoteInstall, /\. "\$HOOKS_ENV\/trae-hooks\.env"/);
+  assert.match(remoteInstall, /export CLIPVAULT_HOOK_SOURCE="pi"/);
+  // instance_id stays the host's Trae env; source=pi is the differentiator.
+  assert.doesNotMatch(remoteInstall, /CLIPVAULT_INSTANCE_ID/);
+  assert.match(remoteInstall, /scp .*clipvault-session\.ts/);
+  // refuses to run until the shared Trae collector exists on the host
+  assert.match(remoteInstall, /trae-hooks\.env missing/);
+});
+
+test('a fresh collector install also wires pi capture', () => {
+  assert.match(installRemote, /install_pi_hook_remote\.sh/);
+  assert.match(docs, /install_pi_hook_remote\.sh/);
+});
+
+test('spool flush batches multi-row INSERTs with per-row fallback', () => {
+  // per-row Quack round trips are ~0.26s; one multi-row INSERT is ~0.002s/row.
+  assert.match(hookClient, /def build_insert_many_sql/);
+  assert.match(hookClient, /def quack_insert_many/);
+  assert.match(hookClient, /ON CONFLICT \(event_id\) DO NOTHING/);
+  assert.match(spoolFlush, /quack_insert_many/);
+  assert.match(spoolFlush, /BATCH_ROWS/);
+  // a failed batch falls back per-row so one bad line never drops the batch
+  assert.match(spoolFlush, /quack_insert\(row/);
 });
