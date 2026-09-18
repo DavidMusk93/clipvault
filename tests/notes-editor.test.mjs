@@ -6,8 +6,17 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import test from 'node:test';
-import { JSDOM } from 'jsdom';
 import { src, root } from './helpers/src.mjs';
+
+// jsdom is a dev-only dependency (npm ci). Skip cleanly when absent so the CI
+// Swift job (check-frontend.sh runs without an npm install) still passes.
+let JSDOM = null;
+let skipJsdom = false;
+try {
+  ({ JSDOM } = await import('jsdom'));
+} catch {
+  skipJsdom = 'jsdom not installed — run `npm ci`';
+}
 
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const entry = readFileSync(join(root, 'web/assets/notes-editor/entry.js'), 'utf8');
@@ -118,7 +127,7 @@ test('save status is labeled and retries on failure', () => {
   assert.match(html, /prefers-reduced-motion: reduce\)\s*\{\s*\.notes-status \{ transition: color/, 'reduced motion drops the width tween');
 });
 
-test('save status morphs on state change and only swaps text on same state', () => {
+test('save status morphs on state change and only swaps text on same state', { skip: skipJsdom }, () => {
   const start = html.indexOf('function notesStatus(');
   assert.ok(start >= 0, 'notesStatus not found');
   const open = html.indexOf('{', start);
