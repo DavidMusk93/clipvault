@@ -34,10 +34,11 @@ scp -o BatchMode=yes \
   "$HOOKS_DIR/row.py" \
   "$HOOKS_DIR/spool_flush.py" \
   "$HOOKS_DIR/clipvault-hook-flush.service" \
+  "$HOOKS_DIR/collector_selfcheck.sh" \
   "$SSH_HOST:$REMOTE_ENV/"
 
 scp -o BatchMode=yes "$TOKEN_SRC" "$SSH_HOST:$REMOTE_ENV/quack.token"
-ssh -o BatchMode=yes "$SSH_HOST" "chmod 600 '$REMOTE_ENV/quack.token' && chmod 755 '$REMOTE_ENV/clipvault_hook.sh'"
+ssh -o BatchMode=yes "$SSH_HOST" "chmod 600 '$REMOTE_ENV/quack.token' && chmod 755 '$REMOTE_ENV/clipvault_hook.sh' '$REMOTE_ENV/collector_selfcheck.sh'"
 
 # Generate hooks.json with this host's wrapper path (no spaces).
 python3 - "$HOOKS_DIR/hooks.json" "$REMOTE_ENV/clipvault_hook.sh" <<'PY' | ssh -o BatchMode=yes "$SSH_HOST" "cat > '$REMOTE_ENV/hooks.json'"
@@ -152,9 +153,17 @@ cp "$ENV/hooks.json" /root/.trae-cn/hooks.json
 
 cp "$ENV/clipvault-hook-flush.service" /etc/systemd/system/clipvault-hook-flush.service
 systemctl daemon-reload
-systemctl enable --now clipvault-hook-flush.service
+systemctl enable clipvault-hook-flush.service
+# `enable --now` does not restart an already-running unit, so a re-install that
+# rewrites trae-hooks.env would keep the old (possibly empty) environment.
+systemctl restart clipvault-hook-flush.service
 echo "remote collector installed instance=${INSTANCE} quack=127.0.0.1:${RPORT}"
 echo "Next: reverse tunnel + hard-restart Trae on this host."
+
+# "active" is not "working" — verify the service sees its env and can reach Mac.
+if ! CLIPVAULT_HOOK_ENV="$ENV/trae-hooks.env" bash "$ENV/collector_selfcheck.sh"; then
+  echo "NOTE: collector self-check reported a problem (see above)." >&2
+fi
 REMOTE
 
 # pi session capture is standard on every collector: install its adapter too.

@@ -17,6 +17,7 @@ const remoteInstall = readFileSync(join(root, 'trae_hooks/pi/install_pi_hook_rem
 const installRemote = readFileSync(join(root, 'trae_hooks/install_remote.sh'), 'utf8');
 const hookClient = readFileSync(join(root, 'trae_hooks/hook_client.py'), 'utf8');
 const spoolFlush = readFileSync(join(root, 'trae_hooks/spool_flush.py'), 'utf8');
+const selfcheck = readFileSync(join(root, 'trae_hooks/collector_selfcheck.sh'), 'utf8');
 
 test('pi adapter maps lifecycle to the ClipVault hook contract', () => {
   for (const ev of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'Notification']) {
@@ -88,4 +89,22 @@ test('spool flush batches multi-row INSERTs with per-row fallback', () => {
   assert.match(spoolFlush, /BATCH_ROWS/);
   // a failed batch falls back per-row so one bad line never drops the batch
   assert.match(spoolFlush, /quack_insert\(row/);
+});
+
+test('collector install restarts the unit and runs a self-check', () => {
+  // enable --now does not restart a running unit; a re-install must restart so
+  // a rewritten trae-hooks.env actually reaches the process.
+  assert.match(installRemote, /systemctl enable clipvault-hook-flush\.service/);
+  assert.match(installRemote, /systemctl restart clipvault-hook-flush\.service/);
+  assert.match(installRemote, /collector_selfcheck\.sh/);
+  assert.match(installRemote, /collector_selfcheck\.sh" \\/);
+});
+
+test('collector self-check catches "active but not working"', () => {
+  // the d2 failure mode: `export` env lines systemd ignores, empty process env
+  assert.match(selfcheck, /uses 'export'/);
+  assert.match(selfcheck, /\/proc\/\$PID\/environ/);
+  assert.match(selfcheck, /no CLIPVAULT_\* env/);
+  assert.match(selfcheck, /nc -z -w 2/);
+  assert.match(docs, /collector_selfcheck\.sh/);
 });

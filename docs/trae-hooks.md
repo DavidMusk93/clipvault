@@ -156,12 +156,18 @@ ssh -fN -o ExitOnForwardFailure=yes -o BatchMode=yes \
 # Mac store
 curl --noproxy '*' -fsS http://127.0.0.1:9488/api/health
 
+# 采集端到底在不在工作（"active" != 在工作）；也可 ssh 远端跑
+ssh d2 'bash /root/.trae-cn/hooks_env/collector_selfcheck.sh'
+#   查三个静默故障：env 写成 export（systemd 忽略）／进程 environ 为空／隧道不通
+
 # 隧道起来后，在远端
 nc -z 127.0.0.1 19495 && echo quack_tunnel_ok
 
 # 库里按机看
 # instance_id in ('mac-work','d2','sg_d')
 ```
+
+`trae-hooks.env` 必须是 systemd `KEY=value`（不要 `export`）。包装器 `set -a` 后再 source。**改完 env 必须 `systemctl restart clipvault-hook-flush`**：`enable --now` 不会重启已在跑的 unit，旧进程会继续用空环境（d2 曾因此积压 3.9G 未上传）。`install_remote.sh` 已改成 `enable` + `restart`，并在末尾自动跑 `collector_selfcheck.sh`。
 
 `trae-hooks.env` 必须是 systemd `KEY=value`（不要 `export`）。包装器 `set -a` 后再 source。
 
@@ -219,7 +225,8 @@ CLIPVAULT_REMOTE_SSH=sg_d bash trae_hooks/pi/install_pi_hook_remote.sh
 | `trae_hooks/server.py` | 唯一 DuckDB writer + HTTP + `quack_serve` |
 | `trae_hooks/hook_client.py` | spool + Quack INSERT |
 | `trae_hooks/install.sh` | Mac store + 本机 hook |
-| `trae_hooks/install_remote.sh` | 任意 SSH 采集端（含 pi 适配器） |
+| `trae_hooks/install_remote.sh` | 任意 SSH 采集端（含 pi 适配器 + 自检） |
+| `trae_hooks/collector_selfcheck.sh` | 采集端自检（env 可见性 / 隧道 / spool） |
 | `trae_hooks/pi/install_pi_hook_remote.sh` | 远端 pi 适配器（复用已装采集端） |
 | `trae_hooks/install_d2.sh` | `install_remote.sh` 的 d2 预设 |
 | `~/bin/ssh-socks-server.py` | 反向隧道条目（活的 9020） |
