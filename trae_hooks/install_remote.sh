@@ -157,6 +157,10 @@ echo "remote collector installed instance=${INSTANCE} quack=127.0.0.1:${RPORT}"
 echo "Next: reverse tunnel + hard-restart Trae on this host."
 REMOTE
 
+# pi session capture is standard on every collector: install its adapter too.
+CLIPVAULT_REMOTE_SSH="$SSH_HOST" CLIPVAULT_REMOTE_HOOKS_ENV="$REMOTE_ENV" \
+  bash "$REPO_ROOT/trae_hooks/pi/install_pi_hook_remote.sh"
+
 echo
 echo "Mac next:"
 echo "  1) tunnel  ${SSH_HOST}:127.0.0.1:${RPORT}  →  127.0.0.1:9494"

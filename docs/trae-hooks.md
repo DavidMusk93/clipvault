@@ -186,7 +186,9 @@ pi 没有 `hooks.json`，用 **extension** 当适配器，把 pi 生命周期事
 
 工具名归一化到 `mine.py` 能认的名字：`bash`→`RunCommand`，`read/write/edit` 原样，`grep/find/ls`→`RunCommand` 并合成 shell 形态的 `cmd`，`nmem_*`→`mcp__nowledge-mem__*`（这样 MCP 只读不沉降的分析也能用）。
 
-装（Mac store 已在时）：
+装：
+
+**本机（Mac store 已在时）：**
 
 ```bash
 bash trae_hooks/pi/install_pi_hook.sh
@@ -194,7 +196,17 @@ bash trae_hooks/pi/install_pi_hook.sh
 # symlink ~/.pi/agent/extensions/clipvault-session.ts -> repo
 ```
 
-然后重启 pi（或 `/reload`）。pi 会话与 Trae 共用 `instance_id`（`mac-work`），靠 `source=pi` 区分。单次关闭：`CLIPVAULT_PI_SESSION_HOOK=0 pi`。
+**远端（Trae 采集端已在时；sg_d / d2 这类 Linux 机）：**
+
+```bash
+CLIPVAULT_REMOTE_SSH=sg_d bash trae_hooks/pi/install_pi_hook_remote.sh
+# 写 <hooks_env>/pi-hooks.env（同上，identity 继承该机 instance_id）
+# 落一份真文件 <home>/.pi/agent/extensions/clipvault-session.ts（非 symlink）
+```
+
+`install_remote.sh` 已把这一步并进新机安装：装采集端即同时装 pi 适配器，pi 捕获是每台采集端的标准件。
+
+然后重启 pi（或 `/reload`）。pi 会话与 Trae 共用该机 `instance_id`（Mac `mac-work`、sg_d `sg_d`），靠 `source=pi` 区分。单次关闭：`CLIPVAULT_PI_SESSION_HOOK=0 pi`。
 
 **不影响 pi 主流程**：适配器 spawn 包装器后立即 `unref()`，不 await；包装器自身失败也 `exit 0`。
 
@@ -207,6 +219,7 @@ bash trae_hooks/pi/install_pi_hook.sh
 | `trae_hooks/server.py` | 唯一 DuckDB writer + HTTP + `quack_serve` |
 | `trae_hooks/hook_client.py` | spool + Quack INSERT |
 | `trae_hooks/install.sh` | Mac store + 本机 hook |
-| `trae_hooks/install_remote.sh` | 任意 SSH 采集端 |
+| `trae_hooks/install_remote.sh` | 任意 SSH 采集端（含 pi 适配器） |
+| `trae_hooks/pi/install_pi_hook_remote.sh` | 远端 pi 适配器（复用已装采集端） |
 | `trae_hooks/install_d2.sh` | `install_remote.sh` 的 d2 预设 |
 | `~/bin/ssh-socks-server.py` | 反向隧道条目（活的 9020） |
