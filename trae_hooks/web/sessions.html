@@ -1193,7 +1193,8 @@
         b.classList.toggle("is-on", b.getAttribute("data-scope") === mineState.scope);
       });
     };
-    const MINE_NUM_COLS = new Set(["n", "writes", "reads", "sec", "share", "work", "wait", "tools", "fail", "rate"]);
+    const MINE_NUM_COLS = new Set(["n", "writes", "reads", "sec", "share", "work", "wait", "tools", "fail", "rate",
+      "tokens", "loads", "avg_tokens", "total_tokens", "usd", "inp", "cr", "out", "hit", "e2e"]);
     const renderTable = (t) => {
       if (!t || !t.rows || !t.rows.length) return "";
       const maxima = {};
@@ -1248,6 +1249,10 @@
         ["跨度", mineSpan(s.duration_s)],
         ["空档", mineSpan(s.idle_s)],
       ];
+      if (s.usage_turns) {
+        tiles.push(["费用 USD", s.cost_usd ?? "-"]);
+        tiles.push(["缓存命中%", s.cache_hit_pct ?? "-"]);
+      }
       const kpis = tiles.map(([k, v]) => `<div class="mine-kpi"><b>${escMine(v)}</b><span>${escMine(k)}</span></div>`).join("");
       const waste = Math.max(0, Math.min(100, Number(h.waste_pct) || 0));
       return `<div class="mine-verdict ${gradeClass(score)}">
@@ -1261,7 +1266,7 @@
       const fl = s.flow || {};
       return JSON.stringify([
         s.n_rows, s.n_turns, s.n_tools, s.work_s, s.wait_s, s.fail_n, s.redundant_reads,
-        s.health && s.health.score,
+        s.health && s.health.score, s.cost_usd, s.cache_hit_pct, s.usage_turns,
         fl.prompt_n, fl.extra_roundtrips, fl.correction_n,
         ((data && data.feedback) || []).map((f) => `${f.sev || ""}:${f.title || ""}:${f.draft || ""}`),
         (data && data.active) || null,

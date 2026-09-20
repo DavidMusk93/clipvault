@@ -25,6 +25,7 @@ DIRECTIONS: list[dict[str, str]] = [
     {"id": "agent.hot", "axis": "agent", "title": "热点/冗余"},
     {"id": "agent.mcp", "axis": "agent", "title": "MCP"},
     {"id": "agent.phases", "axis": "agent", "title": "任务阶段"},
+    {"id": "agent.metrics", "axis": "agent", "title": "成本/缓存/上下文"},
 ]
 
 # Tool names that mutate files. A file_path is a write only when one of these fired;
@@ -56,6 +57,52 @@ SELECT
     substr(coalesce(tool_response, ''), 1, 400) AS resp_head
 FROM hook_events
 WHERE hook_event IN ('PostToolUse', 'UserPromptSubmit', 'Stop')
+"""
+
+# Metrics plane. Tolerated to be missing on stores created before this feature.
+USAGE_SQL = """
+SELECT
+    CAST(ts AS VARCHAR) AS ts,
+    session_id,
+    model,
+    provider,
+    turn_index,
+    input_tokens,
+    output_tokens,
+    cache_read_tokens,
+    cache_write_tokens,
+    reasoning_tokens,
+    total_tokens,
+    cost_total,
+    ttft_ms,
+    elapsed_ms,
+    decode_ms,
+    tok_s_decode,
+    tok_s_e2e
+FROM llm_usage
+WHERE 1=1
+"""
+
+CTX_SQL = """
+SELECT
+    CAST(ts AS VARCHAR) AS ts,
+    session_id,
+    turn_index,
+    system_tokens,
+    preamble_tokens,
+    tools_tokens,
+    rules_tokens,
+    docs_tokens,
+    project_tokens,
+    skills_tokens,
+    prompt_tokens,
+    history_tokens,
+    prompt_total_tokens,
+    skill_names,
+    skill_loaded_tokens,
+    memory_ids
+FROM turn_context
+WHERE 1=1
 """
 
 _RE_FILE_PATH = re.compile(r'"file_path"\s*:\s*"((?:\\.|[^"\\])*)"')
@@ -377,12 +424,226 @@ def _block(title: str, axis: str, note: str, tables: list[dict[str, Any]]) -> di
     return {"title": title, "axis": axis, "note": note, "table": tables[0] if tables else _table([], []), "tables": tables}
 
 
+def _pct(part: float, whole: float) -> float:
+    return round(100.0 * part / whole, 1) if whole else 0.0
+
+
+def _avg(values: list[float]) -> float:
+    return round(sum(values) / len(values), 1) if values else 0.0
+
+
+# Section labels for the context-composition table, in prompt order.
+_CTX_SECTIONS = (
+    ("system", "system 合计"),
+    ("rules", "rules (AGENTS)"),
+    ("project", "project_context"),
+    ("tools", "工具声明"),
+    ("skills", "skills 索引"),
+    ("history", "history 累计"),
+    ("prompt", "当前 prompt"),
+    ("total", "合计"),
+)
+
+
+def metrics_analysis(
+    usage_rows: list[dict[str, Any]],
+    ctx_rows: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    """Cost / cache / context read of the metrics plane.
+
+    Money and tok/s are measured. Context tokens are estimates
+    (chars / calibrated chars-per-token), so the block note says so and the
+    realized estimate ratio is shown so nobody reads them as billing truth.
+    """
+    if not usage_rows:
+        return None, []
+
+    n = len(usage_rows)
+    cost = sum(float(r.get("cost_total") or 0) for r in usage_rows)
+    inp = sum(int(r.get("input_tokens") or 0) for r in usage_rows)
+    cr = sum(int(r.get("cache_read_tokens") or 0) for r in usage_rows)
+    cw = sum(int(r.get("cache_write_tokens") or 0) for r in usage_rows)
+    out = sum(int(r.get("output_tokens") or 0) for r in usage_rows)
+    reasoning = sum(int(r.get("reasoning_tokens") or 0) for r in usage_rows)
+    hit = _pct(cr, inp + cr)
+    decode = _avg([float(r["tok_s_decode"]) for r in usage_rows if r.get("tok_s_decode")])
+    e2e = _avg([float(r["tok_s_e2e"]) for r in usage_rows if r.get("tok_s_e2e")])
+    ttft = _avg([float(r["ttft_ms"]) for r in usage_rows if r.get("ttft_ms")])
+    cold_turns = sum(1 for r in usage_rows if not r.get("cache_read_tokens"))
+    write_turns = sum(1 for r in usage_rows if r.get("cache_write_tokens"))
+
+    models: dict[str, dict[str, Any]] = {}
+    for r in usage_rows:
+        b = models.setdefault(str(r.get("model") or "?"), {"n": 0, "usd": 0.0, "inp": 0, "cr": 0, "out": 0, "e2e": []})
+        b["n"] += 1
+        b["usd"] += float(r.get("cost_total") or 0)
+        b["inp"] += int(r.get("input_tokens") or 0)
+        b["cr"] += int(r.get("cache_read_tokens") or 0)
+        b["out"] += int(r.get("output_tokens") or 0)
+        if r.get("tok_s_e2e"):
+            b["e2e"].append(float(r["tok_s_e2e"]))
+
+    days: dict[str, dict[str, Any]] = {}
+    for r in usage_rows:
+        b = days.setdefault(str(r.get("ts") or "")[:10], {"n": 0, "usd": 0.0, "out": 0, "cr": 0})
+        b["n"] += 1
+        b["usd"] += float(r.get("cost_total") or 0)
+        b["out"] += int(r.get("output_tokens") or 0)
+        b["cr"] += int(r.get("cache_read_tokens") or 0)
+
+    def _mean(col: str) -> float:
+        return _avg([float(r[col]) for r in ctx_rows if r.get(col)])
+
+    sections = {
+        "total": _mean("prompt_total_tokens"),
+        "system": _mean("system_tokens"),
+        "rules": _mean("rules_tokens"),
+        "project": _mean("project_tokens"),
+        "tools": _mean("tools_tokens"),
+        "skills": _mean("skills_tokens"),
+        "history": _mean("history_tokens"),
+        "prompt": _mean("prompt_tokens"),
+    }
+    # Realized estimate ratio: context estimate vs billed prompt tokens.
+    est_ratio = 0.0
+    if ctx_rows:
+        pairs = [
+            float(r["prompt_total_tokens"]) / float(u["input_tokens"] + (u["cache_read_tokens"] or 0))
+            for r, u in zip(ctx_rows, usage_rows)
+            if r.get("prompt_total_tokens") and (u.get("input_tokens") or 0) + (u.get("cache_read_tokens") or 0) > 0
+        ]
+        est_ratio = _avg(pairs)
+
+    # Loaded-skill context cost: tokens each SKILL.md dumped into context this turn.
+    # Position-independent: measured from the toolResult the skill read produced.
+    skill_tokens: dict[str, list[int]] = {}
+    for r in ctx_rows:
+        raw = r.get("skill_loaded_tokens")
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            continue
+        for name, toks in (data or {}).items():
+            skill_tokens.setdefault(str(name), []).append(int(toks or 0))
+    mem_turns = sum(1 for r in ctx_rows if str(r.get("memory_ids") or "").strip())
+
+    overview = [
+        {"metric": "回合", "value": str(n)},
+        {"metric": "费用 USD", "value": f"{cost:.4f}"},
+        {"metric": "输出 tokens", "value": f"{out:,}"},
+        {"metric": "推理 tokens", "value": f"{reasoning:,}"},
+        {"metric": "未缓存输入", "value": f"{inp:,}"},
+        {"metric": "缓存读", "value": f"{cr:,}"},
+        {"metric": "缓存命中率", "value": f"{hit}%"},
+        {"metric": "解码 tok/s", "value": str(decode) if decode else "-"},
+        {"metric": "端到端 tok/s", "value": str(e2e) if e2e else "-"},
+        {"metric": "首字延迟 ms", "value": str(ttft) if ttft else "-"},
+        {"metric": "空缓存回合", "value": str(cold_turns)},
+        {"metric": "写缓存回合", "value": str(write_turns)},
+    ]
+    model_rows = [
+        {
+            "model": m,
+            "n": b["n"],
+            "usd": round(b["usd"], 4),
+            "inp": b["inp"],
+            "cr": b["cr"],
+            "out": b["out"],
+            "hit": _pct(b["cr"], b["inp"] + b["cr"]),
+            "e2e": _avg(b["e2e"]),
+        }
+        for m, b in sorted(models.items(), key=lambda kv: -kv[1]["usd"])
+    ]
+    ctx_tbl = [{"section": label, "tokens": sections.get(key, 0)} for key, label in _CTX_SECTIONS]
+    day_rows = [
+        {"day": d, "n": b["n"], "usd": round(b["usd"], 4), "out": b["out"], "cr": b["cr"]}
+        for d, b in sorted(days.items())
+    ]
+    skill_tbl = [
+        {
+            "skill": k,
+            "loads": len(v),
+            "avg_tokens": _avg([float(x) for x in v]),
+            "total_tokens": sum(v),
+        }
+        for k, v in sorted(skill_tokens.items(), key=lambda kv: -sum(kv[1]))
+    ]
+
+    note = (
+        f"费用/tok 为实测；上下文 tokens 为估算（chars / 校准 cpt；本样本估算/实测 = {est_ratio}）。"
+        "命中率 = cacheRead / (cacheRead + 未缓存 input)。"
+    )
+    block = _block(
+        "成本 / 缓存 / 上下文",
+        "agent",
+        note,
+        [
+            _table(overview, [("metric", "指标"), ("value", "值")], "总览"),
+            _table(model_rows, [("model", "模型"), ("n", "回合"), ("usd", "USD"), ("inp", "未缓存in"), ("cr", "缓存读"), ("out", "出"), ("hit", "命中%"), ("e2e", "e2e tok/s")], "按模型"),
+            _table(ctx_tbl, [("section", "段"), ("tokens", "平均 tokens")], "上下文构成（估算）"),
+            _table(day_rows, [("day", "日期"), ("n", "回合"), ("usd", "USD"), ("out", "出"), ("cr", "缓存读")], "每天成本曲线"),
+            _table(skill_tbl, [("skill", "加载的 skill"), ("loads", "次数"), ("avg_tokens", "平均 tokens"), ("total_tokens", "合计 tokens")], "Skill 上下文成本（SKILL.md 正文）"),
+        ],
+    )
+
+    fb: list[dict[str, str]] = []
+
+    def add(title: str, text: str, evidence: str, sev: str = "note", draft: str = "") -> None:
+        fb.append({"audience": "agent", "use": "agents.md", "title": title, "text": text, "evidence": evidence, "draft": draft, "sev": sev})
+
+    if n >= 20 and hit < 80:
+        add(
+            "缓存命中率偏低",
+            f"缓存命中 {hit}%（{cr:,} 缓存读 / {inp:,} 未缓存输入），{cold_turns}/{n} 个回合完全未命中。"
+            "前缀（system / AGENTS / skill 索引）只要一改，整段 cache 失效。",
+            f"hit={hit}% cr={cr} inp={inp} cold_turns={cold_turns}",
+            "high" if hit < 60 else "med",
+        )
+    if write_turns and n >= 20:
+        add(
+            "有回合在写缓存",
+            f"{write_turns}/{n} 个回合 cacheWrite>0：system prompt 或前缀被改写，下一回合要为整段重新预填。",
+            f"write_turns={write_turns}/{n} cache_write={cw}",
+            "med",
+        )
+    if skill_tbl:
+        top, vals = max(skill_tokens.items(), key=lambda kv: sum(kv[1]))
+        add(
+            f"Skill 吃上下文：{top}",
+            f"加载 {top} 的 {len(vals)} 次共把 {sum(vals):,} tokens 灌进上下文（平均 {_avg([float(x) for x in vals])} tokens/次）。"
+            "SKILL.md 正文进 history，之后每回合都要重发；skill 越大越贵，按需只取命中段。",
+            f"skill={top} loads={len(vals)} tokens={sum(vals)}",
+            "med" if sum(vals) >= 5000 else "note",
+        )
+    if mem_turns:
+        add(
+            "记忆被检索到",
+            f"{mem_turns}/{len(ctx_rows)} 个回合的上下文里出现 nowledgemem 记忆 id。"
+            "记忆价值 = 被检索到 + 改变行为，需与该回合 tok/失败率联看。",
+            f"mem_turns={mem_turns}/{len(ctx_rows)}",
+        )
+    if len(day_rows) >= 2 and day_rows[0]["n"]:
+        first, last = day_rows[0], day_rows[-1]
+        add(
+            "成本曲线",
+            f"首日 {first['day']} ${first['usd']} / {first['n']} 回合（{round(first['usd'] / max(1, first['n']), 4)} $/回合），"
+            f"最新 {last['day']} ${last['usd']} / {last['n']} 回合（{round(last['usd'] / max(1, last['n']), 4)} $/回合）。",
+            f"days={len(day_rows)} total=${round(cost, 4)}",
+            "note",
+        )
+    return block, fb
+
+
 def mine_rows(
     rows: list[dict[str, Any]],
     *,
     dirs: list[str] | None = None,
     session_id: str | None = None,
     scope: str = "session",
+    usage_rows: list[dict[str, Any]] | None = None,
+    ctx_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     want = [d for d in (dirs or list(DIR_IDS)) if d in DIR_IDS]
     if not want:
@@ -842,8 +1103,7 @@ def mine_rows(
         )
 
     summary = {
-        "n_rows": len(rows),
-        "n_turns": len(turns),
+        "n_rows": len(rows),        "n_turns": len(turns),
         "n_tools": total_tools_n,
         "work_s": round(work_s, 1),
         "wait_s": round(wait_s, 1),
@@ -873,6 +1133,20 @@ def mine_rows(
         "instances": [{"id": k, "n": v} for k, v in inst_n.most_common()],
         "span": f"{ordered[0].get('ts') if ordered else ''} → {ordered[-1].get('ts') if ordered else ''}",
     }
+    mblock: dict[str, Any] | None = None
+    mfeed: list[dict[str, str]] = []
+    if "agent.metrics" in want:
+        mblock, mfeed = metrics_analysis(usage_rows or [], ctx_rows or [])
+        if mblock:
+            blocks["agent.metrics"] = mblock
+        if usage_rows:
+            mcost = sum(float(r.get("cost_total") or 0) for r in usage_rows)
+            mcr = sum(int(r.get("cache_read_tokens") or 0) for r in usage_rows)
+            minp = sum(int(r.get("input_tokens") or 0) for r in usage_rows)
+            summary["cost_usd"] = round(mcost, 4)
+            summary["cache_hit_pct"] = round(100.0 * mcr / (mcr + minp), 1) if (mcr + minp) else 0.0
+            summary["usage_turns"] = len(usage_rows)
+
     feedback = _insights(
         cwd_n=cwd_n,
         git_n=git_n,
@@ -907,7 +1181,7 @@ def mine_rows(
         structured_n=structured_n,
         avg_prompt=avg_prompt,
         summary=summary,
-    )
+    ) + mfeed
     return {
         "ok": True,
         "scope": scope,
@@ -1258,6 +1532,28 @@ def fetch_rows(query_fn, *, session_id: str | None, scope: str) -> list[dict[str
     return query_fn(sql, params)
 
 
+def fetch_metrics(query_fn, *, session_id: str | None, scope: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Metrics plane rows for the same scope. Missing tables -> empty, never raises."""
+    def _one(sql: str) -> list[dict[str, Any]]:
+        q = sql
+        params: list[Any] = []
+        if scope == "session" and session_id:
+            q += " AND session_id = ?"
+            params.append(session_id)
+        elif scope == "recent":
+            q += " AND ts >= (current_timestamp - INTERVAL 7 DAY)"
+        else:
+            q += " AND session_id = ?"
+            params.append(session_id or "")
+        q += " ORDER BY ts ASC LIMIT 20000"
+        try:
+            return query_fn(q, params)
+        except Exception:  # noqa: BLE001 - store may predate the metrics plane
+            return []
+
+    return _one(USAGE_SQL), _one(CTX_SQL)
+
+
 def mine(
     query_fn,
     *,
@@ -1268,4 +1564,12 @@ def mine(
     if scope not in ("session", "recent"):
         scope = "session"
     rows = fetch_rows(query_fn, session_id=session_id, scope=scope)
-    return mine_rows(rows, dirs=dirs, session_id=session_id, scope=scope)
+    usage_rows, ctx_rows = fetch_metrics(query_fn, session_id=session_id, scope=scope)
+    return mine_rows(
+        rows,
+        dirs=dirs,
+        session_id=session_id,
+        scope=scope,
+        usage_rows=usage_rows,
+        ctx_rows=ctx_rows,
+    )
