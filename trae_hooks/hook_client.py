@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 import time
 import traceback
@@ -17,6 +18,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from row import needs_user_input, parse_stdin, row_from_payload  # noqa: E402
+from metrics import METRIC_EVENTS, chunked, insert_sql, rows_from_report  # noqa: E402
 
 INSERT_COLS = (
     "event_id",
@@ -253,6 +255,44 @@ def pick_uri(uris: list[str], probe: float) -> str | None:
     return None
 
 
+def emit_metric(
+    payload: dict,
+    event: str,
+    instance_id: str,
+    source: str,
+    token_file: Path,
+    probe: float,
+) -> int:
+    """Metrics plane (llm_usage / turn_context). Best-effort, deliberately no spool.
+
+    The identical rows are reconstructable from pi session JSONL, so a Quack miss
+    costs at most realtime ttft -- never data. Failures land in metrics.err.
+    """
+    try:
+        payload.setdefault("instance_id", instance_id)
+        payload.setdefault("source", source)
+        payload.setdefault("host", socket.gethostname())
+        table, cols, rows = rows_from_report(payload, event)
+        uri = pick_uri(quack_uris(), probe)
+        if uri is None:
+            return 0
+        token = load_token(token_file)
+        con = open_quack_client()
+        try:
+            for batch in chunked(rows, 500):
+                quack_exec(insert_sql(table, cols, batch), uri, token, con=con)
+        finally:
+            con.close()
+    except Exception:
+        try:
+            err = Path("/var/tmp/clipvault-hooks/metrics.err")
+            err.parent.mkdir(parents=True, exist_ok=True)
+            err.write_text(traceback.format_exc(), encoding="utf-8")
+        except Exception:
+            pass
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="ClipVault Trae hook client")
     parser.add_argument("--event", default="", help="hook event name")
@@ -272,6 +312,9 @@ def main() -> int:
     try:
         raw = sys.stdin.read()
         payload = parse_stdin(raw, hook_event or None)
+        if hook_event in METRIC_EVENTS:
+            # Metrics plane, not the conversation store; never touches hook_events.
+            return emit_metric(payload, hook_event, instance_id, source, token_file, probe)
         row = row_from_payload(
             payload,
             hook_event=hook_event or None,
