@@ -60,7 +60,10 @@ chmod 600 "$TOKEN_FILE"
 
 ln -sfn "$VENV" "$HOOKS_ENV/venv"
 install -m 644 "$HOOKS_DIR/hook_client.py" "$HOOKS_ENV/hook_client.py"
+install -m 644 "$HOOKS_DIR/metrics.py" "$HOOKS_ENV/metrics.py"
+install -m 644 "$HOOKS_DIR/pi_session_ingest.py" "$HOOKS_ENV/pi_session_ingest.py"
 install -m 644 "$HOOKS_DIR/row.py" "$HOOKS_ENV/row.py"
+install -m 755 "$HOOKS_DIR/pi_session_ingest.sh" "$HOOKS_ENV/pi_session_ingest.sh"
 install -m 755 "$HOOKS_DIR/clipvault_hook.sh" "$WRAPPER_DST"
 
 cat > "$ENV_FILE" <<EOF
@@ -102,6 +105,20 @@ launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
 sleep 0.3
 launchctl bootstrap "$GUI" "$PLIST_DST"
 sleep 1.2
+
+# Metrics backfill agent: pi session JSONL -> llm_usage / turn_context.
+METRICS_LABEL=com.davidmusk.clipvault-metrics
+METRICS_PLIST_DST="$HOME_USER/Library/LaunchAgents/$METRICS_LABEL.plist"
+python3 - <<PY
+from pathlib import Path
+src = Path("$HOOKS_DIR/com.davidmusk.clipvault-metrics.plist").read_text()
+src = src.replace("/Users/bytedance", "$HOME_USER")
+Path("$METRICS_PLIST_DST").write_text(src)
+print("wrote $METRICS_PLIST_DST")
+PY
+launchctl bootout "$GUI/$METRICS_LABEL" 2>/dev/null || true
+sleep 0.3
+launchctl bootstrap "$GUI" "$METRICS_PLIST_DST" || true
 
 echo "--- probe ---"
 curl -fsS --max-time 3 "http://127.0.0.1:9488/api/health" || {

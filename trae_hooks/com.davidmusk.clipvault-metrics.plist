@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.davidmusk.clipvault-metrics</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/bytedance/.trae-cn/hooks_env/pi_session_ingest.sh</string>
+    <string>--since</string>
+    <string>3</string>
+    <string>--quiet</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/bytedance</string>
+    <key>CLIPVAULT_HOOK_ENV</key>
+    <string>/Users/bytedance/.trae-cn/hooks_env/trae-hooks.env</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/bytedance/Library/Application Support/Keepsake/logs/clipvault-metrics.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/bytedance/Library/Application Support/Keepsake/logs/clipvault-metrics.err.log</string>
+</dict>
+</plist>
