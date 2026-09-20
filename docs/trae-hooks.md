@@ -76,6 +76,73 @@ sg_d    quack:127.0.0.1:19495   ssh -R → Mac :9494   隧道 clipvault-quack-sg
 
 ---
 
+## Metrics 平面（成本 / 缓存 / tok·s / 上下文构成）
+
+`hook_events` 只存**内容**（prompt / 工具 / 回复）。词频能算，钱和效率算不出来：
+它没有 token / cache / model / cost 任何一列。所以指标是**另一条平面、另一组表**，
+靠 `session_id + ts` 与内容表关联。
+
+```text
+                       一次 assistant 回复
+                             │
+      ┌──────────────────────┼────────────────────────┐
+      ▼                      ▼                        ▼
+ hook_events            llm_usage                 turn_context
+ 内容 / 行为             钱 + 速度                  上下文构成
+ ────────────           ──────────────────        ───────────────────
+ PreToolUse             in / out / reasoning       system 分段估算
+ PostToolUse            cacheRead / cacheWrite     rules / skills / project
+ UserPromptSubmit       cost.{in,out,cache}        history 累计
+ Stop / Notification    model / provider / api     skill_loaded_tokens
+                        ttft / elapsed / tok·s     memory_ids
+      └─────────────── join: session_id + ts ───────────────┘
+```
+
+| 表 | 粒度 | 主键 | 谁写 |
+| --- | --- | --- | --- |
+| `llm_usage` | 一条 assistant message | `<session>:<message.timestamp>` | 热路径 + 冷路径 |
+| `turn_context` | 同上 | `<session>:<message.timestamp>` | 冷路径 |
+
+两个 writer，同一主键，互不重复：
+
+- **热路径** `pi/clipvault-session.ts` → `UsageReport` → `hook_client.py` 直接写 `llm_usage`。
+  唯一能拿到 `ttft_ms` 的 writer（JSONL 不存 ttft）。
+- **冷路径** `pi_session_ingest.py` 读 `~/.pi/agent/sessions/**/*.jsonl` 回填两表。
+  无损、可回溯历史、有 system `sections`，但**没有 ttft**。
+  用 `ON CONFLICT ... DO UPDATE`，并 `COALESCE` 保住热路径的 `ttft_ms/decode_ms/tok_s_decode`。
+
+关键事实（踩过坑，别改）：
+
+- `message.timestamp` = **请求开始**，`entry.timestamp` = **完成**。`elapsed = 完成 − 开始`；
+  用相邻消息时间差会得到 1ms（错）。
+- Trae hook stdin **没有** usage/model/cost（实测只有 `session_id/tool_name/tool_input…`），
+  所以 metrics 平面只有 pi 能喂。
+- `hook_events` 里的 usage 相关事件为 0：`hook_client.py` 按 `METRIC_EVENTS` 分流，
+  `UsageReport`/`ContextReport` 不走 spool、不进 `hook_events`。
+
+### 采集
+
+```bash
+# 一次性回填（可重复运行，幂等）
+/Users/bytedance/.trae-cn/hooks_env/pi_session_ingest.sh --since 0
+# 只解析不写：  … --dry-run   ；导出： … --out /tmp/metrics.ndjson
+```
+
+定时：LaunchAgent `com.davidmusk.clipvault-metrics`，每 15 分钟 `--since 3`（`trae_hooks/com.davidmusk.clipvault-metrics.plist`，`install.sh` 会装）。
+
+### 读
+
+面板方向 `agent.metrics`（`/api/mine`）：总览 / 按模型 / 上下文构成 / 每天成本曲线 / Skill 上下文成本。
+判读口径：
+
+- **缓存命中率** = `cacheRead / (cacheRead + 未缓存 input)`。前缀（rules / AGENTS / skills）一改，整段失效。
+- **tok/s** 优先看 decode（`output / (elapsed − ttft)`）；`tok_s_e2e` 含工具时间，天然偏低。
+- **上下文 tokens 是估算**（`chars / 校准 cpt`）。块 note 里有「估算/实测」比，接近 1 才可信。
+- **Skill 上下文成本** = 该 skill 文件**被读进上下文**的正文 tokens（按 toolResult 实测），
+  不是 system 里常驻的 skills 索引；写/改 skill 文件的确认回执不计入。
+
+---
+
 ## 端口与身份
 
 | 谁 | 口 | 绑定 |
@@ -223,7 +290,11 @@ CLIPVAULT_REMOTE_SSH=sg_d bash trae_hooks/pi/install_pi_hook_remote.sh
 | 路径 | 职责 |
 | --- | --- |
 | `trae_hooks/server.py` | 唯一 DuckDB writer + HTTP + `quack_serve` |
-| `trae_hooks/hook_client.py` | spool + Quack INSERT |
+| `trae_hooks/hook_client.py` | spool + Quack INSERT；`UsageReport`/`ContextReport` 分流到 metrics 平面 |
+| `trae_hooks/metrics.py` | metrics 平面的列定义 / 行构造 / INSERT·UPSERT SQL |
+| `trae_hooks/pi_session_ingest.py` | 冷路径回填：pi session JSONL → `llm_usage` / `turn_context` |
+| `trae_hooks/pi_session_ingest.sh` | 回填包装器（LaunchAgent 用） |
+| `trae_hooks/com.davidmusk.clipvault-metrics.plist` | 定时回填（15m） |
 | `trae_hooks/install.sh` | Mac store + 本机 hook |
 | `trae_hooks/install_remote.sh` | 任意 SSH 采集端（含 pi 适配器 + 自检） |
 | `trae_hooks/collector_selfcheck.sh` | 采集端自检（env 可见性 / 隧道 / spool） |
