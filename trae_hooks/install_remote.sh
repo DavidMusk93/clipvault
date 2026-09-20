@@ -31,6 +31,7 @@ ssh -o BatchMode=yes -o ConnectTimeout=12 "$SSH_HOST" \
 scp -o BatchMode=yes \
   "$HOOKS_DIR/clipvault_hook.sh" \
   "$HOOKS_DIR/hook_client.py" \
+  "$HOOKS_DIR/metrics.py" \
   "$HOOKS_DIR/row.py" \
   "$HOOKS_DIR/spool_flush.py" \
   "$HOOKS_DIR/clipvault-hook-flush.service" \
