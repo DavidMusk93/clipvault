@@ -13,8 +13,14 @@
  *   before_agent_start       UserPromptSubmit       prompt (source-guarded)
  *   tool_execution_start     PreToolUse             tool name/input
  *   tool_result              PostToolUse            wall time + isError->exit
+ *   message_end (assistant)  UsageReport            tok in/out/cache/cost + ttft
  *   agent_settled            Stop                   last assistant message
  *   ui_prompt_start          Notification           pi waiting on the human
+ *
+ * UsageReport is the metrics plane: hook_client routes it to DuckDB llm_usage,
+ * never to hook_events. It is the only writer that can supply ttft_ms (the JSONL
+ * backfill in pi_session_ingest.py has no ttft). Key is <session_id>:<message.timestamp>,
+ * identical to the JSONL backfill, so the two writers upsert one row per turn.
  *
  * Tool names are normalised to the ones mine.py understands: bash->RunCommand,
  * read/write/edit stay, grep/find/ls become RunCommand with a shell-shaped cmd,
@@ -106,6 +112,11 @@ export default function (pi: ExtensionAPI) {
 	const starts = new Map<string, number>();
 	let pendingPrompt: string | undefined;
 	let lastAssistant = "";
+	// UsageReport state: message.timestamp is the request start (pi sets it before
+	// the LLM call), so elapsed = now - start and ttft = first delta - start.
+	let streamStartedAt: number | undefined;
+	let streamFirstTokenAt: number | undefined;
+	let turnIndex = -1;
 
 	const base = (ctx: ExtensionContext) => ({
 		session_id: ctx.sessionManager.getSessionId(),
@@ -130,6 +141,10 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
+		// Resume/fork: continue the assistant-message index the JSONL backfill uses.
+		turnIndex = ctx.sessionManager
+			.getEntries()
+			.filter((e: any) => e?.type === "message" && e?.message?.role === "assistant").length - 1;
 		emit("SessionStart", base(ctx));
 	});
 
@@ -173,11 +188,64 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("message_end", (event) => {
-		const msg = event.message as { role?: string; content?: unknown };
+	pi.on("message_start", (event) => {
+		if ((event.message as { role?: string })?.role !== "assistant") return;
+		streamStartedAt = Date.now();
+		streamFirstTokenAt = undefined;
+	});
+
+	pi.on("message_update", (event) => {
+		if (streamStartedAt === undefined || streamFirstTokenAt !== undefined) return;
+		const type = (event.assistantMessageEvent as { type?: string } | undefined)?.type;
+		if (type === "text_delta" || type === "thinking_delta" || type === "toolcall_delta") {
+			streamFirstTokenAt = Date.now();
+		}
+	});
+
+	pi.on("message_end", (event, ctx) => {
+		const msg = event.message as {
+			role?: string;
+			content?: unknown;
+			model?: string;
+			provider?: string;
+			api?: string;
+			usage?: unknown;
+			stopReason?: string;
+			responseId?: string;
+			timestamp?: number;
+		};
 		if (msg?.role !== "assistant") return;
 		const text = textOf(msg.content);
 		if (text) lastAssistant = text;
+
+		const now = Date.now();
+		const elapsed = streamStartedAt !== undefined ? Math.max(0, now - streamStartedAt) : undefined;
+		const ttft =
+			streamStartedAt !== undefined && streamFirstTokenAt !== undefined
+				? Math.max(0, streamFirstTokenAt - streamStartedAt)
+				: undefined;
+		turnIndex += 1;
+		// message.timestamp (unix ms) is the join key shared with the JSONL backfill.
+		const messageId =
+			typeof msg.timestamp === "number"
+				? String(msg.timestamp)
+				: `${ctx.sessionManager.getSessionId()}:${turnIndex}`;
+		emit("UsageReport", {
+			...base(ctx),
+			message_id: messageId,
+			ts: new Date(now).toISOString(),
+			turn_index: turnIndex,
+			model: msg.model,
+			provider: msg.provider,
+			api: msg.api,
+			usage: msg.usage,
+			stop_reason: msg.stopReason,
+			response_id: msg.responseId,
+			elapsed_ms: elapsed,
+			ttft_ms: ttft,
+		});
+		streamStartedAt = undefined;
+		streamFirstTokenAt = undefined;
 	});
 
 	pi.on("agent_settled", (_event, ctx) => {
@@ -196,6 +264,8 @@ export default function (pi: ExtensionAPI) {
 		starts.clear();
 		pendingPrompt = undefined;
 		lastAssistant = "";
+		streamStartedAt = undefined;
+		streamFirstTokenAt = undefined;
 	});
 
 	console.log(`[clipvault-session] pi -> ClipVault sessions via ${HOOK}`);
