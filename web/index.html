@@ -4205,7 +4205,7 @@ window.ClipViewMasonry = Masonry;
       notesSearchTimer = setTimeout(async () => {
         applyNoteReveal(qRaw);
         try {
-          const res = await liveGet(API + '/api/clips?type=note&limit=50&q=' + encodeURIComponent(qRaw));
+          const res = await liveGet(API + '/api/clips?type=note&limit=50&q=' + encodeURIComponent(qRaw) + '&order=relevance');
           const data = await res.json();
           if (gen !== notesState.searchGen) return;
           notesState.results = Array.isArray(data) ? data : (data.items || []);
@@ -4226,7 +4226,7 @@ window.ClipViewMasonry = Masonry;
       paintNotesList();
       try {
         let url = API + '/api/clips?type=note&limit=' + (searching ? 50 : 80) + '&cursor=' + encodeURIComponent(cursor);
-        if (searching) url += '&q=' + encodeURIComponent(notesState.query);
+        if (searching) url += '&q=' + encodeURIComponent(notesState.query) + '&order=relevance';
         const res = await liveGet(url);
         const data = await res.json();
         if (gen !== (searching ? notesState.searchGen : notesState.browseGen)) return;

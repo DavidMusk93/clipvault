@@ -2364,6 +2364,7 @@ class WebServer {
         let typeFilter = items.first(where: { $0.name == "type" })?.value
         let excludeType = items.first(where: { $0.name == "exclude" })?.value
         let headOnly = (items.first(where: { $0.name == "fields" })?.value == "head")
+        let order = items.first(where: { $0.name == "order" })?.value
         if let idStr = items.first(where: { $0.name == "id" })?.value, let uuid = UUID(uuidString: idStr) {
             database.fetchItem(id: uuid) { [weak self] item in
                 guard let self else { return }
@@ -2401,7 +2402,7 @@ class WebServer {
             return
         }
 
-        database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType) { [weak self] page in
+        database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType, order: order) { [weak self] page in
             guard let self = self else { return }
             let readMap = self.database.readerProgressMap(ids: page.items.map { $0.id })
             let jsonItems = page.items.map { self.itemToJSON($0, headOnly: headOnly, read: readMap[$0.id.uuidString]) }
