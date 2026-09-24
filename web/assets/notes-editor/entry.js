@@ -15,6 +15,56 @@ const SPLIT_KEY = 'clipvault.notes.split'
 const WRAP_KEY = 'clipvault.notes.codeWrap'
 const MODES = ['source', 'split', 'preview']
 
+function escapeRegExp(s) {
+  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** All [from,to) token ranges in a plain string. Same tokens as the sidebar. */
+function findRanges(text, tokens) {
+  const out = []
+  const list = (tokens || []).filter(Boolean)
+  const s = String(text || '')
+  if (!s || !list.length) return out
+  const re = new RegExp('(' + list.map(escapeRegExp).join('|') + ')', 'gi')
+  let m
+  while ((m = re.exec(s)) !== null) {
+    if (m[0].length === 0) { re.lastIndex += 1; continue }
+    out.push({ from: m.index, to: m.index + m[0].length })
+  }
+  return out
+}
+
+const setFindQuery = StateEffect.define()
+const clearFindQuery = StateEffect.define()
+
+/** Source-pane find: decorate every hit; the active one gets an accent underline. */
+const findField = StateField.define({
+  create() { return { tokens: [], active: 0, ranges: [] } },
+  update(value, tr) {
+    for (const e of tr.effects) {
+      if (e.is(clearFindQuery)) return { tokens: [], active: 0, ranges: [] }
+      if (e.is(setFindQuery)) {
+        const ranges = findRanges(tr.state.doc.toString(), e.value.tokens)
+        const active = ranges.length ? Math.min(Math.max(0, e.value.active || 0), ranges.length - 1) : 0
+        return { tokens: e.value.tokens, active, ranges }
+      }
+    }
+    if (!value.tokens.length) return value
+    if (tr.docChanged) {
+      const ranges = findRanges(tr.state.doc.toString(), value.tokens)
+      const active = ranges.length ? Math.min(value.active, ranges.length - 1) : 0
+      return { tokens: value.tokens, active, ranges }
+    }
+    return value
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => {
+    if (!v.ranges.length) return Decoration.none
+    return Decoration.set(v.ranges.map((r, i) => Decoration.mark({
+      class: i === v.active ? 'cm-find-hit cm-find-active' : 'cm-find-hit',
+    }).range(r.from, r.to)))
+  }),
+})
+
 function loadCodeWrap() {
   try { return localStorage.getItem(WRAP_KEY) === '1' } catch (_) { return false }
 }
@@ -76,6 +126,16 @@ const notesTheme = EditorView.theme({
     color: '#86868b',
     fontStyle: 'italic',
     pointerEvents: 'none',
+  },
+  '.cm-find-hit': {
+    backgroundColor: 'rgba(255, 214, 10, 0.55)',
+    borderRadius: '3px',
+  },
+  '.cm-find-active': {
+    backgroundColor: 'rgba(255, 214, 10, 0.7)',
+    textDecoration: 'underline',
+    textDecorationColor: '#0071e3',
+    textDecorationThickness: '1.5px',
   },
 })
 
@@ -495,6 +555,12 @@ async function mount(root, opts) {
   let syncing = false
   let paintingPreview = false
   let firstPaintDone = false
+  let findTokens = []
+  let findActive = 0
+  let findChangeCb = null
+  let previewRanges = []
+  let previewPainted = false
+  let findWantScroll = false
 
   function metric(name, extra) {
     if (onMetric) onMetric(name, extra || {})
@@ -510,6 +576,7 @@ async function mount(root, opts) {
     try { localStorage.setItem(MODE_KEY, mode) } catch (_) {}
     if (mode !== 'preview') view.requestMeasure()
     if (mode === 'split') queueSyncFromSource()
+    applyFindForMode()
   }
 
   function enhancePreview(root) {
@@ -613,6 +680,8 @@ async function mount(root, opts) {
       else if (stickBottom) previewEl.scrollTop = previewEl.scrollHeight
       else previewEl.scrollTop = keepTop
       paintingPreview = false
+      previewPainted = true
+      if (findTokens.length && mode === 'preview') applyPreviewFindNow()
     }
     let compiled = 0
     let reused = 0
@@ -706,6 +775,7 @@ async function mount(root, opts) {
       notesTheme,
       pasteDrop,
       calcField,
+      findField,
       EditorView.inputHandler.of(notesInput),
       Prec.highest(keymap.of([
         { key: 'Tab', run: acceptCalc },
@@ -727,6 +797,9 @@ async function mount(root, opts) {
         lastMd = md
         schedulePreview(md)
         if (!applying && onUpdate) onUpdate(md)
+        if (findTokens.length && findChangeCb) {
+          findChangeCb({ total: update.state.field(findField).ranges.length, index: findActive })
+        }
       }),
     ],
   })
@@ -737,6 +810,109 @@ async function mount(root, opts) {
     syncing = true
     clearTimeout(unlockTimer)
     unlockTimer = setTimeout(() => { syncing = false }, 80)
+  }
+
+  function computePreviewRanges(tokens) {
+    const out = []
+    const list = (tokens || []).filter(Boolean)
+    if (!list.length) return out
+    const re = new RegExp('(' + list.map(escapeRegExp).join('|') + ')', 'gi')
+    const walker = document.createTreeWalker(previewInner, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        const p = n.parentElement
+        if (!p || p.closest('.notes-tag') || p.closest('mark') || p.closest('.notes-code-head')) return NodeFilter.FILTER_REJECT
+        if (!n.nodeValue) return NodeFilter.FILTER_REJECT
+        return NodeFilter.FILTER_ACCEPT
+      },
+    })
+    const nodes = []
+    while (walker.nextNode()) nodes.push(walker.currentNode)
+    for (const node of nodes) {
+      const s = node.nodeValue
+      re.lastIndex = 0
+      let m
+      while ((m = re.exec(s)) !== null) {
+        if (m[0].length === 0) { re.lastIndex += 1; continue }
+        const r = document.createRange()
+        r.setStart(node, m.index)
+        r.setEnd(node, m.index + m[0].length)
+        out.push(r)
+      }
+    }
+    return out
+  }
+
+  function paintPreviewFind(active) {
+    if (typeof CSS === 'undefined' || !CSS.highlights || typeof Highlight === 'undefined') return 0
+    CSS.highlights.delete('cv-notes-find')
+    CSS.highlights.delete('cv-notes-find-active')
+    if (!previewRanges.length) return 0
+    const idx = ((active % previewRanges.length) + previewRanges.length) % previewRanges.length
+    CSS.highlights.set('cv-notes-find', new Highlight(...previewRanges))
+    CSS.highlights.set('cv-notes-find-active', new Highlight(previewRanges[idx]))
+    return idx
+  }
+
+  function scrollPreviewRange(range) {
+    if (!range) return
+    let rect
+    try { rect = range.getBoundingClientRect() } catch (_) { return }
+    const box = previewEl.getBoundingClientRect()
+    const top = previewEl.scrollTop + (rect.top - box.top) - previewEl.clientHeight * 0.32
+    const max = Math.max(0, previewEl.scrollHeight - previewEl.clientHeight)
+    lockSync()
+    previewEl.scrollTop = Math.max(0, Math.min(max, top))
+  }
+
+  function notifyFind(total, index) {
+    if (findChangeCb) findChangeCb({ total: total | 0, index: index | 0 })
+  }
+
+  function applyPreviewFindNow() {
+    previewRanges = computePreviewRanges(findTokens)
+    findActive = paintPreviewFind(findActive)
+    if (findWantScroll && previewRanges.length) scrollPreviewRange(previewRanges[findActive])
+    findWantScroll = false
+    notifyFind(previewRanges.length, findActive)
+  }
+
+  function requestPreviewFind() {
+    if (!previewPainted || paintingPreview) return
+    applyPreviewFindNow()
+  }
+
+  function focusFindSource(i) {
+    const v = view.state.field(findField)
+    if (!v.ranges.length) {
+      findActive = 0
+      notifyFind(0, 0)
+      return 0
+    }
+    const idx = ((i % v.ranges.length) + v.ranges.length) % v.ranges.length
+    view.dispatch({
+      effects: setFindQuery.of({ tokens: findTokens, active: idx }),
+      selection: { anchor: v.ranges[idx].from },
+      scrollIntoView: true,
+      userEvent: 'select.find',
+    })
+    findActive = idx
+    notifyFind(v.ranges.length, idx)
+    return idx
+  }
+
+  function applyFindForMode() {
+    if (!findTokens.length) return
+    if (mode === 'preview') {
+      requestPreviewFind()
+      return
+    }
+    view.dispatch({ effects: setFindQuery.of({ tokens: findTokens, active: findActive }) })
+    if (findWantScroll) {
+      findWantScroll = false
+      focusFindSource(findActive)
+    } else {
+      notifyFind(view.state.field(findField).ranges.length, findActive)
+    }
   }
   function yInScroller(el, scroller) {
     const a = el.getBoundingClientRect()
@@ -919,6 +1095,47 @@ async function mount(root, opts) {
       }
     },
     focus() { view.focus() },
+    find(tokens) {
+      findTokens = (tokens || []).filter(Boolean)
+      findActive = 0
+      findWantScroll = false
+      if (!findTokens.length) {
+        api.clearFind()
+        return { total: 0 }
+      }
+      if (mode === 'preview') {
+        requestPreviewFind()
+        return { total: previewRanges.length }
+      }
+      view.dispatch({ effects: setFindQuery.of({ tokens: findTokens, active: 0 }) })
+      const total = view.state.field(findField).ranges.length
+      notifyFind(total, 0)
+      return { total }
+    },
+    focusMatch(i) {
+      if (!findTokens.length) return { total: 0, index: 0 }
+      findActive = Math.max(0, i | 0)
+      findWantScroll = true
+      if (mode === 'preview') {
+        requestPreviewFind()
+        return { total: previewRanges.length, index: findActive }
+      }
+      const idx = focusFindSource(findActive)
+      return { total: view.state.field(findField).ranges.length, index: idx }
+    },
+    clearFind() {
+      findTokens = []
+      findActive = 0
+      findWantScroll = false
+      previewRanges = []
+      if (typeof CSS !== 'undefined' && CSS.highlights) {
+        CSS.highlights.delete('cv-notes-find')
+        CSS.highlights.delete('cv-notes-find-active')
+      }
+      view.dispatch({ effects: clearFindQuery.of(null) })
+      notifyFind(0, 0)
+    },
+    onFindChange(cb) { findChangeCb = typeof cb === 'function' ? cb : null },
   }
   return api
 }
