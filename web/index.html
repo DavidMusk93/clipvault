@@ -2092,6 +2092,15 @@
     .notes-find-nav:hover { color: var(--ink); }
     .notes-find-nav:active { transform: scale(0.94); }
     .notes-find-nav .material-symbols-outlined { font-size: 16px; }
+    .notes-list-foot {
+      display: block; width: 100%; margin: 4px 0 2px; padding: 9px 0;
+      border: 0; background: transparent; cursor: pointer;
+      font: 500 12px/1 var(--font-ui); color: var(--muted); letter-spacing: -0.01em;
+    }
+    .notes-list-foot[hidden] { display: none; }
+    .notes-list-foot:disabled { cursor: default; }
+    .notes-list-foot:not(:disabled):hover { color: var(--ink); }
+    .notes-list-foot:not(:disabled):active { transform: scale(0.99); }
     .notes-tools {
       display: flex; align-items: center; gap: 2px; flex: 1 1 220px; min-width: 0;
       flex-wrap: wrap;
@@ -3692,7 +3701,7 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0, baseHash: '', query: '', results: null, searching: false, searchGen: 0, find: null };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0, baseHash: '', query: '', results: null, searching: false, searchGen: 0, find: null, nextCursor: null, searchNextCursor: null, loadingMore: false, loadMoreFailed: false, browseGen: 0 };
     const NOTE_ID_KEY = 'clipvault.notes.id';
 
     function noteExcerpt(md) {
@@ -4097,6 +4106,7 @@ window.ClipViewMasonry = Masonry;
       const rows = noteListRows(qRaw);
       const keep = new Set(rows.map(n => n.id));
       [...root.children].forEach(el => {
+        if (el.classList.contains('notes-list-foot')) return;
         if (!keep.has(el.dataset.noteId)) el.remove();
       });
       rows.forEach((n, i) => {
@@ -4112,8 +4122,33 @@ window.ClipViewMasonry = Masonry;
         }
         fillNoteRow(btn, n, qRaw);
       });
+      paintNotesFoot(root);
       const M = globalThis.ClipNotesMetrics;
       if (M) M.emit('notes_paint_list', { dur_ms: performance.now() - t0, payload: { n: rows.length } });
+    }
+    function paintNotesFoot(root) {
+      let foot = root.querySelector('.notes-list-foot');
+      if (!foot) {
+        foot = document.createElement('button');
+        foot.type = 'button';
+        foot.className = 'notes-list-foot';
+        foot.addEventListener('click', () => loadMoreNotes());
+        root.appendChild(foot);
+      } else if (foot !== root.lastElementChild) {
+        root.appendChild(foot);
+      }
+      const more = (notesState.searching && Array.isArray(notesState.results))
+        ? notesState.searchNextCursor
+        : notesState.nextCursor;
+      if (notesState.loadingMore) {
+        foot.hidden = false; foot.disabled = true; foot.textContent = '加载中…';
+      } else if (notesState.loadMoreFailed) {
+        foot.hidden = false; foot.disabled = false; foot.textContent = '加载更多失败，重试';
+      } else if (more) {
+        foot.hidden = false; foot.disabled = false; foot.textContent = '加载更多';
+      } else {
+        foot.hidden = true; foot.disabled = false; foot.textContent = '';
+      }
     }
     function paintNotesFindChip(f) {
       const el = document.getElementById('notesFind');
@@ -4160,6 +4195,8 @@ window.ClipViewMasonry = Masonry;
       // Instant local feedback; the ranked server result replaces it when it lands.
       notesState.searching = false;
       notesState.results = null;
+      notesState.searchNextCursor = null;
+      notesState.loadMoreFailed = false;
       paintNotesList();
       if (!qRaw || qRaw.startsWith('#')) {
         clearNoteFind();
@@ -4172,16 +4209,73 @@ window.ClipViewMasonry = Masonry;
           const data = await res.json();
           if (gen !== notesState.searchGen) return;
           notesState.results = Array.isArray(data) ? data : (data.items || []);
+          notesState.searchNextCursor = Array.isArray(data) ? null : (data.nextCursor || null);
           notesState.searching = true;
           paintNotesList();
         } catch (_) { /* keep the local filter */ }
       }, 180);
     }
+    async function loadMoreNotes() {
+      if (notesState.loadingMore) return;
+      const searching = notesState.searching && Array.isArray(notesState.results);
+      const cursor = searching ? notesState.searchNextCursor : notesState.nextCursor;
+      if (!cursor) return;
+      const gen = searching ? notesState.searchGen : notesState.browseGen;
+      notesState.loadingMore = true;
+      notesState.loadMoreFailed = false;
+      paintNotesList();
+      try {
+        let url = API + '/api/clips?type=note&limit=' + (searching ? 50 : 80) + '&cursor=' + encodeURIComponent(cursor);
+        if (searching) url += '&q=' + encodeURIComponent(notesState.query);
+        const res = await liveGet(url);
+        const data = await res.json();
+        if (gen !== (searching ? notesState.searchGen : notesState.browseGen)) return;
+        const items = Array.isArray(data) ? data : (data.items || []);
+        if (searching) {
+          const have = new Set(notesState.results.map((n) => n.id));
+          notesState.results = notesState.results.concat(items.filter((n) => !have.has(n.id)));
+          notesState.searchNextCursor = Array.isArray(data) ? null : (data.nextCursor || null);
+        } else {
+          const have = new Set(notesState.items.map((n) => n.id));
+          notesState.items = notesState.items.concat(items.filter((n) => !have.has(n.id)));
+          notesState.nextCursor = Array.isArray(data) ? null : (data.nextCursor || null);
+        }
+      } catch (_) {
+        notesState.loadMoreFailed = true;
+      } finally {
+        notesState.loadingMore = false;
+        paintNotesList();
+      }
+    }
 
-    async function loadNotesList() {
+    async function loadNotesList(opts) {
+      const append = !!(opts && opts.append);
+      if (append && !notesState.nextCursor) return;
+      const gen = append ? notesState.browseGen : ++notesState.browseGen;
+      try {
+        let url = API + '/api/clips?type=note&limit=80';
+        if (append) url += '&cursor=' + encodeURIComponent(notesState.nextCursor);
+        const res = await liveGet(url);
+        const data = await res.json();
+        if (gen !== notesState.browseGen) return;
+        const items = Array.isArray(data) ? data : (data.items || []);
+        notesState.items = append ? notesState.items.concat(items) : items;
+        notesState.nextCursor = Array.isArray(data) ? null : (data.nextCursor || null);
+        notesState.loaded = true;
+        notesState.loadMoreFailed = false;
+        paintNotesList();
+      } catch (_) {
+        if (gen === notesState.browseGen) { notesState.loadMoreFailed = true; paintNotesList(); }
+      }
+    }
+    /** Refresh rail page 1 on idle resync without dropping already-loaded pages. */
+    async function refreshNotesHead() {
       const res = await liveGet(API + '/api/clips?type=note&limit=80');
       const data = await res.json();
-      notesState.items = Array.isArray(data) ? data : (data.items || []);
+      const head = Array.isArray(data) ? data : (data.items || []);
+      const headIds = new Set(head.map((n) => n.id));
+      notesState.items = head.concat(notesState.items.filter((n) => !headIds.has(n.id)));
+      notesState.nextCursor = Array.isArray(data) ? null : (data.nextCursor || null);
       notesState.loaded = true;
       paintNotesList();
     }
@@ -5055,6 +5149,10 @@ window.ClipViewMasonry = Masonry;
         if (!notesState.loaded) notesState.items = notesState.items || [];
       }
       const want = preferredId || lastNotesId() || alreadyId;
+      if (want && !notesState.items.some(n => n.id === want)) {
+        const item = await fetchClipById(want).catch(() => null);
+        if (item) { notesState.items.unshift(item); paintNotesList(); }
+      }
       if (want && notesState.items.some(n => n.id === want)) {
         if (want !== alreadyId) await openNoteInPanel(want);
         else applyNotesMode('preview');
@@ -5178,6 +5276,10 @@ window.ClipViewMasonry = Masonry;
       if (!btn) return;
       stepNoteFind(btn.dataset.find === 'prev' ? -1 : 1);
     });
+    document.getElementById('notesList')?.addEventListener('scroll', (e) => {
+      const el = e.currentTarget;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) loadMoreNotes();
+    }, { passive: true });
     document.getElementById('notesModes')?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-mode]');
       if (!btn || !notesState.editor) return;
@@ -5614,9 +5716,10 @@ window.ClipViewMasonry = Masonry;
     async function mergeNotesHead() {
       const panelOpen = document.getElementById('notesPanel')?.classList.contains('open');
       if (!panelOpen) return;
-      try { await loadNotesList(); } catch (_) { return; }
+      try { await refreshNotesHead(); } catch (_) { return; }
       if (!panelOpen || !notesState.id || notesState.saving) return;
-      const item = notesState.items.find((n) => n.id === notesState.id);
+      let item = notesState.items.find((n) => n.id === notesState.id);
+      if (!item) item = await fetchClipById(notesState.id).catch(() => null);
       if (!item) return;
       const remoteHash = noteContentHash(item);
       if (notesState.dirty) {

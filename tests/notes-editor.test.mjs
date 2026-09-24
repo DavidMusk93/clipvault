@@ -433,3 +433,17 @@ test('note search highlights hits in the rail and jumps into the doc', () => {
   assert.match(css, /::highlight\(cv-notes-find\)/);
   assert.match(css, /::highlight\(cv-notes-find-active\)/);
 });
+
+test('notes rail paginates browse and search with a retry footer', () => {
+  assert.match(html, /function loadMoreNotes/);
+  assert.match(html, /function paintNotesFoot/);
+  assert.match(html, /notes-list-foot/);
+  assert.match(html, /notesState\.nextCursor/);
+  assert.match(html, /notesState\.searchNextCursor/);
+  assert.match(html, /getElementById\('notesList'\)\?\.addEventListener\('scroll'/);
+  assert.match(html, /加载更多失败，重试/);
+  // Idle resync refreshes page 1 without dropping loaded pages; deep links hydrate by id.
+  assert.match(html, /function refreshNotesHead/);
+  assert.match(html, /await refreshNotesHead\(\)/);
+  assert.match(html, /await fetchClipById\(want\)/);
+});
