@@ -16,8 +16,12 @@ enum DatabaseError: Error {
 struct ClipCursor: Equatable {
     let timestamp: Double
     let id: String
+    /// Relevance mode (`order=relevance`): bm25 order has no (timestamp, id) keyset,
+    /// so ranked search pages by offset. Encoded as `o:<n>`.
+    var offset: Int? = nil
 
     func encode() -> String {
+        if let offset { return "o:\(offset)" }
         let bits = String(timestamp.bitPattern, radix: 16)
         return "\(bits):\(id)"
     }
@@ -25,6 +29,7 @@ struct ClipCursor: Equatable {
     static func decode(_ raw: String) -> ClipCursor? {
         let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2, !parts[1].isEmpty else { return nil }
+        if parts[0] == "o", let n = Int(parts[1]) { return ClipCursor(timestamp: 0, id: "", offset: n) }
         let id = parts[1]
         // Preferred: hex IEEE-754 bits
         if let bits = UInt64(parts[0], radix: 16) {
@@ -2101,6 +2106,7 @@ final class DatabaseManager: ObservableObject {
         trashOnly: Bool = false,
         typeFilter: String? = nil,
         excludeType: String? = nil,
+        order: String? = nil,
         completion: @escaping (ClipPage) -> Void
     ) {
         let run: () -> Void = { [weak self] in
@@ -2116,10 +2122,22 @@ final class DatabaseManager: ObservableObject {
             let ftsMatch = hasQuery ? self.ftsMatchQuery(from: q!) : nil
             let typeEq = typeFilter.flatMap { ClipboardType(rawValue: $0) }?.rawValue
             let excludeEq = typeEq == nil ? excludeType.flatMap { ClipboardType(rawValue: $0) }?.rawValue : nil
+            // `order=relevance` ranks by bm25 (pinned float first). bm25 has no
+            // (timestamp, id) keyset, so it pages by offset cursor instead.
+            let ranked = (order == "relevance") && hasQuery && !trashOnly
 
             var items: [ClipboardItem] = []
 
-            if trashOnly {
+            if ranked {
+                let offset = cursor?.offset ?? 0
+                if let match = ftsMatch {
+                    items = self.runSearchFTSRanked(db: db, match: match, offset: offset, fetchLimit: fetchLimit, typeFilter: typeEq, excludeType: excludeEq)
+                }
+                if items.isEmpty, let q = q {
+                    let narrow = self.ftsTokenizer == "trigram" && q.count >= 3
+                    items = self.runSearchLike(db: db, q: q, cursor: nil, fetchLimit: fetchLimit, narrowFields: narrow, typeFilter: typeEq, excludeType: excludeEq, offset: offset)
+                }
+            } else if trashOnly {
                 // Trash view: no FTS; optional LIKE on alive fields of deleted rows.
                 if hasQuery, let q = q {
                     items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, trashOnly: true, typeFilter: typeEq, excludeType: excludeEq)
@@ -2147,14 +2165,16 @@ final class DatabaseManager: ObservableObject {
                     }
                 }
             }
-            if hasQuery && !trashOnly {
+            if hasQuery && !trashOnly && !ranked {
                 items.sort { Self.pinThenRecency($0, $1) }
             }
 
             var next: ClipCursor? = nil
             if items.count > pageLimit {
                 items = Array(items.prefix(pageLimit))
-                if let last = items.last {
+                if ranked {
+                    next = ClipCursor(timestamp: 0, id: "", offset: (cursor?.offset ?? 0) + pageLimit)
+                } else if let last = items.last {
                     next = ClipCursor(
                         timestamp: last.timestamp.timeIntervalSince1970,
                         id: last.id.uuidString
@@ -2259,6 +2279,47 @@ final class DatabaseManager: ObservableObject {
         return items
     }
 
+    /// Relevance search (`order=relevance`): pinned float first, then bm25.
+    /// Offset-paginated because bm25 order has no keyset.
+    private func runSearchFTSRanked(
+        db: OpaquePointer,
+        match: String,
+        offset: Int,
+        fetchLimit: Int,
+        typeFilter: String? = nil,
+        excludeType: String? = nil
+    ) -> [ClipboardItem] {
+        var sql = """
+        SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, \(Self.listHtmlSQLAliased), c.source_app, c.ocr_text,
+               \(Self.listTailSQLAliased), \(Self.listHtmlOmittedSQLAliased)
+        FROM clipboard_fts f
+        JOIN clipboard_items c ON c.id = f.id
+        WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL
+        """
+        sql += Self.typePredicateSQL(alias: "c", typeFilter: typeFilter, excludeType: excludeType)
+        // Pinned float first; everything else is pure relevance. Single ORDER BY
+        // (no re-sort) so offset pagination stays consistent across pages.
+        sql += " ORDER BY (c.pinned_at IS NOT NULL) DESC, bm25(clipboard_fts), c.timestamp DESC, c.id DESC LIMIT ? OFFSET ?;"
+
+        var stmt: OpaquePointer?
+        var items: [ClipboardItem] = []
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            let msg = String(cString: sqlite3_errmsg(db))
+            print("[DatabaseManager] FTS ranked prepare failed: \(msg)")
+            return []
+        }
+        var bind = 1
+        bindText(stmt, Int32(bind), match); bind += 1
+        bindTypePredicate(stmt, bind: &bind, typeFilter: typeFilter, excludeType: excludeType)
+        sqlite3_bind_int(stmt, Int32(bind), Int32(fetchLimit)); bind += 1
+        sqlite3_bind_int(stmt, Int32(bind), Int32(max(0, offset)))
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let item = rowToItem(stmt: stmt) { items.append(item) }
+        }
+        sqlite3_finalize(stmt)
+        return items
+    }
+
     private func runSearchLike(
         db: OpaquePointer,
         q: String,
@@ -2267,7 +2328,8 @@ final class DatabaseManager: ObservableObject {
         trashOnly: Bool = false,
         narrowFields: Bool = false,
         typeFilter: String? = nil,
-        excludeType: String? = nil
+        excludeType: String? = nil,
+        offset: Int? = nil
     ) -> [ClipboardItem] {
         var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL), \(Self.listHtmlOmittedSQL) FROM clipboard_items WHERE "
         if trashOnly {
@@ -2282,10 +2344,12 @@ final class DatabaseManager: ObservableObject {
         } else {
             sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ? OR IFNULL(judgment_text,'') LIKE ?)"
         }
-        if cursor != nil {
+        if offset == nil && cursor != nil {
             sql += " AND " + Self.keysetSQL
         }
-        if trashOnly {
+        if offset != nil {
+            sql += " ORDER BY (pinned_at IS NOT NULL) DESC, timestamp DESC, id DESC LIMIT ? OFFSET ?;"
+        } else if trashOnly {
             sql += " ORDER BY deleted_at DESC, id DESC LIMIT ?;"
         } else {
             sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
@@ -2301,10 +2365,13 @@ final class DatabaseManager: ObservableObject {
         for _ in 0..<likeSlots {
             bindText(stmt, Int32(bind), like); bind += 1
         }
-        if let cursor = cursor {
+        if offset == nil, let cursor = cursor {
             bind = bindKeysetCursor(stmt, startBind: bind, cursor: cursor)
         }
-        sqlite3_bind_int(stmt, Int32(bind), Int32(fetchLimit))
+        sqlite3_bind_int(stmt, Int32(bind), Int32(fetchLimit)); bind += 1
+        if let offset = offset {
+            sqlite3_bind_int(stmt, Int32(bind), Int32(max(0, offset)))
+        }
         while sqlite3_step(stmt) == SQLITE_ROW {
             if let item = rowToItem(stmt: stmt) { items.append(item) }
         }
