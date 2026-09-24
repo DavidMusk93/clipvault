@@ -16,7 +16,7 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n27" />
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n28" />
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n13"></script>
   <script src="/assets/ui-track.js?v=u1"></script>
@@ -2075,6 +2075,23 @@
     }
     .notes-modes button.is-on { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
     .notes-modes button:active { transform: scale(0.97); }
+    .notes-find {
+      display: inline-flex; align-items: center; gap: 2px; flex: none;
+      height: 28px; padding: 0 2px 0 10px; border-radius: 980px;
+      background: #f6f6f8;
+    }
+    .notes-find[hidden] { display: none; }
+    .notes-find-count {
+      font: 600 12px/1 var(--font-ui); font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em; color: var(--muted);
+    }
+    .notes-find-nav {
+      width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent;
+      color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    }
+    .notes-find-nav:hover { color: var(--ink); }
+    .notes-find-nav:active { transform: scale(0.94); }
+    .notes-find-nav .material-symbols-outlined { font-size: 16px; }
     .notes-tools {
       display: flex; align-items: center; gap: 2px; flex: 1 1 220px; min-width: 0;
       flex-wrap: wrap;
@@ -2757,6 +2774,11 @@
           <button type="button" data-mode="split">分栏</button>
           <button type="button" data-mode="preview">预览</button>
         </div>
+        <div class="notes-find" id="notesFind" hidden>
+          <span class="notes-find-count" id="notesFindCount"></span>
+          <button type="button" class="notes-find-nav" data-find="prev" title="上一个" aria-label="上一个"><span class="material-symbols-outlined">expand_less</span></button>
+          <button type="button" class="notes-find-nav" data-find="next" title="下一个" aria-label="下一个"><span class="material-symbols-outlined">expand_more</span></button>
+        </div>
         <div class="notes-tools" id="notesTools">
           <button type="button" data-cmd="h1" title="标题">H1</button>
           <button type="button" data-cmd="h2" title="二级标题">H2</button>
@@ -3153,22 +3175,34 @@ window.ClipViewMasonry = Masonry;
       const hay = String(text).toLowerCase();
       return searchTokens(q).some(tok => tok && hay.includes(tok.toLowerCase()));
     }
+    /** All [start,end) token ranges in text. One matcher for list / title / editor find. */
+    function matchRanges(text, tokens) {
+      const s = String(text ?? '');
+      const out = [];
+      const list = (tokens || []).filter(Boolean);
+      if (!s || !list.length) return out;
+      const re = new RegExp('(' + list.map(escapeRegExp).join('|') + ')', 'gi');
+      let m;
+      while ((m = re.exec(s)) !== null) {
+        if (m[0].length === 0) { re.lastIndex += 1; continue; }
+        out.push({ start: m.index, end: m.index + m[0].length });
+      }
+      return out;
+    }
     /** Escape text then wrap search hits in <mark class="search-hit">. */
     function highlightEscaped(text, q) {
       const s = String(text ?? '');
       if (!s) return '';
       const tokens = searchTokens(q).filter(t => t.length >= 1);
       if (!tokens.length) return esc(s);
-      const re = new RegExp('(' + tokens.map(escapeRegExp).join('|') + ')', 'gi');
+      const ranges = matchRanges(s, tokens);
+      if (!ranges.length) return esc(s);
       let out = '';
       let last = 0;
-      let m;
-      while ((m = re.exec(s)) !== null) {
-        out += esc(s.slice(last, m.index));
-        out += '<mark class="search-hit">' + esc(m[0]) + '</mark>';
-        last = m.index + m[0].length;
-        // avoid zero-length loops
-        if (m[0].length === 0) re.lastIndex++;
+      for (const r of ranges) {
+        out += esc(s.slice(last, r.start));
+        out += '<mark class="search-hit">' + esc(s.slice(r.start, r.end)) + '</mark>';
+        last = r.end;
       }
       out += esc(s.slice(last));
       return out;
@@ -3658,13 +3692,25 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('evalCancel')?.addEventListener('click', closeEvalSheet);
     document.getElementById('evalSubmit')?.addEventListener('click', () => submitEvaluation());
 
-    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0, baseHash: '' };
+    const notesState = { items: [], id: null, editor: null, timer: null, dirty: false, loaded: false, applying: false, gen: 0, openedAt: 0, settleTimer: 0, tagFilter: null, saving: false, saveAttempts: 0, lastLocalSaveAt: 0, baseHash: '', query: '', results: null, searching: false, searchGen: 0, find: null };
     const NOTE_ID_KEY = 'clipvault.notes.id';
 
     function noteExcerpt(md) {
       return (md || '').replace(/^#+\s+/gm, '').replace(/!\[[^\]]*]\([^)]+\)/g, '')
         .replace(/\[([^\]]+)]\([^)]+\)/g, '$1').replace(/[`*_>#-]/g, '')
         .replace(/\s+/g, ' ').trim();
+    }
+    /** Search-mode excerpt: window the raw body around the first hit so the
+     *  highlighted term is always visible (markdown markers and all). */
+    function noteSearchSnippet(raw, q) {
+      const tokens = searchTokens(q).filter(t => t && !t.startsWith('#'));
+      const text = decodeNoteBody(raw).replace(/\s+/g, ' ').trim();
+      const ranges = matchRanges(text, tokens);
+      if (!ranges.length) return noteExcerpt(raw);
+      const first = ranges[0];
+      const start = Math.max(0, first.start - 42);
+      const end = Math.min(text.length, first.end + 42);
+      return (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '');
     }
     function noteTitleOf(item) {
       const raw = decodeNoteBody(item.textContent || '');
@@ -3711,7 +3757,7 @@ window.ClipViewMasonry = Masonry;
       if (loc.kind === 'notes' && loc.noteId) return loc.noteId;
       try { return localStorage.getItem(NOTE_ID_KEY) || null; } catch (_) { return null; }
     }
-    function formatTaggedHtml(s) {
+    function formatTaggedHtml(s, q) {
       const raw = String(s || '');
       const re = /(^|[^\w#])#([\p{L}\p{N}_/-]{1,32})/gu;
       let out = '';
@@ -3719,18 +3765,18 @@ window.ClipViewMasonry = Masonry;
       let m;
       while ((m = re.exec(raw))) {
         const hashAt = m.index + m[1].length;
-        out += esc(raw.slice(last, hashAt));
+        out += highlightEscaped(raw.slice(last, hashAt), q);
         out += '<span class="notes-tag" data-tag="' + escAttr(m[2]) + '">#' + esc(m[2]) + '</span>';
         last = hashAt + m[2].length + 1;
       }
-      out += esc(raw.slice(last));
+      out += highlightEscaped(raw.slice(last), q);
       return out;
     }
     function paintNotesTitleView() {
       const view = document.getElementById('notesTitleView');
       const input = document.getElementById('notesTitle');
       if (!view || !input) return;
-      view.innerHTML = input.value ? formatTaggedHtml(input.value) : '';
+      view.innerHTML = input.value ? formatTaggedHtml(input.value, notesState.query) : '';
       document.getElementById('notesTitleWrap')?.classList.toggle('has-value', !!input.value);
     }
     function setNotesTagFilter(tag) {
@@ -3970,7 +4016,7 @@ window.ClipViewMasonry = Masonry;
         paintNotesList();
       }
     }
-    function fillNoteRow(btn, n) {
+    function fillNoteRow(btn, n, q) {
       btn.dataset.noteId = n.id;
       btn.classList.toggle('is-on', n.id === notesState.id);
       btn.classList.toggle('is-pinned', noteIsPinned(n));
@@ -4003,38 +4049,52 @@ window.ClipViewMasonry = Masonry;
       pin?.setAttribute('title', noteIsPinned(n) ? '取消置顶' : '置顶');
       pin?.setAttribute('aria-label', noteIsPinned(n) ? '取消置顶' : '置顶');
       const title = noteTitleOf(n) || '未命名';
-      const excerpt = noteExcerpt(n.textContent || '');
       const when = formatItemTime(n);
-      if (t.dataset.raw !== title) {
-        t.dataset.raw = title;
-        t.innerHTML = formatTaggedHtml(title);
+      const tKey = title + '\u0000' + (q || '');
+      if (t.dataset.raw !== tKey) {
+        t.dataset.raw = tKey;
+        t.innerHTML = formatTaggedHtml(title, q);
       }
-      if (x.textContent !== excerpt) x.textContent = excerpt;
+      const body = n.textContent || '';
+      const excerpt = q ? noteSearchSnippet(body, q) : noteExcerpt(body);
+      const xKey = (q ? 'q\u0000' + q : 'e') + '\u0000' + excerpt;
+      if (x.dataset.hl !== xKey) {
+        x.dataset.hl = xKey;
+        x.innerHTML = q ? highlightEscaped(excerpt, q) : esc(excerpt);
+      }
       if (m.textContent !== when) m.textContent = when;
     }
-    function paintNotesList() {
-      const t0 = performance.now();
-      const qRaw = (document.getElementById('notesSearch')?.value || '').trim();
+    function noteListRows(qRaw) {
       const q = qRaw.toLowerCase();
       const qTag = q.startsWith('#') ? q.slice(1) : '';
-      const root = document.getElementById('notesList');
-      if (!root) return;
       const wantTag = (notesState.tagFilter || qTag).toLowerCase();
-      const rows = notesState.items.filter(n => {
+      const searching = !!qRaw && !qTag && notesState.searching && Array.isArray(notesState.results);
+      const source = searching ? notesState.results : notesState.items;
+      const rows = source.filter(n => {
         if (wantTag) {
           const tags = extractNoteTags(n.textContent || '');
           if (!tags.some((t) => t.toLowerCase() === wantTag)) return false;
           if (qTag) return true;
         }
-        if (q && !qTag && !(n.textContent || '').toLowerCase().includes(q)) return false;
+        if (!searching && q && !qTag && !(n.textContent || '').toLowerCase().includes(q)) return false;
         return true;
-      }).sort((a, b) => {
+      });
+      if (searching) return rows;
+      return rows.sort((a, b) => {
         const ap = noteIsPinned(a);
         const bp = noteIsPinned(b);
         if (ap !== bp) return ap ? -1 : 1;
         if (ap && bp) return (Number(b.pinnedAt) || 0) - (Number(a.pinnedAt) || 0);
         return (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0);
       });
+    }
+    function paintNotesList() {
+      const t0 = performance.now();
+      const qRaw = (document.getElementById('notesSearch')?.value || '').trim();
+      notesState.query = qRaw;
+      const root = document.getElementById('notesList');
+      if (!root) return;
+      const rows = noteListRows(qRaw);
       const keep = new Set(rows.map(n => n.id));
       [...root.children].forEach(el => {
         if (!keep.has(el.dataset.noteId)) el.remove();
@@ -4050,10 +4110,72 @@ window.ClipViewMasonry = Masonry;
         } else if (btn !== root.children[i]) {
           root.insertBefore(btn, root.children[i] || null);
         }
-        fillNoteRow(btn, n);
+        fillNoteRow(btn, n, qRaw);
       });
       const M = globalThis.ClipNotesMetrics;
       if (M) M.emit('notes_paint_list', { dur_ms: performance.now() - t0, payload: { n: rows.length } });
+    }
+    function paintNotesFindChip(f) {
+      const el = document.getElementById('notesFind');
+      const c = document.getElementById('notesFindCount');
+      if (!el || !c) return;
+      if (!f || !f.total) { el.hidden = true; return; }
+      el.hidden = false;
+      c.textContent = (f.index + 1) + '/' + f.total;
+    }
+    function clearNoteFind() {
+      notesState.editor?.clearFind?.();
+      notesState.find = null;
+      paintNotesFindChip(null);
+    }
+    function applyNoteReveal(q) {
+      const ed = notesState.editor;
+      const tokens = q ? searchTokens(q).filter(t => t && !t.startsWith('#')) : [];
+      if (!ed || !tokens.length || typeof ed.find !== 'function') {
+        if (ed && typeof ed.clearFind === 'function') ed.clearFind();
+        notesState.find = null;
+        paintNotesFindChip(null);
+        return;
+      }
+      const t0 = performance.now();
+      notesState.find = { tokens, total: 0, index: 0 };
+      ed.find(tokens);
+      ed.focusMatch(0);
+      paintNotesFindChip(notesState.find);
+      nm('notes_find_reveal', { dur_ms: performance.now() - t0, payload: { mode: ed.getMode?.() || '' } });
+    }
+    function stepNoteFind(delta) {
+      const f = notesState.find;
+      const ed = notesState.editor;
+      if (!f || !ed || !f.total || typeof ed.focusMatch !== 'function') return;
+      f.index = ((f.index + delta) % f.total + f.total) % f.total;
+      ed.focusMatch(f.index);
+      paintNotesFindChip(f);
+    }
+    let notesSearchTimer = 0;
+    function scheduleNotesSearch() {
+      const qRaw = (document.getElementById('notesSearch')?.value || '').trim();
+      clearTimeout(notesSearchTimer);
+      const gen = ++notesState.searchGen;
+      // Instant local feedback; the ranked server result replaces it when it lands.
+      notesState.searching = false;
+      notesState.results = null;
+      paintNotesList();
+      if (!qRaw || qRaw.startsWith('#')) {
+        clearNoteFind();
+        return;
+      }
+      notesSearchTimer = setTimeout(async () => {
+        applyNoteReveal(qRaw);
+        try {
+          const res = await liveGet(API + '/api/clips?type=note&limit=50&q=' + encodeURIComponent(qRaw));
+          const data = await res.json();
+          if (gen !== notesState.searchGen) return;
+          notesState.results = Array.isArray(data) ? data : (data.items || []);
+          notesState.searching = true;
+          paintNotesList();
+        } catch (_) { /* keep the local filter */ }
+      }, 180);
     }
 
     async function loadNotesList() {
@@ -4215,7 +4337,7 @@ window.ClipViewMasonry = Masonry;
       if (notesEditorLoading) return notesEditorLoading;
       notesEditorLoading = new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = '/assets/notes-editor/notes-editor.js?v=n27';
+        s.src = '/assets/notes-editor/notes-editor.js?v=n28';
         s.async = true;
         s.onload = () => resolve(globalThis.ClipNotesEditor);
         s.onerror = () => reject(new Error('notes-editor load failed'));
@@ -4256,6 +4378,12 @@ window.ClipViewMasonry = Masonry;
         },
         onTag(tag) { setNotesTagFilter(tag); },
         onMetric(name, extra) { nm(name, extra); },
+      });
+      notesState.editor.onFindChange?.((s) => {
+        if (!notesState.find) return;
+        notesState.find.total = Number(s && s.total) || 0;
+        notesState.find.index = Number(s && s.index) || 0;
+        paintNotesFindChip(notesState.find);
       });
       if (notesState.gen === g) notesState.applying = false;
       if (mode) applyNotesMode(mode);
@@ -4315,6 +4443,8 @@ window.ClipViewMasonry = Masonry;
         const idx = notesState.items.findIndex(n => n.id === notesState.id);
         if (idx >= 0) notesState.items[idx] = j.item;
         else notesState.items.unshift(j.item);
+        const ridx = (notesState.results || []).findIndex(n => n.id === notesState.id);
+        if (ridx >= 0) notesState.results[ridx] = j.item;
         notesState.saveAttempts = 0;
         notesStatus('saved');
         const t = noteTitleOf(j.item);
@@ -4345,10 +4475,11 @@ window.ClipViewMasonry = Masonry;
 
     async function openNoteInPanel(id) {
       if (notesState.dirty) await saveNoteNow();
-      const item = notesState.items.find(n => n.id === id);
+      const item = notesState.items.find(n => n.id === id) || (notesState.results || []).find(n => n.id === id);
       if (!item) return;
       const switching = notesState.id && notesState.id !== id;
       notesState.id = id;
+      notesState.query = (document.getElementById('notesSearch')?.value || '').trim();
       persistNotesId(id);
       notesState.baseHash = noteContentHash(item);
       const t = noteTitleOf(item);
@@ -4358,6 +4489,7 @@ window.ClipViewMasonry = Masonry;
       await ensureNotesEditor(noteStripTitle(item.textContent || '', t), 'preview');
       document.getElementById('notesPanel')?.classList.add('is-writing');
       paintNotesList();
+      applyNoteReveal(notesState.query);
       paintNotesTagBar();
       paintShareControls(id);
       paintNotesLinkButton(id);
@@ -4936,6 +5068,7 @@ window.ClipViewMasonry = Masonry;
     async function closeNotesPanel() {
       await flushNoteTrailingTrim();
       if (notesState.dirty) await saveNoteNow();
+      clearNoteFind();
       const panel = document.getElementById('notesPanel');
       if (!panel || !panel.classList.contains('open')) return;
       sheetTrace = newTrace();
@@ -5034,8 +5167,16 @@ window.ClipViewMasonry = Masonry;
       paintNotesTitleView();
     });
     document.getElementById('notesTagBar')?.addEventListener('click', () => setNotesTagFilter(null));
-    document.getElementById('notesSearch')?.addEventListener('input', () => {
-      paintNotesList();
+    document.getElementById('notesSearch')?.addEventListener('input', scheduleNotesSearch);
+    document.getElementById('notesSearch')?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      stepNoteFind(e.shiftKey ? -1 : 1);
+    });
+    document.getElementById('notesFind')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-find]');
+      if (!btn) return;
+      stepNoteFind(btn.dataset.find === 'prev' ? -1 : 1);
     });
     document.getElementById('notesModes')?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-mode]');
@@ -5070,6 +5211,18 @@ window.ClipViewMasonry = Masonry;
         e.preventDefault();
         notesState.editor?.cycleMode?.();
         paintNotesModes();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        const s = document.getElementById('notesSearch');
+        s?.focus();
+        s?.select();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
+        if (!notesState.find) return;
+        e.preventDefault();
+        stepNoteFind(e.shiftKey ? -1 : 1);
       }
     });
     if (parseAppHash().kind === 'notes') {

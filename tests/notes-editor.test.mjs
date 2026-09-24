@@ -322,8 +322,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n27/);
-  assert.match(html, /notes-editor\.css\?v=n27/);
+  assert.match(html, /notes-editor\.js\?v=n28/);
+  assert.match(html, /notes-editor\.css\?v=n28/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
@@ -402,4 +402,34 @@ test('open notes lock the wall so chips and format toolbar cannot drag', () => {
     html,
     /\n    \.notes-frost \{\n      position: absolute; inset: 0;\n      pointer-events: none;/,
   );
+});
+
+test('note search highlights hits in the rail and jumps into the doc', () => {
+  // One matcher feeds the rail, the title and the editor find.
+  assert.match(html, /function matchRanges/);
+  assert.match(html, /function highlightEscaped[\s\S]{0,260}matchRanges\(s, tokens\)/);
+  assert.match(html, /function noteSearchSnippet/);
+  assert.match(html, /function formatTaggedHtml\(s, q\)/);
+  assert.match(html, /highlightEscaped\(excerpt, q\)/);
+  // Server-ranked search replaces the 80-row client substring filter.
+  assert.match(html, /function scheduleNotesSearch/);
+  assert.match(html, /type=note&limit=50&q=/);
+  assert.match(html, /notesState\.searchGen/);
+  // Reveal + chip + cycling.
+  assert.match(html, /function applyNoteReveal/);
+  assert.match(html, /function stepNoteFind/);
+  assert.match(html, /id="notesFind"/);
+  assert.match(html, /id="notesFindCount"/);
+  assert.match(html, /notes_find_reveal/);
+  // Editor API: source decorations + CSS Custom Highlight API for preview.
+  assert.match(entry, /function findRanges/);
+  assert.match(entry, /const findField = StateField\.define/);
+  assert.match(entry, /cm-find-hit cm-find-active/);
+  assert.match(entry, /function computePreviewRanges/);
+  assert.match(entry, /CSS\.highlights\.set\('cv-notes-find'/);
+  assert.match(entry, /find\(tokens\) \{/);
+  assert.match(entry, /focusMatch\(i\) \{/);
+  assert.match(entry, /clearFind\(\) \{/);
+  assert.match(css, /::highlight\(cv-notes-find\)/);
+  assert.match(css, /::highlight\(cv-notes-find-active\)/);
 });

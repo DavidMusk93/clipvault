@@ -343,3 +343,14 @@
   .notes-preview-inner { padding: 16px 20px 56px; }
   .notes-work[data-mode="preview"] .notes-preview-inner { width: 100%; }
 }
+
+/* Find-in-note: CSS Custom Highlight API (no DOM mutation, React-safe). */
+::highlight(cv-notes-find) {
+  background-color: rgba(255, 214, 10, 0.55);
+}
+::highlight(cv-notes-find-active) {
+  background-color: rgba(255, 214, 10, 0.7);
+  text-decoration: underline;
+  text-decoration-color: #0071e3;
+  text-decoration-thickness: 1.5px;
+}
