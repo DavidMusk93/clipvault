@@ -81,11 +81,13 @@ chmod 600 "$ENV_FILE"
 # LaunchAgent: rewrite home-specific paths from template.
 python3 - <<PY
 from pathlib import Path
+# Most specific prefixes first: a generic /Users/bytedance -> $HOME replace
+# would otherwise consume the host prefix and leave the stale repo/home tail.
 src = Path("$HOOKS_DIR/com.davidmusk.clipvault-trae.plist").read_text()
-src = src.replace("/Users/bytedance", "$HOME_USER")
 src = src.replace("/Users/bytedance/Documents/trae_projects/recallfs/projects/clipvault", "$REPO_ROOT")
 src = src.replace("/Users/bytedance/Documents/trae_projects/recallfs/projects/ClipView", "$REPO_ROOT")
 src = src.replace("/Users/bytedance/Documents/ClipFlow", "$CLIPVAULT_HOME")
+src = src.replace("/Users/bytedance", "$HOME_USER")
 Path("$PLIST_DST").write_text(src)
 print("wrote $PLIST_DST")
 PY
