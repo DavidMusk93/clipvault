@@ -266,9 +266,19 @@
 .notes-code.is-wrap pre code,
 .notes-preview .notes-code.is-wrap .hljs {
   white-space: pre-wrap !important;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  /* break-word, not anywhere: only break a token that cannot fit on its own
+     line. `anywhere` also shrinks min-content and would break eagerly. */
+  overflow-wrap: break-word;
+  /* normal, not break-word: hyphen/slash breaks are UAX #14, so tokens are
+     guarded by .notes-tok inline-blocks instead (see web/notes-wrap.mjs). */
+  word-break: normal;
   overflow-x: hidden;
+}
+/* Token-atomic wrap: a non-whitespace run moves to the next line as one unit;
+   a run longer than the line still breaks inside (last resort), not scroll. */
+.notes-code.is-wrap pre .notes-tok {
+  display: inline-block;
+  max-width: 100%;
 }
 
 /* Xcode Light, scoped so wall hljs github theme does not leak in. */

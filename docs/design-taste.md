@@ -187,7 +187,7 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 | 工具条 | min 36px · 可换行 · 28px 钮 · `#F6F6F8` | **预览不展示标记钮**（`visibility:hidden`）。源码/分栏才露出。删除线是字母 **S** 加删除线，与 H1 一样是字不是图标。禁止预览露工具条；禁止钮面汉字；禁止 `overflow:hidden` 裁标记 |
 | 源码 | JetBrains Mono 14.5 / 1.62 · Xcode Light token | `web/assets/fonts/`，禁止 CDN |
 | 预览正文 | SF / PingFang 17 / 1.65 · **预览模式宽 = 父容器 61.8%**（黄金分割） | 禁止再卡 `38rem`。窄屏 100%。分栏仍 `max-width: 38rem` |
-| 预览代码 | 浅板 `#F5F5F7` + 语言条 + 头栏右簇「换行」「复制」白底浅阴影钮 + Xcode Light | **不是** View 的炭黑井。**默认不换行**（`pre` + 横向滚）。换行是选项。两钮 `gap: 4px`，禁止透明字当按钮、禁止拉开间距 |
+| 预览代码 | 浅板 `#F5F5F7` + 语言条 + 头栏右簇「换行」「复制」白底浅阴影钮 + Xcode Light | **不是** View 的炭黑井。**默认不换行**（`pre` + 横向滚）。换行是选项。**换行按 token 断**：非空白串 = 一个原子单位（`web/notes-wrap.mjs` → `.notes-tok`），`--ip` 整块下移，不拆成 `--` / `ip`；超长串才在行内兜底断（`display:inline-block; max-width:100%`）。禁止 `overflow-wrap:anywhere` / `word-break:break-word`（会 eager 拆 token，且 `keep-all` 挡不住拉丁连字符）。两钮 `gap: 4px`，禁止透明字当按钮、禁止拉开间距 |
 | 模式 | 源码 / 分栏 / 预览；**打开默认预览，新建默认分栏** | 打开已有笔记默认预览；新建进入分栏（源码左 / 预览右），用户可再手动切。CSS 无 `data-mode` 时仍是源码单栏 |
 | 分栏滚动 | 块锚点 + 块内进度（VS Code / MarkEdit）。头/底 2px 钉住 max | 禁止全程 `scrollTop/max`。禁止只把视口第一行钉在预览顶。围栏用 `data-source-end-line` 摊到 PRE 内容盒。**预览终局**：lexer 块 hash LRU 编译 + React 18 keyed `.notes-md-block`（`display:contents`，行号在 wrapper）。禁止整页 `innerHTML` 换预览。输入不 `force` remap。图 load 不 remap |
 | 保存态 | 11px 文案：未保存 / 保存中 / 已保存 / 保存失败将重试；**仅 state 变化时**做一次交叉淡化 + 槽宽数值 tween（同态只换字，error 倒计时不闪） | 禁止只留圆点；相邻按钮不得跳动（宽度 tween，不是布局动画）；11px 不加 blur；`prefers-reduced-motion` 去掉宽度 tween；失败指数退避 + `online` 重放 |
