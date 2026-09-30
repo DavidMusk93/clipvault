@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -456,12 +457,26 @@ def _rank(counter: Counter[str], n: int = 20) -> list[dict[str, Any]]:
     return [{"key": k, "n": v} for k, v in counter.most_common(n) if k]
 
 
-def _table(rows: list[dict[str, Any]], cols: list[tuple[str, str]], caption: str = "") -> dict[str, Any]:
-    return {
+def _table(
+    rows: list[dict[str, Any]],
+    cols: list[tuple[str, str]],
+    caption: str = "",
+    chart: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A fact table, optionally annotated with the chart that fits its shape.
+
+    The chart kind is declared where the data is built (not guessed in the UI):
+    part-to-whole -> stack/donut, trend -> line, ordered points -> columns,
+    ranked comparison -> bars. The table is still rendered: 不折叠细节.
+    """
+    out: dict[str, Any] = {
         "caption": caption,
         "cols": [{"id": i, "title": t} for i, t in cols],
         "rows": rows,
     }
+    if chart and rows:
+        out["chart"] = chart
+    return out
 
 
 def _block(title: str, axis: str, note: str, tables: list[dict[str, Any]]) -> dict[str, Any]:
@@ -638,10 +653,14 @@ def metrics_analysis(
         note,
         [
             _table(overview, [("metric", "指标"), ("value", "值")], "总览"),
-            _table(model_rows, [("model", "模型"), ("n", "回合"), ("usd", "USD"), ("inp", "未缓存in"), ("cr", "缓存读"), ("out", "出"), ("hit", "命中%"), ("e2e", "e2e tok/s")], "按模型"),
-            _table(ctx_tbl, [("section", "段"), ("tokens", "平均 tokens")], "上下文构成（估算）"),
-            _table(day_rows, [("day", "日期"), ("n", "回合"), ("usd", "USD"), ("out", "出"), ("cr", "缓存读")], "每天成本曲线"),
-            _table(skill_tbl, [("skill", "加载的 skill"), ("loads", "次数"), ("avg_tokens", "平均 tokens"), ("total_tokens", "合计 tokens")], "Skill 上下文成本（SKILL.md 正文）"),
+            _table(model_rows, [("model", "模型"), ("n", "回合"), ("usd", "USD"), ("inp", "未缓存in"), ("cr", "缓存读"), ("out", "出"), ("hit", "命中%"), ("e2e", "e2e tok/s")], "按模型",
+                    {"kind": "bars", "label": "model", "value": "usd", "unit": "USD"}),
+            _table(ctx_tbl, [("section", "段"), ("tokens", "平均 tokens")], "上下文构成（估算）",
+                    {"kind": "stack", "label": "section", "value": "tokens", "unit": "tok"}),
+            _table(day_rows, [("day", "日期"), ("n", "回合"), ("usd", "USD"), ("out", "出"), ("cr", "缓存读")], "每天成本曲线",
+                    {"kind": "line", "label": "day", "value": "usd", "unit": "USD"}),
+            _table(skill_tbl, [("skill", "加载的 skill"), ("loads", "次数"), ("avg_tokens", "平均 tokens"), ("total_tokens", "合计 tokens")], "Skill 上下文成本（SKILL.md 正文）",
+                    {"kind": "bars", "label": "skill", "value": "total_tokens", "unit": "tok"}),
         ],
     )
 
@@ -958,6 +977,7 @@ def mine_rows(
     cold_turns = 0
     total_cost_usd = 0.0
     token_total = 0
+    input_uncached_total = 0
 
     def _bucket(rows_in: list[dict[str, Any]]):
         for r in rows_in:
@@ -980,6 +1000,7 @@ def mine_rows(
         t["cache_write"] = int(t.get("cache_write") or 0) + cw
         total_cost_usd += cost
         token_total += tin + tout + cr + cw
+        input_uncached_total += tin
         cache_write_tokens += cw
         if cw > 0:
             cache_write_n += 1
@@ -1045,7 +1066,8 @@ def mine_rows(
             "工作目录",
             "user",
             "cwd / workdir 出现次数。主目录应写进 prompt，避免 agent 在邻近树里乱走。",
-            [_table([{"path": r["key"], "n": r["n"]} for r in _rank(cwd_n)], [("path", "目录"), ("n", "次")])],
+            [_table([{"path": r["key"], "n": r["n"]} for r in _rank(cwd_n)], [("path", "目录"), ("n", "次")],
+                    chart={"kind": "bars", "label": "path", "value": "n"})],
         )
     if "user.git" in want:
         rows_g = []
@@ -1060,14 +1082,16 @@ def mine_rows(
             "Git 库",
             "user",
             "只认 `.tmp/repos/<name>@branch` 或 `--branch` 工作树，不用目录名猜库。",
-            [_table(rows_g, [("repo", "库"), ("branch", "分支"), ("n", "次")])],
+            [_table(rows_g, [("repo", "库"), ("branch", "分支"), ("n", "次")],
+                    chart={"kind": "bars", "label": "repo", "value": "n"})],
         )
     if "user.taste" in want:
         blocks["user.taste"] = _block(
             "Taste / 规范",
             "user",
             "线索必须带项目或技能名（`clipvault/AGENTS.md`、`skill:ce-code-review`），禁止只记 SKILL.md 文件名。",
-            [_table([{"doc": r["key"], "n": r["n"]} for r in _rank(taste_n)], [("doc", "线索"), ("n", "次")])],
+            [_table([{"doc": r["key"], "n": r["n"]} for r in _rank(taste_n)], [("doc", "线索"), ("n", "次")],
+                    chart={"kind": "bars", "label": "doc", "value": "n"})],
         )
     if "agent.files" in want:
         blocks["agent.files"] = _block(
@@ -1114,8 +1138,10 @@ def mine_rows(
             "agent",
             f"墙钟合计 {round(total_s, 1)}s，其中工作 {round(work_s, 1)}s、等待（CheckCommandStatus 等）{round(wait_s, 1)}s。等待不是任务阶段。",
             [
-                _table(rows_t, [("tool", "工具"), ("kind", "类"), ("n", "次"), ("sec", "秒"), ("share", "%"), ("fail", "失败")], "工具"),
-                _table(rows_f, [("family", "shell 族"), ("n", "次"), ("sec", "秒")], "RunCommand 族（git / rg / read / build / test）"),
+                _table(rows_t, [("tool", "工具"), ("kind", "类"), ("n", "次"), ("sec", "秒"), ("share", "%"), ("fail", "失败")], "工具",
+                    {"kind": "bars", "label": "tool", "value": "sec", "unit": "s"}),
+                _table(rows_f, [("family", "shell 族"), ("n", "次"), ("sec", "秒")], "RunCommand 族（git / rg / read / build / test）",
+                    {"kind": "bars", "label": "family", "value": "sec", "unit": "s"}),
             ],
         )
     if "agent.mcp" in want:
@@ -1127,7 +1153,8 @@ def mine_rows(
             "MCP",
             "agent",
             "search 远多于 add = 知识只读不沉淀。",
-            [_table(rows_m, [("mcp", "调用"), ("kind", "类"), ("n", "次")])],
+            [_table(rows_m, [("mcp", "调用"), ("kind", "类"), ("n", "次")],
+                    chart={"kind": "bars", "label": "mcp", "value": "n"})],
         )
     if "agent.phases" in want:
         work_total = sum(phase_work.values()) or 1.0
@@ -1141,6 +1168,7 @@ def mine_rows(
                 "share": round(100 * phase_work.get(name, 0) / work_total, 1),
             })
         rows_turn = [{
+            "index": t["index"],
             "ts": t["ts"],
             "phase": t["phase"],
             "tools": t["tools"],
@@ -1153,8 +1181,10 @@ def mine_rows(
             "agent",
             "阶段按用户 prompt 分类；占比用工作秒，不含 CheckCommandStatus 空等。每回合 prompt 全文首行。",
             [
-                _table(rows_p, [("phase", "阶段"), ("n", "回合"), ("work", "工作秒"), ("sec", "墙钟秒"), ("share", "工作%")], "阶段占比"),
-                _table(rows_turn, [("ts", "时间"), ("phase", "阶段"), ("tools", "工具"), ("work", "工作秒"), ("wait", "等待秒"), ("prompt", "用户首行")], "回合时间线"),
+                _table(rows_p, [("phase", "阶段"), ("n", "回合"), ("work", "工作秒"), ("sec", "墙钟秒"), ("share", "工作%")], "阶段占比",
+                    {"kind": "donut", "label": "phase", "value": "work", "unit": "s"}),
+                _table(rows_turn, [("ts", "时间"), ("phase", "阶段"), ("tools", "工具"), ("work", "工作秒"), ("wait", "等待秒"), ("prompt", "用户首行")], "回合时间线",
+                    {"kind": "columns", "label": "ts", "value": "work", "unit": "s"}),
             ],
         )
     if "agent.failures" in want:
@@ -1174,8 +1204,10 @@ def mine_rows(
             "agent",
             f"失败 {fail_n} 次（{round(100 * fail_rate, 1)}% of {total_tools_n}），同回合重试 {retry_n} 次。失败先读 stderr；同一族连续失败两次必须换策略。",
             [
-                _table(rows_ft, [("tool", "工具"), ("n", "调用"), ("fail", "失败"), ("rate", "失败%")], "失败工具"),
-                _table(rows_ff, [("family", "命令族"), ("n", "调用"), ("fail", "失败")], "失败命令族"),
+                _table(rows_ft, [("tool", "工具"), ("n", "调用"), ("fail", "失败"), ("rate", "失败%")], "失败工具",
+                    {"kind": "bars", "label": "tool", "value": "fail"}),
+                _table(rows_ff, [("family", "命令族"), ("n", "调用"), ("fail", "失败")], "失败命令族",
+                    {"kind": "bars", "label": "family", "value": "fail"}),
             ],
         )
     if "agent.hot" in want:
@@ -1191,9 +1223,12 @@ def mine_rows(
             "agent",
             f"冗余读 {redundant_reads} 次；重复命令与最慢命令是下一轮 prompt 应点名的对象。",
             [
-                _table(rows_read, [("path", "文件"), ("reads", "读"), ("writes", "写")], "重复读取（与写入对比）"),
-                _table(rows_cmd, [("cmd", "命令（数字归一）"), ("n", "次")], "重复命令"),
-                _table(rows_slow, [("sec", "秒"), ("cmd", "命令")], "最慢命令"),
+                _table(rows_read, [("path", "文件"), ("reads", "读"), ("writes", "写")], "重复读取（与写入对比）",
+                    {"kind": "bars", "label": "path", "value": "reads"}),
+                _table(rows_cmd, [("cmd", "命令（数字归一）"), ("n", "次")], "重复命令",
+                    {"kind": "bars", "label": "cmd", "value": "n"}),
+                _table(rows_slow, [("sec", "秒"), ("cmd", "命令")], "最慢命令",
+                    {"kind": "bars", "label": "cmd", "value": "sec", "unit": "s"}),
             ],
         )
     if "user.prompt" in want:
@@ -1235,7 +1270,8 @@ def mine_rows(
             "user",
             f"{prompt_n} 条 prompt 出现 {reminder_total} 处提醒/纠正信号。反复出现的主题要变成 AGENTS 闸门，而不是每次口头重申。",
             [
-                _table(rows_rem, [("theme", "主题"), ("n", "次"), ("share", "占比%")], "提醒主题"),
+                _table(rows_rem, [("theme", "主题"), ("n", "次"), ("share", "占比%")], "提醒主题",
+                    {"kind": "bars", "label": "theme", "value": "n"}),
                 _table(sample_rows, [("theme", "主题"), ("prompt", "样本首行")], "重复提醒样本"),
             ],
         )
@@ -1261,7 +1297,8 @@ def mine_rows(
             f"额外往返 {extra_trips} 次（短催 {nudge_n} + 纠正 {correction_n} + 催促 {push_n}）。首条 prompt 给全 cwd/仓库/目标/验收，并要求「阶段结论再停」，能直接砍掉这些往返。",
             [
                 _table(metrics, [("metric", "指标"), ("value", "值")], "流程摩擦"),
-                _table(bucket_rows, [("bucket", "字数"), ("n", "条")], "prompt 长度分布"),
+                _table(bucket_rows, [("bucket", "字数"), ("n", "条")], "prompt 长度分布",
+                    {"kind": "columns", "label": "bucket", "value": "n"}),
             ],
         )
 
@@ -1396,6 +1433,15 @@ def mine_rows(
         "losses": losses,
         "findings": feedback,
         "turns": turn_rows,
+        "series": {
+            # Charts read these directly: the gauge needs the split behind the ratio.
+            "cache": {
+                "hit_pct": summary.get("cache_hit_pct"),
+                "read": cache_read_total,
+                "uncached": input_uncached_total,
+                "write": cache_write_total,
+            },
+        },
         "directions": DIRECTIONS,
         "active": want,
         "blocks": blocks,
@@ -1812,7 +1858,7 @@ def _fmt_s(v: Any) -> str:
 
 
 def _agent_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    keep = ("id", "sev", "axis", "title", "text", "cause", "action", "gate", "impact", "metric", "refs", "confidence")
+    keep = ("id", "sev", "axis", "title", "text", "cause", "action", "gate", "impact", "metric", "refs", "confidence", "ack")
     return [{k: f.get(k) for k in keep if f.get(k) is not None} for f in findings]
 
 
@@ -1854,6 +1900,22 @@ def agent_brief(result: dict[str, Any]) -> str:
             lines.append(mtxt)
     verify = result.get("verify") or {}
     lines += ["", "## 复测", f"- {verify.get('rerun') or ''}", f"- 期望: {verify.get('expect') or ''}"]
+    loop = result.get("loop") or {}
+    acked = [f for f in (result.get("findings") or []) if f.get("ack")]
+    if acked:
+        lines += [
+            "",
+            f"## 闭环核对（已声明 {loop.get('total', 0)} 条 · 闭环 {len(loop.get('closed') or [])} · 未改善 {len(loop.get('open') or [])}）",
+        ]
+        for f in acked:
+            a = f["ack"]
+            mt = f.get("metric") or {}
+            state = "闭环" if a.get("closed") is True else ("未改善" if a.get("closed") is False else "无目标")
+            lines.append(
+                f"- [{a.get('status')}] {f.get('title')}: {mt.get('id') or '-'} "
+                f"{a.get('at_now')} -> {a.get('now')}（目标 {mt.get('target')}）=> {state}"
+                + (f" · 备注: {a.get('note')}" if a.get("note") else "")
+            )
     return "\n".join(lines)
 
 
@@ -1871,6 +1933,8 @@ def agent_view(result: dict[str, Any], base_metrics: list[dict[str, Any]] | None
         "losses": result.get("losses") or [],
         "findings": _agent_findings(result.get("findings") or []),
         "turns": result.get("turns") or [],
+        "series": result.get("series") or {},
+        "loop": result.get("loop"),
         "stable": [f.get("title") for f in (result.get("findings") or []) if f.get("sev") == "good"],
         "verify": {
             "metric_ids": [m["id"] for m in metrics if m.get("target") is not None],
@@ -1885,6 +1949,95 @@ def agent_view(result: dict[str, Any], base_metrics: list[dict[str, Any]] | None
 def _ts_str(epoch: float) -> str:
     from datetime import datetime
     return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+
+ACKS_SQL = """
+SELECT finding_id, CAST(ts AS VARCHAR) AS ts, status, note, metric_id, metric_now, target
+FROM analysis_acks
+WHERE scope = ? AND session_id = ?
+ORDER BY ts DESC
+"""
+
+
+def fetch_acks(query_fn, *, session_id: str | None, scope: str) -> dict[str, dict[str, Any]]:
+    """Latest ack per finding for exactly this window. Missing table -> empty dict."""
+    try:
+        rows = query_fn(ACKS_SQL, [scope, session_id or ""])
+    except Exception:  # noqa: BLE001 - store may predate the ack table
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        fid = str(r.get("finding_id") or "")
+        if not fid or fid in out:
+            continue
+        out[fid] = {
+            "status": str(r.get("status") or "applied"),
+            "ts": str(r.get("ts") or ""),
+            "note": str(r.get("note") or ""),
+            "metric_id": str(r.get("metric_id") or ""),
+            "at_now": r.get("metric_now"),
+            "target": r.get("target"),
+        }
+    return out
+
+
+def _reached(value: Any, target: Any, direction: str | None) -> bool | None:
+    """Is the metric at/through its target? Unknown target -> None, never a guess."""
+    if value is None or target is None:
+        return None
+    try:
+        v, t = float(value), float(target)
+    except (TypeError, ValueError):
+        return None
+    if direction == "up":
+        return v >= t
+    if direction == "down":
+        return v <= t
+    return None
+
+
+def attach_acks(result: dict[str, Any], acks: dict[str, dict[str, Any]]) -> None:
+    """L3: does the claim hold? Each acked finding gets its before/after and state."""
+    applied: list[str] = []
+    dismissed: list[str] = []
+    closed: list[str] = []
+    still_open: list[str] = []
+    untracked: list[str] = []
+    for f in result.get("findings") or []:
+        ack = acks.get(str(f.get("id")))
+        if not ack:
+            continue
+        metric = f.get("metric") or {}
+        now = metric.get("now")
+        ack = dict(ack)
+        ack["now"] = now
+        ack["moved"] = (
+            None if (ack.get("at_now") is None or now is None)
+            else round(float(now) - float(ack["at_now"]), 4)
+        )
+        ack["closed"] = _reached(now, metric.get("target"), metric.get("dir"))
+        f["ack"] = ack
+        fid = str(f.get("id"))
+        if ack["status"] == "dismissed":
+            dismissed.append(fid)
+            continue
+        applied.append(fid)
+        if ack["closed"] is True:
+            closed.append(fid)
+        elif ack["closed"] is False:
+            still_open.append(fid)
+        else:
+            untracked.append(fid)
+    if not (applied or dismissed):
+        return
+    result["loop"] = {
+        "applied": applied,
+        "dismissed": dismissed,
+        "closed": closed,
+        "open": still_open,
+        "untracked": untracked,
+        "total": len(applied) + len(dismissed),
+    }
 
 
 def fetch_rows(
@@ -2007,6 +2160,7 @@ def mine(
         usage_rows=usage_rows,
         ctx_rows=ctx_rows,
     )
+    attach_acks(result, fetch_acks(query_fn, session_id=session_id, scope=scope))
     query = [f"--scope {scope}"]
     if session_id and scope == "session":
         query.append(f"--session-id {session_id}")
@@ -2041,6 +2195,52 @@ def mine(
     if fmt == "agent":
         return agent_view(result, base_metrics)
     return result
+
+
+def ack_finding(
+    execute_fn,
+    *,
+    scope: str,
+    session_id: str | None,
+    finding_id: str,
+    status: str,
+    note: str = "",
+    metric: dict[str, Any] | None = None,
+    instance_id: str = "",
+) -> dict[str, Any]:
+    """Record that a finding was applied/dismissed. Latest status per window wins."""
+    from row import utc_now
+
+    if scope not in ("session", "recent"):
+        scope = "session"
+    status = "dismissed" if str(status) == "dismissed" else "applied"
+    fid = str(finding_id or "").strip()
+    if not fid:
+        return {"ok": False, "error": "finding_id required"}
+    sid = session_id or ""
+    metric = metric or {}
+    ack_id = f"{scope}:{sid or '-'}:{fid}"
+    execute_fn(
+        "INSERT INTO analysis_acks (ack_id, ts, instance_id, scope, session_id, finding_id, status, note, "
+        "metric_id, metric_now, target) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (ack_id) DO UPDATE SET ts = excluded.ts, status = excluded.status, "
+        "note = excluded.note, metric_id = excluded.metric_id, metric_now = excluded.metric_now, "
+        "target = excluded.target, instance_id = excluded.instance_id",
+        [
+            ack_id,
+            utc_now(),
+            instance_id or os.environ.get("CLIPVAULT_INSTANCE_ID", ""),
+            scope,
+            sid,
+            fid,
+            status,
+            str(note or "")[:500],
+            str(metric.get("id") or ""),
+            metric.get("now"),
+            metric.get("target"),
+        ],
+    )
+    return {"ok": True, "ack_id": ack_id, "finding_id": fid, "status": status}
 
 
 def _cli(argv: list[str] | None = None) -> int:

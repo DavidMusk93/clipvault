@@ -123,3 +123,21 @@ CREATE INDEX IF NOT EXISTS idx_ctx_ts ON turn_context(ts DESC);
 
 -- Idempotent migration for stores whose turn_context predates skill attribution.
 ALTER TABLE turn_context ADD COLUMN IF NOT EXISTS skill_loaded_tokens VARCHAR;
+
+-- Session-analysis acknowledgements: what the Agent (or human) claims it applied.
+-- Append-only in spirit; reads keep the latest status per (scope, session, finding).
+CREATE TABLE IF NOT EXISTS analysis_acks (
+    ack_id VARCHAR PRIMARY KEY,
+    ts TIMESTAMP,
+    instance_id VARCHAR,
+    scope VARCHAR,
+    session_id VARCHAR,
+    finding_id VARCHAR,
+    status VARCHAR,                        -- applied | dismissed
+    note VARCHAR,
+    metric_id VARCHAR,
+    metric_now DOUBLE,                     -- metric value when the ack was written
+    target DOUBLE
+);
+
+CREATE INDEX IF NOT EXISTS idx_acks_scope ON analysis_acks(scope, session_id, ts DESC);

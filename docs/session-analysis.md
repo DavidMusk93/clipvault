@@ -147,6 +147,24 @@ Agent 面是**契约**，字段稳定、可解析、带复测指令。额外返�
 `baseline=1` 时对**同长度前窗**重算一次：`scope=session` 取上一个会话；
 `scope=recent` 取前 7 天。基线缺失时 `baseline: null`，UI 不画 Δ，不猜。
 
+### 4.4 写入面：ack（L3 闭环）
+
+分析接口是读接口；闭环靠一个**窄写入面**：`POST /api/mine/ack`
+
+```json
+{"scope":"session","session_id":"<id>","finding_id":"fail_retry",
+ "status":"applied|dismissed","note":"自由文本",
+ "metric":{"id":"fail_n","now":9,"target":0}}
+```
+
+- 落库 `analysis_acks`（主键 `scope:session|-,finding_id`，重写即最新态）；
+- `GET /api/mine` 回读：每条 finding 带 `ack {status, at_now, now, moved, closed, note}`，
+  顶层出 `loop {applied, dismissed, closed, open, untracked, total}`；
+- `closed` 只在**有 target** 时判定（down: `now <= target`，up: `now >= target`），
+  无 target → `null`（计 `untracked`），禁止猜；
+- `brief` 增 `## 闭环核对`：`fail_n 9 -> 11（目标 0）=> 未改善`；
+- Agent 的反馈因此是**可验证声明 + 下一窗口复测**，不是口头检讨。
+
 ## 5. UI 契约（sheet）
 
 ```text
@@ -182,6 +200,22 @@ Agent 面是**契约**，字段稳定、可解析、带复测指令。额外返�
    （回合明细打开）时只标 `is-pending`，不重绘。
 6. 禁止 `setInterval` 刷 DOM（沿用 SSE `hook_event` 去抖）。
 7. `?mine=1` 是分析深链（浏览器验收、直接打当前会话分析用）；不改变默认不打开的行为。
+8. **图表按数据形状选，不由口味选**（实现 `web/mine-charts.mjs`，后端在 `_table(..., chart=)` 处声明 kind）：
+
+| 数据形状 | 图 | 例 |
+| --- | --- | --- |
+| part-to-whole，少数分量 | 分段条 `stack` | 时间构成（工作/等待/失败）、tokens 构成 |
+| part-to-whole，≤ 6 片 / 单值比率 | 环形 `donut` | 阶段占比、缓存命中率（中心出数） |
+| 有序趋势，≥ 3 点 | 折线 `line` | 每天成本曲线 |
+| 有序多点，看形状 | 柱 `columns` | 每回合墙钟、prompt 长度分布 |
+| 排序比较（数量级） | 横向柱 `bars` | 工具/文件/命令族/损耗排行 |
+
+  硬规则：**相邻比例必须分离**（`gap: 3px` + 每段 0.5px 内描边 + 最小 3px 宽），
+  一张图**只能一个单位**（秒与 $ 不混轴，损耗给「按 $」与「按秒」两张），
+  每个色块都带数值/百分比，折线 < 3 点不画，饼图 > 6 片不画。
+  禁止用色块代替数字。
+9. **闭环可见**：finding 卡底部有 ack 状态 chip（已闭环/未改善/无目标/已忽略）
+   + 两个按钮（标记已应用 / 忽略）；顶部 verdict 出「闭环 声明 N · 闭环 X · 未改善 Y」。
 
 ## 6. Worked example（不可与实现同源的最小 oracle）
 
@@ -205,5 +239,8 @@ metrics:     reread_ratio = 1.0, fail_n = 1, extra_trips = 1
 - 上下文 tokens 是估算（chars / 校准 cpt），带 `est_ratio`，禁止当账单据。
 - Trae 侧无 usage/cost（hook stdin 实测无字段），Trae 会话只有 `s` 维度。
 - `scope=recent` 受 12000 行上限约束，`truncated=true` 必须显式暴露。
+- 长空档（`idle`）是墙钟间隔，与工具耗时不同源；它计入「按秒」排序但不进工作秒。
+- ack 是**声明**不是证明：`closed` 只表示「该指标已达 target」，不证明因果；
+  ack 表只保留每个窗口每个 finding 的最新态（不是审计日志）。
 - 未做：跨实例（多机）归属拆分；记忆 ROI（memory id ↔ 结果）只有计数，
   尚未与失败率/成本联算。

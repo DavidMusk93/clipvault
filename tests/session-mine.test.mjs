@@ -86,16 +86,23 @@ test('the sheet shows the ledger instead of collapsing it', () => {
   assert.match(html, /const renderLosses/);
   assert.match(html, /const renderTimeline/);
   assert.match(html, /const renderVerdict/);
+  assert.match(html, /\.mine-turn\.ph-review/);
 });
 
-test('the sheet is designed: color channels, interaction, no gray-on-gray', () => {
+test('the sheet is designed: color channels, charts, interaction', () => {
   const sheet = html.slice(html.indexOf('.cv-mine-sheet {'), html.indexOf('.cv-mine-fab.is-on'));
   for (const token of ['--mine-time', '--mine-money', '--mine-loss', '--mine-good', '--mine-user', '--mine-agent']) {
     assert.match(sheet, new RegExp(token));
   }
-  assert.match(sheet, /\.mine-stack i\.s-work/);
-  assert.match(sheet, /\.mine-stack i\.s-money|\.mine-stack i\.s-out/);
-  assert.match(sheet, /\.mine-turn\.ph-review/);
+  assert.match(sheet, /\.mc-stack-track/);
+  // Adjacent ratios must not merge: real gaps + a hairline per segment.
+  assert.match(sheet, /\.mc-stack-track \{[^}]*gap: 3px/);
+  assert.match(sheet, /\.mc-seg \{[^}]*box-shadow: inset/);
+  assert.match(sheet, /\.mc-bar-row/);
+  assert.match(sheet, /\.mc-donut/);
+  assert.match(sheet, /\.mc-axis/);
+  assert.match(sheet, /--mine-flat/);
+  assertNo(sheet, /\.mine-stack|s-work/);
   assert.match(html, /class="mine-nav"/);
   assert.match(html, /data-jump=/);
   assert.match(html, /data-mine-turn/);
@@ -105,6 +112,55 @@ test('the sheet is designed: color channels, interaction, no gray-on-gray', () =
   // Interaction is not decoration-only: numbers carry the meaning too.
   assert.match(html, /const mineBarPct/);
   assert.match(html, /mine-metric/);
+});
+
+function assertNo(source, re, msg) {
+  assert.doesNotMatch(source, re, msg || `should not match ${re}`);
+}
+
+test('charts are chosen by the data shape, not by taste', () => {
+  assert.match(html, /from "\.\/mine-charts\.mjs"/);
+  assert.match(html, /const renderChartFor/);
+  assert.match(html, /const chartRows/);
+  assert.match(html, /renderChartFor\(t\)/);
+  // The backend declares the kind next to the data it describes.
+  for (const kind of ['"bars"', '"donut"', '"line"', '"columns"', '"stack"']) {
+    assert.match(mine, new RegExp(kind));
+  }
+  assert.match(mine, /chart: dict\[str, Any\] \| None = None/);
+  assert.match(mine, /"kind": "donut", "label": "phase", "value": "work"/);
+  assert.match(mine, /"kind": "line", "label": "day", "value": "usd"/);
+  assert.match(mine, /"kind": "columns", "label": "ts", "value": "work"/);
+  // The gauge needs the split behind the ratio.
+  assert.match(mine, /"cache": \{/);
+  assert.match(mine, /"uncached": input_uncached_total/);
+  assert.match(html, /data.series \|\| \{\}\)\.cache/);
+  const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
+  assert.match(check, /mine-charts\.test\.mjs/);
+});
+
+test('the analysis loop can be written back by the agent', () => {
+  assert.match(server, /path == "\/api\/mine\/ack"/);
+  assert.match(server, /ack_finding/);
+  assert.match(server, /store\.execute/);
+  assert.match(mine, /def ack_finding/);
+  assert.match(mine, /ON CONFLICT \(ack_id\) DO UPDATE/);
+  assert.match(mine, /def fetch_acks/);
+  assert.match(mine, /def attach_acks/);
+  assert.match(mine, /def _reached/);
+  assert.match(mine, /analysis_acks/);
+  const schema = readFileSync(join(root, 'trae_hooks/schema.sql'), 'utf8');
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS analysis_acks/);
+  // The brief tells the agent whether its last claim actually landed.
+  assert.match(mine, /## 闭环核对/);
+  assert.match(mine, /"closed": closed/);
+  // UI: ack buttons + state chip + loop counter.
+  assert.match(html, /const renderAck/);
+  assert.match(html, /const ackMineFinding/);
+  assert.match(html, /data-ack-status="applied"/);
+  assert.match(html, /mine-ack-chip/);
+  assert.match(html, /class="mine-loop"/);
+  assert.match(html, /apiUrl\("\/api\/mine\/ack"\)/);
 });
 
 test('directions cover user and agent axes', () => {

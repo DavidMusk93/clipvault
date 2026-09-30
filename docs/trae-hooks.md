@@ -144,6 +144,18 @@ python3 trae_hooks/mine.py --agent --scope recent --json              # 拿结�
 
 `--agent` 返回 `brief`（结论 → 影响 → 动作 → 复测）+ 稳定 `metric.id` + `verify.rerun`，
 默认对**上一个同长度窗口**做 Δ（`--no-baseline` 关闭）。
+
+闭环写入面（Agent 声明它改了什么，下一窗口回读是否改善）：
+
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"scope":"session","session_id":"<id>","finding_id":"fail_retry","status":"applied",
+       "note":"先读 stderr","metric":{"id":"fail_n","now":9,"target":0}}' \
+  http://127.0.0.1:9488/api/mine/ack
+```
+
+落表 `analysis_acks`（每窗口每 finding 保留最新态）；回读在 `GET /api/mine` 的
+`findings[].ack` + 顶层 `loop`，以及 `brief` 的 `## 闭环核对` 段。
 判读口径：
 
 - **缓存命中率** = `cacheRead / (cacheRead + 未缓存 input)`。前缀（rules / AGENTS / skills）一改，整段失效。

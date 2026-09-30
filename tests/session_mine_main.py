@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "trae_hooks"))
 
 from mine import (  # noqa: E402
-    agent_view, classify_phase, cmd_family, git_from_path, mcp_parts, mine_rows, parse_head, taste_keys,
+    ack_finding, agent_view, attach_acks, classify_phase, cmd_family, fetch_acks, git_from_path,
+    mcp_parts, mine_rows, parse_head, taste_keys,
 )
 
 
@@ -242,6 +243,61 @@ def main() -> None:
     ok("agent-usd-loss", any(l["usd"] > 0 for l in out4["losses"]), str(out4["losses"]))
     ok("agent-cache-metric", any(m["id"] == "cache_hit_pct" for m in out4["metrics"]), str([m["id"] for m in out4["metrics"]]))
     ok("fail-refs", any(r.get("exit_code") for l in out4["losses"] for r in l.get("refs", [])), str(out4["losses"])[:400])
+
+    # Charts: the shape that fits is declared where the data is built.
+    charted = [(t.get("caption"), t["chart"]["kind"]) for b in out["blocks"].values()
+               for t in (b.get("tables") or []) if t.get("chart")]
+    ok("chart-annotated", len(charted) >= 4, str(charted))
+    ok("chart-kinds", {k for _, k in charted} <= {"bars", "donut", "line", "columns", "stack"}, str(charted))
+    phase_tbl = out["blocks"]["agent.phases"]["tables"][0]
+    ok("chart-phase-donut", phase_tbl["chart"]["kind"] == "donut" and phase_tbl["chart"]["value"] == "work", str(phase_tbl["chart"]))
+    turn_tbl = out["blocks"]["agent.phases"]["tables"][1]
+    ok("chart-turn-columns", turn_tbl["chart"]["kind"] == "columns" and "index" in turn_tbl["rows"][0], str(turn_tbl["chart"]))
+    ok("chart-tool-bars", out["blocks"]["agent.tools"]["tables"][0]["chart"]["kind"] == "bars")
+    ok("series-cache", "cache" in out4["series"] and "uncached" in out4["series"]["cache"], str(out4["series"]))
+
+    # L3 loop: an ack records the claim; the next read says whether it moved.
+    def _find(result, fid):
+        return next(f for f in result["findings"] if f["id"] == fid)
+
+    attach_acks(out4, {"fail_retry": {"status": "applied", "ts": "t1", "note": "先读 stderr",
+                                      "metric_id": "fail_n", "at_now": 9, "target": 0}})
+    acked = _find(out4, "fail_retry")
+    ok("ack-attached", acked["ack"]["status"] == "applied" and acked["ack"]["closed"] is False, str(acked.get("ack")))
+    ok("loop-state", out4["loop"]["applied"] == ["fail_retry"] and out4["loop"]["open"] == ["fail_retry"], str(out4["loop"]))
+    v4 = agent_view(out4, None)
+    ok("agent-loop-brief", "## 闭环核对" in v4["brief"] and "未改善" in v4["brief"], v4["brief"][-400:])
+    ok("agent-loop-view", v4["loop"]["open"] == ["fail_retry"] and any("ack" in f for f in v4["findings"]))
+
+    closed_probe = {"findings": [{"id": "fail_retry", "sev": "high",
+                                  "metric": {"id": "fail_n", "now": 0, "target": 0, "dir": "down"}}]}
+    attach_acks(closed_probe, {"fail_retry": {"status": "applied", "at_now": 9}})
+    ok("loop-closed", closed_probe["findings"][0]["ack"]["closed"] is True
+       and closed_probe["loop"]["closed"] == ["fail_retry"], str(closed_probe["loop"]))
+    no_target = {"findings": [{"id": "idle", "metric": {"id": "idle_s", "now": 5, "target": None, "dir": "down"}}]}
+    attach_acks(no_target, {"idle": {"status": "applied", "at_now": 0}})
+    ok("loop-no-target", no_target["findings"][0]["ack"]["closed"] is None
+       and no_target["loop"]["untracked"] == ["idle"], str(no_target["loop"]))
+    dismissed = {"findings": [{"id": "idle", "metric": {"id": "idle_s", "now": 0, "target": None, "dir": "down"}}]}
+    attach_acks(dismissed, {"idle": {"status": "dismissed", "at_now": 0}})
+    ok("loop-dismissed", dismissed["loop"]["dismissed"] == ["idle"] and "closed" not in dismissed["loop"]["applied"], str(dismissed["loop"]))
+
+    writes: list[tuple[str, list[Any]]] = []
+
+    def _exec(sql: str, params: list[Any] | None = None) -> None:
+        writes.append((sql, list(params or [])))
+
+    res = ack_finding(_exec, scope="session", session_id="f", finding_id="fail_retry", status="applied",
+                      note="n", metric={"id": "fail_n", "now": 9, "target": 0})
+    ok("ack-write", bool(res.get("ok")) and res["ack_id"] == "session:f:fail_retry", str(res))
+    ok("ack-upsert", "ON CONFLICT (ack_id) DO UPDATE" in writes[0][0])
+    ok("ack-params", writes[0][1][5] == "fail_retry" and writes[0][1][6] == "applied" and writes[0][1][9] == 9, str(writes[0][1]))
+    ok("ack-requires-finding", ack_finding(_exec, scope="session", session_id="f", finding_id="", status="applied")["ok"] is False)
+
+    def _boom(sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
+        raise RuntimeError("no analysis_acks table")
+
+    ok("acks-degrade", fetch_acks(_boom, session_id="f", scope="session") == {})
     print("session-mine: all passed")
 
 
