@@ -310,12 +310,13 @@ Invariant demonstrated: `INV-1`. Anchor: `RA-9`.
 ## Appendix A — Phases
 
 ```text
-Phase 0  schema hygiene (no host change, no engine change)   [do first]
-   promote agent_type / agent_id / text_content to columns
-   stop writing raw_json ; keep raw_hash for dedupe
-   add drop-allowlist alarm           (INV-7)
-   7.37 GiB -> 2.96 GiB
-   nightly off-box snapshot of the DuckDB
+Phase 0  corpus hygiene (no host change, no engine change)   [do first]
+   export-only: extract agent_type / agent_id / text_content
+   and drop raw_json at export time instead of mutating the
+   live 7.37 GiB single-writer DuckDB (raw_json is NOT NULL)
+   target PostgreSQL size 2.96 GiB
+   nightly off-box snapshot of the frozen DuckDB
+   drop-allowlist alarm at the new ingest path (INV-7)
 
 Phase 1  PostgreSQL on d2
    docker run postgres:18-alpine  -p 127.0.0.1:55432:5432  volume on durable path
@@ -332,6 +333,12 @@ Phase 3  retention + backup gates
    nightly pg_dump -Fc -> off-box ; prove one restore
    retention DELETE + VACUUM ; revisit partitioning with measured size
 ```
+
+Phase 0 deliberately does not migrate anything in place. `raw_json` is
+`NOT NULL` in `trae_hooks/schema.sql`, so removing it from the write path means
+`ALTER COLUMN DROP NOT NULL` plus a rewrite of a 7.37 GiB file that already has
+one corrupt WAL beside it, on a writer that is known to hang on SIGTERM. The
+export path reaches the same 2.96 GiB target with zero risk to the live store.
 
 ## Appendix B — Cutover sequence and rollback
 
