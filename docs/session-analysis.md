@@ -27,25 +27,31 @@ verified_by:
 损耗账本，并把每个结论写成 Agent 自己可以复测的闭环**。
 
 ```text
-分析的第一性原理
-  输入: 事件流(hook_events) + 经济量纲(llm_usage / turn_context)
-  输出: 两个消费者各取所需, 同一份计算
-        ┌─────────────────────┬──────────────────────────────┐
-        │ 人                  │ Agent                        │
-        │ agent 干了什么      │ 下一次该改什么 + 怎么验证    │
-        │ 时间/钱 花在哪      │ metric id + now + target     │
-        └─────────────────────┴──────────────────────────────┘
-  判据: 一条结论只有同时可归因 / 可行动 / 可验证 / 有量纲, 才算有价值
+Analysis first principles
+  in : event stream (hook_events) + economics (llm_usage / turn_context)
+  out: two consumers, one computation
+       +------------------------+-------------------------------+
+       | human                 | agent                        |
+       | what did it do        | what to change + how to check|
+       | where money/time went | metric id + now + target     |
+       +------------------------+-------------------------------+
+  test: attributable / actionable / verifiable / costed, all four at once
 ```
+
+判据（中文口径，四条同时成立才算结论）：**可归因**（落到 turn/event）· **可行动**
+（改变行为，不是复述计数）· **可验证**（metric id + target 可在下一窗口复测）·
+**有量纲**（秒或 $，且标注实测/估算）。缺任一条即降级为账本行。
 
 四层模型（每层只依赖下一层，禁止跳层下结论）：
 
 ```text
-L0 账本 Ledger       事件次数与时长 (turn / tool / file / phase / cost)   = 事实
-L1 归因 Attribution  损耗落到具体 turn / event / 命令 / 文件上, 给出秒与 $  = 事实加权
-L2 结论 Finding      每条的 cause chain + action + gate + metric(target)   = 可执行断言
-L3 闭环 Loop         metric id 可在下一个窗口重算, 输出 Δ 基线             = 可验证
+L0 Ledger        counts and durations (turn / tool / file / phase / cost) = facts
+L1 Attribution   loss lands on turn / event / command / file, in s or usd   = weighted facts
+L2 Finding       cause chain + action + gate + metric(target)              = executable claim
+L3 Loop          metric id recomputes in the next window, reports delta    = verifiable
 ```
+
+四层名字（中文口径）：**L0 账本** · **L1 归因** · **L2 结论** · **L3 闭环**。
 
 ## 2. 为什么 v1 的「建议」没有价值（反模式，必须禁止）
 
@@ -69,13 +75,13 @@ L3 闭环 Loop         metric id 可在下一个窗口重算, 输出 Δ 基线  
 越界数字会直接毁掉可信度）：
 
 ```text
-L1a 失败重试   exit_code != 0 的调用墙钟 + 同族重试墙钟 + 该回合按失败工具占比分摊的 $
-L1b 重复读     同一文件在同一窗口第 2 次起的读取墙钟 (读到第 N 次说明上下文在重建)
-L1c 空等轮询   is_wait_tool (CheckCommandStatus 类) 墙钟: 没有产出的等待
-L1d 前缀重填   cacheWrite>0 的回合: 前缀被改写, 下一回合整段重新预填 ($ 按本窗混合单价估算)
-L1e 返工往返   短催/纠正/催促产生的回合本身成本 (秒 + $): 本可避免的一次完整回合
-L1f 定位搜索   缺路径/仓库线索回合里的 search 族 (rg/find) 墙钟
-L1g 长空档     相邻事件间隔 >600s（>10 分钟无任何事件, 模型生成不算）累计
+L1a fail_retry  wall of calls with exit_code != 0 + same-family retries + turn cost share
+L1b reread      wall of the 2nd and later read of one file (context rebuild)
+L1c wait_poll   is_wait_tool (CheckCommandStatus) wall: waiting with no output
+L1d cache_write turns with cacheWrite>0: prefix changed, next turn re-prefills ($ estimated)
+L1e rework      cost of whole turns triggered by nudge / correction / push
+L1f locate      search-family wall (rg/find) in turns whose prompt had no path/repo
+L1g idle        gaps > 600s between events (no events at all; model generation excluded)
 ```
 
 「定位搜索」只算 **search 族**（`rg`/`find`）落在缺路径线索回合上的墙钟；
@@ -145,20 +151,21 @@ Agent 面是**契约**，字段稳定、可解析、带复测指令。额外返�
 
 ```text
 +------------------------------------------------------------------+
-| 会话分析        [当前会话][最近 7 天]        [复制 AGENTS 草稿][x] |
-| 时间窗 · 回合 · 工具 · 实例 · (截断警告)                          |
-| 方向 chips: 工作目录 Git Taste 任务描述 用户提醒 操作流程 ...      |
+| session analysis   [this session][last 7d]   [copy gate][close]  |
+| window - turns - tools - instances - (truncated) (baseline)      |
+| direction chips: cwd Git taste prompt reminders flow ...         |
 +------------------------------------------------------------------+
-| ① 损耗判定   score + 4 KPI($ / 墙钟 / 缓存命中 / 失败)             |
-|    时间构成条 (工作蓝 / 等待灰 / 失败红)  钱构成条 (出/缓写/缓读)  |
+| (1) verdict   score + KPI tiles (usd/wall/cache/fail) + deltas   |
+|     time bar (work/wait/fail)   token bar (out/cacheW/cacheR)    |
 +------------------------------------------------------------------+
-| ② 损耗排行   按 $/秒 排序, 每条: 影响数字 + 指标 now→target        |
-|    证据 chips(回合/事件, 可点) · 原因 · 动作 · 闸门                 |
+| (2) loss rank sorted by usd then s: impact, metric now->target   |
+|     evidence chips (turn/event, clickable) cause action gate     |
 +------------------------------------------------------------------+
-| ③ 回合时间轴  每回合一块, 阶段色, 宽=工作秒; 点击就地展开该回合明细 |
+| (3) turn timeline  one block per turn, phase colour, width=wall  |
+|     click opens that turn's detail in place                      |
 +------------------------------------------------------------------+
-| ④ 账本       工具 / 文件(读·写) / 阶段 / 成本 / 上下文 / 提醒       |
-|    始终展开, 顶部锚点导航 (不使用 <details> 折叠)                  |
+| (4) ledger    tools / files / phases / cost / context / reminders|
+|     always expanded, anchor nav; <details> must not hide it      |
 +------------------------------------------------------------------+
 ```
 
@@ -184,9 +191,9 @@ Agent 面是**契约**，字段稳定、可解析、带复测指令。额外返�
 期望输出（口径可复算）：
 
 ```text
-reread:      1 次重复读 × 平均读耗时 = s>0, usd=0     kind=measured
-fail_retry:  1 次失败 + 0 重试, $ = 回合1 成本 × 1/7   kind=measured
-rework:      回合 2 成本全量计入返工                    kind=measured
+reread:      1 extra read x average read wall = s > 0, usd = 0   kind=measured
+fail_retry:  1 failed call + 0 retries, usd = turn1 cost x 1/7    kind=measured
+rework:      turn 2 cost charged in full to rework                kind=measured
 metrics:     reread_ratio = 1.0, fail_n = 1, extra_trips = 1
 ```
 
