@@ -16,7 +16,7 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n29" />
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n30" />
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n13"></script>
   <script src="/assets/ui-track.js?v=u1"></script>
@@ -768,6 +768,8 @@
       padding: 12px 14px 14px;
       max-height: min(48vh, 420px);
       overflow: auto;
+      /* prose wraps: a guarded run longer than the line breaks inside, not pan */
+      overflow-wrap: break-word;
       min-width: 0;
       max-width: 100%;
       overscroll-behavior: contain;
@@ -1005,6 +1007,13 @@
       white-space: normal;
       word-break: normal;
       overflow-wrap: anywhere;
+    }
+    /* Token-atomic wrapping (web/assets/notes-wrap.mjs, loaded lazily by
+       guardCardTokens). A guarded run wraps as one unit; only the wrapping
+       surfaces get guards, so the pan surfaces (`pre`, `.is-mono`) are untouched. */
+    .notes-rich .notes-tok, .snippet-html .notes-tok, .md-preview .notes-tok {
+      display: inline-block;
+      max-width: 100%;
     }
     .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
     .notes-rich p:empty, .snippet-html p:empty,
@@ -4431,7 +4440,7 @@ window.ClipViewMasonry = Masonry;
       if (notesEditorLoading) return notesEditorLoading;
       notesEditorLoading = new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = '/assets/notes-editor/notes-editor.js?v=n29';
+        s.src = '/assets/notes-editor/notes-editor.js?v=n30';
         s.async = true;
         s.onload = () => resolve(globalThis.ClipNotesEditor);
         s.onerror = () => reject(new Error('notes-editor load failed'));
@@ -8284,6 +8293,56 @@ window.ClipViewMasonry = Masonry;
       if (!card) return;
       highlightQueue.push(card);
       scheduleHighlightRun();
+      scheduleTokenGuard(card);
+    }
+
+    // Token-atomic runs (see /assets/notes-wrap.mjs): the wall wraps card prose
+    // too, and UAX #14 breaks after `-`, so `--ip` split across lines. Own idle
+    // queue, so it still runs when highlight.js is unavailable.
+    const tokenGuardQueue = [];
+    let tokenGuardScheduled = false;
+    let tokenWrapMod = null;
+    let tokenWrapLoading = null;
+    /** ~2KB local module; loaded on the first card, not on boot. */
+    function loadTokenWrap() {
+      if (tokenWrapMod) return Promise.resolve(tokenWrapMod);
+      if (tokenWrapLoading) return tokenWrapLoading;
+      tokenWrapLoading = import('/assets/notes-wrap.mjs?v=w1')
+        .then((m) => { tokenWrapMod = m; return m; })
+        .catch(() => { tokenWrapLoading = null; return null; });
+      return tokenWrapLoading;
+    }
+    /** Guard tokens in the card's prose only: `pre` / `.is-mono` pan, they never wrap. */
+    function guardCardTokens(card) {
+      if (!card || !tokenWrapMod) return;
+      card.querySelectorAll('.notes-rich-inner, .snippet-html-inner, .md-preview').forEach((el) => {
+        tokenWrapMod.wrapAtomicTokens(el, { skip: 'pre, .is-mono, .notes-tok' });
+      });
+    }
+    function scheduleTokenGuard(card) {
+      if (!card) return;
+      tokenGuardQueue.push(card);
+      scheduleTokenGuardRun();
+    }
+    function scheduleTokenGuardRun() {
+      if (tokenGuardScheduled) return;
+      tokenGuardScheduled = true;
+      const run = () => {
+        tokenGuardScheduled = false;
+        if (!tokenWrapMod) {
+          // First demand: fetch the module, then drain the queue that accumulated.
+          loadTokenWrap().then((m) => { if (m && tokenGuardQueue.length) scheduleTokenGuardRun(); });
+          return;
+        }
+        let budget = 4;
+        while (budget-- > 0 && tokenGuardQueue.length) {
+          const card = tokenGuardQueue.shift();
+          if (card && card.isConnected) guardCardTokens(card);
+        }
+        if (tokenGuardQueue.length) scheduleTokenGuardRun();
+      };
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 250 });
+      else window.setTimeout(run, 60);
     }
 
     function highlightCard(card) {

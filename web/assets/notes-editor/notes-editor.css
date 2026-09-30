@@ -51,6 +51,12 @@
 }
 .notes-source .cm-editor { height: 100%; }
 .notes-source .cm-scroller { overflow: auto; }
+/* Source/split token guards (see entry.js atomicWrapField): a run with an inner
+   break point (`--ip`) is one atomic unit; longer than the line it still breaks. */
+.notes-source .cm-atomic {
+  display: inline-block;
+  max-width: 100%;
+}
 .notes-source .cm-calc-ghost {
   color: #86868b;
   font-style: italic;
@@ -87,6 +93,8 @@
   max-width: 38rem;
   margin: 0 auto;
   padding: 22px 36px 72px;
+  /* Guards (below) can only break inside themselves if the line box allows it. */
+  overflow-wrap: break-word;
   font: 17px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Segoe UI", system-ui, sans-serif;
   letter-spacing: -0.011em;
@@ -274,11 +282,18 @@
   word-break: normal;
   overflow-x: hidden;
 }
-/* Token-atomic wrap: a non-whitespace run moves to the next line as one unit;
-   a run longer than the line still breaks inside (last resort), not scroll. */
+/* Token-atomic wrapping (web/assets/notes-wrap.mjs). A guarded run moves to the
+   next line as one unit; a run longer than the line still breaks inside.
+   Prose and inline code always guard; inside a code fence the 换行 toggle
+   decides, so the default `pre` + horizontal scroll stays intact. */
+.notes-preview-inner .notes-tok,
 .notes-code.is-wrap pre .notes-tok {
   display: inline-block;
   max-width: 100%;
+}
+.notes-code:not(.is-wrap) .notes-tok {
+  display: inline;
+  max-width: none;
 }
 
 /* Xcode Light, scoped so wall hljs github theme does not leak in. */
