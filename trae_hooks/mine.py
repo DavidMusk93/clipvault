@@ -6,8 +6,10 @@ rank cwd, git, files, tools, MCP, and turn phases.
 
 from __future__ import annotations
 
+import bisect
 import json
 import re
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,33 @@ _RE_PROMPT_REPO = re.compile(
 )
 
 DIR_IDS = tuple(d["id"] for d in DIRECTIONS)
+
+# The Agent's optimization surface. `id` is stable across sessions; UI and Agent
+# both read these keys, so never rename one without evolving the contract in
+# docs/session-analysis.md.
+METRICS: tuple[dict[str, Any], ...] = (
+    {"id": "turns", "label": "回合", "unit": "", "dir": "flat", "target": None, "note": "窗口内回合数"},
+    {"id": "tools", "label": "工具调用", "unit": "", "dir": "flat", "target": None, "note": "PostToolUse 次数"},
+    {"id": "tools_per_turn", "label": "工具/回合", "unit": "", "dir": "down", "target": 25, "note": "单回合超过 25 次即过载"},
+    {"id": "work_s", "label": "工作秒", "unit": "s", "dir": "flat", "target": None, "note": "非等待工具墙钟"},
+    {"id": "wait_s", "label": "等待秒", "unit": "s", "dir": "down", "target": None, "note": "轮询/等待墙钟"},
+    {"id": "wall_s", "label": "墙钟", "unit": "s", "dir": "flat", "target": None, "note": "工作 + 等待"},
+    {"id": "waste_pct", "label": "浪费占比", "unit": "%", "dir": "down", "target": 20, "note": "(等待 + 失败) / 墙钟"},
+    {"id": "fail_n", "label": "失败调用", "unit": "", "dir": "down", "target": 0, "note": "exit_code != 0"},
+    {"id": "fail_rate_pct", "label": "失败率", "unit": "%", "dir": "down", "target": 5, "note": "失败 / 工具"},
+    {"id": "retry_n", "label": "同回合重试", "unit": "", "dir": "down", "target": 0, "note": "同族失败后又跑一次"},
+    {"id": "reread_extra", "label": "多余读取", "unit": "", "dir": "down", "target": None, "note": "同一文件第 2 次起计数"},
+    {"id": "reread_ratio", "label": "重复读/文件", "unit": "次", "dir": "down", "target": 2.0, "note": "读取次数 / 去重文件数"},
+    {"id": "locate_s", "label": "定位搜索秒", "unit": "s", "dir": "down", "target": None, "note": "缺路径线索回合的搜索族墙钟"},
+    {"id": "idle_s", "label": "空档秒", "unit": "s", "dir": "down", "target": None, "note": ">600s（>10 分钟无事件）累计"},
+    {"id": "extra_trips", "label": "额外往返", "unit": "", "dir": "down", "target": 0, "note": "短催 + 纠正 + 催促"},
+    {"id": "cost_usd", "label": "费用", "unit": "USD", "dir": "down", "target": None, "note": "实测计费"},
+    {"id": "cache_hit_pct", "label": "缓存命中率", "unit": "%", "dir": "up", "target": 90, "note": "cacheRead / (cacheRead + 未缓存 input)"},
+    {"id": "cache_write_n", "label": "写缓存回合", "unit": "", "dir": "down", "target": 0, "note": "前缀被改写"},
+    {"id": "skill_tokens", "label": "skill 重复传输", "unit": "tok", "dir": "down", "target": None, "note": "估算：正文 tokens × 剩余回合"},
+    {"id": "loss_usd", "label": "可归因损耗 $", "unit": "USD", "dir": "down", "target": None, "note": "损耗账本合计"},
+    {"id": "loss_s", "label": "可归因损耗秒", "unit": "s", "dir": "down", "target": None, "note": "损耗账本合计"},
+)
 
 FETCH_SQL = """
 SELECT
@@ -135,6 +164,21 @@ _PHASES = (
 
 def unescape(s: str) -> str:
     return s.replace("\\/", "/").replace("\\\"", '"').replace("\\\\", "\\")
+
+
+def norm_path(p: str | None, base: str | None = None) -> str:
+    """Absolute-ish key for a file path so relative spellings collapse."""
+    s = unescape(str(p or "")).strip()
+    if not s:
+        return ""
+    if s.startswith("/"):
+        return s
+    b = str(base or "").rstrip("/")
+    if not b:
+        return s
+    if s.startswith(b + "/"):
+        return s
+    return f"{b}/{s}"
 
 
 def parse_head(text: str | None) -> dict[str, Any]:
@@ -432,6 +476,19 @@ def _avg(values: list[float]) -> float:
     return round(sum(values) / len(values), 1) if values else 0.0
 
 
+def _skill_tokens_of(raw: Any) -> int:
+    """skill -> tokens dict from turn_context.skill_loaded_tokens (cold path only)."""
+    if not raw:
+        return 0
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    return sum(int(v or 0) for v in data.values())
+
+
 # Section labels for the context-composition table, in prompt order.
 _CTX_SECTIONS = (
     ("system", "system 合计"),
@@ -588,52 +645,10 @@ def metrics_analysis(
         ],
     )
 
-    fb: list[dict[str, str]] = []
-
-    def add(title: str, text: str, evidence: str, sev: str = "note", draft: str = "") -> None:
-        fb.append({"audience": "agent", "use": "agents.md", "title": title, "text": text, "evidence": evidence, "draft": draft, "sev": sev})
-
-    if n >= 20 and hit < 80:
-        add(
-            "缓存命中率偏低",
-            f"缓存命中 {hit}%（{cr:,} 缓存读 / {inp:,} 未缓存输入），{cold_turns}/{n} 个回合完全未命中。"
-            "前缀（system / AGENTS / skill 索引）只要一改，整段 cache 失效。",
-            f"hit={hit}% cr={cr} inp={inp} cold_turns={cold_turns}",
-            "high" if hit < 60 else "med",
-        )
-    if write_turns and n >= 20:
-        add(
-            "有回合在写缓存",
-            f"{write_turns}/{n} 个回合 cacheWrite>0：system prompt 或前缀被改写，下一回合要为整段重新预填。",
-            f"write_turns={write_turns}/{n} cache_write={cw}",
-            "med",
-        )
-    if skill_tbl:
-        top, vals = max(skill_tokens.items(), key=lambda kv: sum(kv[1]))
-        add(
-            f"Skill 吃上下文：{top}",
-            f"加载 {top} 的 {len(vals)} 次共把 {sum(vals):,} tokens 灌进上下文（平均 {_avg([float(x) for x in vals])} tokens/次）。"
-            "SKILL.md 正文进 history，之后每回合都要重发；skill 越大越贵，按需只取命中段。",
-            f"skill={top} loads={len(vals)} tokens={sum(vals)}",
-            "med" if sum(vals) >= 5000 else "note",
-        )
-    if mem_turns:
-        add(
-            "记忆被检索到",
-            f"{mem_turns}/{len(ctx_rows)} 个回合的上下文里出现 nowledgemem 记忆 id。"
-            "记忆价值 = 被检索到 + 改变行为，需与该回合 tok/失败率联看。",
-            f"mem_turns={mem_turns}/{len(ctx_rows)}",
-        )
-    if len(day_rows) >= 2 and day_rows[0]["n"]:
-        first, last = day_rows[0], day_rows[-1]
-        add(
-            "成本曲线",
-            f"首日 {first['day']} ${first['usd']} / {first['n']} 回合（{round(first['usd'] / max(1, first['n']), 4)} $/回合），"
-            f"最新 {last['day']} ${last['usd']} / {last['n']} 回合（{round(last['usd'] / max(1, last['n']), 4)} $/回合）。",
-            f"days={len(day_rows)} total=${round(cost, 4)}",
-            "note",
-        )
-    return block, fb
+    # Metrics-plane findings (cache miss / skill cost / memory coverage) live in the
+    # loss account (_insights) so there is exactly one place that turns a number
+    # into a claim. This function returns facts only.
+    return block, []
 
 
 def mine_rows(
@@ -748,7 +763,10 @@ def mine_rows(
                 if g[1]:
                     git_branch[g[0]][g[1]] += 1
         write_hit = is_write_tool(name, raw.get("llm_tool_name"))
-        fp = str(parsed.get("file_path") or "")
+        fp_raw = str(parsed.get("file_path") or "")
+        # Canonical (absolute) path for counters: relative and absolute spellings of
+        # the same file must not look like two files, or 重复读 double-counts.
+        fp = norm_path(fp_raw, wd or cwd)
         if fp:
             file_n[fp] += 1
             if write_hit:
@@ -771,14 +789,15 @@ def mine_rows(
                 cmd_norm[norm_cmd(label)] += 1
                 slow_cmds.append((wall, first_line(label, 120)))
         cmd_paths = paths_from_cmd(cmd)
-        for p in cmd_paths:
+        for p_raw in cmd_paths:
+            p = norm_path(p_raw, wd or cwd)
             file_n[p] += 1
             if fam in ("read", "search"):
                 file_read[p] += 1
             dir_n[str(Path(p).parent)] += 1
             if Path(p).suffix:
                 ext_n[Path(p).suffix] += 1
-        for key in taste_keys(fp, wd, cwd, cmd, *cmd_paths):
+        for key in taste_keys(fp_raw, wd, cwd, cmd, *cmd_paths):
             taste_n[key] += 1
         mcp = mcp_parts(name) or mcp_parts(raw.get("llm_tool_name"))
         if mcp:
@@ -791,56 +810,200 @@ def mine_rows(
 
     turns: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
+    refs: dict[str, list[dict[str, Any]]] = {"fail": [], "wait": [], "read": [], "locate": []}
+    # Exclusive second accounting (by priority: fail > retry > reread > locate):
+    # a call is charged to at most one loss, so loss seconds never double count.
+    sec_fail = 0.0
+    sec_retry = 0.0
+    sec_locate = 0.0
+    sec_reread = 0.0
+    reread_n = 0
+    seen_reads: dict[str, int] = {}
+    reread_files: Counter[str] = Counter()
+    reread_s_files: dict[str, float] = defaultdict(float)
+
+    def _ref(tidx: int, raw: dict[str, Any], label: str, wall: float, **extra: Any) -> dict[str, Any]:
+        """One attributable pointer: the Agent must be able to jump to this event."""
+        return {
+            "turn": tidx,
+            "ts": str(raw.get("ts") or ""),
+            "event_id": raw.get("event_id"),
+            "label": first_line(label, 100),
+            "s": round(float(wall or 0), 1),
+            **extra,
+        }
+
     for raw in ordered:
         hook = str(raw.get("hook_event") or "")
         if hook == "UserPromptSubmit":
+            # A new prompt closes the previous turn even without a Stop event:
+            # the pi hook path has no Stop, so dropping it would merge a whole
+            # session into one turn and make every per-turn number a lie.
+            if pending is not None:
+                turns.append(pending)
             prompt_text = str(raw.get("prompt") or "")
+            hits = set(reminder_hits(prompt_text))
             pending = {
                 "ts": str(raw.get("ts") or ""),
+                "event_id": raw.get("event_id"),
                 "prompt": first_line(prompt_text, 200),
                 "phase": classify_phase(prompt_text),
                 "wall_s": 0.0,
                 "work_s": 0.0,
                 "wait_s": 0.0,
+                "retry_s": 0.0,
+                "locate_s": 0.0,
+                "locate_n": 0,
                 "tools": 0,
                 "fails": 0,
                 "retries": 0,
                 "fail_fams": set(),
                 "has_path": prompt_has_path(prompt_text),
                 "has_repo": prompt_has_repo(prompt_text),
+                "nudge": prompt_is_nudge(prompt_text),
+                "correction": "纠正" in hits,
+                "push": "催促" in hits,
+                "cost_usd": 0.0,
+                "tokens_out": 0,
+                "cache_read": 0,
+                "cache_write": 0,
+                "ctx_total": 0.0,
+                "skill_tokens": 0,
             }
             continue
         if pending and hook == "PostToolUse":
             name = str(raw.get("tool_name") or "")
+            inp = parse_head(raw.get("input_head"))
             resp = parse_head(raw.get("resp_head"))
             wall = float(resp.get("wall_s") or 0)
+            exit_code = resp.get("exit_code")
+            fam = cmd_family(inp.get("cmd"))
+            label = cmd_label(inp.get("cmd")) or str(inp.get("file_path") or name)
+            # 1-based to match turn["index"], so a ref can jump to its turn.
+            tidx = len(turns) + 1
+            wait_hit = is_wait_tool(name)
+            is_fail = exit_code not in (None, 0)
+            is_retry = (not is_fail) and bool(fam) and fam in pending["fail_fams"]
+            vague = not pending["has_path"] and not pending["has_repo"]
+            fp2 = str(inp.get("file_path") or "")
+            write_hit = is_write_tool(name, raw.get("llm_tool_name"))
+            read_key = "" if (write_hit or not fp2) else norm_path(fp2, str(inp.get("workdir") or ""))
+            # Shell *reads* count too: `cat a.py` three times is the same context
+            # rebuild. `rg` targets are not reads here: an unfocused search in a
+            # vague turn is located cost, not a re-read.
+            read_keys: list[str] = [read_key] if read_key else []
+            if fam == "read":
+                for p in paths_from_cmd(inp.get("cmd")):
+                    k = norm_path(p, str(inp.get("workdir") or ""))
+                    if k and k not in read_keys:
+                        read_keys.append(k)
+            is_locate = (not is_fail) and (not is_retry) and (not wait_hit) and fam == "search" and vague
+            repeat_key = next((k for k in read_keys if k in seen_reads), "")
+            is_reread = bool(repeat_key) and (not is_fail) and (not is_retry) and (not wait_hit)
+            is_locate = is_locate and not is_reread
+            for k in read_keys:
+                seen_reads[k] = seen_reads.get(k, 0) + 1
             pending["tools"] += 1
             pending["wall_s"] += wall
-            if is_wait_tool(name):
+            if wait_hit:
                 pending["wait_s"] += wall
+                if len(refs["wait"]) < 20:
+                    refs["wait"].append(_ref(tidx, raw, name, wall, tool=name))
             else:
                 pending["work_s"] += wall
-            fam = cmd_family(parse_head(raw.get("input_head")).get("cmd"))
-            if resp.get("exit_code") not in (None, 0):
+            if is_fail:
                 pending["fails"] += 1
+                sec_fail += wall
                 if fam:
                     pending["fail_fams"].add(fam)
-            elif fam and fam in pending["fail_fams"]:
-                # Same command family ran again after a failure: a retry.
+                if len(refs["fail"]) < 40:
+                    refs["fail"].append(_ref(tidx, raw, label, wall, exit_code=exit_code, family=fam or "?"))
+            elif is_retry:
                 pending["retries"] += 1
+                pending["retry_s"] += wall
+                sec_retry += wall
                 pending["fail_fams"].discard(fam)
+            elif is_locate:
+                pending["locate_s"] += wall
+                pending["locate_n"] += 1
+                sec_locate += wall
+                if len(refs["locate"]) < 20:
+                    refs["locate"].append(_ref(tidx, raw, label, wall))
+            elif is_reread:
+                sec_reread += wall
+                reread_n += 1
+                reread_files[repeat_key] += 1
+                reread_s_files[repeat_key] += wall
+                pending["reread_n"] = int(pending.get("reread_n") or 0) + 1
+            if read_key and len(refs["read"]) < 60:
+                refs["read"].append(_ref(tidx, raw, label, wall, path=read_key))
         if pending and hook == "Stop":
             turns.append(pending)
             pending = None
     if pending:
         turns.append(pending)
     retry_n = 0
-    for t in turns:
+    for i, t in enumerate(turns):
+        t["index"] = i + 1
         t.pop("fail_fams", None)
         retry_n += int(t.get("retries") or 0)
         phase_n[t["phase"]] += 1
         phase_s[t["phase"]] += float(t["wall_s"] or 0)
         phase_work[t["phase"]] += float(t["work_s"] or 0)
+
+    # --- L1 attribution: money/tokens land on the turn that spent them ---
+    starts = [parse_ts(t["ts"]) or 0.0 for t in turns]
+    cache_write_tokens = 0
+    cache_write_n = 0
+    cold_turns = 0
+    total_cost_usd = 0.0
+    token_total = 0
+
+    def _bucket(rows_in: list[dict[str, Any]]):
+        for r in rows_in:
+            tv = parse_ts(r.get("ts"))
+            if tv is None or not starts:
+                continue
+            i = bisect.bisect_right(starts, tv) - 1
+            yield (i if i >= 0 else 0), r
+
+    for i, ur in _bucket(usage_rows or []):
+        t = turns[i]
+        cost = float(ur.get("cost_total") or 0)
+        tin = int(ur.get("input_tokens") or 0)
+        tout = int(ur.get("output_tokens") or 0)
+        cr = int(ur.get("cache_read_tokens") or 0)
+        cw = int(ur.get("cache_write_tokens") or 0)
+        t["cost_usd"] = float(t.get("cost_usd") or 0) + cost
+        t["tokens_out"] = int(t.get("tokens_out") or 0) + tout
+        t["cache_read"] = int(t.get("cache_read") or 0) + cr
+        t["cache_write"] = int(t.get("cache_write") or 0) + cw
+        total_cost_usd += cost
+        token_total += tin + tout + cr + cw
+        cache_write_tokens += cw
+        if cw > 0:
+            cache_write_n += 1
+        if cr == 0:
+            cold_turns += 1
+    for i, ctx_row in _bucket(ctx_rows or []):
+        t = turns[i]
+        t["ctx_total"] = float(t.get("ctx_total") or 0) + float(ctx_row.get("prompt_total_tokens") or 0)
+        t["skill_tokens"] = int(t.get("skill_tokens") or 0) + _skill_tokens_of(ctx_row.get("skill_loaded_tokens"))
+
+    unit_usd = (total_cost_usd / token_total) if token_total else 0.0
+    tokens_out_total = sum(int(t.get("tokens_out") or 0) for t in turns)
+    cache_read_total = sum(int(t.get("cache_read") or 0) for t in turns)
+    cache_write_total = sum(int(t.get("cache_write") or 0) for t in turns)
+    locate_s = sum(float(t.get("locate_s") or 0) for t in turns)
+    locate_n = sum(int(t.get("locate_n") or 0) for t in turns)
+    skill_resend = 0
+    for i, t in enumerate(turns):
+        tk = int(t.get("skill_tokens") or 0)
+        if tk:
+            skill_resend += tk * max(1, len(turns) - i)
+    read_total = sum(file_read.values())
+    read_distinct = sum(1 for n in file_read.values() if n > 0)
+    reread_ratio = round(read_total / read_distinct, 2) if read_distinct else 0.0
 
     # --- derived signals: what the headline must say, not another count ---
     redundant_reads = sum(max(0, n - 1) for n in file_read.values())
@@ -856,7 +1019,7 @@ def mine_rows(
     if len(ts_vals) >= 2:
         span_vals = sorted(ts_vals)
         gaps = [b - a for a, b in zip(span_vals, span_vals[1:])]
-        idle_s = round(sum(g for g in gaps if g > 120), 1)
+        idle_s = round(sum(g for g in gaps if g > 600), 1)
         duration_s = round(span_vals[-1] - span_vals[0], 1)
     tools_per_turn = round(total_tools_n / len(turns), 1) if turns else 0.0
 
@@ -1112,6 +1275,15 @@ def mine_rows(
         "waste_s": round(waste_s, 1),
         "waste_pct": waste_pct,
         "redundant_reads": redundant_reads,
+        "reread_ratio": reread_ratio,
+        "reread_extra": reread_n,
+        "retry_n": retry_n,
+        "locate_s": round(locate_s, 1),
+        "cache_write_n": cache_write_n,
+        "skill_resend_tokens": skill_resend,
+        "tokens_out": tokens_out_total,
+        "cache_read": cache_read_total,
+        "cache_write": cache_write_total,
         "distinct_cwd": distinct_cwd,
         "distinct_repo": distinct_repo,
         "tools_per_turn": tools_per_turn,
@@ -1134,9 +1306,8 @@ def mine_rows(
         "span": f"{ordered[0].get('ts') if ordered else ''} → {ordered[-1].get('ts') if ordered else ''}",
     }
     mblock: dict[str, Any] | None = None
-    mfeed: list[dict[str, str]] = []
     if "agent.metrics" in want:
-        mblock, mfeed = metrics_analysis(usage_rows or [], ctx_rows or [])
+        mblock, _mfeed = metrics_analysis(usage_rows or [], ctx_rows or [])
         if mblock:
             blocks["agent.metrics"] = mblock
         if usage_rows:
@@ -1147,404 +1318,631 @@ def mine_rows(
             summary["cache_hit_pct"] = round(100.0 * mcr / (mcr + minp), 1) if (mcr + minp) else 0.0
             summary["usage_turns"] = len(usage_rows)
 
-    feedback = _insights(
-        cwd_n=cwd_n,
-        git_n=git_n,
-        git_branch=git_branch,
-        tool_n=tool_n,
-        tool_s=tool_s,
-        family_n=family_n,
-        mcp_n=mcp_n,
-        mcp_tool=mcp_tool,
-        taste_n=taste_n,
-        phase_n=phase_n,
-        phase_s=phase_s,
-        phase_work=phase_work,
-        file_n=file_n,
-        file_read=file_read,
-        file_write=file_write,
-        dir_n=dir_n,
+    total_cost_usd = total_cost_usd or float(summary.get("cost_usd") or 0)
+    total_wall = round(work_s + wait_s, 1)
+    plane = {
+        "cache_write_n": cache_write_n,
+        "cache_write_tokens": cache_write_tokens,
+        "cold_turns": cold_turns,
+        "skill_tokens": skill_resend,
+    }
+    losses = build_losses(
         turns=turns,
-        wait_s=wait_s,
-        work_s=work_s,
+        refs=refs,
         fail_n=fail_n,
-        fail_family=fail_family,
+        sec_fail=sec_fail,
+        sec_retry=sec_retry,
         retry_n=retry_n,
-        redundant_reads=redundant_reads,
-        waste_pct=waste_pct,
-        prompt_n=prompt_n,
-        reminder_n=reminder_n,
-        reminder_samples=reminder_samples,
-        nudge_n=nudge_n,
-        correction_n=correction_n,
-        push_n=push_n,
-        structured_n=structured_n,
-        avg_prompt=avg_prompt,
+        wait_s=wait_s,
+        sec_locate=sec_locate,
+        locate_n=locate_n,
+        sec_reread=sec_reread,
+        reread_n=reread_n,
+        reread_detail=sorted(
+            [{"path": p, "reads": n, "s": round(reread_s_files.get(p, 0.0), 1)} for p, n in reread_files.items()],
+            key=lambda r: -r["s"],
+        ),
+        cache_write_tokens=cache_write_tokens,
+        cache_write_n=cache_write_n,
+        unit_usd=unit_usd,
+        cost_usd=total_cost_usd,
+        idle_s=idle_s,
+        skill_resend_tokens=skill_resend,
+        total_wall=total_wall,
+    )
+    metrics = build_metrics(summary, losses, plane=plane)
+    feedback = _insights(
+        losses=losses,
+        metrics=metrics,
         summary=summary,
-    ) + mfeed
+        turns=turns,
+        flow=summary.get("flow") or {},
+        plane=plane,
+    )
+    # Compact per-turn ledger for the timeline: what the Agent actually did, turn by
+    # turn, with the money that turn spent. Capped so the sheet stays one payload.
+    turn_rows = [{
+        "index": int(t["index"]),
+        "ts": t["ts"],
+        "phase": t["phase"],
+        "tools": int(t["tools"]),
+        "fails": int(t.get("fails") or 0),
+        "retries": int(t.get("retries") or 0),
+        "work_s": round(float(t["work_s"] or 0), 1),
+        "wait_s": round(float(t["wait_s"] or 0), 1),
+        "wall_s": round(float(t["wall_s"] or 0), 1),
+        "cost_usd": round(float(t.get("cost_usd") or 0), 4),
+        "tokens_out": int(t.get("tokens_out") or 0),
+        "cache_write": int(t.get("cache_write") or 0),
+        "prompt": t["prompt"],
+        "nudge": bool(t.get("nudge")),
+    } for t in turns[:400]]
     return {
         "ok": True,
         "scope": scope,
         "session_id": session_id or "",
         "n_rows": len(rows),
         "n_turns": len(turns),
+        "window": {
+            "from": ordered[0].get("ts") if ordered else "",
+            "to": ordered[-1].get("ts") if ordered else "",
+            "turns": len(turns),
+            "tools": total_tools_n,
+            "instances": [k for k, _ in inst_n.most_common()],
+            "truncated": len(rows) >= 12000,
+        },
         "summary": summary,
+        "metrics": metrics,
+        "losses": losses,
+        "findings": feedback,
+        "turns": turn_rows,
         "directions": DIRECTIONS,
         "active": want,
         "blocks": blocks,
         "feedback": feedback,
         "draft": "\n".join(f.get("draft") or "" for f in feedback if f.get("draft")).strip(),
+        "rerun": "",
     }
 
 
-def _insights(**kw: Any) -> list[dict[str, str]]:
-    out: list[dict[str, str]] = []
-    tool_n: Counter[str] = kw["tool_n"]
-    family_n: Counter[str] = kw["family_n"]
-    mcp_tool: Counter[str] = kw["mcp_tool"]
-    mcp_n: Counter[str] = kw["mcp_n"]
-    phase_work: dict[str, float] = kw["phase_work"]
-    git_n: Counter[str] = kw["git_n"]
-    git_branch: dict[str, Counter[str]] = kw["git_branch"]
-    taste_n: Counter[str] = kw["taste_n"]
-    file_n: Counter[str] = kw["file_n"]
-    file_read: Counter[str] = kw.get("file_read", Counter())
-    file_write: Counter[str] = kw["file_write"]
-    dir_n: Counter[str] = kw["dir_n"]
-    cwd_n: Counter[str] = kw["cwd_n"]
-    turns: list[dict[str, Any]] = kw["turns"]
-    wait_s: float = kw["wait_s"]
-    work_s: float = kw["work_s"]
-    fail_n: int = kw.get("fail_n", 0)
-    fail_family: Counter[str] = kw.get("fail_family", Counter())
-    retry_n: int = kw.get("retry_n", 0)
-    redundant_reads: int = kw.get("redundant_reads", 0)
-    waste_pct: float = kw.get("waste_pct", 0.0)
-    prompt_n: int = kw.get("prompt_n", 0)
-    reminder_n: Counter[str] = kw.get("reminder_n", Counter())
-    reminder_samples: dict[str, list[str]] = kw.get("reminder_samples", {})
-    nudge_n: int = kw.get("nudge_n", 0)
-    correction_n: int = kw.get("correction_n", 0)
-    push_n: int = kw.get("push_n", 0)
-    structured_n: int = kw.get("structured_n", 0)
-    avg_prompt: float = kw.get("avg_prompt", 0.0)
+def build_metrics(
+    summary: dict[str, Any],
+    losses: list[dict[str, Any]],
+    *,
+    plane: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """The Agent's optimization surface: stable ids, now-value, target, direction.
 
-    total_tools = sum(tool_n.values()) or 1
-    work_total = sum(phase_work.values()) or (work_s or 1.0)
-    run_n = tool_n.get("RunCommand", 0)
-    search_cmd = family_n.get("search", 0)
-    read_cmd = family_n.get("read", 0)
-    write_n = tool_n.get("Write", 0)
+    Baseline is attached later (attach_baseline) because it needs a second window.
+    """
+    flow = summary.get("flow") or {}
+    health = summary.get("health") or {}
+    loss_by_id = {str(l.get("id")): l for l in losses}
+    plane = plane or {}
 
-    def add(
-        audience: str,
-        use: str,
-        title: str,
-        text: str,
-        evidence: str,
-        draft: str = "",
-        sev: str = "note",
-    ) -> None:
+    def val(mid: str) -> Any:
+        if mid == "turns":
+            return summary.get("n_turns", 0)
+        if mid == "tools":
+            return summary.get("n_tools", 0)
+        if mid == "tools_per_turn":
+            return summary.get("tools_per_turn", 0)
+        if mid == "work_s":
+            return summary.get("work_s", 0)
+        if mid == "wait_s":
+            return summary.get("wait_s", 0)
+        if mid == "wall_s":
+            return round(float(summary.get("work_s") or 0) + float(summary.get("wait_s") or 0), 1)
+        if mid == "fail_n":
+            return summary.get("fail_n", 0)
+        if mid == "fail_rate_pct":
+            return health.get("fail_rate", 0)
+        if mid == "retry_n":
+            return summary.get("retry_n", 0)
+        if mid == "waste_pct":
+            return health.get("waste_pct", 0)
+        if mid == "reread_extra":
+            return summary.get("reread_extra", summary.get("redundant_reads", 0))
+        if mid == "reread_ratio":
+            return summary.get("reread_ratio", 0)
+        if mid == "locate_s":
+            return summary.get("locate_s")
+        if mid == "extra_trips":
+            return flow.get("extra_roundtrips", 0)
+        if mid == "idle_s":
+            return summary.get("idle_s", 0)
+        if mid == "cost_usd":
+            return summary.get("cost_usd")
+        if mid == "cache_hit_pct":
+            return summary.get("cache_hit_pct")
+        if mid == "cache_write_n":
+            return plane.get("cache_write_n")
+        if mid == "skill_tokens":
+            return plane.get("skill_tokens")
+        if mid == "loss_usd":
+            return round(sum(float(l.get("usd") or 0) for l in losses), 4)
+        if mid == "loss_s":
+            return round(sum(float(l.get("s") or 0) for l in losses), 1)
+        return None
+
+    out: list[dict[str, Any]] = []
+    for spec in METRICS:
+        value = val(spec["id"])
+        if value is None:
+            continue
         out.append({
-            "audience": audience,
-            "use": use,
-            "title": title,
-            "text": text,
-            "evidence": evidence,
-            "draft": draft,
-            "sev": sev,
+            "id": spec["id"],
+            "label": spec["label"],
+            "unit": spec["unit"],
+            "dir": spec["dir"],
+            "target": spec["target"],
+            "value": value,
+            "baseline": None,
+            "delta": None,
+            "note": spec["note"],
         })
-
-    if run_n / total_tools >= 0.45:
-        add(
-            "agent", "agents.md",
-            "阅读靠 shell，不靠 Read",
-            (
-                f"工具里 RunCommand 占 {round(100 * run_n / total_tools)}%"
-                f"（rg/search {search_cmd} 次，cat/read {read_cmd} 次，Write {write_n} 次）。"
-                "文件轨迹主要来自命令行，Read 工具几乎缺席。下一轮应直接点名热文件，禁止全库 rg 代替阅读。"
-            ),
-            f"RunCommand={run_n}/{total_tools} search={search_cmd} read={read_cmd} Write={write_n}",
-            "- 改代码先 Read 目标文件；禁止用全库 rg/grep 代替阅读。",
-        )
-    if wait_s >= work_s and wait_s >= 30:
-        add(
-            "agent", "prompt",
-            "墙钟大半是空等",
-            (
-                f"等待（CheckCommandStatus 等）{round(wait_s, 1)}s，真正工作 {round(work_s, 1)}s"
-                f"（浪费占比 {waste_pct}%）。阶段占比必须看工作秒，不能把轮询当 review/实现。"
-            ),
-            f"wait_s={round(wait_s,1)} work_s={round(work_s,1)} waste_pct={waste_pct}",
-            "- 评估耗时用工作秒，忽略 CheckCommandStatus 轮询。",
-            sev="high" if waste_pct >= 50 else "med",
-        )
-    search_n = sum(v for k, v in mcp_tool.items() if "search" in k)
-    add_n = sum(v for k, v in mcp_tool.items() if "memory_add" in k or k.endswith("/add"))
-    if search_n >= 3 and add_n == 0:
-        add(
-            "agent", "agents.md",
-            "nmem 只搜不写",
-            f"MCP 搜索 {search_n} 次、memory_add {add_n} 次。知识只读不沉淀。非琐碎结论必须 memory_add。",
-            f"search={search_n} add={add_n} servers={dict(mcp_n)}",
-            "- 非琐碎结论必须 memory_add；禁止只 search。",
-        )
-    elif mcp_n:
-        top = mcp_n.most_common(1)[0]
-        add(
-            "agent", "prompt",
-            "MCP 面过窄或过散",
-            f"MCP 集中在 {top[0]}（{top[1]} 次，共 {sum(mcp_n.values())}）。确认这是本任务该用的记忆面。",
-            f"mcp={list(mcp_tool.most_common(8))}",
-        )
-    review_work = phase_work.get("review", 0)
-    if any("review" in (t.get("prompt") or "").lower() or t.get("phase") == "review" for t in turns):
-        share = 100 * review_work / work_total
-        if share < 25:
-            add(
-                "agent", "agents.md",
-                "用户要 review，时间却没花在 review",
-                (
-                    f"用户 prompt 提到 review，但 review 阶段只占工作秒 {round(share, 1)}%"
-                    f"（{round(review_work, 1)}s / {round(work_total, 1)}s）。"
-                    "实现回合收尾不等于 review。"
-                ),
-                f"review_work={round(review_work,1)} work_total={round(work_total,1)} turns={len(turns)}",
-                "- review 闸门：改完必须对照 diff/测试；不能只用实现回合收尾。",
-            )
-    if git_n:
-        repo, n = git_n.most_common(1)[0]
-        branches = ", ".join(b for b, _ in git_branch[repo].most_common(3)) or "（无分支标记）"
-        add(
-            "user", "prompt",
-            "把仓库根写进任务",
-            f"最常落在 git 库 {repo}（{n} 次，分支 {branches}）。新开任务在 prompt 里写明仓库根与分支。",
-            f"repos={list(git_n.most_common(5))}",
-            f"- 默认仓库 `{repo}`" + (f" 分支 `{branches}`。" if branches else "。"),
-        )
-    if cwd_n:
-        cwd, n = cwd_n.most_common(1)[0]
-        add(
-            "user", "prompt",
-            "主工作目录",
-            f"主工作目录 {cwd}（{n} 次）。",
-            f"cwd_top={list(cwd_n.most_common(5))}",
-            f"- 工作目录 `{cwd}`。",
-        )
-    if taste_n:
-        top = [k for k, _ in taste_n.most_common(4) if k != "taste-mention"]
-        named = [k for k in top if "/" in k or k.startswith("skill:")]
-        doc = named[0] if named else (top[0] if top else taste_n.most_common(1)[0][0])
-        n = taste_n[doc]
-        listing = "、".join(f"{k} ×{taste_n[k]}" for k in (named or top)[:4])
-        add(
-            "agent", "agents.md",
-            "规范被提到却不是闸门",
-            f"本会话碰到 {listing}。必须写明是哪个项目的 AGENTS、哪条 skill，禁止只说 SKILL.md。口头 taste 不会执行。",
-            f"taste={dict(taste_n)}",
-            f"- 执行 `{doc}` 的闸门（×{n}）；禁止只引用文件名 SKILL.md / AGENTS.md。",
-        )
-    if file_n:
-        path, n = file_n.most_common(1)[0]
-        hot_dir = dir_n.most_common(1)[0][0] if dir_n else ""
-        add(
-            "agent", "prompt",
-            "点名热文件，少搜一轮",
-            (
-                f"最热文件 {path}（{n} 次，写入 {file_write.get(path, 0)}）。"
-                + (f" 最热目录 {hot_dir}。" if hot_dir else "")
-                + " 下一轮 prompt 直接点名这些路径。"
-            ),
-            f"files={list(file_n.most_common(8))}",
-            f"- 核心文件 `{path}`。",
-        )
-
-    # --- deep signals: cross tool × outcome × turn, not another count ---
-    if fail_n and fail_n / total_tools >= 0.05:
-        top = fail_family.most_common(1)
-        fam_txt = f"{top[0][0]}×{top[0][1]}" if top else "（未归类命令）"
-        add(
-            "agent", "agents.md",
-            "失败没有变成新策略",
-            (
-                f"工具失败 {fail_n} 次（失败率 {round(100 * fail_n / total_tools, 1)}%），集中在 {fam_txt}；"
-                f"同回合重试 {retry_n} 次。失败先读 stderr，同族连续两次失败必须换方案。"
-            ),
-            f"fail={fail_n}/{total_tools} family={dict(fail_family)} retry={retry_n}",
-            "- 同一命令族失败 2 次必须停下读错误、换方案；禁止原样重试。",
-            sev="high" if fail_n / total_tools >= 0.15 or retry_n >= 3 else "med",
-        )
-    if file_read:
-        top_read = file_read.most_common(1)[0]
-        if redundant_reads >= 8 and top_read[1] >= 5:
-            writes = file_write.get(top_read[0], 0)
-            add(
-                "agent", "prompt",
-                "热文件反复读",
-                (
-                    f"「{top_read[0]}」被读 {top_read[1]} 次（会话冗余读 {redundant_reads} 次），写入 {writes} 次。"
-                    "下一轮 prompt 直接给接口/行号，别让 agent 重建上下文。"
-                ),
-                f"read_top={list(file_read.most_common(6))} redundant={redundant_reads}",
-                f"- 先读 `{top_read[0]}`；只改其中相关函数。",
-                sev="high" if redundant_reads >= 20 else "med",
-            )
-    if len(cwd_n) >= 4 or len(git_n) >= 2:
-        add(
-            "user", "prompt",
-            "任务跨了太多目录/仓库",
-            (
-                f"本会话 {len(cwd_n)} 个工作目录、{len(git_n)} 个 Git 库。"
-                "新任务开头写死 cwd + 仓库根 + 分支，避免 agent 先定位。"
-            ),
-            f"cwds={list(cwd_n.most_common(6))} repos={list(git_n.most_common(6))}",
-            sev="med",
-        )
-    if turns:
-        heavy = max(turns, key=lambda t: int(t.get("tools") or 0))
-        if int(heavy.get("tools") or 0) >= 25:
-            add(
-                "agent", "prompt",
-                "单回合工具过载",
-                (
-                    f"最重回合 {heavy['tools']} 次工具、工作 {round(float(heavy.get('work_s') or 0), 1)}s，"
-                    f"prompt「{heavy['prompt']}」。单回合工具超过 25 次应在中途收口、写结论。"
-                ),
-                f"heavy=tools:{heavy['tools']},work:{round(float(heavy.get('work_s') or 0), 1)}",
-                sev="med",
-            )
-    if len(turns) >= 3:
-        vague = [t for t in turns if not t.get("has_path") and not t.get("has_repo")]
-        if vague and len(vague) >= max(2, len(turns) // 2):
-            add(
-                "user", "prompt",
-                "prompt 缺路径/仓库",
-                (
-                    f"{len(vague)}/{len(turns)} 个 prompt 没有路径或仓库线索，agent 只能先搜一轮。"
-                    "首个 prompt 至少给 cwd、仓库、目标文件。"
-                ),
-                f"vague={len(vague)}/{len(turns)}",
-                "- 首条 prompt 给 cwd + 仓库根 + 目标文件。",
-                sev="med",
-            )
-    # --- user input: what they keep saying, and the flow it costs ---
-    if prompt_n and reminder_n:
-        theme, cnt = reminder_n.most_common(1)[0]
-        if cnt >= 3 or cnt / prompt_n >= 0.4:
-            samples = "；".join(reminder_samples.get(theme, [])[:2])
-            add(
-                "user", "prompt",
-                f"反复提醒：{theme}",
-                (
-                    f"{prompt_n} 条 prompt 里「{theme}」出现 {cnt} 次（占 {round(100 * cnt / prompt_n)}%）。"
-                    + (f"样本：{samples}。" if samples else "")
-                    + " 把它固化成 AGENTS 闸门，别再口头重申。"
-                ),
-                f"reminders={dict(reminder_n)}",
-                _GATE_DRAFT.get(theme, ""),
-                sev="med",
-            )
-    if prompt_n >= 4 and nudge_n >= 3:
-        add(
-            "user", "prompt",
-            "用户靠「继续」推进",
-            (
-                f"{nudge_n}/{prompt_n} 条 prompt 是短催（≤8 字，平均 {avg_prompt} 字），如「继续」。"
-                f"这 {nudge_n} 次是纯流程损耗：长任务应自驱到阶段结论再停。"
-            ),
-            f"nudge={nudge_n}/{prompt_n} avg_chars={avg_prompt} structured={structured_n}",
-            "- 长任务不要一步一停：完成子目标先给结论+下一步，再等确认。",
-            sev="med",
-        )
-    if correction_n >= 2 and prompt_n and correction_n / prompt_n >= 0.2:
-        add(
-            "agent", "agents.md",
-            "方向被反复纠正",
-            (
-                f"{correction_n}/{prompt_n} 条 prompt 在纠正方向（认知错误/不符合预期）。"
-                "动手前先复述理解与验收标准，确认后再改。"
-            ),
-            f"correction={correction_n}/{prompt_n} reminders={dict(reminder_n)}",
-            _GATE_DRAFT["纠正"],
-            sev="high" if correction_n >= 3 else "med",
-        )
-    if prompt_n >= 4 and push_n >= 3:
-        add(
-            "user", "prompt",
-            "用户多次催进度",
-            f"催促信号 {push_n} 次（为什么/还没/尽快/太慢）。长任务缺少中间结论，用户只能追问。",
-            f"push={push_n}/{prompt_n}",
-            "- 每完成一个子目标先给进展与结论，再继续。",
-            sev="med",
-        )
-    sink_n = reminder_n.get("沉淀提醒", 0)
-    if sink_n >= 2:
-        add(
-            "agent", "agents.md",
-            "用户反复要求写 nmem",
-            f"「沉淀提醒」出现 {sink_n} 次。知识沉淀应是默认动作，而不是被催。",
-            f"sink={sink_n} reminders={dict(reminder_n)}",
-            _GATE_DRAFT["沉淀提醒"],
-            sev="med",
-        )
-    extra_trips = nudge_n + correction_n + push_n
-    if prompt_n >= 3 and extra_trips >= 3:
-        add(
-            "user", "prompt",
-            "操作流程：减少口头往返",
-            (
-                f"{prompt_n} 条 prompt 带来 {extra_trips} 次额外往返（短催 {nudge_n}、纠正 {correction_n}、催促 {push_n}）。"
-                "首条 prompt 给 cwd/仓库/目标/验收，并要求「阶段结论再停」。"
-            ),
-            f"prompt_n={prompt_n} nudge={nudge_n} corr={correction_n} push={push_n} structured={structured_n}",
-            sev="med",
-        )
-    if fail_n == 0 and total_tools >= 20:
-        add(
-            "agent", "agents.md",
-            "执行稳定",
-            (
-                f"{total_tools} 次工具无失败，等待占比 {waste_pct}%，冗余读 {redundant_reads}。"
-                "保持当前的错误处理与上下文点名。"
-            ),
-            f"tools={total_tools} fail=0 waste_pct={waste_pct} redundant={redundant_reads}",
-            sev="good",
-        )
-    if not out:
-        add("user", "prompt", "样本不足", "事件太少，还不够形成稳定习惯。多几个完整回合后再分析。", "n=0", sev="note")
-    order = {"high": 0, "med": 1, "note": 2, "good": 3}
-    out.sort(key=lambda f: order.get(str(f.get("sev") or "note"), 2))
     return out
 
 
-def fetch_rows(query_fn, *, session_id: str | None, scope: str) -> list[dict[str, Any]]:
+def attach_baseline(metrics: list[dict[str, Any]], base: list[dict[str, Any]] | None) -> None:
+    """Δ against the previous equal-length window. No baseline -> leave None, never guess."""
+    if not base:
+        return
+    by_id = {str(m.get("id")): m for m in base}
+    for m in metrics:
+        b = by_id.get(str(m.get("id")))
+        if b is None or b.get("value") is None or m.get("value") is None:
+            continue
+        try:
+            prev = float(b["value"])
+            now = float(m["value"])
+        except (TypeError, ValueError):
+            continue
+        m["baseline"] = b["value"]
+        m["delta"] = round(now - prev, 4)
+
+
+def build_losses(
+    *,
+    turns: list[dict[str, Any]],
+    refs: dict[str, Any],
+    fail_n: int,
+    sec_fail: float,
+    sec_retry: float,
+    retry_n: int,
+    wait_s: float,
+    sec_locate: float,
+    locate_n: int,
+    sec_reread: float,
+    reread_n: int,
+    reread_detail: list[dict[str, Any]],
+    cache_write_tokens: int,
+    cache_write_n: int,
+    unit_usd: float,
+    cost_usd: float,
+    idle_s: float,
+    skill_resend_tokens: int,
+    total_wall: float,
+) -> list[dict[str, Any]]:
+    """L1: five kinds of loss, each attributable to turns/events with s or usd.
+
+    Seconds are exclusive (a call is charged once, by priority fail > retry >
+    reread > locate), so the ledger adds up instead of double counting.
+    Everything outside this list is a ledger row, not a loss.
+    """
+    losses: list[dict[str, Any]] = []
+
+    def add(lid: str, label: str, s: float, usd: float, kind: str, refs_in: list[Any], how: str) -> None:
+        s = round(float(s or 0), 1)
+        usd = round(float(usd or 0), 4)
+        if s < 5 and usd < 0.01:
+            return
+        losses.append({
+            "id": lid,
+            "label": label,
+            "s": s,
+            "usd": usd,
+            "kind": kind,
+            "how": how,
+            "refs": list(refs_in)[:8],
+        })
+
+    fail_usd = 0.0
+    for t in turns:
+        fails = int(t.get("fails") or 0)
+        if fails and float(t.get("cost_usd") or 0):
+            fail_usd += float(t["cost_usd"]) * (fails / max(1, int(t.get("tools") or 1)))
+    add(
+        "fail_retry", "失败与重试",
+        sec_fail + sec_retry, fail_usd, "measured", refs.get("fail") or [],
+        f"失败 {fail_n} 次（{round(sec_fail, 1)}s）+ 同回合重试 {retry_n} 次（{round(sec_retry, 1)}s）；$ 按回合内失败工具占比分摊",
+    )
+
+    add(
+        "reread", "重复读（上下文重建）", sec_reread, 0.0, "measured",
+        [r for r in (refs.get("read") or []) if r.get("path") in {d["path"] for d in reread_detail[:5]}][:8],
+        f"同一窗口内多余读取 {reread_n} 次（第 2 次起计，已扣除计入失败/定位的调用）",
+    )
+    if reread_detail:
+        losses[-1]["detail"] = reread_detail[:6]
+
+    add("wait_poll", "空等轮询", wait_s, 0.0, "measured", refs.get("wait") or [],
+        "CheckCommandStatus 类轮询墙钟；等待不产出")
+
+    cache_usd = float(cache_write_tokens or 0) * float(unit_usd or 0)
+    add(
+        "cache_write", "前缀重填（缓存被改写）", 0.0, cache_usd, "estimated", [],
+        f"{cache_write_n} 个回合 cacheWrite>0，共 {int(cache_write_tokens or 0):,} tokens 重新预填（按本窗混合单价 ${round(unit_usd or 0, 8)}/tok 估算）",
+    )
+
+    rework = [t for t in turns if t.get("nudge") or t.get("correction") or t.get("push")]
+    rework_s = sum(float(t.get("wall_s") or 0) for t in rework)
+    rework_usd = sum(float(t.get("cost_usd") or 0) for t in rework)
+    kinds = []
+    if any(t.get("correction") for t in rework):
+        kinds.append("纠正")
+    if any(t.get("nudge") for t in rework):
+        kinds.append("短催")
+    if any(t.get("push") for t in rework):
+        kinds.append("催促")
+    add(
+        "rework", "返工往返", rework_s, rework_usd, "measured",
+        [{"turn": t.get("index"), "ts": t.get("ts"), "event_id": t.get("event_id"), "label": first_line(t.get("prompt"), 90)}
+         for t in rework][:8],
+        f"{len(rework)} 个回合由{'/'.join(kinds) or '流程摩擦'}触发，整个回合视为损耗",
+    )
+
+    add("locate", "缺定位线索导致的搜索", sec_locate, 0.0, "measured", refs.get("locate") or [],
+        f"{locate_n} 次 search 族调用落在没有路径/仓库线索的回合上")
+
+    add("idle", "长时间空档", idle_s, 0.0, "measured", [],
+        "相邻事件间隔 >600s（>10 分钟无任何事件）的时间累计")
+
+    skill_usd = float(skill_resend_tokens or 0) * float(unit_usd or 0)
+    add(
+        "skill_bloat", "上下文重复传输（skill 正文）", 0.0, skill_usd, "estimated", [],
+        f"skill 正文 {int(skill_resend_tokens or 0):,} tokens 在后续回合被重复传输（按混合单价估算）",
+    )
+
+    for l in losses:
+        l["s_share"] = round(100 * float(l["s"]) / total_wall, 1) if total_wall else 0.0
+        l["usd_share"] = round(100 * float(l["usd"]) / cost_usd, 1) if cost_usd else 0.0
+    losses.sort(key=lambda l: (-float(l["usd"]), -float(l["s"])))
+    return losses
+
+
+_LOSS_FINDING: dict[str, dict[str, str]] = {
+    "fail_retry": {
+        "title": "失败与重试在烧时间",
+        "cause": "命令/工具以非 0 退出，或同族失败后原样重试；错误没有转成新策略。",
+        "action": "失败先读 stderr/输出；同一命令族连续失败 2 次必须换方案，禁止原样重跑。",
+        "gate": "- 同一命令族失败 2 次必须停下读错误、换方案；禁止原样重试。",
+        "metric": "fail_n",
+    },
+    "reread": {
+        "title": "重复读：上下文在反复重建",
+        "cause": "同一文件在窗口内被多次读取，说明每次都要重新建立上下文，而不是拿到接口/行号。",
+        "action": "任务里直接点名文件与函数/行号；Agent 读一次就把关键接口写进结论，不要跨回合全量重读。",
+        "gate": "- 同一文件不要跨回合反复全量读；只读相关函数，读到的接口写进结论。",
+        "metric": "reread_ratio",
+    },
+    "wait_poll": {
+        "title": "空等轮询占了墙钟",
+        "cause": "CheckCommandStatus 一类轮询没有产出，只是等结果。",
+        "action": "长任务先给阶段结论再继续；轮询合并成一次检查，不要一步一等。",
+        "gate": "- 长任务不要一步一停：完成子目标先给结论+下一步，再等确认。",
+        "metric": "wait_s",
+    },
+    "cache_write": {
+        "title": "前缀被改写导致缓存重填",
+        "cause": "会话进行中 system/AGENTS/skill 前缀变了，cacheWrite>0，下一回合整段重新预填。",
+        "action": "同一会话内冻结前缀；规则/skill 的改动放到下一会话。",
+        "gate": "- 会话进行中不改前缀（AGENTS / skill / system）；改动留到下一会话。",
+        "metric": "cache_write_n",
+    },
+    "rework": {
+        "title": "返工往返：整个回合是流程损耗",
+        "cause": "用户用短催/纠正/催促推动，说明上一回合没有自驱到阶段结论，或方向没对齐。",
+        "action": "首条 prompt 给全 cwd/仓库/目标/验收；每完成子目标先给结论+下一步再停。",
+        "gate": "- 长任务自驱到阶段结论再停，不要一步一等。",
+        "metric": "extra_trips",
+    },
+    "locate": {
+        "title": "缺定位线索，先花时间找",
+        "cause": "prompt 没给路径/仓库/文件，Agent 只能先用搜索族命令定位。",
+        "action": "prompt 里点名文件或符号；Agent 先定位文件再读，禁止用全库 rg 代替阅读。",
+        "gate": "- 首条 prompt 给 cwd + 仓库根 + 目标文件；禁止用全库 rg/grep 代替阅读。",
+        "metric": "locate_s",
+    },
+    "idle": {
+        "title": "长时间空档",
+        "cause": "相邻事件间隔超过 10 分钟，中间没有可见进展（模型生成中不算）。",
+        "action": "长任务每 10 分钟或每个子目标给一次进展与结论。",
+        "gate": "- 长任务每 10 分钟或每个子目标给一次进展。",
+        "metric": "idle_s",
+    },
+    "skill_bloat": {
+        "title": "skill 正文重复进上下文",
+        "cause": "整篇 SKILL.md 进 history，之后每回合重发。",
+        "action": "skill 只取命中段；加载前先确认该 skill 与当前任务相关。",
+        "gate": "- skill 只取命中段；SKILL.md 正文不整篇反复灌注。",
+        "metric": "skill_tokens",
+    },
+}
+
+
+def _sev_for(loss: dict[str, Any], cost_usd: float) -> str:
+    usd = float(loss.get("usd") or 0)
+    s = float(loss.get("s") or 0)
+    share = max(float(loss.get("usd_share") or 0) if usd else 0.0, float(loss.get("s_share") or 0) if s else 0.0)
+    if (usd and usd >= 0.5) or s >= 600 or share >= 35:
+        return "high"
+    if (usd and usd >= 0.15) or s >= 120 or share >= 12:
+        return "med"
+    return "note"
+
+
+def _insights(
+    *,
+    losses: list[dict[str, Any]],
+    metrics: list[dict[str, Any]],
+    summary: dict[str, Any],
+    turns: list[dict[str, Any]],
+    flow: dict[str, Any],
+    plane: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """L2: findings built only from the loss account + the metrics plane.
+
+    Every finding must carry impact, action and a re-measurable metric; a loss
+    without those would be demoted, so no keyword heuristic is allowed in.
+    """
+    plane = plane or {}
+    out: list[dict[str, Any]] = []
+    m_by_id = {str(m["id"]): m for m in metrics}
+    cost_usd = float(summary.get("cost_usd") or 0)
+
+    def add(
+        fid: str,
+        axis: str,
+        title: str,
+        claim: str,
+        cause: str,
+        action: str,
+        gate: str,
+        metric_id: str,
+        impact_s: float,
+        impact_usd: float,
+        kind: str,
+        refs: list[Any],
+        evidence: str,
+        sev: str,
+        confidence: float,
+    ) -> None:
+        metric = m_by_id.get(metric_id)
+        if sev == "high" and (not action or not metric):
+            sev = "med"
+        out.append({
+            "id": fid,
+            "axis": axis,
+            "audience": "agent",
+            "use": "agents.md",
+            "title": title,
+            "text": claim,
+            "cause": cause,
+            "action": action,
+            "gate": gate,
+            "draft": gate,
+            "evidence": evidence,
+            "sev": sev,
+            "impact": {"s": round(impact_s, 1), "usd": round(impact_usd, 4), "kind": kind},
+            "metric": ({"id": metric["id"], "now": metric["value"], "target": metric["target"], "unit": metric["unit"], "dir": metric["dir"]} if metric else None),
+            "refs": refs[:8],
+            "confidence": confidence,
+        })
+
+    for loss in losses:
+        spec = _LOSS_FINDING.get(str(loss.get("id")))
+        if not spec:
+            continue
+        sev = _sev_for(loss, cost_usd)
+        detail = loss.get("detail") or []
+        top = ""
+        if detail:
+            top = " · top: " + "、".join(f"{d['path']}×{d['reads']}" for d in detail[:3])
+        shares = []
+        if loss.get("s_share"):
+            shares.append(f"s 占比 {loss['s_share']}%")
+        if loss.get("usd_share"):
+            shares.append(f"$ 占比 {loss['usd_share']}%")
+        shares_txt = (" · " + " · ".join(shares)) if shares else ""
+        evidence = f"{loss['label']} {loss['s']}s / ${loss['usd']}（{loss['kind']}{shares_txt}）{top}"
+        add(
+            str(loss["id"]), "agent", spec["title"],
+            f"{loss['how']}。影响 {loss['s']}s" + (f" / ${loss['usd']}" if loss.get("usd") else "") + "。",
+            spec["cause"], spec["action"], spec["gate"], spec["metric"],
+            float(loss.get("s") or 0), float(loss.get("usd") or 0), str(loss.get("kind") or "measured"),
+            loss.get("refs") or [], evidence, sev,
+            0.9 if loss.get("kind") == "measured" else 0.6,
+        )
+
+    hit = summary.get("cache_hit_pct")
+    usage_turns = int(summary.get("usage_turns") or 0)
+    if hit is not None and usage_turns >= 20 and float(hit) < 80:
+        cold = int(plane.get("cold_turns") or 0)
+        add(
+            "cache_miss", "agent", "缓存命中率偏低",
+            f"缓存命中 {hit}%（{usage_turns} 个计费回合），{cold} 个回合完全未命中：前缀一改，整段 cache 失效。",
+            "system / AGENTS / skill 前缀在会话中变化，或前缀结构不稳定。",
+            "冻结会话内前缀；把大段规则前置并且保持字节稳定。",
+            "- 会话进行中不改前缀（AGENTS / skill / system）；改动留到下一会话。",
+            "cache_hit_pct", 0.0, 0.0, "measured", [],
+            f"cache_hit={hit}% cold_turns={cold}/{usage_turns}",
+            "high" if float(hit) < 60 else "med", 0.8,
+        )
+
+    if not out:
+        if int(summary.get("n_tools") or 0) >= 20:
+            add(
+                "stable", "agent", "执行稳定",
+                f"{summary.get('n_tools')} 次工具、失败 {summary.get('fail_n')} 次；损耗账本在阈值以下。",
+                "没有可归因的损耗事件。",
+                "保持当前前缀稳定性与定位方式。",
+                "",
+                "fail_n", 0.0, 0.0, "measured", [],
+                f"tools={summary.get('n_tools')} fail={summary.get('fail_n')} waste={summary.get('health', {}).get('waste_pct')}%",
+                "good", 0.8,
+            )
+        else:
+            add(
+                "sparse", "user", "样本不足",
+                "事件太少，还不构成可归因的损耗账本。",
+                f"窗口内只有 {summary.get('n_rows', 0)} 行事件。",
+                "多跑几个完整回合再看分析。",
+                "", "turns", 0.0, 0.0, "measured", [], f"n_rows={summary.get('n_rows', 0)}", "note", 1.0,
+            )
+
+    order = {"high": 0, "med": 1, "note": 2, "good": 3}
+    out.sort(key=lambda f: (order.get(str(f.get("sev")), 2), -float(f.get("impact", {}).get("usd") or 0), -float(f.get("impact", {}).get("s") or 0)))
+    return out
+
+
+def _fmt_s(v: Any) -> str:
+    n = float(v or 0)
+    return f"{n / 3600:.1f}h" if n >= 3600 else f"{round(n, 1)}s"
+
+
+def _agent_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    keep = ("id", "sev", "axis", "title", "text", "cause", "action", "gate", "impact", "metric", "refs", "confidence")
+    return [{k: f.get(k) for k in keep if f.get(k) is not None} for f in findings]
+
+
+def agent_brief(result: dict[str, Any]) -> str:
+    """Markdown the Agent can read directly: conclusion -> impact -> action -> re-measure."""
+    win = result.get("window") or {}
+    lines = [
+        f"# 会话分析 · {result.get('scope')}" + (f" · {result.get('session_id')}" if result.get("session_id") else ""),
+        "",
+        f"窗口 {win.get('from') or '?'} → {win.get('to') or '?'} · {win.get('turns', 0)} 回合 · {win.get('tools', 0)} 工具"
+        + ("  ⚠ 12000 行截断" if win.get("truncated") else ""),
+        "",
+        "## 指标（Δ = 对基线）",
+    ]
+    for m in result.get("metrics") or []:
+        d = m.get("delta")
+        delta = "" if d is None else f"  Δ{d:+g} vs {m.get('baseline')}"
+        tgt = f" → 目标 {m['target']}{m['unit']}" if m.get("target") is not None else ""
+        lines.append(f"- {m['label']} ({m['id']}): {m['value']}{m['unit']}{tgt}{delta}")
+    lines += ["", "## 损耗（按 $ / 秒）"]
+    for l in result.get("losses") or []:
+        usd = f" / ${l['usd']}" if l.get("usd") else ""
+        lines.append(f"- {l['label']}: {l['s']}s{usd}（{l['kind']}）{l.get('how') or ''}")
+    lines += ["", "## 结论与动作"]
+    for f in result.get("findings") or []:
+        imp = f.get("impact") or {}
+        usd = f" / ${imp['usd']}" if imp.get("usd") else ""
+        mt = f.get("metric")
+        mtxt = f"  复测 {mt['id']}={mt['now']}→{mt['target']}{mt['unit']}" if mt and mt.get("target") is not None else (f"  复测 {mt['id']}={mt['now']}{mt['unit']}" if mt else "")
+        lines.append(f"### [{f.get('sev')}] {f.get('title')}  ({imp.get('s')}s{usd}, {imp.get('kind')})")
+        lines.append(f"- 依据: {f.get('text')}")
+        if f.get("cause"):
+            lines.append(f"- 原因: {f['cause']}")
+        if f.get("action"):
+            lines.append(f"- 动作: {f['action']}")
+        if f.get("gate"):
+            lines.append(f"- 闸门: {f['gate']}")
+        if mtxt:
+            lines.append(mtxt)
+    verify = result.get("verify") or {}
+    lines += ["", "## 复测", f"- {verify.get('rerun') or ''}", f"- 期望: {verify.get('expect') or ''}"]
+    return "\n".join(lines)
+
+
+def agent_view(result: dict[str, Any], base_metrics: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Machine contract for analysis-based optimization."""
+    metrics = [dict(m) for m in (result.get("metrics") or [])]
+    attach_baseline(metrics, base_metrics)
+    view = {
+        "view": "agent",
+        "ok": bool(result.get("ok")),
+        "scope": result.get("scope"),
+        "session_id": result.get("session_id") or "",
+        "window": result.get("window"),
+        "metrics": metrics,
+        "losses": result.get("losses") or [],
+        "findings": _agent_findings(result.get("findings") or []),
+        "turns": result.get("turns") or [],
+        "stable": [f.get("title") for f in (result.get("findings") or []) if f.get("sev") == "good"],
+        "verify": {
+            "metric_ids": [m["id"] for m in metrics if m.get("target") is not None],
+            "rerun": result.get("rerun") or "",
+            "expect": "同一窗口重跑，metric.value 向 target 移动；findings 里同一 id 不再出现或 sev 降低",
+        },
+    }
+    view["brief"] = agent_brief({**result, "metrics": metrics, "verify": view["verify"]})
+    return view
+
+
+def _ts_str(epoch: float) -> str:
+    from datetime import datetime
+    return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+
+def fetch_rows(
+    query_fn,
+    *,
+    session_id: str | None,
+    scope: str,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict[str, Any]]:
     sql = FETCH_SQL
     params: list[Any] = []
-    if scope == "session" and session_id:
-        sql += " AND session_id = ?"
-        params.append(session_id)
-    elif scope == "recent":
-        sql += " AND ts >= (current_timestamp - INTERVAL 7 DAY)"
-    else:
-        sql += " AND session_id = ?"
-        params.append(session_id or "")
+    if since is not None:
+        sql += " AND ts >= CAST(? AS TIMESTAMP)"
+        params.append(since)
+    if until is not None:
+        sql += " AND ts < CAST(? AS TIMESTAMP)"
+        params.append(until)
+    if since is None and until is None:
+        if scope == "session" and session_id:
+            sql += " AND session_id = ?"
+            params.append(session_id)
+        elif scope == "recent":
+            sql += " AND ts >= (current_timestamp - INTERVAL 7 DAY)"
+        else:
+            sql += " AND session_id = ?"
+            params.append(session_id or "")
     sql += " ORDER BY ts ASC LIMIT 12000"
     return query_fn(sql, params)
 
 
-def fetch_metrics(query_fn, *, session_id: str | None, scope: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def fetch_metrics(
+    query_fn,
+    *,
+    session_id: str | None,
+    scope: str,
+    since: str | None = None,
+    until: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Metrics plane rows for the same scope. Missing tables -> empty, never raises."""
     def _one(sql: str) -> list[dict[str, Any]]:
         q = sql
         params: list[Any] = []
-        if scope == "session" and session_id:
-            q += " AND session_id = ?"
-            params.append(session_id)
-        elif scope == "recent":
-            q += " AND ts >= (current_timestamp - INTERVAL 7 DAY)"
-        else:
-            q += " AND session_id = ?"
-            params.append(session_id or "")
+        if since is not None:
+            q += " AND ts >= CAST(? AS TIMESTAMP)"
+            params.append(since)
+        if until is not None:
+            q += " AND ts < CAST(? AS TIMESTAMP)"
+            params.append(until)
+        if since is None and until is None:
+            if scope == "session" and session_id:
+                q += " AND session_id = ?"
+                params.append(session_id)
+            elif scope == "recent":
+                q += " AND ts >= (current_timestamp - INTERVAL 7 DAY)"
+            else:
+                q += " AND session_id = ?"
+                params.append(session_id or "")
         q += " ORDER BY ts ASC LIMIT 20000"
         try:
             return query_fn(q, params)
@@ -1554,18 +1952,54 @@ def fetch_metrics(query_fn, *, session_id: str | None, scope: str) -> tuple[list
     return _one(USAGE_SQL), _one(CTX_SQL)
 
 
+def fetch_baseline(query_fn, *, session_id: str | None, scope: str, rows: list[dict[str, Any]]):
+    """Previous equal-length window: previous session, or the 7 days before this one.
+
+    Returns (rows, usage, ctx, label). Empty when there is no earlier window: the
+    UI must then show no delta instead of inventing a baseline.
+    """
+    ts = [t for t in (parse_ts(r.get("ts")) for r in rows) if t]
+    if not ts:
+        return [], [], [], ""
+    start, end = min(ts), max(ts)
+    span = max(60.0, end - start)
+    if scope == "session" and session_id:
+        got = query_fn(
+            "SELECT session_id FROM hook_events WHERE ts < CAST(? AS TIMESTAMP) AND session_id != ? "
+            "GROUP BY session_id ORDER BY max(ts) DESC LIMIT 1",
+            [_ts_str(start), session_id],
+        )
+        prev = str((got[0] if got else {}).get("session_id") or "")
+        if not prev:
+            return [], [], [], ""
+        usage, ctx = fetch_metrics(query_fn, session_id=prev, scope="session")
+        return fetch_rows(query_fn, session_id=prev, scope="session"), usage, ctx, f"上一个会话 {prev[:8]}"
+    since, until = _ts_str(start - span), _ts_str(start)
+    usage, ctx = fetch_metrics(query_fn, session_id=None, scope=scope, since=since, until=until)
+    return (
+        fetch_rows(query_fn, session_id=None, scope=scope, since=since, until=until),
+        usage,
+        ctx,
+        f"前 {round(span / 3600, 1)} 小时",
+    )
+
+
 def mine(
     query_fn,
     *,
     session_id: str | None = None,
     scope: str = "session",
     dirs: list[str] | None = None,
+    baseline: bool = False,
+    fmt: str = "full",
+    host: str = "http://127.0.0.1:9488",
 ) -> dict[str, Any]:
+    """Full analysis result, or the machine contract when fmt == "agent"."""
     if scope not in ("session", "recent"):
         scope = "session"
     rows = fetch_rows(query_fn, session_id=session_id, scope=scope)
     usage_rows, ctx_rows = fetch_metrics(query_fn, session_id=session_id, scope=scope)
-    return mine_rows(
+    result = mine_rows(
         rows,
         dirs=dirs,
         session_id=session_id,
@@ -1573,3 +2007,77 @@ def mine(
         usage_rows=usage_rows,
         ctx_rows=ctx_rows,
     )
+    query = [f"--scope {scope}"]
+    if session_id and scope == "session":
+        query.append(f"--session-id {session_id}")
+    if dirs:
+        query.append(f"--dirs {','.join(dirs)}")
+    result["host"] = host
+    result["rerun"] = "python3 trae_hooks/mine.py --agent " + " ".join(query)
+
+    base_metrics: list[dict[str, Any]] | None = None
+    if baseline:
+        b_rows, b_usage, b_ctx, label = fetch_baseline(query_fn, session_id=session_id, scope=scope, rows=rows)
+        if b_rows:
+            base = mine_rows(
+                b_rows,
+                dirs=dirs,
+                session_id=session_id,
+                scope=scope,
+                usage_rows=b_usage,
+                ctx_rows=b_ctx,
+            )
+            base_metrics = base.get("metrics") or []
+            attach_baseline(result["metrics"], base_metrics)
+            result["baseline"] = {
+                "source": label,
+                "window": base.get("window"),
+                "metrics": base_metrics,
+                "losses": base.get("losses") or [],
+            }
+        else:
+            result["baseline"] = None
+
+    if fmt == "agent":
+        return agent_view(result, base_metrics)
+    return result
+
+
+def _cli(argv: list[str] | None = None) -> int:
+    import argparse
+    import urllib.request
+    from urllib.parse import urlencode
+
+    ap = argparse.ArgumentParser(description="ClipVault session analysis (read-only HTTP client).")
+    ap.add_argument("--agent", action="store_true", help="machine contract + markdown brief")
+    ap.add_argument("--scope", default="session", choices=("session", "recent"))
+    ap.add_argument("--session-id", default="")
+    ap.add_argument("--dirs", default="")
+    ap.add_argument("--host", default="http://127.0.0.1:9488")
+    ap.add_argument("--json", action="store_true", help="print raw JSON instead of the brief")
+    ap.add_argument("--no-baseline", action="store_true", help="skip the previous-window comparison")
+    a = ap.parse_args(argv)
+
+    q = {"scope": a.scope, "format": "agent" if a.agent else "full"}
+    if a.session_id:
+        q["session_id"] = a.session_id
+    if a.dirs:
+        q["dirs"] = a.dirs
+    if not a.no_baseline:
+        q["baseline"] = "1"
+    url = a.host.rstrip("/") + "/api/mine?" + urlencode(q)
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:  # noqa: S310 - localhost only
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"analysis unavailable: {exc}", file=sys.stderr)
+        return 2
+    if a.agent and not a.json:
+        print(data.get("brief") or json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())

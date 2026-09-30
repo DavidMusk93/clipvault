@@ -133,6 +133,17 @@ sg_d    quack:127.0.0.1:19495   ssh -R → Mac :9494   隧道 clipvault-quack-sg
 ### 读
 
 面板方向 `agent.metrics`（`/api/mine`）：总览 / 按模型 / 上下文构成 / 每天成本曲线 / Skill 上下文成本。
+
+**会话分析的完整契约（四层模型、损耗账本口径、Agent 接口）在 `docs/session-analysis.md`。**
+Agent 侧不要手拼 HTTP，直接用：
+
+```bash
+python3 trae_hooks/mine.py --agent --scope session --session-id <id>   # 读 brief
+python3 trae_hooks/mine.py --agent --scope recent --json              # 拿结构化 view
+```
+
+`--agent` 返回 `brief`（结论 → 影响 → 动作 → 复测）+ 稳定 `metric.id` + `verify.rerun`，
+默认对**上一个同长度窗口**做 Δ（`--no-baseline` 关闭）。
 判读口径：
 
 - **缓存命中率** = `cacheRead / (cacheRead + 未缓存 input)`。前缀（rules / AGENTS / skills）一改，整段失效。
