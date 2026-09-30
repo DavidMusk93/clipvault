@@ -1,4 +1,4 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, Decoration, WidgetType } from '@codemirror/view'
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, Decoration, ViewPlugin, WidgetType } from '@codemirror/view'
 import { EditorState, Prec, StateField, StateEffect } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
@@ -9,7 +9,7 @@ import DOMPurify from 'dompurify'
 import { compileMarkdownBlocks, mapSourceToPreviewScroll, mapPreviewToSourceLine } from '../../markdown-render.mjs'
 import { mountNotesPreview } from '../../notes-preview.mjs'
 import { extractCalcExpr, formatCheckpoint, hrStampBlock, inFence, isHrLine, isStampLine, tryEval } from '../../notes-calc.mjs'
-import { wrapAtomicTokens } from '../../notes-wrap.mjs'
+import { wrapAtomicTokens, guardRanges } from '../notes-wrap.mjs'
 
 const MODE_KEY = 'clipvault.notes.mode'
 const SPLIT_KEY = 'clipvault.notes.split'
@@ -65,6 +65,36 @@ const findField = StateField.define({
     }).range(r.from, r.to)))
   }),
 })
+
+const atomicWrapMark = Decoration.mark({ class: 'cm-atomic' })
+
+/**
+ * Editor marks for token-atomic wrapping, visible ranges only: the list rebuilds
+ * on every edit and scroll, so it must never walk the whole document.
+ */
+function atomicWrapDecorations(view) {
+  const doc = view.state.doc
+  const ranges = []
+  for (const { from, to } of view.visibleRanges) {
+    const first = doc.lineAt(from).number
+    const last = doc.lineAt(to).number
+    for (let n = first; n <= last; n++) {
+      const line = doc.line(n)
+      for (const r of guardRanges(line.text)) {
+        ranges.push(atomicWrapMark.range(line.from + r.start, line.from + r.end))
+      }
+    }
+  }
+  return Decoration.set(ranges, true)
+}
+
+/** Source/split wrap is token-atomic too: UAX #14 breaks after `-`, so `--ip`
+ * would split. Runs with an inner break point get a `.cm-atomic` mark; the CSS
+ * makes the mark an inline-block, so the run moves as one unit. */
+const atomicWrapField = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = atomicWrapDecorations(view) }
+  update(u) { if (u.docChanged || u.viewportChanged) this.decorations = atomicWrapDecorations(u.view) }
+}, { decorations: (v) => v.decorations })
 
 function loadCodeWrap() {
   try { return localStorage.getItem(WRAP_KEY) === '1' } catch (_) { return false }
@@ -628,6 +658,9 @@ async function mount(root, opts) {
       wrap.appendChild(pre)
     })
     tagifyPreview(root)
+    // Prose and inline code wraps token-atomically as well; code fences above are
+    // already guarded, so skip them (and their guards) here.
+    wrapAtomicTokens(root, { skip: 'pre, .notes-tok, .notes-tag' })
   }
 
   function tagifyPreview(root) {
@@ -779,6 +812,7 @@ async function mount(root, opts) {
       pasteDrop,
       calcField,
       findField,
+      atomicWrapField,
       EditorView.inputHandler.of(notesInput),
       Prec.highest(keymap.of([
         { key: 'Tab', run: acceptCalc },

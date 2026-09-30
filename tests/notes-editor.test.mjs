@@ -80,31 +80,44 @@ test('preview code wraps and has a copy button', () => {
 });
 
 test('wrap mode is token-atomic: `--ip` never splits across lines', { skip: skipJsdom }, async () => {
-  const { wrapAtomicTokens, atomicRuns, TOKEN_CLASS } = await import('../web/notes-wrap.mjs');
-  // Unit: runs are whitespace-delimited, not UAX #14 break points.
+  const wrap = await import('../web/assets/notes-wrap.mjs');
+  const { wrapAtomicTokens, atomicRuns, guardRanges, TOKEN_CLASS, TOKEN_BREAK_RE } = wrap;
+  // Unit: runs are whitespace-delimited, and only runs with an inner break point
+  // are worth guarding. Measured in Chrome: `- ? – — …` break inside a run,
+  // ASCII `/ : . , = _` and CJK prose do not (so they keep their break points).
   assert.deepEqual(atomicRuns('a --ip\n10.20.30.40').map((r) => r.text), ['a', '--ip', '10.20.30.40']);
-  // CSS contract: guard runs, but let an over-long run break instead of scroll.
-  assert.match(css, /\.notes-code\.is-wrap pre \.notes-tok \{[\s\S]{0,120}display: inline-block/);
+  assert.deepEqual(guardRanges('a --ip 10.20.30.40 a/b c:d').map((r) => r.text), ['--ip']);
+  assert.equal(TOKEN_BREAK_RE.test('-'), true);
+  assert.equal(guardRanges('中文，标点。--flag').map((r) => r.text).join('|'), '中文，标点。--flag');
+  assert.deepEqual(guardRanges('中文，标点。').map((r) => r.text), []);
+  // CSS contract: prose guards always on; a code fence guard only when 换行 is on,
+  // and an over-long run breaks inside instead of scrolling.
+  assert.match(css, /\.notes-preview-inner \.notes-tok,\n\.notes-code\.is-wrap pre \.notes-tok \{[\s\S]{0,80}display: inline-block/);
   assert.match(css, /\.notes-code\.is-wrap pre \.notes-tok \{[\s\S]{0,120}max-width: 100%/);
+  assert.match(css, /\.notes-code:not\(\.is-wrap\) \.notes-tok \{[\s\S]{0,60}display: inline;/);
   assert.match(css, /overflow-wrap: break-word/);
   assert.doesNotMatch(css, /overflow-wrap: anywhere/);
   assert.match(css, /word-break: normal/);
   assert.doesNotMatch(css, /word-break: break-word/);
-  // Wiring: entry tokenizes after hljs; the bundle vendoring copies the module.
-  assert.match(entry, /import \{ wrapAtomicTokens \} from '\.\.\/\.\.\/notes-wrap\.mjs'/);
+  // Source/split: CodeMirror marks over the visible ranges, never the whole doc.
+  assert.match(entry, /import \{ wrapAtomicTokens, guardRanges \} from '\.\.\/notes-wrap\.mjs'/);
   assert.match(entry, /wrapAtomicTokens\(code\)/);
-  assert.match(vendor, /notes-wrap\.mjs/);
+  assert.match(entry, /Decoration\.mark\(\{ class: 'cm-atomic' \}\)/);
+  assert.match(entry, /for \(const \{ from, to \} of view\.visibleRanges\)/);
+  assert.match(entry, /atomicWrapField,/);
+  assert.match(css, /\.notes-source \.cm-atomic \{[\s\S]{0,60}display: inline-block/);
+  assert.match(vendor, /web\/assets\/notes-wrap\.mjs/);
 
   const dom = new JSDOM('<!doctype html><body><pre><code class="hljs"><span class="hljs-meta">--</span>ip 10.20.30.40 <span class="hljs-string">-p</span> 8080</code></pre></body>');
   const { document } = dom.window;
   const code = document.querySelector('code');
   const before = code.textContent;
   const n = wrapAtomicTokens(code);
-  assert.ok(n >= 4, `expected guards, got ${n}`);
+  assert.equal(n, 3, 'only the three runs with an inner break point are guarded');
   assert.equal(code.textContent, before, 'tokenizing must not change the copied text');
   assert.equal(TOKEN_CLASS, 'notes-tok');
   const guards = [...code.querySelectorAll('.notes-tok')].map((s) => s.textContent);
-  assert.deepEqual(guards.slice(0, 4), ['--', 'ip', '10.20.30.40', '-p']);
+  assert.deepEqual(guards, ['--', 'ip', '-p']);
   // `--ip` spans two hljs nodes. The two guards must be adjacent elements with no
   // whitespace between them, or the line may still break there.
   const meta = code.children[0];
@@ -112,12 +125,20 @@ test('wrap mode is token-atomic: `--ip` never splits across lines', { skip: skip
   assert.equal(meta.nextSibling.nodeType, 1);
   assert.equal(meta.nextSibling.classList.contains('notes-tok'), true);
   assert.equal(meta.nextSibling.textContent, 'ip');
-  // A run longer than the line stays one guard, so it breaks inside (max-width) not by overflow.
-  const long = new JSDOM('<!doctype html><body><pre><code>curl https://example.com/a/very/long/path/that/keeps/going</code></pre></body>');
-  const lcode = long.window.document.querySelector('code');
-  wrapAtomicTokens(lcode);
-  const url = [...lcode.querySelectorAll('.notes-tok')].map((s) => s.textContent).find((s) => s.startsWith('https://'));
-  assert.equal(url, 'https://example.com/a/very/long/path/that/keeps/going');
+  // A guarded run longer than the line stays one span, so it breaks inside (max-width).
+  const long = new JSDOM('<!doctype html><body><p>see <code>cmd --x=1?s=2&amp;t=3</code> end</p></body>');
+  const ldoc = long.window.document;
+  wrapAtomicTokens(ldoc.body);
+  const span = [...ldoc.querySelectorAll('.notes-tok')].map((s) => s.textContent);
+  assert.deepEqual(span, ['--x=1?s=2&t=3']);
+  // `skip` leaves pan surfaces (`pre`) and existing guards alone.
+  const skipDom = new JSDOM('<!doctype html><body><div><pre>keep --me</pre><p class="t">guard --me</p></div></body>');
+  const sdoc = skipDom.window.document;
+  wrapAtomicTokens(sdoc.body, { skip: 'pre' });
+  assert.equal(sdoc.querySelector('pre .notes-tok'), null);
+  assert.equal(sdoc.querySelector('p .notes-tok').textContent, '--me');
+  const again = wrapAtomicTokens(sdoc.body, { skip: 'pre, .notes-tok' });
+  assert.equal(again, 0, 're-running with .notes-tok skipped is a no-op');
 });
 
 test('notes remember the open note and support Apple tags', () => {
@@ -363,8 +384,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n29/);
-  assert.match(html, /notes-editor\.css\?v=n29/);
+  assert.match(html, /notes-editor\.js\?v=n30/);
+  assert.match(html, /notes-editor\.css\?v=n30/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
