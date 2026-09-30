@@ -161,12 +161,12 @@ test('highlight.js loads on demand, not on wall boot', () => {
 test('notes editor bundle is loaded lazily, not on wall boot', () => {
   assert.doesNotMatch(html, /<script src="\/assets\/notes-editor\/notes-editor\.js/);
   assert.match(html, /function loadNotesEditorBundle\(\)/);
-  assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n30'/);
+  assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n31'/);
 });
 
 test('wall card prose wraps token-atomically, pan surfaces untouched', () => {
   // Same module as the notes editor (served .mjs), fetched on the first card only.
-  assert.match(html, /import\('\/assets\/notes-wrap\.mjs\?v=w1'\)/);
+  assert.match(html, /import\('\/assets\/notes-wrap\.mjs\?v=w2'\)/);
   assert.match(html, /function loadTokenWrap\(\)/);
   assert.match(html, /function guardCardTokens\(card\)/);
   // Wrapping surfaces only: `pre` / `.is-mono` are white-space:pre pan surfaces.

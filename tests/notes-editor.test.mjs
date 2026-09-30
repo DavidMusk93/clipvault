@@ -88,8 +88,14 @@ test('wrap mode is token-atomic: `--ip` never splits across lines', { skip: skip
   assert.deepEqual(atomicRuns('a --ip\n10.20.30.40').map((r) => r.text), ['a', '--ip', '10.20.30.40']);
   assert.deepEqual(guardRanges('a --ip 10.20.30.40 a/b c:d').map((r) => r.text), ['--ip']);
   assert.equal(TOKEN_BREAK_RE.test('-'), true);
-  assert.equal(guardRanges('中文，标点。--flag').map((r) => r.text).join('|'), '中文，标点。--flag');
+  // A run is whitespace-delimited, but only its non-CJK segments are guarded: a
+  // mixed `笔记分栏编辑界面，--ip` guards `--ip` alone, so the CJK clause keeps its own
+  // break points and can never end a line with the token's hyphen. Pure CJK prose
+  // and fullwidth punctuation (`，。`) are never guarded.
+  assert.deepEqual(guardRanges('中文，标点。--flag').map((r) => r.text), ['--flag']);
   assert.deepEqual(guardRanges('中文，标点。').map((r) => r.text), []);
+  assert.deepEqual(guardRanges('笔记分栏编辑界面，--ip 被换行切割。').map((r) => r.text), ['--ip']);
+  assert.deepEqual(guardRanges('run --name=值 -p 80').map((r) => r.text), ['--name=', '-p']);
   // CSS contract: prose guards always on; a code fence guard only when 换行 is on,
   // and an over-long run breaks inside instead of scrolling.
   assert.match(css, /\.notes-preview-inner \.notes-tok,\n\.notes-code\.is-wrap pre \.notes-tok \{[\s\S]{0,80}display: inline-block/);
@@ -384,8 +390,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n30/);
-  assert.match(html, /notes-editor\.css\?v=n30/);
+  assert.match(html, /notes-editor\.js\?v=n31/);
+  assert.match(html, /notes-editor\.css\?v=n31/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {

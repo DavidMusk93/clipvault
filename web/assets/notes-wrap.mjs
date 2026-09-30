@@ -11,13 +11,15 @@
  * does not suppress Latin hyphen breaks, and `overflow-wrap` only adds break
  * points, never removes (both measured in Chrome).
  *
- * Rule: a run that contains one of those inner break points is one atomic wrap
- * unit. Runs become `<span class="notes-tok">` (or a `.cm-atomic` mark in the
- * editor); a guard is `display: inline-block; max-width: 100%`, so it moves to the
- * next line whole, yet a run longer than the line still breaks inside (last
- * resort) instead of overflowing. Two adjacent inline-blocks with no whitespace
- * between them offer no wrap opportunity, so a run that highlight.js split across
- * spans (`--` + `ip`) stays glued.
+ * Rule: within each whitespace-delimited run, the non-ideographic segments that
+ * contain one of those inner break points are atomic wrap units. Those become
+ * `<span class="notes-tok">` (or a `.cm-atomic` mark in the editor); a guard is
+ * `display: inline-block; max-width: 100%`, so it moves to the next line whole,
+ * yet a guard longer than the line still breaks inside (last resort) instead of
+ * overflowing. CJK clauses stay outside the guard, so they keep their natural
+ * break points and can never make a line end in `-`. Two adjacent inline-blocks
+ * with no whitespace between them offer no wrap opportunity, so a run that
+ * highlight.js split across spans (`--` + `ip`) stays glued.
  *
  * Nothing here mutates text: textContent — and therefore every copy button — is
  * byte-identical. Pure DOM, no dependencies; `notes-render.mjs` stays the only
@@ -43,6 +45,16 @@ export const TOKEN_CLASS = 'notes-tok';
  */
 export const TOKEN_BREAK_RE = /[-?\u2013\u2014\u2026]/;
 
+/**
+ * Ideographic / fullwidth runs (CJK, kana, hangul, fullwidth forms). Those break
+ * between characters by design (and `，。、：` after them), so they must never be
+ * swallowed into a guard: a guarded `笔记分栏编辑界面，--ip` is wider than a narrow
+ * pane, breaks internally, and the break lands on the `-`. Guard the non-CJK
+ * segment (`--ip`) only, and the CJK clause keeps its own break points — then a
+ * line can only end in `-` if the token itself is wider than the line.
+ */
+export const IDEOGRAPHIC_SEG_RE = /[\u2E80-\u303F\u3040-\u30FF\u31C0-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE10-\uFE4F\uFF00-\uFFEF]+/g;
+
 const SHOW_TEXT = 4;
 
 /** All non-whitespace runs of `text`, in order. */
@@ -56,13 +68,30 @@ export function atomicRuns(text) {
 }
 
 /**
- * The subset of `atomicRuns` worth guarding: runs with an inner break point.
- * Guarding a run with none is a no-op for layout, so this keeps the DOM small.
+ * The pieces worth guarding: per whitespace-delimited run, the non-ideographic
+ * segments that contain an inner break point. Guarding a segment without one is a
+ * layout no-op, so this keeps the DOM small.
  * @param {string} text
  * @returns {{start:number,end:number,text:string}[]}
  */
 export function guardRanges(text) {
-  return atomicRuns(text).filter((r) => TOKEN_BREAK_RE.test(r.text));
+  const out = [];
+  for (const run of atomicRuns(text)) {
+    const segs = [];
+    let last = 0;
+    IDEOGRAPHIC_SEG_RE.lastIndex = 0;
+    let m;
+    while ((m = IDEOGRAPHIC_SEG_RE.exec(run.text)) !== null) {
+      if (m.index > last) segs.push([last, m.index]);
+      last = m.index + m[0].length;
+    }
+    if (last < run.text.length) segs.push([last, run.text.length]);
+    for (const [a, b] of segs) {
+      const seg = run.text.slice(a, b);
+      if (TOKEN_BREAK_RE.test(seg)) out.push({ start: run.start + a, end: run.start + b, text: seg });
+    }
+  }
+  return out;
 }
 
 /**
