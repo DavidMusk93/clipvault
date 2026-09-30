@@ -1,9 +1,10 @@
 /**
- * Session mining is the product. Dumping the transcript is not.
+ * Session analysis is the product: an attributable loss ledger the Agent can
+ * re-measure, plus a sheet that shows the ledger instead of hiding it.
  * Run via scripts/check-frontend.sh.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { root } from './helpers/src.mjs';
@@ -13,6 +14,7 @@ const server = readFileSync(join(root, 'trae_hooks/server.py'), 'utf8');
 const mine = readFileSync(join(root, 'trae_hooks/mine.py'), 'utf8');
 const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
+const designPath = join(root, 'docs/session-analysis.md');
 
 test('this file and session_mine_main.py are in the deploy gate', () => {
   assert.match(check, /session-mine\.test\.mjs/);
@@ -25,9 +27,25 @@ test('AGENTS.md treats sessions as an asset that must be mined', () => {
   assert.match(agents, /分析.*调试/);
 });
 
-test('server exposes /api/mine without tool bodies', () => {
+test('the analysis contract is a tracked design doc', () => {
+  assert.ok(existsSync(designPath), 'docs/session-analysis.md must exist');
+  const doc = readFileSync(designPath, 'utf8');
+  assert.match(doc, /doc_id: clipvault-session-analysis-v2/);
+  assert.match(doc, /kind: design/);
+  assert.match(doc, /authority: design/);
+  assert.match(doc, /verified_by:/);
+  // The four value criteria and the layer model are the doc's spine.
+  for (const word of ['可归因', '可行动', '可验证', '量纲', 'L0 账本', 'L1 归因', 'L2 结论', 'L3 闭环']) {
+    assert.match(doc, new RegExp(word));
+  }
+  assert.match(doc, /反模式/);
+});
+
+test('server exposes /api/mine without tool bodies, plus the agent view', () => {
   assert.match(server, /path == "\/api\/mine"/);
   assert.match(server, /mine_session/);
+  assert.match(server, /format/);
+  assert.match(server, /baseline/);
   assert.match(mine, /substr\(coalesce\(tool_input/);
   assert.match(mine, /substr\(coalesce\(tool_response/);
   assert.doesNotMatch(mine, /SELECT \* FROM hook_events/);
@@ -51,13 +69,42 @@ test('analysis fab sits above the debug fab', () => {
 test('analysis is a stage sheet, not a 420px pop with ellipsis', () => {
   assert.match(html, /cv-mine-sheet/);
   assert.match(html, /inset:\s*8px 8px 52px 8px/);
-  const sheet = html.slice(html.indexOf('.cv-mine-sheet'), html.indexOf('.cv-mine-fab.is-on'));
+  const sheet = html.slice(html.indexOf('.cv-mine-sheet {'), html.indexOf('.cv-mine-fab.is-on'));
   assert.match(sheet, /overflow-wrap:\s*anywhere/);
   assert.doesNotMatch(sheet, /width:\s*min\(420px/);
   assert.doesNotMatch(sheet, /text-overflow:\s*ellipsis/);
-  assert.match(html, /f\.draft/);
-  assert.match(html, /f\.evidence/);
-  assert.match(html, /b\.tables/);
+  assert.doesNotMatch(sheet, /backdrop-filter/);
+  assert.match(sheet, /background: #fafafa/);
+});
+
+test('the sheet shows the ledger instead of collapsing it', () => {
+  // Owner rule: 不要折叠细节, 所见即所得. The old <details> 方向明细 is gone.
+  assert.doesNotMatch(html, /mine-tables<\/details>|class="mine-tables"/);
+  assert.match(html, /const renderLedger/);
+  assert.match(html, /class="mine-blk axis-\$\{axis\}"/);
+  assert.match(html, /始终展开/);
+  assert.match(html, /const renderLosses/);
+  assert.match(html, /const renderTimeline/);
+  assert.match(html, /const renderVerdict/);
+});
+
+test('the sheet is designed: color channels, interaction, no gray-on-gray', () => {
+  const sheet = html.slice(html.indexOf('.cv-mine-sheet {'), html.indexOf('.cv-mine-fab.is-on'));
+  for (const token of ['--mine-time', '--mine-money', '--mine-loss', '--mine-good', '--mine-user', '--mine-agent']) {
+    assert.match(sheet, new RegExp(token));
+  }
+  assert.match(sheet, /\.mine-stack i\.s-work/);
+  assert.match(sheet, /\.mine-stack i\.s-money|\.mine-stack i\.s-out/);
+  assert.match(sheet, /\.mine-turn\.ph-review/);
+  assert.match(html, /class="mine-nav"/);
+  assert.match(html, /data-jump=/);
+  assert.match(html, /data-mine-turn/);
+  assert.match(html, /data-turn=/);
+  assert.match(html, /const jumpMineTo/);
+  assert.match(html, /const openMineTurn/);
+  // Interaction is not decoration-only: numbers carry the meaning too.
+  assert.match(html, /const mineBarPct/);
+  assert.match(html, /mine-metric/);
 });
 
 test('directions cover user and agent axes', () => {
@@ -72,27 +119,49 @@ test('taste keys keep skill and project names, not bare SKILL.md', () => {
   assert.match(mine, /禁止只记 SKILL\.md 文件名/);
 });
 
-test('deep mining: failures, redundancy, prompt quality, health', () => {
-  assert.match(mine, /"agent\.failures"/);
-  assert.match(mine, /"agent\.hot"/);
-  assert.match(mine, /"user\.prompt"/);
-  assert.match(mine, /"user\.reminders"/);
-  assert.match(mine, /"user\.flow"/);
-  assert.match(mine, /def is_write_tool/);
-  assert.match(mine, /def norm_cmd/);
-  assert.match(mine, /def cmd_label/);
-  assert.match(mine, /def reminder_hits/);
-  assert.match(mine, /def prompt_is_nudge/);
-  assert.match(mine, /redundant_reads/);
-  assert.match(mine, /fail_family/);
-  assert.match(mine, /retry_n/);
-  assert.match(mine, /"health"/);
-  assert.match(mine, /"flow"/);
-  assert.match(mine, /extra_roundtrips/);
-  assert.match(mine, /"sev"/);
-  assert.match(mine, /失败没有变成新策略/);
-  assert.match(mine, /反复提醒/);
-  assert.match(mine, /操作流程：减少口头往返/);
+test('findings come from an attributable loss account, not keywords', () => {
+  assert.match(mine, /METRICS: tuple\[dict\[str, Any\], \.\.\.\]/);
+  assert.match(mine, /def build_losses/);
+  assert.match(mine, /def build_metrics/);
+  assert.match(mine, /def norm_path/);
+  assert.match(mine, /def _skill_tokens_of/);
+  // The five loss kinds and their measured/estimated split.
+  for (const id of ['fail_retry', 'reread', 'wait_poll', 'cache_write', 'rework', 'locate', 'idle', 'skill_bloat']) {
+    assert.match(mine, new RegExp(`"${id}"`));
+  }
+  assert.match(mine, /kind.*measured|"measured"/);
+  assert.match(mine, /"estimated"/);
+  assert.match(mine, /refs/);
+  assert.match(mine, /_LOSS_FINDING/);
+  // L1 needs money per turn: usage rows are bucketed onto the turn that spent them.
+  assert.match(mine, /def _bucket|bisect_right/);
+  assert.match(mine, /unit_usd/);
+  // Keyword heuristics are gone from findings.
+  assert.doesNotMatch(mine, /反复提醒/);
+  assert.doesNotMatch(mine, /操作流程：减少口头往返/);
+  assert.doesNotMatch(mine, /MCP 面过窄或过散/);
+});
+
+test('the agent interface is a contract: brief, metrics, verify, rerun', () => {
+  assert.match(mine, /def agent_view/);
+  assert.match(mine, /def agent_brief/);
+  assert.match(mine, /"view": "agent"/);
+  assert.match(mine, /"brief"/);
+  assert.match(mine, /"verify"/);
+  assert.match(mine, /metric_ids/);
+  assert.match(mine, /rerun/);
+  assert.match(mine, /同一窗口重跑/);
+  assert.match(mine, /if __name__ == "__main__"/);
+  assert.match(mine, /--agent/);
+  assert.match(mine, /def fetch_baseline/);
+  assert.match(mine, /def attach_baseline/);
+});
+
+test('per-turn ledger: a prompt closes a turn even without a Stop event', () => {
+  assert.match(mine, /A new prompt closes the previous turn even without a Stop event/);
+  assert.match(mine, /"turns": turn_rows/);
+  assert.match(mine, /"phase": t\["phase"\]/);
+  assert.match(mine, /"cost_usd": round\(float\(t\.get\("cost_usd"\)/);
 });
 
 test('analysis sheet keeps dynamic: verdict, severity, live refresh', () => {
@@ -100,16 +169,15 @@ test('analysis sheet keeps dynamic: verdict, severity, live refresh', () => {
   assert.match(html, /mine-score/);
   assert.match(html, /mine-sev/);
   assert.match(html, /sev-high/);
-  assert.match(html, /mine-tables/);
   assert.match(html, /scheduleMineRefresh/);
   assert.match(html, /loadMine\(\{ auto: true \}\)/);
   assert.match(html, /clipvault-sessions-overlay/);
   assert.doesNotMatch(html, /setInterval\(/);
 });
 
-test('auto refresh preserves expanded detail and scroll', () => {
-  assert.match(html, /mineDetailOpen/);
-  assert.match(html, /det\.open = mineDetailOpen/);
+test('auto refresh preserves the open turn detail and scroll', () => {
+  assert.match(html, /let mineOpenTurn = null/);
+  assert.match(html, /if \(mineOpenTurn !== null\) \{/);
   assert.match(html, /mineBody\.scrollTop = prevScroll/);
   assert.match(html, /const prevScroll = mineBody\.scrollTop/);
   assert.match(html, /mineDataSig/);
@@ -118,16 +186,19 @@ test('auto refresh preserves expanded detail and scroll', () => {
   assert.match(html, /mineAutoAt/);
   assert.match(html, /mineChipSig/);
   assert.match(html, /minePending/);
-  assert.match(html, /if \(mineDetailOpen\) \{/);
   assert.match(html, /is-pending/);
-  assert.match(html, /收起明细后更新/);
+  assert.match(html, /关掉回合明细后更新/);
 });
 
 test('analysis sheet does not repaint the covered thread', () => {
   assert.match(html, /if \(mineState\.open\) return;/);
   assert.match(html, /pendingHookIds\.length > 400/);
-  // A full-cover sheet must not use backdrop-filter: blur recomputes on every hook.
-  const sheet = html.slice(html.indexOf('.cv-mine-sheet {'), html.indexOf('.cv-mine-sheet[hidden]'));
-  assert.doesNotMatch(sheet, /backdrop-filter/);
-  assert.match(sheet, /background: #fafafa/);
+});
+
+test('baseline is the previous equal-length window, never a guess', () => {
+  assert.match(mine, /AND session_id != \?/);
+  assert.match(mine, /上一个会话/);
+  assert.match(mine, /%Y-%m-%d %H:%M:%S\.%f/);
+  assert.match(html, /params\.set\("baseline", "1"\)/);
+  assert.match(html, /对照 \$\{escMine\(data\.baseline\.source\)\}|对照 \$\{escMine\(data\.baseline\.source\)\}/);
 });

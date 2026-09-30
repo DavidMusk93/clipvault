@@ -451,12 +451,18 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                 scope = (qs.get("scope") or ["session"])[0]
                 dirs_raw = (qs.get("dirs") or [""])[0]
                 dirs = [d.strip() for d in dirs_raw.split(",") if d.strip()]
+                fmt = (qs.get("format") or ["full"])[0]
+                want_base = (qs.get("baseline") or [""])[0] in ("1", "true")
+                host = (qs.get("host") or [http_origin_note])[0]
                 try:
                     result = mine_session(
                         store.query,
                         session_id=session_id or None,
                         scope=scope,
                         dirs=dirs or None,
+                        baseline=want_base,
+                        fmt="agent" if fmt == "agent" else "full",
+                        host=host,
                     )
                 except Exception:  # noqa: BLE001
                     LOG.exception("mine")

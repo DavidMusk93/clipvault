@@ -8,7 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "trae_hooks"))
 
-from mine import classify_phase, cmd_family, git_from_path, mcp_parts, mine_rows, parse_head, taste_keys  # noqa: E402
+from mine import (  # noqa: E402
+    agent_view, classify_phase, cmd_family, git_from_path, mcp_parts, mine_rows, parse_head, taste_keys,
+)
 
 
 def ok(name: str, cond: bool, detail: str = "") -> None:
@@ -126,10 +128,22 @@ def main() -> None:
     ok("runcommand-ranked", "RunCommand" in tools)
     git_rows = out["blocks"]["user.git"]["table"]["rows"]
     ok("git-stream", any(r["repo"] == "stream_engine" for r in git_rows), str(git_rows))
-    texts = " ".join(f["text"] for f in out["feedback"])
-    ok("insight-runcommand", "RunCommand" in texts)
-    ok("insight-nmem", "搜索" in texts and "写入" in texts)
-    ok("insight-review", "review" in texts.lower())
+    # v2 contract: findings come from the attributable loss account, not keywords.
+    ok("findings-shape", all(
+        f.get("id") and f.get("sev") in ("high", "med", "note", "good")
+        and isinstance(f.get("impact"), dict) and "s" in f["impact"] and f.get("evidence")
+        for f in out["feedback"]
+    ), str(out["feedback"])[:400])
+    ok("losses-shape", all(
+        l.get("id") and l.get("kind") in ("measured", "estimated") and "s" in l and "how" in l
+        for l in out["losses"]
+    ))
+    metric_ids = {m["id"] for m in out["metrics"]}
+    ok("metrics-registry", {"fail_n", "reread_ratio", "locate_s", "loss_s"} <= metric_ids, str(sorted(metric_ids)))
+    ok("metrics-shape", all(m.get("dir") in ("up", "down", "flat") and "unit" in m for m in out["metrics"]))
+    ok("turn-ledger", bool(out["turns"]) and all("index" in t and "phase" in t and "tools" in t for t in out["turns"]))
+    ok("window-facts", out["window"]["turns"] == out["n_turns"] and out["window"]["tools"] == out["summary"]["n_tools"])
+    ok("no-keyword-findings", not any("提醒" in f["title"] and "反复" in f["title"] for f in out["feedback"]), str(out["feedback"])[:300])
     taste_docs = [r["doc"] for r in out["blocks"]["user.taste"]["table"]["rows"]]
     ok("taste-named-skill", any(d.startswith("skill:ce-code-review") for d in taste_docs), str(taste_docs))
     ok("taste-named-agents", any(d.endswith("/AGENTS.md") or "AGENTS.md" in d for d in taste_docs), str(taste_docs))
@@ -137,7 +151,7 @@ def main() -> None:
     files = out["blocks"]["agent.files"]["table"]["rows"]
     ok("file-write", any("a.cc" in r["path"] for r in files), str(files))
     ok("feedback-title", all(f.get("title") and f.get("evidence") for f in out["feedback"]))
-    ok("feedback-draft", any(f.get("draft") for f in out["feedback"]))
+    ok("feedback-draft", all(f.get("draft") for f in out["feedback"] if f.get("sev") in ("high", "med")))
     phases = out["blocks"]["agent.phases"]
     ok("phase-turns-table", len(phases.get("tables") or []) >= 2)
     ok("summary-work", out["summary"]["work_s"] >= 20)
@@ -152,12 +166,12 @@ def main() -> None:
         {
             "event_id": "ft1", "ts": "11", "hook_event": "PostToolUse", "tool_name": "RunCommand",
             "input_head": '{"cmd":"git push origin master","workdir":"/root/p"}',
-            "resp_head": '{"wall_time_seconds":2.0,"exit_code":128,"output":"boom"}',
+            "resp_head": '{"wall_time_seconds":30.0,"exit_code":128,"output":"boom"}',
         },
         {
             "event_id": "ft2", "ts": "12", "hook_event": "PostToolUse", "tool_name": "RunCommand",
             "input_head": '{"cmd":"git push origin master","workdir":"/root/p"}',
-            "resp_head": '{"wall_time_seconds":2.0,"exit_code":1,"output":"again"}',
+            "resp_head": '{"wall_time_seconds":20.0,"exit_code":1,"output":"again"}',
         },
         {
             "event_id": "fr", "ts": "13", "hook_event": "PostToolUse", "tool_name": "RunCommand",
@@ -199,10 +213,35 @@ def main() -> None:
     ok("reminder-load", rem_themes.get("加载上下文", 0) >= 1, str(rem_themes))
     ok("flow-nudge", out3["summary"]["flow"]["nudge_n"] >= 2, str(out3["summary"]["flow"]))
     ok("flow-trips", out3["summary"]["flow"]["extra_roundtrips"] >= 4, str(out3["summary"]["flow"]))
-    titles3 = " ".join(f["title"] for f in out3["feedback"])
-    ok("reminder-insight", "反复提醒" in titles3, titles3)
-    ok("flow-insight", "操作流程" in titles3, titles3)
-    ok("gate-draft", any(f.get("draft", "").startswith("- ") for f in out3["feedback"]), str(out3["feedback"]))
+    ok("turns-ledger", len(out3["turns"]) >= 8, str(len(out3["turns"])))
+    trips = {m["id"]: m for m in out3["metrics"]}
+    ok("flow-metric", trips.get("extra_trips", {}).get("value") == out3["summary"]["flow"]["extra_roundtrips"])
+    ok("flow-metric-target", trips.get("extra_trips", {}).get("target") == 0)
+
+    # Agent contract: a brief to read, stable metric ids to re-measure, and no
+    # actionable finding without an action + metric.
+    ag_rows = fail_rows + [
+        {"event_id": "fu2", "ts": "16", "hook_event": "UserPromptSubmit", "prompt": "继续", "cwd": "/root/p"},
+        {"event_id": "ft3", "ts": "17", "hook_event": "PostToolUse", "tool_name": "RunCommand",
+         "input_head": '{"cmd":"cargo test","workdir":"/root/p"}',
+         "resp_head": '{"wall_time_seconds":30.0,"exit_code":1}'},
+        {"event_id": "fs2", "ts": "18", "hook_event": "Stop"},
+    ]
+    usage = [
+        {"ts": "11", "session_id": "f", "model": "m", "input_tokens": 1000, "output_tokens": 100,
+         "cache_read_tokens": 2000, "cache_write_tokens": 500, "total_tokens": 3600, "cost_total": 0.05},
+        {"ts": "17", "session_id": "f", "model": "m", "input_tokens": 1200, "output_tokens": 120,
+         "cache_read_tokens": 100, "cache_write_tokens": 0, "total_tokens": 1420, "cost_total": 0.06},
+    ]
+    out4 = mine_rows(ag_rows, session_id="f", scope="session", usage_rows=usage)
+    view = agent_view(out4, None)
+    ok("agent-view", view["view"] == "agent" and view["ok"] is True)
+    ok("agent-brief", view["brief"].startswith("# 会话分析") and "## 指标" in view["brief"] and "## 复测" in view["brief"])
+    ok("agent-verify", bool(view["verify"]["metric_ids"]) and bool(view["verify"]["expect"]))
+    ok("agent-high-has-action", all(f.get("metric") and f.get("action") for f in view["findings"] if f.get("sev") == "high"), str(view["findings"])[:400])
+    ok("agent-usd-loss", any(l["usd"] > 0 for l in out4["losses"]), str(out4["losses"]))
+    ok("agent-cache-metric", any(m["id"] == "cache_hit_pct" for m in out4["metrics"]), str([m["id"] for m in out4["metrics"]]))
+    ok("fail-refs", any(r.get("exit_code") for l in out4["losses"] for r in l.get("refs", [])), str(out4["losses"])[:400])
     print("session-mine: all passed")
 
 

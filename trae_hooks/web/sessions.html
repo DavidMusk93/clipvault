@@ -673,6 +673,19 @@
       gap: 8px;
     }
     .cv-mine-sheet {
+      --mine-time: #0071e3;
+      --mine-time-soft: rgba(0, 113, 227, 0.12);
+      --mine-money: #2f8f83;
+      --mine-money-soft: rgba(47, 143, 131, 0.14);
+      --mine-loss: #c2410c;
+      --mine-loss-soft: rgba(194, 65, 12, 0.13);
+      --mine-good: #2e7d32;
+      --mine-good-soft: rgba(46, 125, 50, 0.13);
+      --mine-user: var(--honey);
+      --mine-user-soft: var(--honey-soft);
+      --mine-agent: var(--accent);
+      --mine-agent-soft: rgba(0, 113, 227, 0.10);
+      --mine-flat: rgba(60, 60, 67, 0.08);
       position: absolute;
       inset: 8px 8px 52px 8px;
       z-index: 10;
@@ -692,12 +705,14 @@
       flex: 0 0 auto;
       padding: 12px 16px 10px;
       border-bottom: 0.5px solid var(--separator);
+      background: #fff;
+      border-radius: 16px 16px 0 0;
     }
     .cv-mine-sheet .mine-head-row {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     .cv-mine-sheet h2 {
       flex: 1;
@@ -712,6 +727,18 @@
       font-variant-numeric: tabular-nums;
       margin: 0 0 8px;
     }
+    .cv-mine-sheet .mine-sum b { color: var(--ink); font-weight: 650; }
+    .cv-mine-sheet .mine-flag {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 980px;
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .cv-mine-sheet .mine-flag.warn { background: var(--mine-loss-soft); color: var(--mine-loss); }
+    .cv-mine-sheet .mine-flag.base { background: var(--mine-flat); color: var(--muted); font-weight: 500; }
+    .cv-mine-sheet .mine-flag.est { background: var(--mine-money-soft); color: var(--mine-money); }
     .cv-mine-sheet .mine-scopes,
     .cv-mine-sheet .mine-dirs {
       display: flex;
@@ -729,6 +756,7 @@
       font: 600 11.5px/23px inherit;
       cursor: pointer;
     }
+    .cv-mine-sheet .mine-chip:hover { background: rgba(120, 120, 128, 0.10); }
     .cv-mine-sheet .mine-chip.is-on {
       color: var(--honey);
       border-color: var(--honey);
@@ -739,64 +767,317 @@
       min-height: 0;
       overflow: auto;
       overscroll-behavior: contain;
-      padding: 12px 16px 20px;
+      padding: 12px 16px 24px;
+      scroll-behavior: smooth;
     }
-    .cv-mine-sheet .mine-fb {
-      border-radius: 12px;
-      padding: 10px 12px;
-      margin: 0 0 10px;
-      background: var(--honey-soft);
-      font-size: 13.5px;
-      line-height: 1.5;
-    }
-    .cv-mine-sheet .mine-fb .who {
-      font-size: 11px;
-      font-weight: 650;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--honey);
-      margin-bottom: 2px;
-    }
-    .cv-mine-sheet .mine-fb .ttl {
-      font-weight: 650;
-      margin-bottom: 4px;
-    }
-    .cv-mine-sheet .mine-fb .ev {
-      margin-top: 6px;
-      font-family: var(--font-mono);
-      font-size: 11.5px;
-      color: var(--muted);
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-    .cv-mine-sheet .mine-fb .draft {
-      margin-top: 8px;
-      padding: 8px 10px;
-      border-radius: 8px;
-      background: #fff;
-      font-family: var(--font-mono);
-      font-size: 12.5px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-    .cv-mine-sheet .mine-block { margin: 16px 0 8px; }
-    .cv-mine-sheet .mine-block h3 {
-      font-size: 13px;
-      font-weight: 650;
-      margin: 0 0 4px;
-    }
-    .cv-mine-sheet .mine-block .note {
-      font-size: 12.5px;
-      color: var(--muted);
+
+    /* section frame ------------------------------------------------------ */
+    .cv-mine-sheet .mine-sec { margin: 0 0 20px; scroll-margin-top: 44px; }
+    .cv-mine-sheet .mine-sec-h {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       margin: 0 0 8px;
-      line-height: 1.45;
-    }
-    .cv-mine-sheet .mine-cap {
-      font-size: 11.5px;
+      font-size: 12px;
       font-weight: 650;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
       color: var(--muted);
-      margin: 10px 0 4px;
     }
+    .cv-mine-sheet .mine-sec-h .mine-count {
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 980px;
+      background: rgba(60, 60, 67, 0.10);
+      font-size: 11px;
+      line-height: 18px;
+      text-align: center;
+    }
+    .cv-mine-sheet .mine-sec-h .mine-hint {
+      margin-left: auto;
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 500;
+      font-size: 11px;
+    }
+    .cv-mine-sheet .mine-nav {
+      position: sticky;
+      top: -12px;
+      z-index: 3;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: -4px 0 14px;
+      padding: 8px 0 6px;
+      /* Opaque: a translucent sticky bar shows scrolled content through it. */
+      background: #fafafa;
+    }
+    .cv-mine-sheet .mine-nav button {
+      height: 22px;
+      padding: 0 9px;
+      border-radius: 980px;
+      border: 0.5px solid var(--separator);
+      background: #fff;
+      color: var(--muted);
+      font: 600 11px/21px inherit;
+      cursor: pointer;
+    }
+    .cv-mine-sheet .mine-nav button:hover { color: var(--ink); border-color: rgba(60, 60, 67, 0.3); }
+
+    /* verdict ------------------------------------------------------------ */
+    .cv-mine-sheet .mine-verdict {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 12px 16px;
+      padding: 14px 16px;
+      margin: 0 0 12px;
+      border-radius: 16px;
+      background: #fff;
+      border: 0.5px solid var(--separator);
+    }
+    .cv-mine-sheet .mine-score {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-width: 66px;
+      padding-right: 16px;
+      border-right: 0.5px solid var(--separator);
+    }
+    .cv-mine-sheet .mine-score b {
+      font-size: 34px;
+      font-weight: 700;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+    }
+    .cv-mine-sheet .mine-score span { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+    .cv-mine-sheet .mine-verdict.g-good .mine-score b { color: var(--mine-good); }
+    .cv-mine-sheet .mine-verdict.g-ok .mine-score b { color: var(--mine-user); }
+    .cv-mine-sheet .mine-verdict.g-warn .mine-score b { color: var(--mine-loss); }
+    .cv-mine-sheet .mine-verdict.g-bad .mine-score b { color: #b91c1c; }
+    .cv-mine-sheet .mine-kpis {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 18px;
+      align-content: start;
+      min-width: 0;
+    }
+    .cv-mine-sheet .mine-kpi { display: flex; flex-direction: column; min-width: 62px; }
+    .cv-mine-sheet .mine-kpi b {
+      font-size: 16px;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+      color: var(--ink);
+    }
+    .cv-mine-sheet .mine-kpi b.t-time { color: var(--mine-time); }
+    .cv-mine-sheet .mine-kpi b.t-money { color: var(--mine-money); }
+    .cv-mine-sheet .mine-kpi b.t-loss { color: var(--mine-loss); }
+    .cv-mine-sheet .mine-kpi b.t-good { color: var(--mine-good); }
+    .cv-mine-sheet .mine-kpi span { font-size: 11px; color: var(--muted); }
+    .cv-mine-sheet .mine-kpi em { font-style: normal; font-size: 10.5px; color: var(--muted); }
+    .mine-kpi em.up { color: var(--mine-loss); }
+    .mine-kpi em.down { color: var(--mine-good); }
+    .cv-mine-sheet .mine-compose { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
+    .cv-mine-sheet .mine-bar-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+    .cv-mine-sheet .mine-bar-row > span:first-child { width: 58px; flex: 0 0 auto; font-weight: 650; }
+    .cv-mine-sheet .mine-stack {
+      flex: 1 1 auto;
+      display: flex;
+      height: 14px;
+      min-width: 0;
+      border-radius: 7px;
+      overflow: hidden;
+      background: var(--mine-flat);
+    }
+    .cv-mine-sheet .mine-stack i { display: block; min-width: 2px; }
+    .cv-mine-sheet .mine-stack i.s-work { background: var(--mine-time); }
+    .cv-mine-sheet .mine-stack i.s-wait { background: rgba(60, 60, 67, 0.35); }
+    .cv-mine-sheet .mine-stack i.s-fail { background: var(--mine-loss); }
+    .cv-mine-sheet .mine-stack i.s-out { background: var(--mine-money); }
+    .cv-mine-sheet .mine-stack i.s-cw { background: var(--mine-user); }
+    .cv-mine-sheet .mine-stack i.s-cr { background: rgba(47, 143, 131, 0.35); }
+    .cv-mine-sheet .mine-legend { display: flex; gap: 10px; font-size: 10.5px; color: var(--muted); margin-left: 66px; }
+    .cv-mine-sheet .mine-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; }
+
+    /* losses ------------------------------------------------------------- */
+    .cv-mine-sheet .mine-loss {
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin: 0 0 10px;
+      background: #fff;
+      border: 0.5px solid var(--separator);
+      border-left: 3px solid rgba(60, 60, 67, 0.22);
+      scroll-margin-top: 44px;
+    }
+    .cv-mine-sheet .mine-loss.sev-high { border-left-color: var(--mine-loss); background: linear-gradient(180deg, var(--mine-loss-soft), #fff 46%); }
+    .cv-mine-sheet .mine-loss.sev-med { border-left-color: var(--honey); background: linear-gradient(180deg, var(--honey-soft), #fff 46%); }
+    .cv-mine-sheet .mine-loss.sev-good { border-left-color: var(--mine-good); background: linear-gradient(180deg, var(--mine-good-soft), #fff 46%); }
+    .cv-mine-sheet .mine-loss-h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .cv-mine-sheet .mine-loss-h h4 { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+    .cv-mine-sheet .mine-rank {
+      width: 18px; height: 18px;
+      flex: 0 0 auto;
+      border-radius: 980px;
+      background: rgba(60, 60, 67, 0.10);
+      font-size: 10.5px;
+      line-height: 18px;
+      text-align: center;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .cv-mine-sheet .mine-sev {
+      flex: 0 0 auto;
+      padding: 1px 6px;
+      border-radius: 980px;
+      font-size: 10.5px;
+      font-weight: 650;
+      letter-spacing: 0.03em;
+    }
+    .cv-mine-sheet .sev-high .mine-sev { background: var(--mine-loss-soft); color: var(--mine-loss); }
+    .cv-mine-sheet .sev-med .mine-sev { background: var(--honey-soft); color: var(--honey); }
+    .cv-mine-sheet .sev-note .mine-sev { background: rgba(60, 60, 67, 0.10); color: var(--muted); }
+    .cv-mine-sheet .sev-good .mine-sev { background: var(--mine-good-soft); color: var(--mine-good); }
+    .cv-mine-sheet .mine-impact {
+      flex: 0 0 auto;
+      font-variant-numeric: tabular-nums;
+      font-size: 12.5px;
+      color: var(--muted);
+      text-align: right;
+    }
+    .cv-mine-sheet .mine-impact b { display: block; font-size: 17px; font-weight: 700; color: var(--ink); }
+    .cv-mine-sheet .mine-impact b.usd { color: var(--mine-money); }
+    .cv-mine-sheet .mine-metric {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin: 0 0 8px;
+      padding: 6px 8px;
+      border-radius: 9px;
+      background: rgba(120, 120, 128, 0.07);
+      font-size: 11.5px;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+    }
+    .cv-mine-sheet .mine-metric .k { font-weight: 650; color: var(--ink); }
+    .cv-mine-sheet .mine-metric .now { font-weight: 650; color: var(--mine-loss); }
+    .cv-mine-sheet .mine-metric.good .now { color: var(--mine-good); }
+    .cv-mine-sheet .mine-metric .tgt { font-weight: 650; }
+    .cv-mine-sheet .mine-metric .delta { margin-left: auto; }
+    .cv-mine-sheet .mine-metric .delta.bad { color: var(--mine-loss); }
+    .cv-mine-sheet .mine-metric .delta.good { color: var(--mine-good); }
+    .cv-mine-sheet .mine-track {
+      position: relative;
+      flex: 0 0 90px;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(120, 120, 128, 0.18);
+      overflow: hidden;
+    }
+    .cv-mine-sheet .mine-track i { position: absolute; inset: 0 auto 0 0; width: var(--v, 0%); background: var(--mine-loss); }
+    .cv-mine-sheet .mine-metric.good .mine-track i { background: var(--mine-good); }
+    .cv-mine-sheet .mine-claim { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
+    .cv-mine-sheet .mine-line { margin: 0 0 3px; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+    .cv-mine-sheet .mine-line b { color: var(--ink); font-weight: 650; margin-right: 4px; }
+    .cv-mine-sheet .mine-line.action b { color: var(--mine-agent); }
+    .cv-mine-sheet .mine-line.gate b { color: var(--mine-user); }
+    .cv-mine-sheet .mine-refs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+    .cv-mine-sheet .mine-ref {
+      max-width: 100%;
+      min-height: 22px;
+      padding: 2px 8px;
+      border-radius: 7px;
+      border: 0.5px solid var(--separator);
+      background: #fff;
+      color: var(--muted);
+      font: 500 11px/1.5 var(--font-mono);
+      cursor: pointer;
+      text-align: left;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+    .cv-mine-sheet .mine-ref:hover { color: var(--ink); border-color: var(--mine-agent); }
+    .cv-mine-sheet .mine-ref.is-hit { border-color: var(--mine-agent); background: var(--mine-agent-soft); color: var(--mine-agent); }
+
+    /* turn timeline ------------------------------------------------------ */
+    .cv-mine-sheet .mine-turns { display: flex; flex-direction: column; gap: 5px; }
+    .cv-mine-sheet .mine-turn {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 2px 10px;
+      text-align: left;
+      padding: 8px 10px 8px 12px;
+      border-radius: 11px;
+      border: 0.5px solid var(--separator);
+      border-left: 3px solid var(--mine-time);
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      cursor: pointer;
+      scroll-margin-top: 44px;
+    }
+    .cv-mine-sheet .mine-turn:hover { border-color: rgba(60, 60, 67, 0.3); }
+    .cv-mine-sheet .mine-turn.is-open { background: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08); }
+    .cv-mine-sheet .mine-turn.ph-implement { border-left-color: var(--mine-user); }
+    .cv-mine-sheet .mine-turn.ph-review { border-left-color: #6e56cf; }
+    .cv-mine-sheet .mine-turn.ph-debug { border-left-color: #c62828; }
+    .cv-mine-sheet .mine-turn.ph-ship { border-left-color: var(--mine-good); }
+    .cv-mine-sheet .mine-turn.ph-taste { border-left-color: #1565c0; }
+    .cv-mine-sheet .mine-turn-h { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+    .cv-mine-sheet .mine-turn-h b { font-variant-numeric: tabular-nums; }
+    .cv-mine-sheet .mine-turn-h em { font-style: normal; font-weight: 650; color: var(--muted); }
+    .cv-mine-sheet .mine-turn-h i { font-style: normal; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+    .cv-mine-sheet .mine-turn-stat { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .cv-mine-sheet .mine-turn-p {
+      grid-column: 1 / -1;
+      min-width: 0;
+      font-size: 12px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    .cv-mine-sheet .mine-turn-bar {
+      grid-column: 1 / -1;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--mine-flat);
+      overflow: hidden;
+    }
+    .cv-mine-sheet .mine-turn-bar i { display: block; height: 100%; background: var(--mine-time); border-radius: 3px; }
+    .cv-mine-sheet .mine-turn.has-fail .mine-turn-bar i { background: var(--mine-loss); }
+    .cv-mine-sheet .mine-turn-detail {
+      margin: -2px 0 6px;
+      padding: 10px 12px;
+      border-radius: 0 0 11px 11px;
+      border: 0.5px dashed var(--separator);
+      border-top: 0;
+      background: #fff;
+      font-size: 12px;
+    }
+    .cv-mine-sheet .mine-turn-detail .kv-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+    .cv-mine-sheet .mine-turn-detail .kv-row span { padding: 2px 7px; border-radius: 7px; background: rgba(120, 120, 128, 0.08); font-variant-numeric: tabular-nums; }
+    .cv-mine-sheet .mine-turn-detail .kv-row span b { font-weight: 650; }
+
+    /* ledger ------------------------------------------------------------- */
+    .cv-mine-sheet .mine-blk {
+      margin: 0 0 14px;
+      padding: 10px 12px;
+      border-radius: 13px;
+      background: #fff;
+      border: 0.5px solid var(--separator);
+      border-left: 3px solid var(--mine-agent);
+      scroll-margin-top: 44px;
+    }
+    .cv-mine-sheet .mine-blk.axis-user { border-left-color: var(--mine-user); }
+    .cv-mine-sheet .mine-blk-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+    .cv-mine-sheet .mine-blk-h h3 { flex: 1; font-size: 13px; font-weight: 650; margin: 0; }
+    .cv-mine-sheet .mine-blk.axis-user .mine-blk-h h3 { color: var(--mine-user); }
+    .cv-mine-sheet .mine-blk.axis-agent .mine-blk-h h3 { color: var(--mine-agent); }
+    .cv-mine-sheet .mine-blk-h .axis { font-size: 10.5px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .cv-mine-sheet .mine-blk .note { font-size: 12px; color: var(--muted); margin: 0 0 8px; line-height: 1.45; }
+    .cv-mine-sheet .mine-cap { font-size: 11.5px; font-weight: 650; color: var(--muted); margin: 10px 0 4px; }
     .cv-mine-sheet table {
       width: 100%;
       border-collapse: collapse;
@@ -811,8 +1092,11 @@
       overflow-wrap: anywhere;
       white-space: pre-wrap;
     }
+    .cv-mine-sheet th { font-size: 11px; color: var(--muted); font-weight: 650; }
+    .cv-mine-sheet tbody tr:hover { background: rgba(120, 120, 128, 0.06); }
     .cv-mine-sheet td.path, .cv-mine-sheet td.repo, .cv-mine-sheet td.tool,
-    .cv-mine-sheet td.mcp, .cv-mine-sheet td.doc, .cv-mine-sheet td.prompt {
+    .cv-mine-sheet td.mcp, .cv-mine-sheet td.doc, .cv-mine-sheet td.prompt,
+    .cv-mine-sheet td.cmd, .cv-mine-sheet td.family {
       font-family: var(--font-mono);
       font-size: 12px;
     }
@@ -826,6 +1110,7 @@
       font: 600 12px/27px inherit;
       cursor: pointer;
     }
+    .cv-mine-sheet .mine-copy:hover, .cv-mine-sheet .mine-x:hover { background: rgba(120, 120, 128, 0.10); }
     .cv-mine-sheet .mine-empty { color: var(--muted); font-size: 13px; }
     .cv-mine-fab.is-on {
       color: var(--honey);
@@ -846,145 +1131,13 @@
       font-size: 11.5px;
       font-weight: 600;
     }
-    .cv-mine-sheet.is-pending .mine-scroll::before { content: "有新事件 · 收起明细后更新"; }
-    .cv-mine-sheet .mine-verdict {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px 14px;
-      padding: 10px 12px;
-      margin: 0 0 12px;
-      border-radius: 14px;
-      background: #fff;
-      border: 0.5px solid var(--separator);
+    .cv-mine-sheet.is-pending .mine-scroll::before { content: "有新事件 · 关掉回合明细后更新"; }
+    .cv-mine-sheet .mine-sec.is-hit,
+    .cv-mine-sheet .mine-blk.is-hit {
+      outline: 2px solid var(--mine-agent);
+      outline-offset: 2px;
+      transition: outline-color 0.6s ease;
     }
-    .cv-mine-sheet .mine-score {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-width: 52px;
-    }
-    .cv-mine-sheet .mine-score b {
-      font-size: 26px;
-      font-weight: 700;
-      line-height: 1;
-      font-variant-numeric: tabular-nums;
-      color: var(--muted);
-    }
-    .cv-mine-sheet .mine-score span { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-    .cv-mine-sheet .mine-verdict.g-good .mine-score b { color: var(--ok, #248a3d); }
-    .cv-mine-sheet .mine-verdict.g-ok .mine-score b { color: var(--honey); }
-    .cv-mine-sheet .mine-verdict.g-warn .mine-score b { color: #c2410c; }
-    .cv-mine-sheet .mine-verdict.g-bad .mine-score b { color: #b91c1c; }
-    .cv-mine-sheet .mine-kpis {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px 14px;
-      flex: 1;
-    }
-    .cv-mine-sheet .mine-kpi { display: flex; flex-direction: column; }
-    .cv-mine-sheet .mine-kpi b {
-      font-size: 15px;
-      font-weight: 650;
-      font-variant-numeric: tabular-nums;
-      line-height: 1.2;
-    }
-    .cv-mine-sheet .mine-kpi span { font-size: 11px; color: var(--muted); }
-    .cv-mine-sheet .mine-healthbar {
-      position: relative;
-      flex: 1 0 100%;
-      height: 22px;
-      border-radius: 7px;
-      background: rgba(120, 120, 128, 0.12);
-      overflow: hidden;
-    }
-    .cv-mine-sheet .mine-healthbar i {
-      position: absolute;
-      inset: 0 auto 0 0;
-      width: var(--v, 0%);
-      background: rgba(196, 122, 44, 0.28);
-    }
-    .cv-mine-sheet .mine-healthbar span {
-      position: relative;
-      display: block;
-      padding: 0 9px;
-      font-size: 11.5px;
-      line-height: 22px;
-      font-variant-numeric: tabular-nums;
-    }
-    .cv-mine-sheet .mine-sec-h {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin: 0 0 8px;
-      font-size: 12px;
-      font-weight: 650;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-    .cv-mine-sheet .mine-sec-h .mine-count {
-      min-width: 18px;
-      height: 18px;
-      padding: 0 5px;
-      border-radius: 980px;
-      background: var(--honey-soft);
-      color: var(--honey);
-      font-size: 11px;
-      line-height: 18px;
-      text-align: center;
-    }
-    .cv-mine-sheet .mine-fb-head {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 3px;
-    }
-    .cv-mine-sheet .mine-rank {
-      width: 16px;
-      height: 16px;
-      border-radius: 980px;
-      background: rgba(60, 60, 67, 0.10);
-      font-size: 10.5px;
-      line-height: 16px;
-      text-align: center;
-      color: var(--muted);
-      font-variant-numeric: tabular-nums;
-    }
-    .cv-mine-sheet .mine-sev {
-      padding: 1px 6px;
-      border-radius: 980px;
-      font-size: 10.5px;
-      font-weight: 650;
-      letter-spacing: 0.03em;
-    }
-    .cv-mine-sheet .mine-fb.sev-high { border-left: 3px solid #c2410c; }
-    .cv-mine-sheet .mine-fb.sev-med { border-left: 3px solid var(--honey); }
-    .cv-mine-sheet .mine-fb.sev-note { border-left: 3px solid rgba(60, 60, 67, 0.22); }
-    .cv-mine-sheet .mine-fb.sev-good { border-left: 3px solid var(--ok, #248a3d); }
-    .cv-mine-sheet .mine-fb.sev-high .mine-sev { background: rgba(194, 65, 12, 0.14); color: #c2410c; }
-    .cv-mine-sheet .mine-fb.sev-med .mine-sev { background: var(--honey-soft); color: var(--honey); }
-    .cv-mine-sheet .mine-fb.sev-note .mine-sev { background: rgba(60, 60, 67, 0.10); color: var(--muted); }
-    .cv-mine-sheet .mine-fb.sev-good .mine-sev { background: rgba(36, 138, 61, 0.14); color: var(--ok, #248a3d); }
-    .cv-mine-sheet .mine-fb .who { margin: 0; }
-    .cv-mine-sheet .mine-tables {
-      margin-top: 14px;
-      border-top: 0.5px solid var(--separator);
-      padding-top: 10px;
-    }
-    .cv-mine-sheet .mine-tables > summary {
-      cursor: pointer;
-      user-select: none;
-      font-size: 12px;
-      font-weight: 650;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      color: var(--muted);
-      list-style: none;
-    }
-    .cv-mine-sheet .mine-tables > summary::-webkit-details-marker { display: none; }
-    .cv-mine-sheet .mine-tables > summary::before { content: "▸ "; }
-    .cv-mine-sheet .mine-tables[open] > summary::before { content: "▾ "; }
     .cv-mine-sheet td.num {
       position: relative;
       font-variant-numeric: tabular-nums;
@@ -1164,14 +1317,14 @@
         </div>
         <div class="mine-dirs" id="mineDirs"></div>
       </div>
-      <div class="mine-scroll" id="mineBody"><p class="mine-empty">打开后按用户提醒/操作流程、工作目录、Git 库、失败/冗余与阶段挖资产。</p></div>`;
+      <div class="mine-scroll" id="mineBody"><p class="mine-empty">打开后给出：损耗判定 → 按 $/秒 排序的结论 → 回合时间轴 → 账本。每条结论带证据回合与可复测指标。</p></div>`;
     cornerMount.appendChild(mineSheet);
     const mineBody = mineSheet.querySelector("#mineBody");
     const mineDirsEl = mineSheet.querySelector("#mineDirs");
     let mineLast = null;
     let mineRefreshTimer = 0;
     let mineChipSig = "";
-    let mineDetailOpen = false;
+    let mineOpenTurn = null;
     let mineSig = "";
     let mineAutoAt = 0;
     let minePending = false;
@@ -1220,122 +1373,299 @@
       }).join("")}</tr>`).join("");
       return `${cap}<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     };
+    const gradeClass = (score) => (score >= 85 ? "g-good" : score >= 70 ? "g-ok" : score >= 50 ? "g-warn" : "g-bad");
+    const MINE_PHASES = ["implement", "review", "debug", "ship", "taste"];
+    const MINE_PHASE_LABEL = { implement: "实现", review: "评审", debug: "排查", ship: "提交", taste: "规范" };
     const MINE_SEV = {
       high: { cls: "sev-high", label: "需处理" },
       med: { cls: "sev-med", label: "注意" },
       note: { cls: "sev-note", label: "观察" },
       good: { cls: "sev-good", label: "良好" },
     };
-    const gradeClass = (score) => (score >= 85 ? "g-good" : score >= 70 ? "g-ok" : score >= 50 ? "g-warn" : "g-bad");
     const mineSpan = (v) => {
       const n = Number(v) || 0;
-      return n >= 3600 ? `${(n / 3600).toFixed(1)}h` : `${Math.round(n)}s`;
+      if (n >= 3600) return `${(n / 3600).toFixed(1)}h`;
+      if (n >= 60) return `${Math.round(n)}s`;
+      return `${Math.round(n * 10) / 10}s`;
     };
-    const renderHealth = (s) => {
-      if (!s) return "";
+    const mineUsd = (v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "—";
+      return n >= 0.1 ? `$${n.toFixed(3)}` : `$${n.toFixed(4)}`;
+    };
+    const mineMetric = (data, id) => (((data || {}).metrics) || []).find((m) => m.id === id) || null;
+    const minePctOf = (v, total) => Math.max(0, Math.min(100, Math.round((100 * (Number(v) || 0)) / (Number(total) || 1))));
+    const mineDeltaTxt = (m) => {
+      if (!m || m.delta === null || m.delta === undefined) return "";
+      const d = Number(m.delta);
+      if (!Number.isFinite(d) || d === 0) return "Δ0";
+      return `Δ${d > 0 ? "+" : "-"}${Math.abs(d) >= 100 ? Math.round(Math.abs(d)) : Math.round(Math.abs(d) * 100) / 100}`;
+    };
+    const mineDeltaCls = (m) => {
+      if (!m || m.delta === null || m.delta === undefined) return "";
+      const d = Number(m.delta);
+      if (!Number.isFinite(d) || d === 0) return "";
+      const worse = m.dir === "up" ? d < 0 : d > 0;
+      return worse ? "up" : "down";
+    };
+    const mineBarPct = (m) => {
+      if (!m || m.target === null || m.target === undefined) return 0;
+      const now = Number(m.value) || 0;
+      const tgt = Number(m.target) || 0;
+      if (tgt <= 0) return now > 0 ? 100 : 0;
+      return Math.max(4, Math.min(100, Math.round((100 * now) / tgt)));
+    };
+    const renderVerdict = (data) => {
+      const s = data.summary || {};
       const h = s.health || {};
+      const flow = s.flow || {};
+      const losses = data.losses || [];
+      const lossS = losses.reduce((a, l) => a + (Number(l.s) || 0), 0);
+      const lossUsd = losses.reduce((a, l) => a + (Number(l.usd) || 0), 0);
       const score = Number(h.score) || 0;
-      const tiles = [
-        ["回合", s.n_turns ?? 0],
-        ["工具", s.n_tools ?? 0],
-        ["工具/回合", s.tools_per_turn ?? 0],
-        ["工作秒", s.work_s ?? 0],
-        ["等待秒", s.wait_s ?? 0],
-        ["失败", s.fail_n ?? 0],
-        ["冗余读", s.redundant_reads ?? 0],
-        ["prompt", s.flow?.prompt_n ?? 0],
-        ["额外往返", s.flow?.extra_roundtrips ?? 0],
-        ["目录/仓库", `${s.distinct_cwd ?? 0}/${s.distinct_repo ?? 0}`],
-        ["跨度", mineSpan(s.duration_s)],
-        ["空档", mineSpan(s.idle_s)],
+      const defs = [
+        ["工作秒", mineSpan(s.work_s), "work_s", "t-time"],
+        ["等待秒", mineSpan(s.wait_s), "wait_s", "t-time"],
+        ["可归因损耗", mineSpan(lossS), "loss_s", "t-loss"],
+        ["失败调用", s.fail_n ?? 0, "fail_n", "t-loss"],
+        ["额外往返", flow.extra_roundtrips ?? 0, "extra_trips", "t-loss"],
+        ["费用", s.usage_turns ? mineUsd(s.cost_usd) : "—", "cost_usd", "t-money"],
+        ["缓存命中", s.usage_turns ? `${s.cache_hit_pct}%` : "—", "cache_hit_pct", "t-money"],
+        ["工具/回合", s.tools_per_turn ?? 0, "tools_per_turn", ""],
       ];
-      if (s.usage_turns) {
-        tiles.push(["费用 USD", s.cost_usd ?? "-"]);
-        tiles.push(["缓存命中%", s.cache_hit_pct ?? "-"]);
+      const tiles = defs.map(([label, value, id, cls]) => {
+        const m = mineMetric(data, id);
+        const dTxt = mineDeltaTxt(m);
+        return `<div class="mine-kpi"><b class="${cls}">${escMine(value)}</b><span>${escMine(label)}</span>`
+          + (dTxt ? `<em class="${mineDeltaCls(m)}">${escMine(dTxt)}</em>` : "")
+          + "</div>";
+      }).join("");
+      const workOk = Math.max(0, (Number(s.work_s) || 0) - (Number(s.fail_s) || 0));
+      const wall = workOk + (Number(s.wait_s) || 0) + (Number(s.fail_s) || 0);
+      const tOut = Number(s.tokens_out) || 0;
+      const tCw = Number(s.cache_write) || 0;
+      const tCr = Number(s.cache_read) || 0;
+      const tokTotal = tOut + tCw + tCr;
+      const rows = [`<div class="mine-bar-row"><span>时间</span><div class="mine-stack">`
+        + `<i class="s-work" style="width:${minePctOf(workOk, wall)}%"></i>`
+        + `<i class="s-wait" style="width:${minePctOf(s.wait_s, wall)}%"></i>`
+        + `<i class="s-fail" style="width:${minePctOf(s.fail_s, wall)}%"></i>`
+        + `</div><span>${escMine(mineSpan(wall))}</span></div>`];
+      if (tokTotal) {
+        rows.push(`<div class="mine-bar-row"><span>tokens</span><div class="mine-stack">`
+          + `<i class="s-out" style="width:${minePctOf(tOut, tokTotal)}%"></i>`
+          + `<i class="s-cw" style="width:${minePctOf(tCw, tokTotal)}%"></i>`
+          + `<i class="s-cr" style="width:${minePctOf(tCr, tokTotal)}%"></i>`
+          + `</div><span>${escMine(tOut.toLocaleString())} 出</span></div>`);
       }
-      const kpis = tiles.map(([k, v]) => `<div class="mine-kpi"><b>${escMine(v)}</b><span>${escMine(k)}</span></div>`).join("");
-      const waste = Math.max(0, Math.min(100, Number(h.waste_pct) || 0));
-      return `<div class="mine-verdict ${gradeClass(score)}">
-          <div class="mine-score"><b>${escMine(h.score ?? "-")}</b><span>${escMine(h.grade || "")}</span></div>
-          <div class="mine-kpis">${kpis}</div>
-          <div class="mine-healthbar"><i style="--v:${waste}%"></i><span>浪费 ${escMine(h.waste_pct ?? 0)}% · 失败率 ${escMine(h.fail_rate ?? 0)}%</span></div>
+      const legend = `<div class="mine-legend"><span><i style="background:var(--mine-time)"></i>工作（不含失败）</span>`
+        + `<span><i style="background:rgba(60,60,67,0.35)"></i>等待</span>`
+        + `<span><i style="background:var(--mine-loss)"></i>失败</span>`
+        + (tokTotal ? `<span><i style="background:var(--mine-money)"></i>输出</span><span><i style="background:var(--mine-user)"></i>写缓存</span><span><i style="background:rgba(47,143,131,0.35)"></i>缓存读</span>` : "")
+        + "</div>";
+      return `<section class="mine-sec" id="mineVerdict">
+          <div class="mine-sec-h">损耗判定<span class="mine-count">${losses.length}</span><span class="mine-hint">可归因 ${escMine(mineSpan(lossS))}${lossUsd ? ` · ${escMine(mineUsd(lossUsd))}` : ""}</span></div>
+          <div class="mine-verdict ${gradeClass(score)}">
+            <div class="mine-score"><b>${escMine(h.score ?? "-")}</b><span>${escMine(h.grade || "")}</span></div>
+            <div class="mine-kpis">${tiles}</div>
+            <div class="mine-compose">${rows.join("")}${legend}</div>
+          </div>
+        </section>`;
+    };
+    const abbrev = (s, n = 46) => {
+      const t = String(s || "");
+      if (t.length <= n) return t;
+      const head = Math.ceil((n - 1) / 2);
+      return `${t.slice(0, head)}…${t.slice(t.length - (n - 1 - head))}`;
+    };
+    const renderRefs = (refs) => {
+      // The same failure repeats; show it once with a count instead of six chips.
+      const seen = new Map();
+      (refs || []).forEach((r) => {
+        if (r.turn === null || r.turn === undefined) return;
+        const key = `${r.turn}|${r.label}|${r.exit_code || ""}`;
+        const hit = seen.get(key);
+        if (hit) hit.n += 1;
+        else seen.set(key, { ref: r, n: 1 });
+      });
+      const chips = [...seen.values()].slice(0, 4).map(({ ref: r, n }) =>
+        `<button type="button" class="mine-ref" data-turn="${Number(r.turn)}" title="${escMine(`${r.label || ""} ${r.event_id || ""}`)}">#${Number(r.turn)} ${escMine(abbrev(r.label))}${r.exit_code ? ` · exit ${r.exit_code}` : ""}${n > 1 ? ` ×${n}` : ""}</button>`);
+      const more = [...seen.values()].length - chips.length;
+      if (more > 0) chips.push(`<button type="button" class="mine-ref" data-turn="${Number([...seen.values()][4].ref.turn)}" title="展开该回合看全部证据">+${more} 更多（点回合看明细）</button>`);
+      (refs || []).filter((r) => r.turn === null || r.turn === undefined).slice(0, 4)
+        .forEach((r) => chips.push(`<span class="mine-ref">${escMine(abbrev(r.label))}</span>`));
+      return chips.length ? `<div class="mine-refs">${chips.join("")}</div>` : "";
+    };
+    const renderLosses = (data) => {
+      const list = data.findings || [];
+      const head = `<div class="mine-sec-h">损耗排行 · 按 $ / 秒<span class="mine-count">${list.length}</span>`
+        + (list.some((f) => (f.impact || {}).kind === "estimated") ? `<span class="mine-hint">含估算项</span>` : "")
+        + "</div>";
+      if (!list.length) {
+        return `<section class="mine-sec" id="mineLosses">${head}<p class="mine-empty">${data.n_rows ? "没有信号形成结论" : "还没有足够事件"}</p></section>`;
+      }
+      const cards = list.map((f, i) => {
+        const sev = MINE_SEV[f.sev] || MINE_SEV.note;
+        const imp = f.impact || {};
+        const m = f.metric;
+        const mm = m ? mineMetric(data, m.id) : null;
+        const reached = !!(m && m.target !== null && m.target !== undefined && mm && mm.dir !== "up" && Number(m.now) <= Number(m.target));
+        const metricRow = m
+          ? `<div class="mine-metric${reached ? " good" : ""}"><span class="k">${escMine((mm && mm.label) || m.id)}</span>`
+            + `<span class="now">${escMine(m.now ?? "—")}${escMine(m.unit || "")}</span>`
+            + (m.target === null || m.target === undefined
+              ? ""
+              : `<span class="arrow">→</span><span class="tgt">目标 ${escMine(m.target)}${escMine(m.unit || "")}</span><span class="mine-track"><i style="--v:${mm ? mineBarPct(mm) : 0}%"></i></span>`)
+            + (mm && mineDeltaTxt(mm) ? `<span class="delta ${mineDeltaCls(mm)}">较基线 ${escMine(mineDeltaTxt(mm))}</span>` : "")
+            + "</div>"
+          : "";
+        return `<article class="mine-loss ${sev.cls}" id="loss-${escMine(f.id || i)}">
+            <div class="mine-loss-h"><span class="mine-rank">${i + 1}</span><span class="mine-sev">${sev.label}</span>
+              <h4>${escMine(f.title || "")}</h4>
+              <span class="mine-impact"><b class="${imp.usd ? "usd" : ""}">${escMine(mineSpan(imp.s))}${imp.usd ? ` · ${escMine(mineUsd(imp.usd))}` : ""}</b>${escMine(imp.kind === "estimated" ? "估算" : "实测")}</span>
+            </div>
+            ${metricRow}
+            <p class="mine-claim">${escMine(f.text || "")}</p>
+            ${f.cause ? `<p class="mine-line"><b>原因</b>${escMine(f.cause)}</p>` : ""}
+            ${f.action ? `<p class="mine-line action"><b>动作</b>${escMine(f.action)}</p>` : ""}
+            ${f.gate ? `<p class="mine-line gate"><b>闸门</b>${escMine(String(f.gate).replace(/^-\s*/, ""))}</p>` : ""}
+            ${(f.refs || []).length ? renderRefs(f.refs) : ""}
+          </article>`;
+      }).join("");
+      return `<section class="mine-sec" id="mineLosses">${head}${cards}</section>`;
+    };
+    const renderTurnDetail = (data, idx) => {
+      const t = (data.turns || []).find((x) => Number(x.index) === Number(idx));
+      if (!t) return "";
+      const chips = [["工具", t.tools], ["失败", t.fails], ["重试", t.retries], ["工作", mineSpan(t.work_s)],
+        ["等待", mineSpan(t.wait_s)], ["费用", t.cost_usd ? mineUsd(t.cost_usd) : "—"],
+        ["输出 tok", t.tokens_out], ["写缓存", t.cache_write]]
+        .map(([k, v]) => `<span>${escMine(k)} <b>${escMine(v)}</b></span>`).join("");
+      const refs = [];
+      (data.findings || []).forEach((f) => (f.refs || []).forEach((r) => {
+        if (Number(r.turn) === Number(idx)) refs.push(r);
+      }));
+      return `<div class="mine-turn-detail" data-turn-detail="${Number(idx)}">
+          <div class="kv-row">${chips}</div>
+          <p class="mine-line"><b>prompt</b>${escMine(t.prompt || "")}</p>
+          ${t.nudge ? `<p class="mine-line"><b>性质</b>短催回合：这一整个回合的成本计入返工损耗。</p>` : ""}
+          ${refs.length ? renderRefs(refs) : ""}
         </div>`;
     };
+    const renderTimeline = (data) => {
+      const turns = data.turns || [];
+      if (!turns.length) return "";
+      const maxW = Math.max(1, ...turns.map((t) => Number(t.wall_s) || 0));
+      const cards = turns.map((t) => {
+        const w = Math.max(3, Math.round((100 * (Number(t.wall_s) || 0)) / maxW));
+        const ph = MINE_PHASES.includes(t.phase) ? t.phase : "other";
+        const open = Number(mineOpenTurn) === Number(t.index);
+        const btn = `<button type="button" class="mine-turn ph-${ph}${t.fails ? " has-fail" : ""}${open ? " is-open" : ""}" data-mine-turn="${Number(t.index)}" id="turn-${Number(t.index)}">
+            <span class="mine-turn-h"><b>#${Number(t.index)}</b><em>${escMine(MINE_PHASE_LABEL[t.phase] || "其他")}</em><i>${escMine(localDateTime(t.ts) || "")}</i></span>
+            <span class="mine-turn-stat">${Number(t.tools)} 工具${t.fails ? ` · ${Number(t.fails)} 失败` : ""}${t.cost_usd ? ` · ${mineUsd(t.cost_usd)}` : ""} · ${escMine(mineSpan(t.wall_s))}</span>
+            <span class="mine-turn-p">${escMine(t.prompt || "")}</span>
+            <span class="mine-turn-bar"><i style="width:${w}%"></i></span>
+          </button>`;
+        return btn + (open ? renderTurnDetail(data, t.index) : "");
+      }).join("");
+      const inst = ((data.window || {}).instances || []).join("、");
+      return `<section class="mine-sec" id="mineTimeline">
+          <div class="mine-sec-h">回合时间轴<span class="mine-count">${turns.length}</span><span class="mine-hint">条宽 = 墙钟占比 · 点击就地展开</span></div>
+          ${inst && inst.includes("、") ? `<p class="mine-line"><b>多实例</b>窗口含 ${escMine(inst)}，按事件时间合并。</p>` : ""}
+          <div class="mine-turns">${cards}</div>
+        </section>`;
+    };
+    const renderLedger = (data) => {
+      const active = data.active || null;
+      const blocks = Object.entries(data.blocks || {}).filter(([id]) => !active || active.includes(id));
+      if (!blocks.length) return "";
+      const secs = blocks.map(([id, b]) => {
+        const tables = (b.tables && b.tables.length ? b.tables : (b.table ? [b.table] : [])).map(renderTable).join("");
+        if (!tables) return "";
+        const axis = b.axis === "user" ? "user" : "agent";
+        return `<section class="mine-blk axis-${axis}" id="blk-${escMine(id)}">
+            <div class="mine-blk-h"><span class="axis">${axis === "user" ? "用户" : "Agent"}</span><h3>${escMine(b.title || id)}</h3></div>
+            ${b.note ? `<p class="note">${escMine(b.note)}</p>` : ""}
+            ${tables}
+          </section>`;
+      }).join("");
+      return `<section class="mine-sec" id="mineLedger">
+          <div class="mine-sec-h">账本 · 事实<span class="mine-count">${blocks.length}</span><span class="mine-hint">始终展开</span></div>${secs}
+        </section>`;
+    };
+    const renderNav = (data) => {
+      // Jump bar only: the direction chips in the head are the *filter*, and
+      // duplicating them here made the hierarchy unreadable.
+      const chips = [`<button type="button" data-jump="mineLosses">损耗 ${(data.findings || []).length}</button>`];
+      if ((data.turns || []).length) chips.push(`<button type="button" data-jump="mineTimeline">回合 ${(data.turns || []).length}</button>`);
+      chips.push(`<button type="button" data-jump="mineLedger">账本 ${Object.keys(data.blocks || {}).length}</button>`);
+      return `<nav class="mine-nav">${chips.join("")}</nav>`;
+    };
     const mineDataSig = (data) => {
-      const s = (data && data.summary) || {};
-      const fl = s.flow || {};
+      if (!data || !data.ok) return `err:${(data && data.error) || ""}`;
+      const s = data.summary || {};
       return JSON.stringify([
-        s.n_rows, s.n_turns, s.n_tools, s.work_s, s.wait_s, s.fail_n, s.redundant_reads,
-        s.health && s.health.score, s.cost_usd, s.cache_hit_pct, s.usage_turns,
-        fl.prompt_n, fl.extra_roundtrips, fl.correction_n,
-        ((data && data.feedback) || []).map((f) => `${f.sev || ""}:${f.title || ""}:${f.draft || ""}`),
-        (data && data.active) || null,
+        data.scope, s.n_rows, s.n_turns, s.n_tools, s.work_s, s.wait_s, s.fail_n, s.idle_s, s.cost_usd,
+        (data.losses || []).map((l) => `${l.id}:${l.s}:${l.usd}`),
+        (data.findings || []).map((f) => `${f.id}:${f.sev}:${(f.impact || {}).s}:${(f.impact || {}).usd}`),
+        (data.turns || []).length,
+        (data.metrics || []).map((m) => `${m.id}=${m.value}${m.delta === null || m.delta === undefined ? "" : `d${m.delta}`}`),
+        (data.baseline || {}).source || "",
+        data.active,
       ]);
     };
     const renderMine = (data, { auto = false } = {}) => {
       // Auto refresh must not repaint identical content: it would drop scroll
-      // and collapse the user's expanded 方向明细.
+      // and collapse the turn detail the user opened.
       if (auto && mineDataSig(data) === mineSig) return;
       mineSig = mineDataSig(data);
       mineLast = data;
       paintMineChips(data.directions);
       const prevScroll = mineBody.scrollTop;
       const sum = mineSheet.querySelector("#mineSum");
-      const s = data && data.summary;
       if (sum) {
-        sum.textContent = s
-          ? `${s.n_turns || 0} 回合 · ${s.n_tools || 0} 工具 · 工作 ${s.work_s || 0}s · 等待 ${s.wait_s || 0}s · ${s.span || ""}`
-          : "";
+        if (!data || !data.ok) {
+          sum.innerHTML = "";
+        } else {
+          const w = data.window || {};
+          const s = data.summary || {};
+          sum.innerHTML = `${escMine(localDateTime(w.from) || w.from || "?")} → ${escMine(localDateTime(w.to) || w.to || "?")}`
+            + ` · ${s.n_turns || 0} 回合 · ${s.n_tools || 0} 工具`
+            + (w.instances && w.instances.length ? ` · ${escMine(w.instances.join("/"))}` : "")
+            + (w.truncated ? `<span class="mine-flag warn">12000 行截断</span>` : "")
+            + (data.baseline && data.baseline.source ? `<span class="mine-flag base">对照 ${escMine(data.baseline.source)}</span>` : "")
+            + (s.usage_turns ? "" : `<span class="mine-flag est">无计费数据</span>`);
+        }
       }
       if (!data || !data.ok) {
         mineBody.innerHTML = `<p class="mine-empty">分析失败${data && data.error ? " · " + escMine(data.error) : ""}</p>`;
         return;
       }
-      const found = data.feedback || [];
-      const fb = found.map((f, i) => {
-        const who = f.audience === "agent" ? "给 Agent / AGENTS.md" : "给用户 / prompt";
-        const sev = MINE_SEV[f.sev] || MINE_SEV.note;
-        return `<article class="mine-fb ${sev.cls}">
-            <div class="mine-fb-head"><span class="mine-rank">${i + 1}</span><span class="mine-sev">${sev.label}</span><span class="who">${escMine(who)}</span></div>
-            <div class="ttl">${escMine(f.title || "")}</div>
-            <div>${escMine(f.text || "")}</div>
-            ${f.evidence ? `<div class="ev">${escMine(f.evidence)}</div>` : ""}
-            ${f.draft ? `<pre class="draft">${escMine(f.draft)}</pre>` : ""}
-          </article>`;
-      }).join("");
-      const blocks = data.active
-        ? data.active.map((id) => data.blocks && data.blocks[id]).filter(Boolean)
-        : Object.values(data.blocks || {});
-      const sections = blocks.map((b) => {
-        const tables = (b.tables && b.tables.length ? b.tables : (b.table ? [b.table] : [])).map(renderTable).join("");
-        if (!tables) return "";
-        return `<section class="mine-block">
-            <h3>${escMine(b.axis === "user" ? "用户 · " : "Agent · ")}${escMine(b.title)}</h3>
-            ${b.note ? `<p class="note">${escMine(b.note)}</p>` : ""}
-            ${tables}
-          </section>`;
-      }).join("");
-      const findings = fb
-        ? `<div class="mine-sec-h">诊断<span class="mine-count">${found.length}</span></div>${fb}`
-        : `<p class="mine-empty">${data.n_rows ? "没有信号形成反馈" : "还没有足够事件"}</p>`;
-      const detail = sections
-        ? `<details class="mine-tables"><summary>方向明细 · ${blocks.length} 组</summary>${sections}</details>`
-        : "";
-      mineBody.innerHTML = renderHealth(s) + findings + detail;
-      const det = mineBody.querySelector(".mine-tables");
-      if (det) {
-        det.open = mineDetailOpen;
-        det.addEventListener("toggle", () => {
-          mineDetailOpen = det.open;
-          // Don't wipe an expanded detail under the user; refresh once collapsed.
-          if (!det.open && minePending) {
-            minePending = false;
-            mineSheet.classList.remove("is-pending");
-            scheduleMineRefresh();
-          }
-        });
-      }
+      mineBody.innerHTML = renderNav(data) + renderVerdict(data) + renderLosses(data) + renderTimeline(data) + renderLedger(data);
       mineBody.scrollTop = prevScroll;
+    };
+    const jumpMineTo = (id) => {
+      const el = mineBody.querySelector(`[id="${id}"]`);
+      if (!el) return;
+      el.scrollIntoView({ block: "start" });
+      el.classList.add("is-hit");
+      window.setTimeout(() => el.classList.remove("is-hit"), 1200);
+    };
+    const openMineTurn = (idx) => {
+      const n = Number(idx);
+      mineOpenTurn = Number(mineOpenTurn) === n ? null : n;
+      if (mineLast && mineLast.ok) {
+        const keep = mineBody.scrollTop;
+        renderMine(mineLast, { auto: false });
+        mineBody.scrollTop = keep;
+      }
+      const el = mineBody.querySelector(`#turn-${n}`);
+      if (el) el.scrollIntoView({ block: "center" });
+      if (mineOpenTurn === null && minePending) {
+        minePending = false;
+        mineSheet.classList.remove("is-pending");
+        scheduleMineRefresh();
+      }
     };
     const loadMine = async ({ auto = false } = {}) => {
       if (!mineState.open || mineState.loading) return;
@@ -1350,6 +1680,9 @@
         mineBody.innerHTML = '<p class="mine-empty">分析中…</p>';
       }
       const params = new URLSearchParams({ scope: mineState.scope });
+      // Baseline (previous window) doubles the query; auto refresh skips it and
+      // keeps the last Δ from the manual load.
+      if (!auto) params.set("baseline", "1");
       if (mineState.scope === "session" && current) params.set("session_id", current);
       if (mineState.dirs.length) params.set("dirs", mineState.dirs.join(","));
       try {
@@ -1369,8 +1702,8 @@
       const wait = Math.max(2000, MINE_AUTO_MIN_MS - (Date.now() - mineAutoAt));
       mineRefreshTimer = window.setTimeout(() => {
         mineRefreshTimer = 0;
-        if (mineDetailOpen) {
-          // User is reading an expanded 方向明细: mark stale, don't repaint.
+        if (mineOpenTurn !== null) {
+          // User is reading an expanded turn detail: mark stale, don't repaint.
           minePending = true;
           mineSheet.classList.add("is-pending");
           return;
@@ -1406,14 +1739,43 @@
       ev.stopPropagation();
       setMineOpen(!mineState.open);
     });
+    // Deep link for verification and for "open analysis of the current session":
+    // /trae/?mine=1 opens the sheet once a session is selected.
+    if (/(?:^|[?&])mine=1(?:[=&]|$)/.test(location.search)) {
+      let mineBootTries = 0;
+      const bootOpenMine = () => {
+        if (current || mineState.scope === "recent" || ++mineBootTries > 25) {
+          setMineOpen(true);
+          return;
+        }
+        window.setTimeout(bootOpenMine, 200);
+      };
+      window.setTimeout(bootOpenMine, 300);
+    }
     mineSheet.querySelector("#mineClose").addEventListener("click", (ev) => {
       ev.preventDefault();
       setMineOpen(false);
     });
     mineSheet.addEventListener("click", (ev) => {
+      const jump = ev.target.closest("[data-jump]");
+      if (jump) {
+        jumpMineTo(jump.getAttribute("data-jump"));
+        return;
+      }
+      const turnBtn = ev.target.closest("[data-mine-turn]");
+      if (turnBtn) {
+        openMineTurn(turnBtn.getAttribute("data-mine-turn"));
+        return;
+      }
+      const refBtn = ev.target.closest("[data-turn]");
+      if (refBtn) {
+        openMineTurn(refBtn.getAttribute("data-turn"));
+        return;
+      }
       const scopeBtn = ev.target.closest("[data-scope]");
       if (scopeBtn) {
         mineState.scope = scopeBtn.getAttribute("data-scope") || "session";
+        mineOpenTurn = null;
         persistMine();
         paintMineChips();
         loadMine();
@@ -1427,17 +1789,28 @@
         if (i >= 0) dirs.splice(i, 1);
         else dirs.push(id);
         mineState.dirs = dirs;
+        mineOpenTurn = null;
         persistMine();
         paintMineChips();
         loadMine();
       }
     });
     mineSheet.querySelector("#mineCopy").addEventListener("click", async () => {
-      const drafts = (mineLast && mineLast.feedback || []).map((f) => f.draft).filter(Boolean);
-      const body = drafts.length
-        ? drafts.join("\n")
-        : (mineLast && mineLast.feedback || []).map((f) => `- ${f.text}`).join("\n");
-      const md = "# 从会话分析得到的约束\n\n" + body + "\n";
+      const found = (mineLast && (mineLast.findings || mineLast.feedback)) || [];
+      const ruled = found.filter((f) => f.draft);
+      const win = (mineLast && mineLast.window) || {};
+      const md = [
+        `# 从会话分析得到的约束（${(mineLast && mineLast.scope) || "session"} · ${win.from || ""} → ${win.to || ""}）`,
+        "",
+        ...(ruled.length ? ruled.map((f, i) => {
+          const imp = f.impact || {};
+          const cost = [imp.s ? `${imp.s}s` : "", imp.usd ? `$${imp.usd}` : ""].filter(Boolean).join(" / ");
+          return [`## ${i + 1}. ${f.title}${cost ? `（${cost}，${imp.kind === "estimated" ? "估算" : "实测"}）` : ""}`, f.draft, ""].join("\n");
+        }) : found.map((f) => `- ${f.text || f.title}`)),
+        "",
+        "<!-- 复测：同一窗口重跑会话分析，指标应向 target 移动 -->",
+        "",
+      ].join("\n");
       try {
         await navigator.clipboard.writeText(md);
         mineSheet.querySelector("#mineCopy").textContent = "已复制";

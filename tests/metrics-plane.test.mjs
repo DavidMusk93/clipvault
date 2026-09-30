@@ -88,7 +88,10 @@ test('mine exposes the metrics direction and derives cost/cache/tok-per-second',
 });
 
 test('sessions UI surfaces cost and cache hit', () => {
-  assert.match(html, /\["费用 USD", s\.cost_usd/);
-  assert.match(html, /\["缓存命中%", s\.cache_hit_pct/);
-  assert.match(html, /s\.cost_usd, s\.cache_hit_pct, s\.usage_turns/);
+  // The v2 sheet shows money/cache as colored KPI tiles with a baseline delta.
+  assert.match(html, /\["费用", s\.usage_turns \? mineUsd\(s\.cost_usd\)/);
+  assert.match(html, /\["缓存命中", s\.usage_turns \? `\$\{s\.cache_hit_pct\}%`/);
+  assert.match(html, /s\.cost_usd/);
+  assert.match(html, /cache_hit_pct/);
+  assert.match(html, /s\.usage_turns \? "" : `<span class="mine-flag est">无计费数据<\/span>`/);
 });

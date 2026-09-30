@@ -186,7 +186,10 @@ def main() -> None:
     ok("mine-cost", overview["费用 USD"] == "0.0031", overview.get("费用 USD", ""))
     ok("mine-hit", overview["缓存命中率"] == "90.9%", overview.get("缓存命中率", ""))
     ok("mine-tok-s", overview["端到端 tok/s"] == "19.1", overview.get("端到端 tok/s", ""))
-    ok("mine-skill-feedback", any("bytedcli" in f["title"] for f in feedback), str([f["title"] for f in feedback]))
+    # metrics_analysis is facts only now: findings come from the loss account.
+    ok("mine-no-keyword-feedback", feedback == [], str(feedback))
+    skill_tbl = [t for t in block["tables"] if t["caption"].startswith("Skill")]
+    ok("mine-skill-table", bool(skill_tbl) and any("bytedcli" in r["skill"] for r in skill_tbl[0]["rows"]), str(skill_tbl)[:200])
 
     ok("mine-empty-safe", metrics_analysis([], []) == (None, []))
 
