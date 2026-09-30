@@ -243,7 +243,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
     禁止嵌套 <<<<<<<；≥3 个起算爆炸，启动 flatten
 ```
 
-工具条向源码插 Markdown，不改预览 DOM。**预览藏工具条**（只留模式切换）。删除线钮面是字母 **S** 加删除线（GFM `~~`，`Mod-Shift-x`），不靠 Material ligature、不用汉字。禁止预览露出标记钮。预览纸面宽 = 父 `.notes-preview` 的 **0.618**；代码块头栏「换行」+「复制」，**默认不换行**。禁止把预览卡死在 `38rem`；禁止默认 `pre-wrap`。换行必须 **token-atomic**，四条面共用一个真源 `web/assets/notes-wrap.mjs`：预览代码块 + 预览正文/行内代码 + 源码分栏（CodeMirror `.cm-atomic` mark，只看 `visibleRanges`）+ 墙卡片正文（`.md-preview` / `.notes-rich-inner`，`index.html` 懒加载同一模块）。带内部断点的串套 `.notes-tok` 后是 `inline-block; max-width:100%`，超长串才兜底断。Chrome 实测只在 `- ? – — …` 后、`（` 前断（ASCII `/ : . , _ =` 不断，CJK 按字断是正常排印不强守）；禁止 `overflow-wrap:anywhere` / `word-break:break-word`，禁止靠 CSS 猜 token（`keep-all` 挡不住拉丁连字符）。墙的 `pre` / `.is-mono` 是 pan 面，不得套 guard。
+工具条向源码插 Markdown，不改预览 DOM。**预览藏工具条**（只留模式切换）。删除线钮面是字母 **S** 加删除线（GFM `~~`，`Mod-Shift-x`），不靠 Material ligature、不用汉字。禁止预览露出标记钮。预览纸面宽 = 父 `.notes-preview` 的 **0.618**；代码块头栏「换行」+「复制」，**默认不换行**。禁止把预览卡死在 `38rem`；禁止默认 `pre-wrap`。换行必须 **token-atomic**，四条面共用一个真源 `web/assets/notes-wrap.mjs`：预览代码块 + 预览正文/行内代码 + 源码分栏（CodeMirror `.cm-atomic` mark，只看 `visibleRanges`）+ 墙卡片正文（`.md-preview` / `.notes-rich-inner`，`index.html` 懒加载同一模块）。一**个空白串里的「非 CJK 段」**带内部断点时才套 `.notes-tok`（`inline-block; max-width:100%`），超长段才兜底断。Chrome 实测只在 `- ? – — …` 后、`（` 前断（ASCII `/ : . , _ =` 不断）；CJK 按字断是正常排印，**必须留在 guard 外面**（`笔记分栏编辑界面，--ip` 只守 `--ip`，否则窄栏下 guard 被 `max-width` 夹紧、兜底断就落在 `-` 上）。禁止 `overflow-wrap:anywhere` / `word-break:break-word`，禁止靠 CSS 猜 token（`keep-all` 挡不住拉丁连字符）；禁止把 CJK 包进 guard。墙的 `pre` / `.is-mono` 是 pan 面，不得套 guard。
 
 禁止：Vditor / Crepe WYSIWYG；textarea 玩具编辑器；另开文档页；笔记另搞 `note_pin` trx。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`。列表失败禁止开空白新笔记。
 
