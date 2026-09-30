@@ -79,6 +79,47 @@ test('preview code wraps and has a copy button', () => {
   assert.doesNotMatch(css, /\.notes-preview-inner pre[\s\S]{0,200}white-space:\s*pre-wrap/);
 });
 
+test('wrap mode is token-atomic: `--ip` never splits across lines', { skip: skipJsdom }, async () => {
+  const { wrapAtomicTokens, atomicRuns, TOKEN_CLASS } = await import('../web/notes-wrap.mjs');
+  // Unit: runs are whitespace-delimited, not UAX #14 break points.
+  assert.deepEqual(atomicRuns('a --ip\n10.20.30.40').map((r) => r.text), ['a', '--ip', '10.20.30.40']);
+  // CSS contract: guard runs, but let an over-long run break instead of scroll.
+  assert.match(css, /\.notes-code\.is-wrap pre \.notes-tok \{[\s\S]{0,120}display: inline-block/);
+  assert.match(css, /\.notes-code\.is-wrap pre \.notes-tok \{[\s\S]{0,120}max-width: 100%/);
+  assert.match(css, /overflow-wrap: break-word/);
+  assert.doesNotMatch(css, /overflow-wrap: anywhere/);
+  assert.match(css, /word-break: normal/);
+  assert.doesNotMatch(css, /word-break: break-word/);
+  // Wiring: entry tokenizes after hljs; the bundle vendoring copies the module.
+  assert.match(entry, /import \{ wrapAtomicTokens \} from '\.\.\/\.\.\/notes-wrap\.mjs'/);
+  assert.match(entry, /wrapAtomicTokens\(code\)/);
+  assert.match(vendor, /notes-wrap\.mjs/);
+
+  const dom = new JSDOM('<!doctype html><body><pre><code class="hljs"><span class="hljs-meta">--</span>ip 10.20.30.40 <span class="hljs-string">-p</span> 8080</code></pre></body>');
+  const { document } = dom.window;
+  const code = document.querySelector('code');
+  const before = code.textContent;
+  const n = wrapAtomicTokens(code);
+  assert.ok(n >= 4, `expected guards, got ${n}`);
+  assert.equal(code.textContent, before, 'tokenizing must not change the copied text');
+  assert.equal(TOKEN_CLASS, 'notes-tok');
+  const guards = [...code.querySelectorAll('.notes-tok')].map((s) => s.textContent);
+  assert.deepEqual(guards.slice(0, 4), ['--', 'ip', '10.20.30.40', '-p']);
+  // `--ip` spans two hljs nodes. The two guards must be adjacent elements with no
+  // whitespace between them, or the line may still break there.
+  const meta = code.children[0];
+  assert.equal(meta.querySelector('.notes-tok').textContent, '--');
+  assert.equal(meta.nextSibling.nodeType, 1);
+  assert.equal(meta.nextSibling.classList.contains('notes-tok'), true);
+  assert.equal(meta.nextSibling.textContent, 'ip');
+  // A run longer than the line stays one guard, so it breaks inside (max-width) not by overflow.
+  const long = new JSDOM('<!doctype html><body><pre><code>curl https://example.com/a/very/long/path/that/keeps/going</code></pre></body>');
+  const lcode = long.window.document.querySelector('code');
+  wrapAtomicTokens(lcode);
+  const url = [...lcode.querySelectorAll('.notes-tok')].map((s) => s.textContent).find((s) => s.startsWith('https://'));
+  assert.equal(url, 'https://example.com/a/very/long/path/that/keeps/going');
+});
+
 test('notes remember the open note and support Apple tags', () => {
   assert.match(html, /clipvault\.notes\.id/);
   assert.match(html, /notes\/\$\{|notes\/' \+|notes\//);
@@ -322,8 +363,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n28/);
-  assert.match(html, /notes-editor\.css\?v=n28/);
+  assert.match(html, /notes-editor\.js\?v=n29/);
+  assert.match(html, /notes-editor\.css\?v=n29/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {

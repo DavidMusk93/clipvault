@@ -243,7 +243,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
     禁止嵌套 <<<<<<<；≥3 个起算爆炸，启动 flatten
 ```
 
-工具条向源码插 Markdown，不改预览 DOM。**预览藏工具条**（只留模式切换）。删除线钮面是字母 **S** 加删除线（GFM `~~`，`Mod-Shift-x`），不靠 Material ligature、不用汉字。禁止预览露出标记钮。预览纸面宽 = 父 `.notes-preview` 的 **0.618**；代码块头栏「换行」+「复制」，**默认不换行**。禁止把预览卡死在 `38rem`；禁止默认 `pre-wrap`。
+工具条向源码插 Markdown，不改预览 DOM。**预览藏工具条**（只留模式切换）。删除线钮面是字母 **S** 加删除线（GFM `~~`，`Mod-Shift-x`），不靠 Material ligature、不用汉字。禁止预览露出标记钮。预览纸面宽 = 父 `.notes-preview` 的 **0.618**；代码块头栏「换行」+「复制」，**默认不换行**。禁止把预览卡死在 `38rem`；禁止默认 `pre-wrap`。代码块换行必须 **token-atomic**：非空白串是一个原子单位（`web/notes-wrap.mjs` 给每个串套 `.notes-tok`，`.notes-code.is-wrap` 下 `inline-block; max-width:100%`），`--ip` / `a/b` 不拆行，超长串才兜底断；禁止 `overflow-wrap:anywhere` / `word-break:break-word`，禁止靠 CSS 猜 token（拉丁连字符在 UAX #14 就是断点，`keep-all` 也挡不住）。
 
 禁止：Vditor / Crepe WYSIWYG；textarea 玩具编辑器；另开文档页；笔记另搞 `note_pin` trx。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`。列表失败禁止开空白新笔记。
 

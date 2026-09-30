@@ -9,6 +9,7 @@ import DOMPurify from 'dompurify'
 import { compileMarkdownBlocks, mapSourceToPreviewScroll, mapPreviewToSourceLine } from '../../markdown-render.mjs'
 import { mountNotesPreview } from '../../notes-preview.mjs'
 import { extractCalcExpr, formatCheckpoint, hrStampBlock, inFence, isHrLine, isStampLine, tryEval } from '../../notes-calc.mjs'
+import { wrapAtomicTokens } from '../../notes-wrap.mjs'
 
 const MODE_KEY = 'clipvault.notes.mode'
 const SPLIT_KEY = 'clipvault.notes.split'
@@ -596,6 +597,8 @@ async function mount(root, opts) {
           }
         } catch (_) {}
       }
+      // After highlighting: make wrap mode token-atomic (no break inside `--ip`).
+      wrapAtomicTokens(code)
       const wrap = document.createElement('div')
       wrap.className = 'notes-code'
       pre.parentNode.insertBefore(wrap, pre)
