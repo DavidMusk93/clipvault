@@ -881,26 +881,96 @@
     .mine-kpi em.up { color: var(--mine-loss); }
     .mine-kpi em.down { color: var(--mine-good); }
     .cv-mine-sheet .mine-compose { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; }
-    .cv-mine-sheet .mine-bar-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
-    .cv-mine-sheet .mine-bar-row > span:first-child { width: 58px; flex: 0 0 auto; font-weight: 650; }
-    .cv-mine-sheet .mine-stack {
-      flex: 1 1 auto;
+    /* charts (web/mine-charts.mjs) -------------------------------------- */
+    .cv-mine-sheet .mc-wrap { margin: 6px 0 10px; }
+    .cv-mine-sheet .mc-stack-track {
       display: flex;
-      height: 14px;
-      min-width: 0;
-      border-radius: 7px;
-      overflow: hidden;
+      gap: 3px;
+      height: 16px;
+      border-radius: 8px;
       background: var(--mine-flat);
+      overflow: hidden;
     }
-    .cv-mine-sheet .mine-stack i { display: block; min-width: 2px; }
-    .cv-mine-sheet .mine-stack i.s-work { background: var(--mine-time); }
-    .cv-mine-sheet .mine-stack i.s-wait { background: rgba(60, 60, 67, 0.35); }
-    .cv-mine-sheet .mine-stack i.s-fail { background: var(--mine-loss); }
-    .cv-mine-sheet .mine-stack i.s-out { background: var(--mine-money); }
-    .cv-mine-sheet .mine-stack i.s-cw { background: var(--mine-user); }
-    .cv-mine-sheet .mine-stack i.s-cr { background: rgba(47, 143, 131, 0.35); }
-    .cv-mine-sheet .mine-legend { display: flex; gap: 10px; font-size: 10.5px; color: var(--muted); margin-left: 66px; }
-    .cv-mine-sheet .mine-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; }
+    .cv-mine-sheet .mc-stack-track .mc-seg {
+      box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.75);
+      border-radius: 3px;
+      min-width: 3px;
+    }
+    .cv-mine-sheet .mc-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+    .cv-mine-sheet .mc-legend-col { flex-direction: column; gap: 3px; }
+    .cv-mine-sheet .mc-lg { display: inline-flex; align-items: center; gap: 4px; }
+    .cv-mine-sheet .mc-lg i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+    .cv-mine-sheet .mc-lg b { color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; }
+    .cv-mine-sheet .mc-lg em { font-style: normal; color: var(--muted); }
+    .cv-mine-sheet .mc-bars { display: flex; flex-direction: column; gap: 3px; }
+    .cv-mine-sheet .mc-bar-row {
+      display: grid;
+      grid-template-columns: minmax(84px, 32%) minmax(36px, 1fr) auto auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 2px 4px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      font: inherit;
+      color: var(--ink);
+      text-align: left;
+      cursor: default;
+    }
+    .cv-mine-sheet button.mc-bar-row { cursor: pointer; }
+    .cv-mine-sheet button.mc-bar-row:hover { background: rgba(120, 120, 128, 0.09); }
+    .cv-mine-sheet .mc-bar-lab { font-size: 11.5px; color: var(--ink); overflow-wrap: anywhere; }
+    .cv-mine-sheet .mc-bar-track { height: 8px; border-radius: 4px; background: var(--mine-flat); overflow: hidden; }
+    .cv-mine-sheet .mc-bar-track i { display: block; height: 100%; min-width: 2px; border-radius: 4px; }
+    .cv-mine-sheet .mc-bar-val { font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .cv-mine-sheet .mc-bar-sub { font-size: 10.5px; color: var(--muted); }
+    .cv-mine-sheet .mc-donut { display: flex; align-items: center; gap: 14px; }
+    .cv-mine-sheet .mc-donut svg { flex: 0 0 auto; }
+    .cv-mine-sheet .mc-donut-v { font: 700 19px var(--font-ui); fill: var(--ink); }
+    .cv-mine-sheet .mc-donut-s { font: 500 10px var(--font-ui); fill: var(--muted); }
+    .cv-mine-sheet .mc-line, .cv-mine-sheet .mc-cols { margin: 4px 0 8px; }
+    .cv-mine-sheet .mc-line-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; font-size: 11.5px; color: var(--muted); }
+    .cv-mine-sheet .mc-line-head b { font-size: 14px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .cv-mine-sheet .mc-line-head em { font-style: normal; }
+    .cv-mine-sheet .mc-axis { font: 500 9.5px var(--font-ui); fill: var(--muted); }
+    .cv-mine-sheet .mc-axis-row { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+    .cv-mine-sheet svg .mc-col { cursor: pointer; }
+    .cv-mine-sheet svg .mc-col:hover { opacity: 0.72; }
+    .cv-mine-sheet .mc-empty { font-size: 11.5px; color: var(--muted); }
+    .cv-mine-sheet .mine-cache { grid-column: 1 / -1; border-top: 0.5px solid var(--separator); padding-top: 10px; }
+    .cv-mine-sheet .mine-loop { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+    .cv-mine-sheet .mine-loop b { padding: 1px 6px; border-radius: 980px; background: var(--mine-agent-soft); color: var(--mine-agent); font-size: 10.5px; }
+
+    /* analysis loop (ack) ------------------------------------------------ */
+    .cv-mine-sheet .mine-ack-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 0.5px dashed var(--separator);
+      font-size: 11.5px;
+      color: var(--muted);
+    }
+    .cv-mine-sheet .mine-ack-chip { padding: 1px 7px; border-radius: 980px; font-size: 10.5px; font-weight: 650; }
+    .cv-mine-sheet .mine-ack-chip.good { background: var(--mine-good-soft); color: var(--mine-good); }
+    .cv-mine-sheet .mine-ack-chip.open { background: var(--mine-loss-soft); color: var(--mine-loss); }
+    .cv-mine-sheet .mine-ack-chip.note { background: rgba(60, 60, 67, 0.10); color: var(--muted); }
+    .cv-mine-sheet .mine-ack-txt { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .cv-mine-sheet .mine-ack-btns { margin-left: auto; display: inline-flex; gap: 6px; }
+    .cv-mine-sheet .mine-ack {
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 7px;
+      border: 0.5px solid var(--separator);
+      background: #fff;
+      color: var(--muted);
+      font: 600 11px/21px inherit;
+      cursor: pointer;
+    }
+    .cv-mine-sheet .mine-ack:hover { color: var(--ink); border-color: var(--mine-agent); }
 
     /* losses ------------------------------------------------------------- */
     .cv-mine-sheet .mine-loss {
@@ -1203,6 +1273,9 @@
     import {
       canFetch, canIngest, createLoadState, readSnap, reduce, writeSnap,
     } from "./session-load.mjs";
+    import {
+      PHASE_COLORS, SEV_COLORS, colorAt, columns, donut, fmtValue, lineChart, rankBars, stackBar,
+    } from "./mine-charts.mjs";
 
     const TRAE_BASE = location.pathname.startsWith("/trae") ? "/trae" : "";
     const apiUrl = (p) => TRAE_BASE + p;
@@ -1361,6 +1434,7 @@
         maxima[c.id] = m;
       });
       const cap = t.caption ? `<div class="mine-cap">${escMine(t.caption)}</div>` : "";
+      const chart = t.chart ? `<div class="mc-wrap">${renderChartFor(t)}</div>` : "";
       const head = t.cols.map((c) => `<th>${escMine(c.title)}</th>`).join("");
       const body = t.rows.map((row) => `<tr>${t.cols.map((c) => {
         const raw = row[c.id] ?? "";
@@ -1371,11 +1445,55 @@
         }
         return `<td class="${escMine(c.id)}">${escMine(raw)}</td>`;
       }).join("")}</tr>`).join("");
-      return `${cap}<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+      return `${cap}${chart}<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
     };
     const gradeClass = (score) => (score >= 85 ? "g-good" : score >= 70 ? "g-ok" : score >= 50 ? "g-warn" : "g-bad");
     const MINE_PHASES = ["implement", "review", "debug", "ship", "taste"];
     const MINE_PHASE_LABEL = { implement: "实现", review: "评审", debug: "排查", ship: "提交", taste: "规范" };
+    const phaseColor = (phase, i) => PHASE_COLORS[phase] || colorAt(i);
+    const sevColor = (sev) => SEV_COLORS[sev] || SEV_COLORS.note;
+    // Shape follows the data: the backend declares which chart a table wants.
+    const chartRows = (t) => {
+      const c = (t && t.chart) || {};
+      return (t.rows || []).map((r, i) => ({
+        label: String(r[c.label] ?? ""),
+        value: Number(r[c.value] ?? 0),
+        raw: r,
+        i,
+      }));
+    };
+    const renderChartFor = (t) => {
+      const c = t && t.chart;
+      if (!c) return "";
+      const rows = chartRows(t);
+      const unit = c.unit || "";
+      const base = { unit, aria: t.caption || "" };
+      if (c.kind === "donut") {
+        const total = rows.reduce((a, r) => a + r.value, 0);
+        return donut(
+          rows.map((r, i) => ({ label: MINE_PHASE_LABEL[r.label] || r.label, value: r.value, color: phaseColor(r.label, i) })),
+          { ...base, center: fmtValue(total, unit), centerSub: t.caption || "", },
+        );
+      }
+      if (c.kind === "stack") {
+        return stackBar(rows.map((r, i) => ({ label: r.label, value: r.value, color: colorAt(i) })), base);
+      }
+      if (c.kind === "line") {
+        return lineChart(rows.map((r) => ({ label: r.label, value: r.value })), { ...base, title: t.caption, color: "#2f8f83" });
+      }
+      if (c.kind === "columns") {
+        return columns(
+          rows.map((r) => ({
+            label: MINE_PHASE_LABEL[r.label] || r.label,
+            value: r.value,
+            flag: Number(r.raw.fails || 0) > 0,
+            jump: r.raw.index,
+          })),
+          { ...base, height: 52 },
+        );
+      }
+      return rankBars(rows.map((r, i) => ({ label: r.label, value: r.value, color: colorAt(i) })), base);
+    };
     const MINE_SEV = {
       high: { cls: "sev-high", label: "需处理" },
       med: { cls: "sev-med", label: "注意" },
@@ -1394,7 +1512,6 @@
       return n >= 0.1 ? `$${n.toFixed(3)}` : `$${n.toFixed(4)}`;
     };
     const mineMetric = (data, id) => (((data || {}).metrics) || []).find((m) => m.id === id) || null;
-    const minePctOf = (v, total) => Math.max(0, Math.min(100, Math.round((100 * (Number(v) || 0)) / (Number(total) || 1))));
     const mineDeltaTxt = (m) => {
       if (!m || m.delta === null || m.delta === undefined) return "";
       const d = Number(m.delta);
@@ -1446,29 +1563,37 @@
       const tCw = Number(s.cache_write) || 0;
       const tCr = Number(s.cache_read) || 0;
       const tokTotal = tOut + tCw + tCr;
-      const rows = [`<div class="mine-bar-row"><span>时间</span><div class="mine-stack">`
-        + `<i class="s-work" style="width:${minePctOf(workOk, wall)}%"></i>`
-        + `<i class="s-wait" style="width:${minePctOf(s.wait_s, wall)}%"></i>`
-        + `<i class="s-fail" style="width:${minePctOf(s.fail_s, wall)}%"></i>`
-        + `</div><span>${escMine(mineSpan(wall))}</span></div>`];
-      if (tokTotal) {
-        rows.push(`<div class="mine-bar-row"><span>tokens</span><div class="mine-stack">`
-          + `<i class="s-out" style="width:${minePctOf(tOut, tokTotal)}%"></i>`
-          + `<i class="s-cw" style="width:${minePctOf(tCw, tokTotal)}%"></i>`
-          + `<i class="s-cr" style="width:${minePctOf(tCr, tokTotal)}%"></i>`
-          + `</div><span>${escMine(tOut.toLocaleString())} 出</span></div>`);
-      }
-      const legend = `<div class="mine-legend"><span><i style="background:var(--mine-time)"></i>工作（不含失败）</span>`
-        + `<span><i style="background:rgba(60,60,67,0.35)"></i>等待</span>`
-        + `<span><i style="background:var(--mine-loss)"></i>失败</span>`
-        + (tokTotal ? `<span><i style="background:var(--mine-money)"></i>输出</span><span><i style="background:var(--mine-user)"></i>写缓存</span><span><i style="background:rgba(47,143,131,0.35)"></i>缓存读</span>` : "")
-        + "</div>";
+      const timeStack = stackBar([
+        { label: "工作（不含失败）", value: workOk, color: "#0071e3" },
+        { label: "等待", value: Number(s.wait_s) || 0, color: "rgba(60,60,67,0.38)" },
+        { label: "失败", value: Number(s.fail_s) || 0, color: "#c2410c" },
+      ], { unit: "s", aria: `时间构成 ${mineSpan(wall)}` });
+      const tokenStack = tokTotal
+        ? stackBar([
+            { label: "输出", value: tOut, color: "#2f8f83" },
+            { label: "写缓存", value: tCw, color: "#c47a2c" },
+            { label: "缓存读", value: tCr, color: "rgba(47,143,131,0.40)" },
+          ], { unit: "tok", aria: "tokens 构成" })
+        : "";
+      const cache = (data.series || {}).cache || {};
+      const cacheGauge = s.usage_turns
+        ? donut([
+            { label: "缓存读", value: Number(cache.read) || 0, color: "#2f8f83" },
+            { label: "未缓存输入", value: Number(cache.uncached) || 0, color: "#c47a2c" },
+          ], { unit: "tok", center: `${s.cache_hit_pct}%`, centerSub: "缓存命中", aria: "缓存命中构成" })
+        : "";
+      const loop = data.loop || null;
+      const loopChip = loop
+        ? `<div class="mine-loop"><b>闭环</b>声明 ${loop.total} 条 · 闭环 ${(loop.closed || []).length} · 未改善 ${(loop.open || []).length}`
+          + `${(loop.dismissed || []).length ? ` · 已忽略 ${loop.dismissed.length}` : ""}</div>`
+        : "";
       return `<section class="mine-sec" id="mineVerdict">
           <div class="mine-sec-h">损耗判定<span class="mine-count">${losses.length}</span><span class="mine-hint">可归因 ${escMine(mineSpan(lossS))}${lossUsd ? ` · ${escMine(mineUsd(lossUsd))}` : ""}</span></div>
           <div class="mine-verdict ${gradeClass(score)}">
             <div class="mine-score"><b>${escMine(h.score ?? "-")}</b><span>${escMine(h.grade || "")}</span></div>
             <div class="mine-kpis">${tiles}</div>
-            <div class="mine-compose">${rows.join("")}${legend}</div>
+            <div class="mine-compose">${timeStack}${tokenStack}${loopChip}</div>
+            ${cacheGauge ? `<div class="mine-cache">${cacheGauge}</div>` : ""}
           </div>
         </section>`;
     };
@@ -1496,6 +1621,22 @@
         .forEach((r) => chips.push(`<span class="mine-ref">${escMine(abbrev(r.label))}</span>`));
       return chips.length ? `<div class="mine-refs">${chips.join("")}</div>` : "";
     };
+    const renderAck = (f) => {
+      // L3 in the sheet: what the Agent/human claims it applied, and whether the
+      // metric actually moved since the claim.
+      const a = f.ack;
+      const m = f.metric || {};
+      const track = `<span class="mine-ack-btns"><button type="button" class="mine-ack" data-ack="${escMine(f.id)}" data-ack-status="applied">标记已应用</button>`
+        + `<button type="button" class="mine-ack" data-ack="${escMine(f.id)}" data-ack-status="dismissed">忽略</button></span>`;
+      if (!a) return `<div class="mine-ack-row">${track}</div>`;
+      const state = a.closed === true ? "已闭环" : (a.closed === false ? "未改善" : "无目标");
+      const cls = a.closed === true ? "good" : (a.closed === false ? "open" : "note");
+      return `<div class="mine-ack-row is-acked">`
+        + `<span class="mine-ack-chip ${cls}">${a.status === "dismissed" ? "已忽略" : escMine(state)}</span>`
+        + `<span class="mine-ack-txt">${escMine(m.id || a.metric_id || "")} ${escMine(a.at_now ?? "-")} → ${escMine(a.now ?? "-")}`
+        + `${m.target !== null && m.target !== undefined ? `（目标 ${escMine(m.target)}${escMine(m.unit || "")}）` : ""}`
+        + `${a.note ? ` · ${escMine(a.note)}` : ""}</span>${track}</div>`;
+    };
     const renderLosses = (data) => {
       const list = data.findings || [];
       const head = `<div class="mine-sec-h">损耗排行 · 按 $ / 秒<span class="mine-count">${list.length}</span>`
@@ -1504,6 +1645,23 @@
       if (!list.length) {
         return `<section class="mine-sec" id="mineLosses">${head}<p class="mine-empty">${data.n_rows ? "没有信号形成结论" : "还没有足够事件"}</p></section>`;
       }
+      // One unit per chart, sorted descending: mixing s and $ in one axis printed
+      // "$6439" for a value that was seconds. $ chart only when cost data exists.
+      const byUsd = list.filter((f) => Number((f.impact || {}).usd) > 0)
+        .sort((a, b) => Number(b.impact.usd) - Number(a.impact.usd));
+      const byS = [...list].sort((a, b) => Number((b.impact || {}).s || 0) - Number((a.impact || {}).s || 0));
+      const shapeRows = (rows, useUsd) => rankBars(
+        rows.map((f) => ({
+          label: f.title || f.id,
+          value: useUsd ? Number(f.impact.usd) : Number((f.impact || {}).s) || 0,
+          sub: (f.impact || {}).kind === "estimated" ? "估算" : "实测",
+          color: sevColor(f.sev),
+          jump: `loss-${f.id}`,
+        })),
+        { unit: useUsd ? "USD" : "s", aria: useUsd ? "按 $ 损耗排序" : "按秒损耗排序" },
+      );
+      const shapes = (byUsd.length ? `<div class="mine-cap">按 $ 排序</div>${shapeRows(byUsd, true)}` : "")
+        + `<div class="mine-cap">按秒排序（含墙钟空档）</div>${shapeRows(byS, false)}`;
       const cards = list.map((f, i) => {
         const sev = MINE_SEV[f.sev] || MINE_SEV.note;
         const imp = f.impact || {};
@@ -1530,9 +1688,10 @@
             ${f.action ? `<p class="mine-line action"><b>动作</b>${escMine(f.action)}</p>` : ""}
             ${f.gate ? `<p class="mine-line gate"><b>闸门</b>${escMine(String(f.gate).replace(/^-\s*/, ""))}</p>` : ""}
             ${(f.refs || []).length ? renderRefs(f.refs) : ""}
+            ${renderAck(f)}
           </article>`;
       }).join("");
-      return `<section class="mine-sec" id="mineLosses">${head}${cards}</section>`;
+      return `<section class="mine-sec" id="mineLosses">${head}${shapes}${cards}</section>`;
     };
     const renderTurnDetail = (data, idx) => {
       const t = (data.turns || []).find((x) => Number(x.index) === Number(idx));
@@ -1569,9 +1728,28 @@
         return btn + (open ? renderTurnDetail(data, t.index) : "");
       }).join("");
       const inst = ((data.window || {}).instances || []).join("、");
+      const wallChart = columns(
+        turns.map((t) => ({
+          label: localDateTime(t.ts) || `#${t.index}`,
+          value: Number(t.wall_s) || 0,
+          flag: Number(t.fails) > 0,
+          jump: t.index,
+          note: `${Number(t.tools)} 工具${t.fails ? ` · ${Number(t.fails)} 失败` : ""}`,
+        })),
+        {
+          unit: "s",
+          height: 52,
+          title: "每回合墙钟",
+          total: turns.reduce((a, t) => a + (Number(t.wall_s) || 0), 0),
+          aria: "回合墙钟分布",
+          axisLeft: localDateTime(turns[0].ts) || "",
+          axisRight: localDateTime(turns[turns.length - 1].ts) || "",
+        },
+      );
       return `<section class="mine-sec" id="mineTimeline">
-          <div class="mine-sec-h">回合时间轴<span class="mine-count">${turns.length}</span><span class="mine-hint">条宽 = 墙钟占比 · 点击就地展开</span></div>
+          <div class="mine-sec-h">回合时间轴<span class="mine-count">${turns.length}</span><span class="mine-hint">柱=墙钟（红点=该回合有失败）· 点击就地展开</span></div>
           ${inst && inst.includes("、") ? `<p class="mine-line"><b>多实例</b>窗口含 ${escMine(inst)}，按事件时间合并。</p>` : ""}
+          ${wallChart}
           <div class="mine-turns">${cards}</div>
         </section>`;
     };
@@ -1607,7 +1785,9 @@
       return JSON.stringify([
         data.scope, s.n_rows, s.n_turns, s.n_tools, s.work_s, s.wait_s, s.fail_n, s.idle_s, s.cost_usd,
         (data.losses || []).map((l) => `${l.id}:${l.s}:${l.usd}`),
-        (data.findings || []).map((f) => `${f.id}:${f.sev}:${(f.impact || {}).s}:${(f.impact || {}).usd}`),
+        (data.findings || []).map((f) => `${f.id}:${f.sev}:${(f.impact || {}).s}:${(f.impact || {}).usd}`
+          + (f.ack ? `:ack=${f.ack.status}:${f.ack.moved}` : "")),
+        data.loop ? JSON.stringify(data.loop) : "",
         (data.turns || []).length,
         (data.metrics || []).map((m) => `${m.id}=${m.value}${m.delta === null || m.delta === undefined ? "" : `d${m.delta}`}`),
         (data.baseline || {}).source || "",
@@ -1650,6 +1830,35 @@
       el.scrollIntoView({ block: "start" });
       el.classList.add("is-hit");
       window.setTimeout(() => el.classList.remove("is-hit"), 1200);
+    };
+    const ackMineFinding = async (fid, status, btn) => {
+      // The Agent (or the human) records that a finding was applied; the next
+      // read compares the metric against the value at ack time.
+      const found = (((mineLast || {}).findings) || []).find((x) => String(x.id) === String(fid));
+      const m = (found && found.metric) || {};
+      const payload = {
+        scope: mineState.scope,
+        session_id: mineState.scope === "session" ? current : "",
+        finding_id: fid,
+        status,
+        metric: { id: m.id || "", now: m.now ?? null, target: m.target ?? null },
+      };
+      const label = btn ? btn.textContent : "";
+      if (btn) btn.textContent = "记录中…";
+      try {
+        const res = await fetch(apiUrl("/api/mine/ack"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`ack ${res.status}`);
+        await loadMine();
+      } catch (err) {
+        if (btn) {
+          btn.textContent = "失败";
+          window.setTimeout(() => { btn.textContent = label; }, 1500);
+        }
+      }
     };
     const openMineTurn = (idx) => {
       const n = Number(idx);
@@ -1770,6 +1979,13 @@
       const refBtn = ev.target.closest("[data-turn]");
       if (refBtn) {
         openMineTurn(refBtn.getAttribute("data-turn"));
+        return;
+      }
+      const ackBtn = ev.target.closest("[data-ack]");
+      if (ackBtn) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        ackMineFinding(ackBtn.getAttribute("data-ack"), ackBtn.getAttribute("data-ack-status"), ackBtn);
         return;
       }
       const scopeBtn = ev.target.closest("[data-scope]");

@@ -25,7 +25,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from mine import DIRECTIONS as MINE_DIRECTIONS, mine as mine_session  # noqa: E402
+from mine import DIRECTIONS as MINE_DIRECTIONS, ack_finding, mine as mine_session  # noqa: E402
 from row import needs_user_input, utc_now  # noqa: E402
 
 LOG = logging.getLogger("clipvault-trae")
@@ -410,6 +410,22 @@ def make_handler(store: Store, http_origin_note: str, hub: SseHub) -> type[BaseH
                     }
                 )
                 self._json(200, result)
+                return
+            if parsed.path == "/api/mine/ack":
+                payload = self._read_json_object()
+                if payload is None:
+                    return
+                metric = payload.get("metric")
+                result = ack_finding(
+                    store.execute,
+                    scope=str(payload.get("scope") or "session"),
+                    session_id=str(payload.get("session_id") or ""),
+                    finding_id=str(payload.get("finding_id") or ""),
+                    status=str(payload.get("status") or "applied"),
+                    note=str(payload.get("note") or ""),
+                    metric=metric if isinstance(metric, dict) else None,
+                )
+                self._json(200 if result.get("ok") else 400, result)
                 return
             if parsed.path != "/api/notify":
                 self._json(404, {"error": "not found"})
