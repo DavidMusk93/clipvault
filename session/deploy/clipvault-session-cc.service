@@ -1,0 +1,25 @@
+[Unit]
+Description=ClipVault session backend (SA-v1 facade, replica)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=CLIPVAULT_PG_HOST=127.0.0.1
+Environment=CLIPVAULT_PG_PORT=5432
+Environment=CLIPVAULT_PG_DB=clipvault
+Environment=CLIPVAULT_PG_USER=clipvault
+Environment=CLIPVAULT_PG_PASSWORD_FILE=/root/.config/clipvault/pg.password
+Environment=CLIPVAULT_BACKEND_ID=cc
+Environment=CLIPVAULT_CORPUS_ID=clipvault
+Environment=CLIPVAULT_BACKEND_ROLE=replica
+Environment=CLIPVAULT_TRAE_HTTP_HOST=127.0.0.1
+Environment=CLIPVAULT_TRAE_HTTP_PORT=9488
+Environment=CLIPVAULT_SESSION_WEB_DIR=/root/clipvault/web
+Environment=RUST_LOG=info
+ExecStart=/root/clipvault/bin/clipvault-session
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -56,7 +56,7 @@ It backs up every file it overwrites (`*.bak-rust-<stamp>`).
 
 - Done: PostgreSQL 18 on d2 (dedicated volume), SA-v1 facade, hook collector,
   `LISTEN`/`NOTIFY` SSE, `pin`, metrics hot path, spool flush, **mac-home cut
-  over to d2**.
+  over to d2**, **cc logical-CDC replica + replica facade**.
 - Pending: analysis (`/api/mine`, `ack`) port; cold metrics ingest from pi JSONL;
-  the `cc` logical-CDC replica; the client-side aggregator + backend registry;
-  collector installers for mac-work / sg_d.
+  the client-side aggregator + backend registry; collector installers for
+  mac-work / sg_d.
