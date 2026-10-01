@@ -9,7 +9,8 @@ Two binaries:
 | Binary | Role |
 | --- | --- |
 | `clipvault-session` | SA-v1 facade: HTTP + SSE read plane, `pin`, `ack`. Stateless w.r.t. storage; learns of new rows via `LISTEN clipvault_hook`. |
-| `clipvault-hook` | Collector: stdin JSON -> spool JSONL -> `INSERT ... ON CONFLICT DO NOTHING` -> `pg_notify`. Always exits 0. |
+| `clipvault-hook` | Collector: stdin JSON -> spool JSONL -> `INSERT ... ON CONFLICT DO NOTHING` -> `pg_notify`. Always exits 0. Metrics events (`UsageReport`/`ContextReport`) go hot into `llm_usage`/`turn_context`. |
+| `clipvault-flush` | Spool drainer: retries `hooks-*.jsonl` and `metrics-*.jsonl` into PostgreSQL; moves a file to `done/` only when every line landed. |
 
 ## Build
 
@@ -43,10 +44,19 @@ cp session/deploy/clipvault-session.service /etc/systemd/system/
 systemctl enable --now clipvault-session
 ```
 
+## Mac cutover
+
+`session/deploy/install_macos.sh` installs the Rust collector + facade tunnel on a
+Mac: hooks env -> PG on d2, wrapper execs `clipvault-hook`, a LaunchAgent forwards
+`55432` (collector) and `9488` (facade) to d2, a flush LaunchAgent drains the spool,
+and the old Python `com.davidmusk.clipvault-trae` / `-metrics` are booted out.
+It backs up every file it overwrites (`*.bak-rust-<stamp>`).
+
 ## Status
 
 - Done: PostgreSQL 18 on d2 (dedicated volume), SA-v1 facade, hook collector,
-  `LISTEN`/`NOTIFY` SSE, `pin`.
-- Pending: analysis (`/api/mine`, `ack`) port; metrics ingest (`clipvault-ingest`);
+  `LISTEN`/`NOTIFY` SSE, `pin`, metrics hot path, spool flush, **mac-home cut
+  over to d2**.
+- Pending: analysis (`/api/mine`, `ack`) port; cold metrics ingest from pi JSONL;
   the `cc` logical-CDC replica; the client-side aggregator + backend registry;
-  collector installers for mac-home / mac-work / sg_d.
+  collector installers for mac-work / sg_d.

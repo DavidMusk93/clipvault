@@ -12,6 +12,10 @@ path = "src/bin/clipvault-session.rs"
 name = "clipvault-hook"
 path = "src/bin/clipvault-hook.rs"
 
+[[bin]]
+name = "clipvault-flush"
+path = "src/bin/clipvault-flush.rs"
+
 [dependencies]
 anyhow = "1"
 axum = "0.8"
