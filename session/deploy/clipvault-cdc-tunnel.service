@@ -1,0 +1,12 @@
+[Unit]
+Description=ClipVault CDC reverse tunnel: cc:15432 -> d2:55432
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R 127.0.0.1:15432:127.0.0.1:55432 cc
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
