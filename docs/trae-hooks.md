@@ -1,5 +1,12 @@
 # ClipVault · Trae 会话采集
 
+> **Partially superseded (draft).** The storage/collection shape below (Mac is the
+> only writer, Quack `:9494`, reverse tunnels `19494` / `19495`) is replaced at
+> cutover by `docs/design-session-provider-plugins.md` and
+> `docs/design-session-store-postgres-hub.md`: one PostgreSQL 18 store on d2, the
+> facade on d2, and Macs as provider clients + `ssh -L 55432` collectors. Keep
+> this file for the hook protocol and the metrics plane until Phase 4.
+
 会话展示读的是 **Mac 上那一份 DuckDB**，不是剪贴板 CloudDocs 同步。多机要的是 **采集进同一库**，不是每机再起一套 store。
 
 ```text
