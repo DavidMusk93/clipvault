@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clipvault_session::config;
+use clipvault_session::metrics;
 use clipvault_session::model::{self, HookEvent};
 use serde_json::{json, Value};
 use tokio_postgres::NoTls;
@@ -34,7 +35,13 @@ fn run() -> i32 {
     let payload = parse_payload(&raw, &hook_event);
 
     if model::METRIC_EVENTS.contains(&hook_event.as_str()) {
-        let _ = model::append_metric_spool(&spool_path, &payload);
+        if let Err(e) = deliver_metric(&payload, &hook_event, &instance_id, &source) {
+            let _ = model::append_metric_spool(&spool_path, &payload);
+            let _ = std::fs::write(
+                std::path::Path::new(&spool_dir).join("metric.err"),
+                format!("{e:#}\n"),
+            );
+        }
         return 0;
     }
 
@@ -53,6 +60,34 @@ fn run() -> i32 {
         );
     }
     0
+}
+
+fn deliver_metric(payload: &Value, event: &str, instance_id: &str, source: &str) -> Result<()> {
+    let mut p = payload.clone();
+    if let Some(obj) = p.as_object_mut() {
+        obj.entry("instance_id").or_insert_with(|| json!(instance_id));
+        obj.entry("source").or_insert_with(|| json!(source));
+        obj.entry("host")
+            .or_insert_with(|| json!(hostname::get().ok().map(|h| h.to_string_lossy().to_string())));
+    }
+    let (table, cols, row) = if event == "UsageReport" {
+        (metrics::USAGE_TABLE, metrics::USAGE_COLS, metrics::usage_row(&p))
+    } else {
+        (metrics::CTX_TABLE, metrics::CTX_COLS, metrics::ctx_row(&p))
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let cfg = config::pg_config()?;
+        let (client, connection) = cfg.connect(NoTls).await?;
+        let driver = tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let result = metrics::insert_row(&client, table, cols, &row).await;
+        driver.abort();
+        result
+    })
 }
 
 fn deliver(row: &HookEvent) -> Result<()> {

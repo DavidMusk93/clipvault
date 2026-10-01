@@ -234,6 +234,42 @@ fn append_line(spool_dir: &Path, prefix: &str, value: &Value) -> Result<PathBuf>
     Ok(path)
 }
 
+/// Rebuild a `HookEvent` from a spool line (the `row_value` shape).
+pub fn from_row_value(v: &Value) -> Option<HookEvent> {
+    let get = |k: &str| v.get(k);
+    let text = |k: &str| get(k).and_then(Value::as_str).map(str::to_string);
+    let ts = text("ts").and_then(|s| {
+        chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.f")
+            .ok()
+            .map(|n| DateTime::from_naive_utc_and_offset(n, Utc))
+    })?;
+    Some(HookEvent {
+        event_id: text("event_id")?,
+        ts,
+        instance_id: text("instance_id")?,
+        session_id: text("session_id"),
+        hook_event: text("hook_event")?,
+        source: text("source")?,
+        cwd: text("cwd"),
+        workspace_roots: text("workspace_roots"),
+        tool_name: text("tool_name"),
+        llm_tool_name: text("llm_tool_name"),
+        tool_use_id: text("tool_use_id"),
+        prompt: text("prompt"),
+        last_assistant_message: text("last_assistant_message"),
+        notification_type: text("notification_type"),
+        notification_message: text("notification_message"),
+        stop_hook_active: get("stop_hook_active").and_then(Value::as_bool),
+        loop_count: get("loop_count").and_then(Value::as_i64).map(|n| n as i32),
+        tool_input: text("tool_input"),
+        tool_response: text("tool_response"),
+        raw_json: text("raw_json")?,
+        raw_hash: text("raw_hash")?,
+        host: text("host"),
+        pid: get("pid").and_then(Value::as_i64).unwrap_or(0) as i32,
+    })
+}
+
 /// Serialise a `HookEvent` back to the payload-shaped JSON the spool/flush use.
 pub fn row_value(row: &HookEvent) -> Value {
     let mut m = Map::new();

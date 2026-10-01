@@ -7,6 +7,7 @@
 pub mod config;
 pub mod db;
 pub mod facade;
+pub mod metrics;
 pub mod model;
 
 /// Wire timestamp: naive UTC `YYYY-MM-DD HH:MM:SS` (INV-5).
