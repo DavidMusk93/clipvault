@@ -1,0 +1,31 @@
+[package]
+name = "clipvault-session"
+version = "0.1.0"
+edition = "2021"
+description = "ClipVault session plane: PostgreSQL-backed Session API v1 (SA-v1) facade + hook collector. Replaces the Python trae_hooks module."
+
+[[bin]]
+name = "clipvault-session"
+path = "src/bin/clipvault-session.rs"
+
+[[bin]]
+name = "clipvault-hook"
+path = "src/bin/clipvault-hook.rs"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+deadpool-postgres = "0.14"
+futures = "0.3"
+hex = "0.4"
+hostname = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "net", "io-util", "sync", "fs"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
