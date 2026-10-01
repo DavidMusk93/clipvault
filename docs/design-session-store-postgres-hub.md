@@ -48,12 +48,12 @@ Three consequences are accepted explicitly:
 
 Quack, the DuckDB extension, and the `:9494` listener are removed entirely.
 
-> **Extended by** `docs/design-session-provider-plugins.md`
-> (`doc_id: clipvault-session-provider-v1`, status=draft). That document adds the
-> write-amplification rationale, the `d2 -> cc` `pg_dump -Fc` backup chain
-> (closes `U-3`), and the **provider plugin** model that turns the display input
-> API into a registry of PostgreSQL-backed providers. Storage DDL and the
-> rollback window stay owned by this document.
+> **Extended by** `docs/design-session-backends.md`
+> (`doc_id: clipvault-session-backends-v1`, status=draft). That document adds the
+> write-amplification rationale, the **session backend** plugin + aggregator
+> fan-in model, the `d2 -> cc` logical-CDC replica/backup (closes `U-3`), and the
+> dedicated-volume decision. Storage DDL and the rollback window stay owned by
+> this document.
 
 ```text
                     one facade, one store, no embedded db on the laptop
@@ -309,7 +309,7 @@ Invariant demonstrated: `INV-1`. Anchor: `RA-9`.
 | --- | --- | --- |
 | `U-1` | 2026-09-25..27 contains 0 rows, while the Mac module log shows one `GET /api/stream` per day. Whether this is "no capture" or "hub outage data loss" is undetermined. | Migrating a corpus whose hole is unexplained would freeze the defect into the new store. Determine first, then migrate either way with the finding recorded. |
 | `U-2` | d2 -> sg_d SSH is denied (`Permission denied (publickey,gssapi-with-mic,password)`), and sg_d cannot resolve `d2`. | The sg_d collector needs a tunnel to d2. Either install an `sg_d -> d2` key (preferred: sg_d initiates `ssh -L`) or accept Mac-relayed forwarding, which reintroduces the unstable Mac. |
-| `U-3` | d2 has no off-box backup target. | 7.37 GiB of personal history on a shared corporate dev host with no backup is the current state; the new design must name the target and prove one restore. **Resolved:** `docs/design-session-provider-plugins.md` §6 - nightly `pg_dump -Fc` streamed `d2 -> ssh cc:/backup/clipvault/`, `RA-11` restore drill. |
+| `U-3` | d2 has no off-box backup target. | 7.37 GiB of personal history on a shared corporate dev host with no backup is the current state; the new design must name the target and prove one restore. **Resolved:** `docs/design-session-backends.md` §5 - `d2 -> cc` logical CDC (full replica via `pgoutput`), plus a nightly `pg_dump -Fc` on cc; `RA-11` restore drill. |
 | `U-4` | Whether d2's host is reprovisioned on a schedule. | Determines whether PostgreSQL data lives on the root filesystem or on a separately durable volume. |
 | `U-5` | Actual PostgreSQL storage size for the corpus. | Needed for the retention threshold. Estimate 1.5–3.0 GB after TOAST; must be measured post-load. |
 | `U-6` | `/api/mine` latency on PostgreSQL for a 7-day window. | The 640 ms DuckDB baseline is the number to beat within 3x (`RA-10`). |
