@@ -3,6 +3,7 @@
 *.swp
 *.lock
 !http-front/Cargo.lock
+!session/Cargo.lock
 *.log
 
 ## Xcode / CocoaPods / Carthage
@@ -20,6 +21,9 @@ xcuserdata/
 
 ## Rust HTTP/2 edge
 http-front/target/
+
+## Rust session plane
+session/target/
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
 .swiftpm/observability
 

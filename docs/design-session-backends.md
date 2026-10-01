@@ -54,6 +54,9 @@ a small plugin interface, fanned in by clipvault.**
 4. **Replication: PostgreSQL logical CDC, `d2 -> cc`.** d2 is the publisher, cc
    is a full logical replica driven by `pgoutput`, so cc holds a complete,
    continuously consistent copy. No Mac is in the path.
+5. **Implementation language: Rust.** The session module is the `session/` crate
+   (`clipvault-session` facade + `clipvault-hook` collector); the Python
+   `trae_hooks` server is deprecated. Rationale and module map in §11.
 
 Naming: the plugin unit is a **backend** (the conventional reverse-proxy term
 for the upstream that serves a route); the fan-in component is the
@@ -413,6 +416,35 @@ the hub doc's Appendix B.
 | `RA-11` | Replica / backup is restorable | `pg_restore` of cc's dump into a throwaway DB succeeds; row counts match `RA-1` | restore drill |
 | `RA-12` | Replica equivalence | For the same window, d2 and cc return the same `event_id` set; aggregator failover to cc changes `backend_id` but not the rows | `tests/session-backend-router.test.mjs` + manual |
 | `RA-13` | Backend health proves ownership | `/api/health` echoes `backend_id`, `store`, `corpus_id`, `role`; the router refuses a backend otherwise | `tests/session-backend-router.test.mjs` |
+
+## 11. Implementation language: Rust
+
+Python is retired for the session plane. The `session/` crate owns it:
+
+```text
+   session/
+     src/lib.rs        wire_ts (naive-UTC, INV-5)
+     src/config.rs     one DSN shape; password from a chmod 600 file
+     src/db.rs         deadpool pool + LISTEN fan-out + typed row -> JSON
+     src/model.rs      hook payload -> hook_events row; SSE stub; spool
+     src/facade.rs     SA-v1 handlers (health/sessions/events/event/stream/pin/mine)
+     src/bin/clipvault-session.rs   facade service
+     src/bin/clipvault-hook.rs      fail-open collector
+     schema.sql        PostgreSQL DDL
+     deploy/clipvault-session.service
+```
+
+Why Rust here: the collector runs on every hook (process spawn per event) so
+startup and memory matter; the facade is a long-lived networked service where a
+single async runtime with bounded, typed connection pooling is a better fit than
+threads + an untyped driver; and `tokio-postgres` gives `LISTEN`/`NOTIFY` and
+`pgoutput`-adjacent primitives without a platform extension.
+
+Ordering stays architecture -> correctness -> performance: the endpoints,
+invariants and reconciliation anchors are pinned before any tuning knobs. The
+Python `trae_hooks` files remain in the tree only until the client-side cutover
+(`docs/trae-hooks.md` is the migration reference), and are not modified by this
+design.
 
 ## Appendix A - Relationship to the hub design
 
