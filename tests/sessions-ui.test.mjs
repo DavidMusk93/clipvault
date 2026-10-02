@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { src, root } from './helpers/src.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const htmlPath = path.join(__dirname, '../trae_hooks/web/sessions.html');
+const htmlPath = path.join(__dirname, '../trae_hooks/web/sessions-vanilla.html');
 const html = fs.readFileSync(htmlPath, 'utf8');
 
 function extractInlineScripts(src) {

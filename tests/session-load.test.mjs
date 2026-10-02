@@ -156,7 +156,7 @@ test('snapshot rejects old, wrong version, and missing arrays', () => {
 });
 
 test('sessions.html imports the load machine and does not resync on every onopen', () => {
-  const html = fs.readFileSync(path.join(root, 'trae_hooks/web/sessions.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'trae_hooks/web/sessions-vanilla.html'), 'utf8');
   const agents = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
   const taste = fs.readFileSync(path.join(root, 'docs/design-taste.md'), 'utf8');
   const check = fs.readFileSync(path.join(root, 'scripts/check-frontend.sh'), 'utf8');

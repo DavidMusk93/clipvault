@@ -11,7 +11,7 @@ import { root } from './helpers/src.mjs';
 const js = readFileSync(join(root, 'web/assets/metrics-panel.js'), 'utf8');
 const css = readFileSync(join(root, 'web/assets/metrics-panel.css'), 'utf8');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
-const sess = readFileSync(join(root, 'trae_hooks/web/sessions.html'), 'utf8');
+const sess = readFileSync(join(root, 'trae_hooks/web/sessions-vanilla.html'), 'utf8');
 const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
 
 test('popover keeps skip/paint and compile/preview, drops 24h essays', () => {
