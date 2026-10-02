@@ -107,7 +107,7 @@ export default function Analysis() {
         <Kpi label="费用" value={`$${fmtNum(d.summary?.cost_usd ?? 0)}`} tone="text-honey" />
         <Kpi label="缓存命中" value={`${fmtNum(d.summary?.cache_hit_pct ?? 0)}%`} />
         <Kpi label="浪费" value={`${fmtNum(h?.waste_pct ?? 0)}%`} />
-        <Kpi label="失败" value={fmtNum(h?.fail_rate ?? 0) + "%"} />
+        <Kpi label="失败" value={`${fmtNum(h?.fail_rate ?? 0)}%`} />
       </div>
 
       {(d.findings ?? []).length > 0 && (

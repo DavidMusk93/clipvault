@@ -144,6 +144,13 @@ the one server change this design depends on.
    by the app as `@render`. The React panel renders that exact HTML; the visual
    identity is `web/session-app/src/theme/panel.css`, copied verbatim from the
    vanilla panel. A rewrite must not invent a second look.
+   The shared renderer's engines (marked, DOMPurify, highlight.js) were `<script>`
+   globals in vanilla while the app is a bundle: pass them explicitly
+   (`web/session-app/src/features/session/engines.ts`), or markdown silently
+   degrades to raw text because `renderMarkdownToHtml` refuses to emit unsanitized
+   HTML. If the vanilla shell loads a stylesheet directly (e.g. the FAB chrome in
+   `/assets/metrics-panel.css`), fold those rules into `panel.css` so the app is
+   self-contained.
 2. **Tokens are code**: `theme/tokens.css` is generated from `docs/design-taste.md`;
    no component hardcodes a hex.
 3. **Every API response is Zod-parsed**; the Rust struct and the TS schema are

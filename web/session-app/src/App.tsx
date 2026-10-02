@@ -42,7 +42,41 @@ function SessionHead({ s }: { s: SessionT | null }) {
   );
 }
 
-function Sessions({ onOpenAnalysis }: { onOpenAnalysis: () => void }) {
+/** `分析` FAB. Lives in the corner stack so it is styled and pinned like the
+ *  vanilla panel; a bare button rendered as plain text before. */
+function CornerStack({
+  analysisOpen,
+  onOpenAnalysis,
+}: {
+  analysisOpen: boolean;
+  onOpenAnalysis: () => void;
+}) {
+  return (
+    <div className="cv-corner-stack">
+      <div className="cv-mine-float">
+        <button
+          type="button"
+          className={`cv-debug-fab cv-mine-fab${analysisOpen ? " is-on" : ""}`}
+          onClick={onOpenAnalysis}
+          aria-label="分析"
+          aria-pressed={analysisOpen}
+        >
+          分析
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Sessions({
+  analysisOpen,
+  onOpenAnalysis,
+  onCloseAnalysis,
+}: {
+  analysisOpen: boolean;
+  onOpenAnalysis: () => void;
+  onCloseAnalysis: () => void;
+}) {
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.sessions(80) });
   const [selected, setSelected] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -118,9 +152,27 @@ function Sessions({ onOpenAnalysis }: { onOpenAnalysis: () => void }) {
             <div className="empty">选择左侧会话</div>
           </div>
         )}
-        <button type="button" className="cv-debug-fab cv-mine-fab" onClick={onOpenAnalysis}>
-          分析
-        </button>
+        <CornerStack analysisOpen={analysisOpen} onOpenAnalysis={onOpenAnalysis} />
+
+        {/* Sheet covers the thread, not the rail: it belongs to .stage (vanilla
+            appended it to .stage too). */}
+        {analysisOpen && (
+          <div className="cv-mine-sheet">
+            <div className="mine-head">
+              <div className="mine-head-row">
+                <h2>会话分析</h2>
+                <button type="button" className="mine-x" onClick={onCloseAnalysis}>
+                  关闭
+                </button>
+              </div>
+            </div>
+            <div className="mine-scroll">
+              <Suspense fallback={<p className="mine-empty">加载分析…</p>}>
+                <Analysis />
+              </Suspense>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -132,13 +184,31 @@ export function App() {
   const [analysisOpen, setAnalysisOpen] = useState(false);
 
   useEffect(() => {
+    // The parent shell hides its own close button while the analysis sheet
+    // covers the thread. Vanilla posted this contract; without it the close
+    // button floats on top of the sheet.
+    const post = () => {
+      if (window.parent === window) return;
+      try {
+        window.parent.postMessage(
+          { type: "clipvault-sessions-overlay", open: analysisOpen },
+          location.origin,
+        );
+      } catch {
+        /* not embedded */
+      }
+    };
+    post();
     const onMsg = (e: MessageEvent) => {
       const t = (e.data as { type?: string } | null)?.type;
-      if (t === "clipvault-sessions-resume") void qc.invalidateQueries();
+      if (t === "clipvault-sessions-resume") {
+        void qc.invalidateQueries();
+        post();
+      }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [qc]);
+  }, [analysisOpen, qc]);
 
   return (
     <>
@@ -157,23 +227,11 @@ export function App() {
         </a>
       </header>
 
-      <Sessions onOpenAnalysis={() => setAnalysisOpen(true)} />
-
-      <div className="cv-mine-sheet" hidden={!analysisOpen}>
-        <div className="mine-head">
-          <div className="mine-head-row">
-            <h2>会话分析</h2>
-            <button type="button" className="mine-x" onClick={() => setAnalysisOpen(false)}>
-              关闭
-            </button>
-          </div>
-        </div>
-        <div className="mine-scroll">
-          <Suspense fallback={<p className="mine-empty">加载分析…</p>}>
-            {analysisOpen && <Analysis />}
-          </Suspense>
-        </div>
-      </div>
+      <Sessions
+        analysisOpen={analysisOpen}
+        onOpenAnalysis={() => setAnalysisOpen(true)}
+        onCloseAnalysis={() => setAnalysisOpen(false)}
+      />
     </>
   );
 }
