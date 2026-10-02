@@ -18,6 +18,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:/usr/bin:/bin"
 
 INSTANCE="${CLIPVAULT_INSTANCE_ID:-$(scutil --get LocalHostName 2>/dev/null || hostname -s)}"
 SSH_HOST="${CLIPVAULT_SSH_HOST:-d2}"
+CC_HOST="${CLIPVAULT_CC_SSH_HOST:-cc}"
 HOME_DIR="$HOME"
 BIN_DIR="$HOME_DIR/.clipvault/bin"
 HOOKS_ENV="$HOME_DIR/.trae-cn/hooks_env"
@@ -46,8 +47,9 @@ else
   fi
   cp -f "$REPO_ROOT/session/target/release/clipvault-hook" "$BIN_DIR/"
   cp -f "$REPO_ROOT/session/target/release/clipvault-flush" "$BIN_DIR/"
+  cp -f "$REPO_ROOT/session/target/release/clipvault-aggregator" "$BIN_DIR/"
 fi
-chmod 755 "$BIN_DIR/clipvault-hook" "$BIN_DIR/clipvault-flush"
+chmod 755 "$BIN_DIR/clipvault-hook" "$BIN_DIR/clipvault-flush" "$BIN_DIR/clipvault-aggregator"
 
 # --- hooks env (PG) + wrapper ----------------------------------------------
 for f in trae-hooks.env pi-hooks.env clipvault_hook.sh; do
@@ -117,7 +119,7 @@ cat > "$TUNNEL_PLIST" <<EOF
     <string>-o</string><string>ServerAliveInterval=30</string>
     <string>-o</string><string>ServerAliveCountMax=3</string>
     <string>-L</string><string>127.0.0.1:55432:127.0.0.1:55432</string>
-    <string>-L</string><string>127.0.0.1:9488:127.0.0.1:9488</string>
+    <string>-L</string><string>127.0.0.1:29488:127.0.0.1:9488</string>
     <string>$SSH_HOST</string>
   </array>
   <key>RunAtLoad</key><true/>
@@ -151,16 +153,76 @@ cat > "$FLUSH_PLIST" <<EOF
 </dict></plist>
 EOF
 
+# Replica tunnel + backend registry + aggregator. The aggregator owns :9488,
+# which is what ClipVault already proxies /trae/* to; the backends live on
+# 29488 (d2) and 29489 (cc).
+CC_TUNNEL_PLIST="$AGENTS/com.davidmusk.clipvault-cc-tunnel.plist"
+cat > "$CC_TUNNEL_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.davidmusk.clipvault-cc-tunnel</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/ssh</string>
+    <string>-N</string>
+    <string>-o</string><string>ExitOnForwardFailure=yes</string>
+    <string>-o</string><string>BatchMode=yes</string>
+    <string>-o</string><string>ControlMaster=no</string>
+    <string>-o</string><string>ControlPath=none</string>
+    <string>-o</string><string>ServerAliveInterval=30</string>
+    <string>-o</string><string>ServerAliveCountMax=3</string>
+    <string>-L</string><string>127.0.0.1:29489:127.0.0.1:9488</string>
+    <string>$CC_HOST</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardErrorPath</key><string>/var/tmp/clipvault-hooks/cc-tunnel.err</string>
+</dict></plist>
+EOF
+
+BACKENDS_DIR="$HOME_DIR/.config/clipvault/backends.d"
+mkdir -p "$BACKENDS_DIR"
+cat > "$BACKENDS_DIR/d2.json" <<EOF
+{ "id": "d2", "label": "d2 primary", "api_version": 1, "corpus_id": "clipvault", "role": "primary", "priority": 100, "base_url": "http://127.0.0.1:29488" }
+EOF
+cat > "$BACKENDS_DIR/cc.json" <<EOF
+{ "id": "cc", "label": "cc replica", "api_version": 1, "corpus_id": "clipvault", "role": "replica", "priority": 10, "base_url": "http://127.0.0.1:29489" }
+EOF
+
+AGG_PLIST="$AGENTS/com.davidmusk.clipvault-aggregator.plist"
+cat > "$AGG_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.davidmusk.clipvault-aggregator</string>
+  <key>ProgramArguments</key><array>
+    <string>$BIN_DIR/clipvault-aggregator</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>CLIPVAULT_BACKENDS_DIR</key><string>$BACKENDS_DIR</string>
+    <key>CLIPVAULT_AGG_HTTP_PORT</key><string>9488</string>
+    <key>CLIPVAULT_AGG_DEFAULT_CORPUS</key><string>clipvault</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardErrorPath</key><string>/var/tmp/clipvault-hooks/aggregator.err</string>
+</dict></plist>
+EOF
+
 # --- swap services ----------------------------------------------------------
 for label in com.davidmusk.clipvault-trae com.davidmusk.clipvault-metrics; do
   launchctl bootout "gui/$UID_NUM/$label" 2>/dev/null || true
 done
 sleep 1
-for label in com.davidmusk.clipvault-pg-tunnel com.davidmusk.clipvault-flush; do
+for label in com.davidmusk.clipvault-pg-tunnel com.davidmusk.clipvault-cc-tunnel com.davidmusk.clipvault-flush com.davidmusk.clipvault-aggregator; do
   launchctl bootout "gui/$UID_NUM/$label" 2>/dev/null || true
 done
+launchctl bootstrap "gui/$UID_NUM" "$CC_TUNNEL_PLIST"
 launchctl bootstrap "gui/$UID_NUM" "$TUNNEL_PLIST"
 launchctl bootstrap "gui/$UID_NUM" "$FLUSH_PLIST"
+launchctl bootstrap "gui/$UID_NUM" "$AGG_PLIST"
 
 echo "waiting for the tunnel..."
 for _ in $(seq 1 20); do
