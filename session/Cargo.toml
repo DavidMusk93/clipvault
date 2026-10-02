@@ -20,6 +20,10 @@ path = "src/bin/clipvault-flush.rs"
 name = "clipvault-aggregator"
 path = "src/bin/clipvault-aggregator.rs"
 
+[[bin]]
+name = "clipvault-ingest"
+path = "src/bin/clipvault-ingest.rs"
+
 [dependencies]
 anyhow = "1"
 axum = "0.8"

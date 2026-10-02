@@ -48,8 +48,9 @@ else
   cp -f "$REPO_ROOT/session/target/release/clipvault-hook" "$BIN_DIR/"
   cp -f "$REPO_ROOT/session/target/release/clipvault-flush" "$BIN_DIR/"
   cp -f "$REPO_ROOT/session/target/release/clipvault-aggregator" "$BIN_DIR/"
+  cp -f "$REPO_ROOT/session/target/release/clipvault-ingest" "$BIN_DIR/"
 fi
-chmod 755 "$BIN_DIR/clipvault-hook" "$BIN_DIR/clipvault-flush" "$BIN_DIR/clipvault-aggregator"
+chmod 755 "$BIN_DIR/clipvault-hook" "$BIN_DIR/clipvault-flush" "$BIN_DIR/clipvault-aggregator" "$BIN_DIR/clipvault-ingest"
 
 # --- hooks env (PG) + wrapper ----------------------------------------------
 for f in trae-hooks.env pi-hooks.env clipvault_hook.sh; do
@@ -211,18 +212,46 @@ cat > "$AGG_PLIST" <<EOF
 </dict></plist>
 EOF
 
+INGEST_PLIST="$AGENTS/com.davidmusk.clipvault-ingest.plist"
+cat > "$INGEST_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.davidmusk.clipvault-ingest</string>
+  <key>ProgramArguments</key><array>
+    <string>$BIN_DIR/clipvault-ingest</string>
+    <string>--since</string><string>30</string>
+    <string>--quiet</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>CLIPVAULT_PG_HOST</key><string>127.0.0.1</string>
+    <key>CLIPVAULT_PG_PORT</key><string>55432</string>
+    <key>CLIPVAULT_PG_DB</key><string>clipvault</string>
+    <key>CLIPVAULT_PG_USER</key><string>clipvault</string>
+    <key>CLIPVAULT_PG_PASSWORD_FILE</key><string>$PASSWORD_FILE</string>
+    <key>CLIPVAULT_INSTANCE_ID</key><string>$INSTANCE</string>
+    <key>CLIPVAULT_HOOK_SOURCE</key><string>pi</string>
+    <key>CLIPVAULT_PI_SESSIONS</key><string>$HOME_DIR/.pi/agent/sessions</string>
+  </dict>
+  <key>StartInterval</key><integer>900</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>/var/tmp/clipvault-hooks/ingest.err</string>
+</dict></plist>
+EOF
+
 # --- swap services ----------------------------------------------------------
 for label in com.davidmusk.clipvault-trae com.davidmusk.clipvault-metrics; do
   launchctl bootout "gui/$UID_NUM/$label" 2>/dev/null || true
 done
 sleep 1
-for label in com.davidmusk.clipvault-pg-tunnel com.davidmusk.clipvault-cc-tunnel com.davidmusk.clipvault-flush com.davidmusk.clipvault-aggregator; do
+for label in com.davidmusk.clipvault-pg-tunnel com.davidmusk.clipvault-cc-tunnel com.davidmusk.clipvault-flush com.davidmusk.clipvault-aggregator com.davidmusk.clipvault-ingest; do
   launchctl bootout "gui/$UID_NUM/$label" 2>/dev/null || true
 done
 launchctl bootstrap "gui/$UID_NUM" "$CC_TUNNEL_PLIST"
 launchctl bootstrap "gui/$UID_NUM" "$TUNNEL_PLIST"
 launchctl bootstrap "gui/$UID_NUM" "$FLUSH_PLIST"
 launchctl bootstrap "gui/$UID_NUM" "$AGG_PLIST"
+launchctl bootstrap "gui/$UID_NUM" "$INGEST_PLIST"
 
 echo "waiting for the tunnel..."
 for _ in $(seq 1 20); do

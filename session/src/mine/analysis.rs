@@ -118,18 +118,6 @@ pub fn block(title: &str, axis: &str, note: &str, tables: Vec<Value>) -> Value {
     json!({ "title": title, "axis": axis, "note": note, "table": first, "tables": tables })
 }
 
-fn skill_tokens_of(raw: &Value) -> i64 {
-    let data = match raw {
-        Value::String(s) => serde_json::from_str::<Value>(s).unwrap_or(Value::Null),
-        Value::Null => return 0,
-        other => other.clone(),
-    };
-    match data {
-        Value::Object(o) => o.values().map(iv).sum(),
-        _ => 0,
-    }
-}
-
 const CTX_SECTIONS: &[(&str, &str)] = &[
     ("system", "system 合计"),
     ("rules", "rules (AGENTS)"),
