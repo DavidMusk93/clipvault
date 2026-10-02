@@ -1,28 +1,11 @@
 import * as Tabs from "@radix-ui/react-tabs";
-import { useQuery } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { api, type EventStubT, type SessionT } from "./api/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { api, type SessionT } from "./api/client";
+import { SessionView } from "./features/session/SessionView";
 import { cn } from "./lib/cn";
 
 const Analysis = lazy(() => import("./features/analysis/Analysis"));
-
-type Role = "user" | "assistant" | "tool" | "ask" | "system";
-
-const ROLE_COLOR: Record<Role, string> = {
-  user: "text-role-user",
-  assistant: "text-role-assistant",
-  tool: "text-role-tool",
-  ask: "text-role-ask",
-  system: "text-role-system",
-};
-
-function roleOf(e: EventStubT): Role {
-  if (e.hook_event === "UserPromptSubmit") return "user";
-  if (e.hook_event === "Stop") return "assistant";
-  if (e.hook_event === "PreToolUse" || e.hook_event === "PostToolUse") return "tool";
-  if (e.hook_event === "Notification") return "ask";
-  return "system";
-}
 
 function relTime(ts?: string | null): string {
   if (!ts) return "—";
@@ -35,11 +18,6 @@ function relTime(ts?: string | null): string {
   return ts.slice(0, 10);
 }
 
-function preview(e: EventStubT): string {
-  const s = e.prompt || e.last_assistant_message || e.tool_name || e.llm_tool_name || "";
-  return s.trim().split("\n")[0].slice(0, 120);
-}
-
 function Sessions() {
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.sessions(80) });
   const [selected, setSelected] = useState<string | null>(null);
@@ -48,13 +26,6 @@ function Sessions() {
     const first = sessions.data?.sessions?.[0];
     if (!selected && first) setSelected(first.session_id);
   }, [sessions.data, selected]);
-
-  const events = useQuery({
-    queryKey: ["events", selected],
-    queryFn: () => api.events(selected as string),
-    enabled: !!selected,
-  });
-  const rows = useMemo(() => events.data?.events ?? [], [events.data]);
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[280px_1fr]">
@@ -83,24 +54,12 @@ function Sessions() {
         ))}
       </aside>
 
-      <main className="min-h-0 overflow-y-auto p-3">
-        {!selected && <p className="text-[12px] text-role-system">选择左侧会话</p>}
-        {events.isPending && selected && <p className="text-[12px] text-role-system">加载事件…</p>}
-        {rows.map((e) => {
-          const role = roleOf(e);
-          return (
-            <div key={e.event_id} className="mb-2 rounded-lg bg-white px-3 py-2 shadow-sm">
-              <div className="mb-0.5 flex items-center gap-2">
-                <span className={cn("text-[10px] font-semibold", ROLE_COLOR[role])}>{role}</span>
-                <span className="text-[10px] text-role-system">{e.hook_event}</span>
-                <span className="ml-auto text-[10px] text-role-system">{relTime(e.ts)}</span>
-              </div>
-              <div className="whitespace-pre-wrap break-words text-[12px] text-ink">
-                {preview(e) || "—"}
-              </div>
-            </div>
-          );
-        })}
+      <main className="min-h-0">
+        {selected ? (
+          <SessionView sessionId={selected} />
+        ) : (
+          <p className="p-3 text-[12px] text-role-system">选择左侧会话</p>
+        )}
       </main>
     </div>
   );
@@ -108,6 +67,18 @@ function Sessions() {
 
 export function App() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15000 });
+  const qc = useQueryClient();
+
+  // Parent ClipVault page handshake: it pauses/resumes the iframe with the
+  // panel. On resume, refresh what is stale.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const t = (e.data as { type?: string } | null)?.type;
+      if (t === "clipvault-sessions-resume") void qc.invalidateQueries();
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [qc]);
 
   return (
     <Tabs.Root defaultValue="sessions" className="flex h-full flex-col">
