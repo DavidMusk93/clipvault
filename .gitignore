@@ -35,6 +35,9 @@ build/DerivedData/
 node_modules/
 npm-debug.log*
 
+## Session app build output (built at deploy time, not committed)
+web/assets/session/
+
 ## Python virtual environments & caches
 tools/paddleocr_venv/
 **/__pycache__/

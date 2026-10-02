@@ -21,6 +21,13 @@ echo "sync web -> $D2:$WEB_DIR (+ $CC)"
   | ssh -o BatchMode=yes "$D2" "mkdir -p '$WEB_DIR' && tar xzf - -C '$WEB_DIR'"
 ( cd "$REPO_ROOT/web" && tar czf - ./*.mjs ) \
   | ssh -o BatchMode=yes "$D2" "tar xzf - -C '$WEB_DIR'"
+# built React app (produced by `npm run build` at deploy time)
+if [ -d "$REPO_ROOT/web/assets/session" ]; then
+  ( cd "$REPO_ROOT/web" && tar czf - assets/session ) \
+    | ssh -o BatchMode=yes "$D2" "mkdir -p '$WEB_DIR/assets' && tar xzf - -C '$WEB_DIR'"
+else
+  echo "WARN: web/assets/session missing; run: (cd web/session-app && npm run build)" >&2
+fi
 # fan out to the replica
 ssh -o BatchMode=yes "$D2" "tar czf - -C '$WEB_DIR' . | ssh -o BatchMode=yes $CC 'mkdir -p $WEB_DIR && tar xzf - -C $WEB_DIR'"
 echo "--- $D2:$WEB_DIR ---"
