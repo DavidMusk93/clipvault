@@ -176,15 +176,35 @@ async fn health(State(st): State<Arc<AppState>>) -> Json<Value> {
             "healthy": is_healthy(&st, backend).await,
         }));
     }
+    let mut events = Value::Null;
+    let mut last_ts = Value::Null;
     for corpus in st.registry.corpora() {
         if let Some(w) = winner(&st, &corpus).await {
-            winners.insert(corpus, json!(w.id));
+            winners.insert(corpus.clone(), json!(w.id));
+            // Surface the default corpus winner's event count / last_ts so the
+            // health line keeps the pre-aggregator contract.
+            if corpus == st.default_corpus {
+                if let Ok(resp) = st
+                    .client
+                    .get(format!("{}/api/health", w.base_url))
+                    .timeout(Duration::from_millis(1500))
+                    .send()
+                    .await
+                {
+                    if let Ok(v) = resp.json::<Value>().await {
+                        events = v.get("events").cloned().unwrap_or(Value::Null);
+                        last_ts = v.get("last_ts").cloned().unwrap_or(Value::Null);
+                    }
+                }
+            }
         }
     }
     Json(json!({
         "ok": true,
         "service": "clipvault-aggregator",
         "default_corpus": st.default_corpus,
+        "events": events,
+        "last_ts": last_ts,
         "backends": backends,
         "winners": winners,
     }))
