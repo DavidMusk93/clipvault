@@ -52,6 +52,7 @@ export function RailCard({
   const title = sessionTitle(s);
 
   return (
+    // biome-ignore lint/a11y/useSemanticElements: the card hosts nested pin/copy buttons, so it cannot be a native <button>.
     <div
       className={cn(
         "card",
@@ -82,6 +83,7 @@ export function RailCard({
             e.stopPropagation();
             onPin(s.session_id, !s.pinned_at);
           }}
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: static local pin glyph, no user data.
           dangerouslySetInnerHTML={{ __html: PIN_ICON }}
         />
         <button

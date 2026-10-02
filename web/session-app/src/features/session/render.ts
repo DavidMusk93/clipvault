@@ -34,6 +34,6 @@ export function bundleHtml(item: BundleItem, expandAll: boolean): string {
   </details></div>`;
 }
 
-export function focusHtml(item: FocusItem, prev: ImRow | null): string {
-  return renderRows([item.row], prev);
+export function focusHtml(item: FocusItem, prev: ImRow | null, engines?: unknown): string {
+  return renderRows([item.row], prev, engines);
 }

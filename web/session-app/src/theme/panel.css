@@ -20,6 +20,16 @@
       height: 100%;
       overflow: hidden;
     }
+    /* React mounts into #root, and the flex chain (.top / .app) lives inside it.
+       Vanilla had body as the direct flex parent; without #root being a flex
+       column too, .app never stretches and the panel shows an empty band below
+       the rail/thread. */
+    #root {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
     html.embed .top { display: none; }
     html.embed .session-head .sid { display: none; }
     html.embed .session-head {
@@ -590,6 +600,8 @@
     .follow[hidden] { display: none !important; }
     .follow:active { transform: scale(0.97); }
     .follow.has-new { background: var(--accent); color: #fff; }
+    /* Sits above the 分析 FAB (which owns the corner stack at bottom:16). */
+    .stage > .follow { bottom: 64px; }
     .bubble pre, .bubble code, .bubble .hljs, .bubble .md-preview, .bubble .kv {
       max-width: 100%; min-width: 0;
     }
@@ -648,6 +660,31 @@
       overflow: auto; max-height: 22em;
     }
     .url-inert.md-link { color: var(--accent); }
+    /* The FAB chrome lives in the metrics panel stylesheet for the vanilla
+       panel; fold it in so the app is self-contained (no /assets link). */
+    .cv-debug-fab {
+      height: 28px;
+      padding: 0 10px;
+      border: 0.5px solid rgba(60, 60, 67, 0.28);
+      border-radius: 980px;
+      background: transparent;
+      color: rgba(60, 60, 67, 0.55);
+      font: 600 12px/27px -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      box-shadow: none;
+    }
+    .cv-debug-fab:active { transform: scale(0.97); }
+    @media (hover: hover) and (pointer: fine) {
+      .cv-debug-fab:hover { color: #1d1d1f; border-color: rgba(60, 60, 67, 0.45); }
+    }
+    .cv-debug-fab.is-on {
+      color: #0071e3;
+      border-color: #0071e3;
+      background: transparent;
+    }
     .cv-mine-float {
       display: flex;
       flex-direction: column;
