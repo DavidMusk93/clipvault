@@ -8,6 +8,7 @@ pub mod config;
 pub mod db;
 pub mod facade;
 pub mod metrics;
+pub mod mine;
 pub mod model;
 pub mod registry;
 pub mod role;
