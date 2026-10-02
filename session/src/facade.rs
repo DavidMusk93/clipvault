@@ -20,6 +20,7 @@ use tokio_stream::StreamExt as _;
 
 use crate::config;
 use crate::db::{self, Pool};
+use crate::mine::run;
 use crate::role::BackendRole;
 
 const EVENT_LIST_SQL: &str = "SELECT event_id, ts, instance_id, session_id, hook_event, source, \
@@ -405,102 +406,91 @@ async fn pin(State(st): State<AppState>, Json(body): Json<Value>) -> Result<Json
 
 // ----------------------------------------------------------- analysis (TODO) ----
 
-async fn mine(Query(q): Query<BTreeMap<String, String>>) -> Json<Value> {
+async fn mine(
+    State(st): State<AppState>,
+    Query(q): Query<BTreeMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
     if matches!(
         q.get("catalog").map(String::as_str),
         Some("1") | Some("true")
     ) {
-        return Json(json!({ "directions": DIRECTIONS }));
+        let directions: Vec<Value> = crate::mine::DIRECTIONS
+            .iter()
+            .map(|d| json!({"id": d.id, "axis": d.axis, "title": d.title}))
+            .collect();
+        return Ok(Json(json!({ "directions": directions })));
     }
-    Json(json!({
-        "ok": false,
-        "error": "mine not yet ported to rust (Phase 2 follow-up)",
-    }))
+    let session_id = q.get("session_id").cloned().filter(|s| !s.is_empty());
+    let scope = q.get("scope").cloned().unwrap_or_else(|| "session".into());
+    let dirs: Option<Vec<String>> = q.get("dirs").map(|d| {
+        d.split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    });
+    let baseline = matches!(
+        q.get("baseline").map(String::as_str),
+        Some("1") | Some("true")
+    );
+    let fmt = if q.get("format").map(String::as_str) == Some("agent") {
+        "agent"
+    } else {
+        "full"
+    };
+    let host = q
+        .get("host")
+        .cloned()
+        .unwrap_or_else(|| "http://127.0.0.1:9488".to_string());
+    let client = st.pool.get().await.map_err(internal)?;
+    let result = run::mine(
+        &client,
+        session_id.as_deref(),
+        &scope,
+        dirs.as_deref(),
+        baseline,
+        fmt,
+        &host,
+    )
+    .await;
+    Ok(Json(result))
 }
 
 async fn ack(State(st): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
-    let scope = match body.get("scope").and_then(Value::as_str) {
-        Some("recent") => "recent",
-        _ => "session",
-    };
-    let status = match body.get("status").and_then(Value::as_str) {
-        Some("dismissed") => "dismissed",
-        _ => "applied",
-    };
+    let scope = body
+        .get("scope")
+        .and_then(Value::as_str)
+        .unwrap_or("session");
+    let status = body
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("applied");
     let finding_id = body
         .get("finding_id")
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    if finding_id.is_empty() {
-        return Err(err(StatusCode::BAD_REQUEST, "finding_id required"));
-    }
-    let session_id = body
-        .get("session_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let note: String = body
-        .get("note")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(500)
-        .collect();
+        .unwrap_or_default();
+    let session_id = body.get("session_id").and_then(Value::as_str);
+    let note = body.get("note").and_then(Value::as_str).unwrap_or("");
     let metric = body.get("metric").cloned().unwrap_or_else(|| json!({}));
-    let metric_id = metric
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let metric_now = metric.get("now").and_then(Value::as_f64);
-    let target = metric.get("target").and_then(Value::as_f64);
-    let ack_id = format!(
-        "{scope}:{}:{finding_id}",
-        if session_id.is_empty() {
-            "-"
-        } else {
-            &session_id
-        }
-    );
     let instance_id = config::var("CLIPVAULT_INSTANCE_ID", "");
     let client = st.pool.get().await.map_err(internal)?;
-    client
-        .execute(
-            "INSERT INTO analysis_acks (ack_id, ts, instance_id, scope, session_id, finding_id, \
-             status, note, metric_id, metric_now, target) \
-             VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10) \
-             ON CONFLICT (ack_id) DO UPDATE SET ts = excluded.ts, status = excluded.status, \
-             note = excluded.note, metric_id = excluded.metric_id, metric_now = excluded.metric_now, \
-             target = excluded.target, instance_id = excluded.instance_id",
-            &[
-                &ack_id,
-                &instance_id,
-                &scope,
-                &session_id,
-                &finding_id,
-                &status,
-                &note,
-                &metric_id,
-                &metric_now,
-                &target,
-            ],
-        )
-        .await
-        .map_err(internal)?;
-    Ok(Json(json!({
-        "ok": true,
-        "ack_id": ack_id,
-        "finding_id": finding_id,
-        "status": status,
-    })))
+    let result = run::ack_finding(
+        &client,
+        scope,
+        session_id,
+        finding_id,
+        status,
+        note,
+        &metric,
+        &instance_id,
+    )
+    .await
+    .map_err(internal)?;
+    if result.get("ok").and_then(Value::as_bool) == Some(false) {
+        return Err(err(StatusCode::BAD_REQUEST, "finding_id required"));
+    }
+    Ok(Json(result))
 }
-
-const DIRECTIONS: &[&str] = &[
-    "cwd", "git", "taste", "intent", "reminder", "flow", "file", "tool", "failure", "hot", "mcp",
-    "phase",
-];
 
 // -------------------------------------------------------------- static ----
 

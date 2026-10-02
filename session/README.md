@@ -12,6 +12,7 @@ Two binaries:
 | `clipvault-hook` | Collector: stdin JSON -> spool JSONL -> `INSERT ... ON CONFLICT DO NOTHING` -> `pg_notify`. Always exits 0. Metrics events (`UsageReport`/`ContextReport`) go hot into `llm_usage`/`turn_context`. |
 | `clipvault-flush` | Spool drainer: one JSONL file per event -> persistent PG connection -> batched INSERT; readiness-woken by the hook, 30s watchdog fallback. |
 | `clipvault-aggregator` | Client-side fan-in: reads `backends.d/*.json`, fails over within a `corpus_id`, merges across corpora, routes writes to the primary, passes SSE through. |
+| session analysis | `/api/mine` + `/api/mine/ack` (Session Analysis v2) ported to Rust in `src/mine/` (primitives, rows, analysis, run). |
 
 ## Build
 
@@ -58,6 +59,6 @@ It backs up every file it overwrites (`*.bak-rust-<stamp>`).
 - Done: PostgreSQL 18 on d2 (dedicated volume), SA-v1 facade, hook collector,
   `LISTEN`/`NOTIFY` SSE, `pin`, metrics hot path, spool flush, **mac-home cut
   over to d2**, **cc logical-CDC replica + replica facade**, **client fan-in
-  (`clipvault-aggregator`) on d2+cc**.
-- Pending: analysis (`/api/mine`, `ack`) port; cold metrics ingest from pi JSONL;
-  collector installers for mac-work / sg_d.
+  (`clipvault-aggregator`)**, **`/api/mine` + `ack` in Rust**.
+- Pending: cold metrics ingest from pi JSONL; collector installers for
+  mac-work / sg_d.
