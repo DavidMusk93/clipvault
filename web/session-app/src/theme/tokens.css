@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Design tokens. Source of truth: docs/design-taste.md. Never hardcode a hex
+   in a component; add it here first. */
+@theme {
+  --color-honey: #c47a2c;
+  --color-cream: #f8f1e7;
+  --color-ink: #1d1d1f;
+  --color-chrome: #f5f5f7;
+  --color-accent: #0071e3;
+
+  --color-role-user: #c47a2c;
+  --color-role-assistant: #0071e3;
+  --color-role-tool: #1565c0;
+  --color-role-ask: #c47a2c;
+  --color-role-system: #8e8e93;
+
+  --color-mine-loss: #c62828;
+  --color-mine-money: #c47a2c;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-chrome);
+  color: var(--color-ink);
+  font:
+    13px/1.45 -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "PingFang SC",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}

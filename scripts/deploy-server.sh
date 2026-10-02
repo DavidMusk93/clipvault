@@ -1,7 +1,7 @@
 #!/bin/bash
 # deploy-server.sh — build release + install binary + LaunchAgent restart + verify.
 set -euo pipefail
-export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/.cargo/bin:$HOME/.local/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 echo "swift build -c release..."
@@ -22,5 +22,11 @@ cp "$REPO_ROOT/http-front/target/release/clipvault-http" "$HTTP_BIN"
 chmod +x "$HTTP_BIN"
 xattr -cr "$HTTP_BIN" 2>/dev/null || true
 codesign --force --sign - "$HTTP_BIN" >/dev/null 2>&1 || true
+echo "vite build -p web/session-app (session panel)..."
+if command -v npm >/dev/null 2>&1; then
+  ( cd "$REPO_ROOT/web/session-app" && npm ci --no-audit --no-fund >/dev/null && npm run build )
+else
+  echo "WARN: npm not found; session panel build skipped" >&2
+fi
 export INSTALL_RELEASE=1
 "$REPO_ROOT/scripts/restart-clipvault.sh"

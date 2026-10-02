@@ -27,4 +27,11 @@ echo "[check-frontend] python session mine"
 python3 tests/session_mine_main.py
 echo "[check-frontend] python session metrics"
 python3 tests/session_metrics_main.py
+echo "[check-frontend] vite session-app (types + tests + build)"
+export PATH="$HOME/.local/node/bin:$PATH"
+if command -v npm >/dev/null 2>&1; then
+  ( cd "$ROOT/web/session-app" && npm ci --no-audit --no-fund >/dev/null && npm run check && npm test && npm run build )
+else
+  echo "WARN: npm not found; skipping session-app gate" >&2
+fi
 echo "[check-frontend] OK"
