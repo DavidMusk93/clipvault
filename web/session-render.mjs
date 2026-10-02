@@ -411,3 +411,148 @@ export function renderEventBlocks(event, engines = {}) {
     ...renderValue(block.text, block.hint, engines),
   }));
 }
+
+// ---------------------------------------------------------------------------
+// IM markup. This is the session display logic (roles, alignment, beats vs
+// tool index, bundles, ask blocks). The React panel renders this HTML; do NOT
+// fork it into a second implementation. Taste: docs/design-taste.md 「会话」.
+// ---------------------------------------------------------------------------
+
+export const esc = (s) =>
+  String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+export const dayKey = localDayKey;
+export const dayLabel = (key) => {
+  const now = new Date();
+  const today = localDayKey(now.toISOString());
+  const y = new Date(now);
+  y.setDate(y.getDate() - 1);
+  if (key === today) return '今天';
+  if (key === localDayKey(y.toISOString())) return '昨天';
+  return key.replace(/-/g, '/');
+};
+
+export const toolBits = (e) => {
+  const resp = asObj(e.tool_response) || {};
+  const bits = [];
+  if (resp.exit_code != null) bits.push('exit ' + resp.exit_code);
+  if (resp.status) bits.push(String(resp.status));
+  if (resp.wall_time_seconds != null) bits.push(resp.wall_time_seconds + 's');
+  return bits.join(' · ');
+};
+
+export const bulky = (text) => {
+  const s = String(text || '');
+  return s.length > 900 || s.split(/\n/).length > 14;
+};
+
+export function renderAskBody(e) {
+  const qs = askQuestions(e);
+  const ans = askAnswers(e);
+  if (qs.length) {
+    return qs
+      .map((q, i) => {
+        const head = esc(q.header || q.question || '问题');
+        const picked = ans[i]?.selected_options || [];
+        const opts = (q.options || [])
+          .map((o) => {
+            const on = picked.includes(o.label);
+            return `<div class="ask-opt${on ? ' is-on' : ''}">${esc(o.label || '')}</div>`;
+          })
+          .join('');
+        return `<div class="ask-q"><div class="ask-h">${head}</div>${opts}</div>`;
+      })
+      .join('');
+  }
+  return esc(e.notification_message || e.hook_event || '需要你');
+}
+
+export function renderTool(e, engines = {}) {
+  const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(' / ');
+  const name = tools || '工具';
+  const result = toolBits(e);
+  const meta = [localDateTime(e.ts), tools].filter(Boolean).join(' · ');
+  let html = `<div class="tool-head"><span class="tool-name">${esc(name)}</span><span class="tool-result">${esc(result)}</span></div>`;
+  for (const b of blocksFromEvent(e)) {
+    if (b.key === 'result') continue;
+    const rendered = renderValue(b.text, b.hint, engines);
+    if (b.key === 'command' || b.key === 'tool_input') {
+      html += `<div class="tool-cmd">${rendered.html}</div>`;
+      continue;
+    }
+    if (b.key === 'output') {
+      if (bulky(b.text)) {
+        const preview = String(b.text).trim().split(/\n/).slice(0, 3).join('\n');
+        const n = String(b.text).split(/\n/).length;
+        html += `<div class="tool-preview"><pre>${esc(preview)}</pre></div>
+          <details class="tool-fold"><summary>展开输出 · ${n} 行</summary>
+            <div class="bubble-body">${rendered.html}</div>
+          </details>`;
+      } else {
+        html += `<div class="tool-out">${rendered.html}</div>`;
+      }
+      continue;
+    }
+    html += `<div class="kv"><div class="k">${esc(b.key)}</div>${rendered.html}</div>`;
+  }
+  html += `<div class="meta">${esc(meta)}</div>
+    <details class="raw">
+      <summary>原始 JSON</summary>
+      <div class="raw-body">加载中…</div>
+    </details>`;
+  return html;
+}
+
+export function renderRows(rows, prev, engines = {}) {
+  let lastDay = prev ? dayKey(prev.event.ts) : '';
+  let lastRole = prev ? prev.role : '';
+  return (rows || [])
+    .map((row) => {
+      const e = row.event;
+      const day = dayKey(e.ts);
+      const grouped = lastRole === row.role && row.role !== 'system' && day === lastDay;
+      const chip =
+        day && day !== lastDay
+          ? `<div class="day"><span>${esc(dayLabel(day))}</span></div>`
+          : '';
+      lastDay = day;
+      lastRole = row.role;
+      const tools = [e.tool_name, e.llm_tool_name].filter(Boolean).join(' / ');
+      const meta = [localDateTime(e.ts), tools].filter(Boolean).join(' · ');
+      const body =
+        row.role === 'tool'
+          ? ''
+          : renderEventBlocks(e, engines)
+              .map(
+                (b) =>
+                  `<div class="kv">${b.key === 'result' || b.key === 'prompt' ? '' : `<div class="k">${esc(b.key)}</div>`}${b.html}</div>`,
+              )
+              .join('');
+      const who = grouped ? '' : `<div class="who">${esc(row.label)}</div>`;
+      let inner;
+      if (row.role === 'tool') {
+        inner = renderTool(e, engines);
+      } else if (row.role === 'ask' || (row.role === 'user' && isAskTool(e))) {
+        inner = `${who}<div class="bubble-body">${renderAskBody(e)}</div>
+          <div class="meta">${esc(meta)}</div>`;
+      } else if (row.role === 'system') {
+        inner = `<div class="bubble-body">${esc(e.notification_message || e.hook_event || '')}</div>
+          <div class="meta">${esc(localDateTime(e.ts))}</div>`;
+      } else {
+        inner = `${who}<div class="bubble-body">${body}</div>
+          <div class="meta">${esc(meta)}</div>
+          <details class="raw">
+            <summary>原始 JSON</summary>
+            <div class="raw-body">加载中…</div>
+          </details>`;
+      }
+      return `${chip}<div class="row ${esc(row.role)}${grouped ? ' grouped' : ''}">
+        <article class="bubble ${esc(row.role)}" data-id="${esc(e.event_id)}">${inner}</article>
+      </div>`;
+    })
+    .join('');
+}

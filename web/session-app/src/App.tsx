@@ -1,66 +1,127 @@
-import * as Tabs from "@radix-ui/react-tabs";
+import { localDateTime, relLocalTime } from "@render";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { api, type SessionT } from "./api/client";
+import { RailCard, sourceLabel } from "./features/session/RailCard";
 import { SessionView } from "./features/session/SessionView";
-import { cn } from "./lib/cn";
 
 const Analysis = lazy(() => import("./features/analysis/Analysis"));
 
-function relTime(ts?: string | null): string {
-  if (!ts) return "—";
-  const t = Date.parse(ts.replace(" ", "T") + (ts.endsWith("Z") ? "" : "Z"));
-  if (Number.isNaN(t)) return ts.slice(0, 19);
-  const d = Math.max(0, Date.now() - t) / 1000;
-  if (d < 60) return "刚刚";
-  if (d < 3600) return `${Math.floor(d / 60)} 分钟前`;
-  if (d < 86400) return `${Math.floor(d / 3600)} 小时前`;
-  return ts.slice(0, 10);
+function sessionTitle(s: SessionT): string {
+  const p = String(s.last_prompt || "")
+    .trim()
+    .split(/\n/)[0];
+  if (p) return p.slice(0, 56);
+  const cwd = String(s.cwd || "").replace(/\/$/, "");
+  const base = cwd.split("/").filter(Boolean).pop();
+  if (base) return base;
+  const id = String(s.session_id || "");
+  return id ? `${id.slice(0, 10)}…` : "无会话";
 }
 
-function Sessions() {
+function SessionHead({ s }: { s: SessionT | null }) {
+  const raw = String(s?.source || "")
+    .trim()
+    .toLowerCase();
+  const cwd = String(s?.cwd || "").replace(/\/$/, "");
+  const host = String(s?.instance_id || "").trim();
+  return (
+    <div className={`session-head${s ? "" : " is-empty"}`} id="sessionHead">
+      <span className="sid" id="sessionSid" title={s?.session_id}>
+        {s ? sessionTitle(s) : ""}
+      </span>
+      <span className="idline">
+        <span id="sessionWhen">{s ? localDateTime(s.last_ts) : ""}</span>
+        <span id="sessionSource">{raw ? `agent ${sourceLabel(raw)}` : ""}</span>
+        <span id="sessionHost">{host}</span>
+        <span className="cwd" id="sessionCwd" title={cwd}>
+          {cwd}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function Sessions({ onOpenAnalysis }: { onOpenAnalysis: () => void }) {
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.sessions(80) });
   const [selected, setSelected] = useState<string | null>(null);
+  const [q, setQ] = useState("");
 
   useEffect(() => {
     const first = sessions.data?.sessions?.[0];
     if (!selected && first) setSelected(first.session_id);
   }, [sessions.data, selected]);
 
+  const rows = useMemo(() => {
+    const list = sessions.data?.sessions ?? [];
+    const needle = q.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter((s) =>
+      `${s.last_prompt || ""} ${s.cwd || ""} ${s.instance_id || ""} ${s.source || ""}`
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [sessions.data, q]);
+
+  const current = rows.find((s) => s.session_id === selected) ?? null;
+
+  const pin = async (id: string, pinned: boolean) => {
+    try {
+      await fetch(`/trae/api/sessions/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: id, pinned }),
+      });
+    } catch {
+      /* ignore */
+    }
+    await sessions.refetch();
+  };
+  const copy = (id: string) => {
+    void navigator.clipboard?.writeText(id);
+  };
+
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[280px_1fr]">
-      <aside className="min-h-0 overflow-y-auto border-r border-black/5 bg-white/50 p-2">
-        {sessions.isPending && <p className="p-2 text-[12px] text-role-system">加载会话…</p>}
-        {sessions.isError && <p className="p-2 text-[12px] text-mine-loss">会话列表加载失败</p>}
-        {(sessions.data?.sessions ?? []).map((s: SessionT) => (
-          <button
-            type="button"
-            key={s.session_id}
-            onClick={() => setSelected(s.session_id)}
-            className={cn(
-              "mb-1 block w-full rounded-lg px-3 py-2 text-left",
-              selected === s.session_id ? "bg-honey/10 ring-1 ring-honey/30" : "hover:bg-black/5",
-            )}
-          >
-            <div className="truncate text-[12px] font-medium">
-              {s.last_prompt?.trim().slice(0, 40) || s.session_id.slice(0, 10)}
-            </div>
-            <div className="mt-0.5 flex gap-2 text-[10px] text-role-system">
-              <span>{s.instance_id || "—"}</span>
-              <span>{s.event_count} 事件</span>
-              <span>{relTime(s.last_ts)}</span>
-            </div>
-          </button>
-        ))}
+    <div className="app">
+      <aside className="rail">
+        <div className="rail-search">
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="搜 prompt / 工具"
+          />
+        </div>
+        <div id="sessionList">
+          {sessions.isPending && <div className="empty">加载会话…</div>}
+          {sessions.isError && <div className="empty">会话列表加载失败</div>}
+          {!sessions.isPending && rows.length === 0 && <div className="empty">暂无会话</div>}
+          {rows.map((s) => (
+            <RailCard
+              key={s.session_id}
+              s={s}
+              active={s.session_id === selected}
+              onSelect={setSelected}
+              onPin={pin}
+              onCopy={copy}
+            />
+          ))}
+        </div>
       </aside>
 
-      <main className="min-h-0">
+      <section className="stage">
+        <SessionHead s={current} />
         {selected ? (
           <SessionView sessionId={selected} />
         ) : (
-          <p className="p-3 text-[12px] text-role-system">选择左侧会话</p>
+          <div className="thread" id="thread">
+            <div className="empty">选择左侧会话</div>
+          </div>
         )}
-      </main>
+        <button type="button" className="cv-debug-fab cv-mine-fab" onClick={onOpenAnalysis}>
+          分析
+        </button>
+      </section>
     </div>
   );
 }
@@ -68,9 +129,8 @@ function Sessions() {
 export function App() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15000 });
   const qc = useQueryClient();
+  const [analysisOpen, setAnalysisOpen] = useState(false);
 
-  // Parent ClipVault page handshake: it pauses/resumes the iframe with the
-  // panel. On resume, refresh what is stale.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       const t = (e.data as { type?: string } | null)?.type;
@@ -81,41 +141,39 @@ export function App() {
   }, [qc]);
 
   return (
-    <Tabs.Root defaultValue="sessions" className="flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b border-black/5 bg-white/70 px-4 py-1.5 backdrop-blur">
-        <span className="font-semibold text-[13px]">会话</span>
-        <Tabs.List className="flex gap-1">
-          <Tabs.Trigger
-            value="sessions"
-            className="rounded-md px-2 py-1 text-[12px] text-role-system data-[state=active]:bg-black/5 data-[state=active]:text-ink"
-          >
-            会话
-          </Tabs.Trigger>
-          <Tabs.Trigger
-            value="analysis"
-            className="rounded-md px-2 py-1 text-[12px] text-role-system data-[state=active]:bg-black/5 data-[state=active]:text-ink"
-          >
-            分析
-          </Tabs.Trigger>
-        </Tabs.List>
-        <span className="text-[11px] text-role-system">
-          {health.data
-            ? `${health.data.events ?? 0} 条 · ${relTime(health.data.last_ts)}`
-            : "加载中…"}
-        </span>
-        <span className="ml-auto text-[11px] text-role-system">
-          {health.data?.backend_id ? `backend ${health.data.backend_id}` : ""}
-        </span>
+    <>
+      <header className="top">
+        <div>
+          <h1>会话</h1>
+          <div className="sub" id="health">
+            {health.data
+              ? `${health.data.events ?? 0} 条 · ${relLocalTime(health.data.last_ts)}`
+              : "加载中…"}
+          </div>
+        </div>
+        <div className="grow" />
+        <a className="back" href="http://127.0.0.1:8080/">
+          回剪贴板
+        </a>
       </header>
 
-      <Tabs.Content value="sessions" className="flex min-h-0 flex-1 flex-col outline-none">
-        <Sessions />
-      </Tabs.Content>
-      <Tabs.Content value="analysis" className="min-h-0 flex-1 overflow-y-auto outline-none">
-        <Suspense fallback={<p className="p-4 text-[12px] text-role-system">加载分析…</p>}>
-          <Analysis />
-        </Suspense>
-      </Tabs.Content>
-    </Tabs.Root>
+      <Sessions onOpenAnalysis={() => setAnalysisOpen(true)} />
+
+      <div className="cv-mine-sheet" hidden={!analysisOpen}>
+        <div className="mine-head">
+          <div className="mine-head-row">
+            <h2>会话分析</h2>
+            <button type="button" className="mine-x" onClick={() => setAnalysisOpen(false)}>
+              关闭
+            </button>
+          </div>
+        </div>
+        <div className="mine-scroll">
+          <Suspense fallback={<p className="mine-empty">加载分析…</p>}>
+            {analysisOpen && <Analysis />}
+          </Suspense>
+        </div>
+      </div>
+    </>
   );
 }
