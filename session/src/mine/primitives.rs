@@ -18,19 +18,71 @@ pub struct Direction {
 }
 
 pub const DIRECTIONS: &[Direction] = &[
-    Direction { id: "user.cwd", axis: "user", title: "工作目录" },
-    Direction { id: "user.git", axis: "user", title: "Git 库" },
-    Direction { id: "user.taste", axis: "user", title: "Taste / 规范" },
-    Direction { id: "user.prompt", axis: "user", title: "任务描述" },
-    Direction { id: "user.reminders", axis: "user", title: "用户提醒" },
-    Direction { id: "user.flow", axis: "user", title: "操作流程" },
-    Direction { id: "agent.files", axis: "agent", title: "读写文件" },
-    Direction { id: "agent.tools", axis: "agent", title: "工具调用" },
-    Direction { id: "agent.failures", axis: "agent", title: "失败/重试" },
-    Direction { id: "agent.hot", axis: "agent", title: "热点/冗余" },
-    Direction { id: "agent.mcp", axis: "agent", title: "MCP" },
-    Direction { id: "agent.phases", axis: "agent", title: "任务阶段" },
-    Direction { id: "agent.metrics", axis: "agent", title: "成本/缓存/上下文" },
+    Direction {
+        id: "user.cwd",
+        axis: "user",
+        title: "工作目录",
+    },
+    Direction {
+        id: "user.git",
+        axis: "user",
+        title: "Git 库",
+    },
+    Direction {
+        id: "user.taste",
+        axis: "user",
+        title: "Taste / 规范",
+    },
+    Direction {
+        id: "user.prompt",
+        axis: "user",
+        title: "任务描述",
+    },
+    Direction {
+        id: "user.reminders",
+        axis: "user",
+        title: "用户提醒",
+    },
+    Direction {
+        id: "user.flow",
+        axis: "user",
+        title: "操作流程",
+    },
+    Direction {
+        id: "agent.files",
+        axis: "agent",
+        title: "读写文件",
+    },
+    Direction {
+        id: "agent.tools",
+        axis: "agent",
+        title: "工具调用",
+    },
+    Direction {
+        id: "agent.failures",
+        axis: "agent",
+        title: "失败/重试",
+    },
+    Direction {
+        id: "agent.hot",
+        axis: "agent",
+        title: "热点/冗余",
+    },
+    Direction {
+        id: "agent.mcp",
+        axis: "agent",
+        title: "MCP",
+    },
+    Direction {
+        id: "agent.phases",
+        axis: "agent",
+        title: "任务阶段",
+    },
+    Direction {
+        id: "agent.metrics",
+        axis: "agent",
+        title: "成本/缓存/上下文",
+    },
 ];
 
 /// Tool names that mutate files. A `file_path` is a write only when one of these
@@ -64,9 +116,8 @@ static RE_FILE_PATH: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#""file_path"\s*:\s*"((?:\\.|[^"\\])*)""#).unwrap());
 static RE_WORKDIR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#""(?:workdir|cwd)"\s*:\s*"((?:\\.|[^"\\])*)""#).unwrap());
-static RE_CMD: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#""(?:cmd|command)"\s*:\s*"((?:\\.|[^"\\]){1,500})""#).unwrap()
-});
+static RE_CMD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#""(?:cmd|command)"\s*:\s*"((?:\\.|[^"\\]){1,500})""#).unwrap());
 static RE_WALL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#""wall_time_seconds"\s*:\s*([0-9]+(?:\.[0-9]+)?)"#).unwrap());
 static RE_EXIT: LazyLock<Regex> =
@@ -86,12 +137,10 @@ static RE_PATH_TOKEN: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
-static RE_SHELL_PROLOGUE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(?:set|export|source|shopt)\b|^[{}]$").unwrap()
-});
-static RE_CONTINUE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(?:继续|接着|往下|go on|next|ok|好)[。.!！~ ]*$").unwrap()
-});
+static RE_SHELL_PROLOGUE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^(?:set|export|source|shopt)\b|^[{}]$").unwrap());
+static RE_CONTINUE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^(?:继续|接着|往下|go on|next|ok|好)[。.!！~ ]*$").unwrap());
 static RE_STRUCTURED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^\s*[-*•]|\b1\.[^0-9]").unwrap());
 static RE_TURN_MENTION: LazyLock<Regex> =
@@ -99,38 +148,78 @@ static RE_TURN_MENTION: LazyLock<Regex> =
 
 const TASTE_SKIP_PARENT: &[&str] = &[".tmp", "tmp", "refs", "references", "node_modules"];
 
-static PHASE_RES: LazyLock<Vec<(&'static str, Regex)>> =
-    LazyLock::new(|| PHASES.iter().map(|(n, p)| (*n, Regex::new(p).unwrap())).collect());
+static PHASE_RES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
+    PHASES
+        .iter()
+        .map(|(n, p)| (*n, Regex::new(p).unwrap()))
+        .collect()
+});
 static FAMILY_RES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     vec![
         ("git", Regex::new(r"\bgit\b").unwrap()),
         ("search", Regex::new(r"\b(rg|grep|ag|ack)\b").unwrap()),
-        ("read", Regex::new(r"\b(cat|head|tail|less|bat|sed -n)\b").unwrap()),
-        ("test", Regex::new(r"\b(pytest|ctest|cargo test|go test|googletest)\b").unwrap()),
-        ("build", Regex::new(r"\b(ninja|make\b|blade|bazel|cmake|cargo build)\b").unwrap()),
+        (
+            "read",
+            Regex::new(r"\b(cat|head|tail|less|bat|sed -n)\b").unwrap(),
+        ),
+        (
+            "test",
+            Regex::new(r"\b(pytest|ctest|cargo test|go test|googletest)\b").unwrap(),
+        ),
+        (
+            "build",
+            Regex::new(r"\b(ninja|make\b|blade|bazel|cmake|cargo build)\b").unwrap(),
+        ),
         ("remote", Regex::new(r"\b(ssh|scp|rsync)\b").unwrap()),
     ]
 });
 static RE_WS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
 static RE_NUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[0-9]+\b").unwrap());
-static RE_NUMERIC: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+(?:\.[0-9]+)?$").unwrap());
-static RE_PARENT_AT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([^/@\s]+)(?:@|--).+$").unwrap());
+static RE_NUMERIC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[0-9]+(?:\.[0-9]+)?$").unwrap());
+static RE_PARENT_AT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([^/@\s]+)(?:@|--).+$").unwrap());
 static RE_EXT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\.[a-zA-Z0-9]{1,8}$").unwrap());
 static RE_WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[\w.-]+$").unwrap());
-static RE_SKILLS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)/skills/([\w.-]+)/").unwrap());
+static RE_SKILLS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)/skills/([\w.-]+)/").unwrap());
 static REMINDER_RES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     vec![
-        ("纠正", Regex::new(r"认知错误|搞错|不对|不正确|有误|不是.{0,8}而是|不符合预期|太浅|有问题").unwrap()),
-        ("重申约束", Regex::new(r"注意|记得|必须|一定要|禁止|唯一|只能|不要|别|不需要|无需|不用|应该").unwrap()),
-        ("催促", Regex::new(r"为什么|怎么还|多久|尽快|还没|没有结果|太慢|用了这么多时间|尚未").unwrap()),
-        ("没看到", Regex::new(r"没看到|没有看到|都丢了|丢了|不见了|停了|挂了|崩了|没结果").unwrap()),
-        ("加载上下文", Regex::new(r"(?i)从\s*nmem|加载|guideline|上下文|taste|规范|读取").unwrap()),
-        ("重新执行", Regex::new(r"重新|再次|重跑|再测|再来|重试").unwrap()),
-        ("推进", Regex::new(r"(?i)继续|接着|往下|go on|next").unwrap()),
+        (
+            "纠正",
+            Regex::new(r"认知错误|搞错|不对|不正确|有误|不是.{0,8}而是|不符合预期|太浅|有问题")
+                .unwrap(),
+        ),
+        (
+            "重申约束",
+            Regex::new(r"注意|记得|必须|一定要|禁止|唯一|只能|不要|别|不需要|无需|不用|应该")
+                .unwrap(),
+        ),
+        (
+            "催促",
+            Regex::new(r"为什么|怎么还|多久|尽快|还没|没有结果|太慢|用了这么多时间|尚未").unwrap(),
+        ),
+        (
+            "没看到",
+            Regex::new(r"没看到|没有看到|都丢了|丢了|不见了|停了|挂了|崩了|没结果").unwrap(),
+        ),
+        (
+            "加载上下文",
+            Regex::new(r"(?i)从\s*nmem|加载|guideline|上下文|taste|规范|读取").unwrap(),
+        ),
+        (
+            "重新执行",
+            Regex::new(r"重新|再次|重跑|再测|再来|重试").unwrap(),
+        ),
+        (
+            "推进",
+            Regex::new(r"(?i)继续|接着|往下|go on|next").unwrap(),
+        ),
     ]
 });
-static RE_NMEM_ACTION: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"写入|记录|整理|梳理|沉淀|结构化|落到|落盘|存(?:入|到)|更新到|补充到|写到").unwrap());
+static RE_NMEM_ACTION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"写入|记录|整理|梳理|沉淀|结构化|落到|落盘|存(?:入|到)|更新到|补充到|写到").unwrap()
+});
 
 /// Parsed heads of `tool_input` / `tool_response`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -165,7 +254,9 @@ impl Head {
 }
 
 pub fn unescape(s: &str) -> String {
-    s.replace("\\/", "/").replace("\\\"", "\"").replace("\\\\", "\\")
+    s.replace("\\/", "/")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
 }
 
 /// Absolute-ish key for a file path so relative and absolute spellings collapse.
@@ -316,12 +407,25 @@ pub fn parse_ts(value: &str) -> Option<f64> {
     if RE_NUMERIC.is_match(s) {
         return s.parse::<f64>().ok();
     }
-    let cleaned = s.replacen('Z', "+00:00", 1);
-    let cleaned = if cleaned.contains(' ') {
-        cleaned.replacen(' ', "T", 1)
-    } else {
-        cleaned
-    };
+    // Normalise the timezone suffix so RFC3339 parsing accepts `+00` / `+0800`.
+    let mut cleaned = s.replacen('Z', "+00:00", 1);
+    let n = cleaned.len();
+    let b = cleaned.as_bytes();
+    if n >= 3
+        && (b[n - 3] == b'+' || b[n - 3] == b'-')
+        && b[n - 2].is_ascii_digit()
+        && b[n - 1].is_ascii_digit()
+    {
+        cleaned.push_str(":00");
+    } else if n >= 5
+        && (b[n - 5] == b'+' || b[n - 5] == b'-')
+        && b[n - 4..].iter().all(u8::is_ascii_digit)
+    {
+        cleaned.insert(n - 2, ':');
+    }
+    if cleaned.contains(' ') {
+        cleaned = cleaned.replacen(' ', "T", 1);
+    }
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&cleaned) {
         return Some(dt.timestamp_micros() as f64 / 1_000_000.0);
     }
@@ -333,7 +437,6 @@ pub fn parse_ts(value: &str) -> Option<f64> {
     }
     None
 }
-
 pub fn prompt_has_path(text: &str) -> bool {
     text.contains('/')
 }
@@ -537,7 +640,10 @@ mod tests {
 
     #[test]
     fn mcp_parts_splits() {
-        assert_eq!(mcp_parts("mcp__nowledge-mem__search"), Some(("nowledge-mem".into(), "search".into())));
+        assert_eq!(
+            mcp_parts("mcp__nowledge-mem__search"),
+            Some(("nowledge-mem".into(), "search".into()))
+        );
         assert_eq!(mcp_parts("mcp_x_y"), Some(("x".into(), "y".into())));
         assert_eq!(mcp_parts("Bash"), None);
     }
@@ -570,7 +676,10 @@ mod tests {
     fn taste_keys_identify_by_project_or_skill() {
         assert_eq!(taste_keys(&["/x/skills/goal/SKILL.md"]), vec!["skill:goal"]);
         assert_eq!(taste_keys(&["/p/foo/AGENTS.md"]), vec!["foo/AGENTS.md"]);
-        assert_eq!(taste_keys(&["/legacy/proj/AGENTS.md"]), vec!["proj/AGENTS.md"]);
+        assert_eq!(
+            taste_keys(&["/legacy/proj/AGENTS.md"]),
+            vec!["proj/AGENTS.md"]
+        );
     }
 
     #[test]
