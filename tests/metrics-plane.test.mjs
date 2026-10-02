@@ -15,7 +15,7 @@ const ingest = readFileSync(join(root, 'trae_hooks/pi_session_ingest.py'), 'utf8
 const hookClient = readFileSync(join(root, 'trae_hooks/hook_client.py'), 'utf8');
 const extension = readFileSync(join(root, 'trae_hooks/pi/clipvault-session.ts'), 'utf8');
 const mine = readFileSync(join(root, 'trae_hooks/mine.py'), 'utf8');
-const html = readFileSync(join(root, 'trae_hooks/web/sessions.html'), 'utf8');
+const html = readFileSync(join(root, 'trae_hooks/web/sessions-vanilla.html'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
 
 test('this file and session_metrics_main.py are in the deploy gate', () => {

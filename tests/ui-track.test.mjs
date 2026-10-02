@@ -14,7 +14,7 @@ import { root } from './helpers/src.mjs';
 
 const trackSrc = readFileSync(join(root, 'web/assets/ui-track.js'), 'utf8');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
-const sessionsHtml = readFileSync(join(root, 'trae_hooks/web/sessions.html'), 'utf8');
+const sessionsHtml = readFileSync(join(root, 'trae_hooks/web/sessions-vanilla.html'), 'utf8');
 const metricsJs = readFileSync(join(root, 'web/assets/notes-metrics.js'), 'utf8');
 const panelJs = readFileSync(join(root, 'web/assets/metrics-panel.js'), 'utf8');
 const swift = readFileSync(join(root, 'Sources/ClipVault/Metrics/UiMetrics.swift'), 'utf8');

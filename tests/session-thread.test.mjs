@@ -11,7 +11,7 @@ import test from 'node:test';
 import { root } from './helpers/src.mjs';
 import { imMessagesFromEvents, layoutImRows } from '../web/session-render.mjs';
 
-const html = readFileSync(join(root, 'trae_hooks/web/sessions.html'), 'utf8');
+const html = readFileSync(join(root, 'trae_hooks/web/sessions-vanilla.html'), 'utf8');
 const server = readFileSync(join(root, 'trae_hooks/server.py'), 'utf8');
 const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');

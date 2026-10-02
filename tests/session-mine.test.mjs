@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { root } from './helpers/src.mjs';
 
-const html = readFileSync(join(root, 'trae_hooks/web/sessions.html'), 'utf8');
+const html = readFileSync(join(root, 'trae_hooks/web/sessions-vanilla.html'), 'utf8');
 const server = readFileSync(join(root, 'trae_hooks/server.py'), 'utf8');
 const mine = readFileSync(join(root, 'trae_hooks/mine.py'), 'utf8');
 const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');

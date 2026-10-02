@@ -11,7 +11,7 @@ import { src, root } from './helpers/src.mjs';
 const metricsJs = readFileSync(join(root, 'web/assets/notes-metrics.js'), 'utf8');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const panelJs = readFileSync(join(root, 'web/assets/metrics-panel.js'), 'utf8');
-const sessionsHtml = readFileSync(join(root, 'trae_hooks/web/sessions.html'), 'utf8');
+const sessionsHtml = readFileSync(join(root, 'trae_hooks/web/sessions-vanilla.html'), 'utf8');
 const notesEntry = readFileSync(join(root, 'web/assets/notes-editor/entry.js'), 'utf8');
 const notesBundle = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.js'), 'utf8');
 const swift = src('UiMetrics.swift');
