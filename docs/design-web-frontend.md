@@ -138,6 +138,12 @@ the one server change this design depends on.
 
 1. **One app per feature island**, mounted into an existing page; no global SPA
    rewrite. `web/session-app` is the reference.
+1b. **Display logic is shared, never forked.** Roles, alignment, beats-vs-tools,
+   bundles and ask blocks live in `web/session-render.mjs` (`renderRows`,
+   `imMessagesFromEvents`, `focusImRows`, `bundleTitle`, `rowPreview`, …), imported
+   by the app as `@render`. The React panel renders that exact HTML; the visual
+   identity is `web/session-app/src/theme/panel.css`, copied verbatim from the
+   vanilla panel. A rewrite must not invent a second look.
 2. **Tokens are code**: `theme/tokens.css` is generated from `docs/design-taste.md`;
    no component hardcodes a hex.
 3. **Every API response is Zod-parsed**; the Rust struct and the TS schema are

@@ -1,82 +1,9 @@
+import { focusImRows, type ImRow, imMessagesFromEvents, layoutKey, renderRows } from "@render";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type EventStubT, streamUrl } from "../../api/client";
-import { cn } from "../../lib/cn";
-
-type Role = "user" | "assistant" | "tool" | "ask" | "system";
-
-const ROLE_COLOR: Record<Role, string> = {
-  user: "text-role-user",
-  assistant: "text-role-assistant",
-  tool: "text-role-tool",
-  ask: "text-role-ask",
-  system: "text-role-system",
-};
-
-function roleOf(e: EventStubT): Role {
-  if (e.hook_event === "UserPromptSubmit") return "user";
-  if (e.hook_event === "Stop") return "assistant";
-  if (e.hook_event === "PreToolUse" || e.hook_event === "PostToolUse") return "tool";
-  if (e.hook_event === "Notification") return "ask";
-  return "system";
-}
-
-function relTime(ts?: string | null): string {
-  if (!ts) return "—";
-  const t = Date.parse(ts.replace(" ", "T") + (ts.endsWith("Z") ? "" : "Z"));
-  if (Number.isNaN(t)) return ts.slice(0, 19);
-  const d = Math.max(0, Date.now() - t) / 1000;
-  if (d < 60) return "刚刚";
-  if (d < 3600) return `${Math.floor(d / 60)} 分钟前`;
-  if (d < 86400) return `${Math.floor(d / 3600)} 小时前`;
-  return ts.slice(0, 10);
-}
-
-function preview(e: EventStubT): string {
-  const s = e.prompt || e.last_assistant_message || e.tool_name || e.llm_tool_name || "";
-  return s.trim().split("\n")[0].slice(0, 140);
-}
-
-/** Lazy body: the stub is already in the list; the full bundle is fetched only
- *  when the row is opened. */
-function LazyBody({ id }: { id: string }) {
-  const [open, setOpen] = useState(false);
-  const q = useQuery({
-    queryKey: ["event", id],
-    queryFn: () => api.event(id),
-    enabled: open,
-    staleTime: 5 * 60_000,
-  });
-  const raw = q.data?.event?.raw_json;
-  const text = typeof raw === "string" ? raw : q.data ? JSON.stringify(q.data.event, null, 2) : "";
-  return (
-    <details className="mt-1" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary className="cursor-pointer text-[10px] text-role-tool">正文</summary>
-      <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-black/[0.03] p-2 text-[11px]">
-        {q.isPending ? "加载中…" : text.slice(0, 12000)}
-      </pre>
-    </details>
-  );
-}
-
-function Row({ e }: { e: EventStubT }) {
-  const role = roleOf(e);
-  const isTool = role === "tool";
-  return (
-    <div className="mb-2 rounded-lg bg-white px-3 py-2 shadow-sm">
-      <div className="mb-0.5 flex items-center gap-2">
-        <span className={cn("text-[10px] font-semibold", ROLE_COLOR[role])}>{role}</span>
-        <span className="text-[10px] text-role-system">{e.hook_event}</span>
-        <span className="ml-auto text-[10px] text-role-system">{relTime(e.ts)}</span>
-      </div>
-      <div className="whitespace-pre-wrap break-words text-[12px] text-ink">
-        {preview(e) || "—"}
-      </div>
-      {isTool && <LazyBody id={e.event_id} />}
-    </div>
-  );
-}
+import { bundleHtml, focusHtml } from "./render";
 
 export function SessionView({ sessionId }: { sessionId: string }) {
   const beats = useQuery({
@@ -110,52 +37,118 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     return () => es.close();
   }, [sessionId]);
 
-  const items = useMemo(() => {
-    const stubs = tools.data?.pages.flatMap((p) => p.events) ?? [];
-    // Drop PreToolUse when its Post is loaded (may be on a later page).
-    const posted = new Set(
-      stubs
-        .filter((s) => s.hook_event === "PostToolUse" && s.tool_use_id)
-        .map((s) => s.tool_use_id as string),
-    );
-    const deduped = stubs.filter(
-      (s) => !(s.hook_event === "PreToolUse" && s.tool_use_id && posted.has(s.tool_use_id ?? "")),
-    );
-    const all = [...(beats.data?.events ?? []), ...deduped, ...live];
-    all.sort((a, b) => a.ts.localeCompare(b.ts) || a.event_id.localeCompare(b.event_id));
-    return all;
-  }, [beats.data, tools.data, live]);
+  // Display logic lives in web/session-render.mjs: chronological IM rows
+  // (Pre/Post collapse, SessionStart drop), then beats vs bundled tool index.
+  const imRows = useMemo<ImRow[]>(
+    () =>
+      imMessagesFromEvents([
+        ...(beats.data?.events ?? []),
+        ...(tools.data?.pages.flatMap((p) => p.events) ?? []),
+        ...live,
+      ]),
+    [beats.data, tools.data, live],
+  );
+  const items = useMemo(() => focusImRows(imRows), [imRows]);
+  const rowById = useMemo(
+    () => new Map(imRows.map((r) => [String(r.event.event_id || ""), r])),
+    [imRows],
+  );
+
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setExpanded(new Set());
+  }, [sessionId]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virt = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 76,
-    overscan: 12,
+    estimateSize: () => 96,
+    overscan: 8,
   });
+
+  // Lazy: a bundle item's body renders on open; a raw JSON body fetches on open.
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    const onToggle = (ev: Event) => {
+      const d = ev.target as HTMLDetailsElement;
+      if (!d.matches) return;
+      if (d.matches("details.history-item") && d.open) {
+        const body = d.querySelector<HTMLElement>(".history-item-body");
+        if (!body || body.dataset.loaded) return;
+        const row = rowById.get(d.dataset.eid || "");
+        if (!row) return;
+        body.dataset.loaded = "1";
+        body.innerHTML = renderRows([row], null);
+      } else if (d.matches("details.raw") && d.open) {
+        const host = d.querySelector<HTMLElement>(".raw-body");
+        const id = d.closest(".bubble")?.getAttribute("data-id");
+        if (!host || host.dataset.loaded || !id) return;
+        host.dataset.loaded = "1";
+        api
+          .event(id)
+          .then((j) => {
+            const raw = (j.event as Record<string, unknown>).raw_json;
+            host.textContent = (
+              typeof raw === "string" ? raw : JSON.stringify(j.event, null, 2)
+            ).slice(0, 12000);
+          })
+          .catch(() => {
+            host.textContent = "加载失败";
+          });
+      }
+    };
+    const onClick = (ev: Event) => {
+      const btn = (ev.target as HTMLElement | null)?.closest?.(".history-expand-all");
+      if (!btn) return;
+      const key = btn.closest("[data-key]")?.getAttribute("data-key");
+      if (key) setExpanded((prev) => new Set(prev).add(key));
+    };
+    el.addEventListener("toggle", onToggle, true);
+    el.addEventListener("click", onClick);
+    return () => {
+      el.removeEventListener("toggle", onToggle, true);
+      el.removeEventListener("click", onClick);
+    };
+  }, [rowById]);
+
   const vitems = virt.getVirtualItems();
   const lastIndex = vitems.length ? vitems[vitems.length - 1].index : 0;
-
   useEffect(() => {
-    if (lastIndex >= items.length - 12 && tools.hasNextPage && !tools.isFetchingNextPage) {
+    if (lastIndex >= items.length - 8 && tools.hasNextPage && !tools.isFetchingNextPage) {
       void tools.fetchNextPage();
     }
   }, [lastIndex, items.length, tools.hasNextPage, tools.isFetchingNextPage, tools]);
 
   return (
-    <div ref={parentRef} className="h-full overflow-y-auto p-3">
-      {items.length === 0 && tools.isPending && (
-        <p className="text-[12px] text-role-system">加载事件…</p>
+    <div className="thread" id="thread" ref={parentRef} style={{ overflowY: "auto" }}>
+      {items.length === 0 && (beats.isPending || tools.isPending) && (
+        <div className="empty">加载事件…</div>
+      )}
+      {items.length === 0 && !beats.isPending && !tools.isPending && (
+        <div className="empty">没有匹配事件</div>
       )}
       <div style={{ height: virt.getTotalSize(), position: "relative" }}>
         {vitems.map((vi) => {
-          const e = items[vi.index];
-          if (!e) return null;
+          const it = items[vi.index];
+          if (!it) return null;
+          const prev = vi.index > 0 ? items[vi.index - 1] : null;
+          const prevRow: ImRow | null = prev
+            ? prev.type === "focus"
+              ? prev.row
+              : (prev.rows[prev.rows.length - 1] ?? null)
+            : null;
+          const key = layoutKey(it);
+          const html =
+            it.type === "focus" ? focusHtml(it, prevRow) : bundleHtml(it, expanded.has(key));
           return (
             <div
-              key={e.event_id}
+              key={key}
+              data-key={key}
               data-index={vi.index}
               ref={virt.measureElement}
+              className="thread-block"
               style={{
                 position: "absolute",
                 top: 0,
@@ -163,15 +156,12 @@ export function SessionView({ sessionId }: { sessionId: string }) {
                 width: "100%",
                 transform: `translateY(${vi.start}px)`,
               }}
-            >
-              <Row e={e} />
-            </div>
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
           );
         })}
       </div>
-      {tools.isFetchingNextPage && (
-        <p className="py-2 text-center text-[11px] text-role-system">加载更多…</p>
-      )}
+      {tools.isFetchingNextPage && <div className="empty">加载更多…</div>}
     </div>
   );
 }
