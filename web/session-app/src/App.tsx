@@ -1,7 +1,7 @@
 import { localDateTime, relLocalTime } from "@render";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { api, type SessionT } from "./api/client";
+import { api, type SessionT, streamUrl } from "./api/client";
 import { RailCard, sourceLabel } from "./features/session/RailCard";
 import { SessionView } from "./features/session/SessionView";
 
@@ -182,6 +182,31 @@ export function App() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15000 });
   const qc = useQueryClient();
   const [analysisOpen, setAnalysisOpen] = useState(false);
+
+  // Live rail: any hook event on the corpus refreshes the session list, merged
+  // to 1s (taste: 列表 1s 合并). The thread has its own per-session stream.
+  useEffect(() => {
+    const es = new EventSource(streamUrl());
+    let timer = 0;
+    const bump = () => {
+      if (timer) return;
+      timer = window.setTimeout(() => {
+        timer = 0;
+        void qc.invalidateQueries({ queryKey: ["sessions"] });
+      }, 1000);
+    };
+    es.onmessage = (ev) => {
+      try {
+        if ((JSON.parse(ev.data) as { type?: string }).type === "hook_event") bump();
+      } catch {
+        /* ping / connected */
+      }
+    };
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      es.close();
+    };
+  }, [qc]);
 
   useEffect(() => {
     // The parent shell hides its own close button while the analysis sheet
