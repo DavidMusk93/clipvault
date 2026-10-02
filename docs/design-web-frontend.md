@@ -1,7 +1,7 @@
 ---
 doc_id: clipvault-web-frontend-v1
 kind: design
-status: draft
+status: active
 authority: design
 applies_to:
   - web/session-app/**
@@ -22,6 +22,14 @@ verified_by:
 ---
 
 # Session panel as a real app: React 19 + Radix + ECharts on a Vite build
+
+## 0. Status (2026-10-02)
+
+Landed: P0 (Vite toolchain, deploy-time build), P1 (analysis dashboard),
+P2 (keyset pagination + virtualized thread + SSE), P3 (the `/trae/` shell now
+mounts the React app; the vanilla panel is kept at
+`trae_hooks/web/sessions-vanilla.html` for rollback). `web/index.html` (parent
+shell) is unchanged.
 
 ## 1. Decision
 
