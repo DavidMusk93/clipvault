@@ -11,14 +11,15 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures::stream::Stream;
 use serde_json::{json, Map, Value};
 use tokio::sync::broadcast;
 use tokio_postgres::types::ToSql;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::Stream;
 use tokio_stream::StreamExt as _;
 
 use crate::db::{self, Pool};
+use crate::role::BackendRole;
 
 const EVENT_LIST_SQL: &str = "SELECT event_id, ts, instance_id, session_id, hook_event, source, \
     cwd, tool_name, llm_tool_name, tool_use_id, prompt, last_assistant_message, \
@@ -30,7 +31,7 @@ pub struct AppState {
     pub pool: Pool,
     pub backend_id: String,
     pub corpus_id: String,
-    pub role: String,
+    pub role: BackendRole,
     pub store_label: String,
     pub tx: broadcast::Sender<Value>,
     pub web_dirs: Vec<PathBuf>,
@@ -67,7 +68,10 @@ pub fn router(state: AppState) -> Router {
 async fn health(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
     let client = st.pool.get().await.map_err(internal)?;
     let row = client
-        .query_one("SELECT count(*) AS events, max(ts) AS last_ts FROM hook_events", &[])
+        .query_one(
+            "SELECT count(*) AS events, max(ts) AS last_ts FROM hook_events",
+            &[],
+        )
         .await
         .map_err(internal)?;
     let events: i64 = row.get("events");
@@ -81,7 +85,7 @@ async fn health(State(st): State<AppState>) -> Result<Json<Value>, ApiError> {
         "ok": true,
         "service": "clipvault-session",
         "backend_id": st.backend_id,
-        "role": st.role,
+        "role": st.role.as_str(),
         "corpus_id": st.corpus_id,
         "store": { "engine": "postgresql", "database": st.store_label },
         "pg": version,
@@ -176,7 +180,9 @@ async fn events(
                 out.push(item);
             }
         }
-        return Ok(Json(json!({ "events": out, "view": if view.is_empty() { "full" } else { &view } })));
+        return Ok(Json(
+            json!({ "events": out, "view": if view.is_empty() { "full" } else { &view } }),
+        ));
     }
 
     let mut where_parts: Vec<String> = vec!["1=1".into()];
@@ -227,12 +233,19 @@ fn index_session_tools(rows: &[Value]) -> Vec<Value> {
     let posted: std::collections::HashSet<String> = rows
         .iter()
         .filter(|r| r.get("hook_event").and_then(Value::as_str) == Some("PostToolUse"))
-        .filter_map(|r| r.get("tool_use_id").and_then(Value::as_str).map(str::to_string))
+        .filter_map(|r| {
+            r.get("tool_use_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .collect();
     let mut out = Vec::new();
     for row in rows {
         let is_pre = row.get("hook_event").and_then(Value::as_str) == Some("PreToolUse");
-        let tuid = row.get("tool_use_id").and_then(Value::as_str).unwrap_or_default();
+        let tuid = row
+            .get("tool_use_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if is_pre && !tuid.is_empty() && posted.contains(tuid) {
             continue;
         }
@@ -256,7 +269,10 @@ async fn event_by_id(
     let full = matches!(q.get("full").map(String::as_str), Some("1") | Some("true"));
     let client = st.pool.get().await.map_err(internal)?;
     let rows = client
-        .query("SELECT * FROM hook_events WHERE event_id = $1 LIMIT 1", &[&id])
+        .query(
+            "SELECT * FROM hook_events WHERE event_id = $1 LIMIT 1",
+            &[&id],
+        )
         .await
         .map_err(internal)?;
     let Some(row) = rows.first() else {
@@ -270,7 +286,10 @@ async fn event_by_id(
                 if let Some(Value::String(s)) = obj.get(key).cloned() {
                     if s.chars().count() > 16000 {
                         let head: String = s.chars().take(16000).collect();
-                        obj.insert(key.into(), Value::String(format!("{head}\n/* truncated */")));
+                        obj.insert(
+                            key.into(),
+                            Value::String(format!("{head}\n/* truncated */")),
+                        );
                         truncated = true;
                     }
                 }
@@ -285,9 +304,7 @@ async fn event_by_id(
 
 // ------------------------------------------------------------------ SSE ----
 
-async fn stream(
-    State(st): State<AppState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+async fn stream(State(st): State<AppState>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let rx = st.tx.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(|item| match item {
         Ok(v) => Some(Ok(Event::default().data(v.to_string()))),
@@ -319,10 +336,7 @@ async fn notify(State(st): State<AppState>, Json(mut body): Json<Value>) -> Json
 
 // ----------------------------------------------------------------- pins ----
 
-async fn pin(
-    State(st): State<AppState>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
+async fn pin(State(st): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
     let sid = body
         .get("session_id")
         .and_then(Value::as_str)
@@ -363,7 +377,10 @@ async fn pin(
     }
     let pinned_at: Option<chrono::DateTime<chrono::Utc>> = if want {
         client
-            .query_one("SELECT pinned_at FROM session_pins WHERE session_id = $1", &[&sid])
+            .query_one(
+                "SELECT pinned_at FROM session_pins WHERE session_id = $1",
+                &[&sid],
+            )
             .await
             .map_err(internal)?
             .get(0)
@@ -388,7 +405,10 @@ async fn pin(
 // ----------------------------------------------------------- analysis (TODO) ----
 
 async fn mine(Query(q): Query<BTreeMap<String, String>>) -> Json<Value> {
-    if matches!(q.get("catalog").map(String::as_str), Some("1") | Some("true")) {
+    if matches!(
+        q.get("catalog").map(String::as_str),
+        Some("1") | Some("true")
+    ) {
         return Json(json!({ "directions": DIRECTIONS }));
     }
     Json(json!({
@@ -402,7 +422,8 @@ async fn ack(Json(_body): Json<Value>) -> Json<Value> {
 }
 
 const DIRECTIONS: &[&str] = &[
-    "cwd", "git", "taste", "intent", "reminder", "flow", "file", "tool", "failure", "hot", "mcp", "phase",
+    "cwd", "git", "taste", "intent", "reminder", "flow", "file", "tool", "failure", "hot", "mcp",
+    "phase",
 ];
 
 // -------------------------------------------------------------- static ----

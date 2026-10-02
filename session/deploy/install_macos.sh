@@ -112,6 +112,8 @@ cat > "$TUNNEL_PLIST" <<EOF
     <string>-N</string>
     <string>-o</string><string>ExitOnForwardFailure=yes</string>
     <string>-o</string><string>BatchMode=yes</string>
+    <string>-o</string><string>ControlMaster=no</string>
+    <string>-o</string><string>ControlPath=none</string>
     <string>-o</string><string>ServerAliveInterval=30</string>
     <string>-o</string><string>ServerAliveCountMax=3</string>
     <string>-L</string><string>127.0.0.1:55432:127.0.0.1:55432</string>
@@ -121,6 +123,7 @@ cat > "$TUNNEL_PLIST" <<EOF
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardErrorPath</key><string>/var/tmp/clipvault-hooks/tunnel.err</string>
 </dict></plist>
 EOF
 
@@ -140,9 +143,11 @@ cat > "$FLUSH_PLIST" <<EOF
     <key>CLIPVAULT_PG_USER</key><string>clipvault</string>
     <key>CLIPVAULT_PG_PASSWORD_FILE</key><string>$PASSWORD_FILE</string>
     <key>CLIPVAULT_HOOK_SPOOL</key><string>$SPOOL</string>
+    <key>CLIPVAULT_FLUSH_WAKE</key><string>127.0.0.1:19499</string>
   </dict>
-  <key>StartInterval</key><integer>60</integer>
   <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
 </dict></plist>
 EOF
 
