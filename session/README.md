@@ -35,6 +35,17 @@ cargo build --release            # host
 | `CLIPVAULT_SESSION_WEB_DIR` | — | `:`-separated dirs serving `sessions.html` + `*.mjs` |
 | `CLIPVAULT_INSTANCE_ID` / `CLIPVAULT_HOOK_SOURCE` / `CLIPVAULT_HOOK_SPOOL` | `unknown` / `trae` / `/var/tmp/clipvault-hooks/spool` | collector |
 
+## Session panel assets
+
+The panel iframe (`/trae/?embed=1`) is served by the **backend** (d2/cc), so
+`sessions.html` and every module it imports must live in the backend web dir.
+A missing ES module 404 aborts the whole panel script (empty panel). After any
+change to `trae_hooks/web/sessions.html` or `web/*.mjs`, run:
+
+```bash
+bash session/deploy/sync_backend_web.sh
+```
+
 ## Deploy (d2, primary)
 
 ```bash
