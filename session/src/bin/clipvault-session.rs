@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clipvault_session::config;
+use clipvault_session::role::BackendRole;
 use clipvault_session::{db, facade};
 use tokio::sync::broadcast;
 
@@ -42,7 +43,7 @@ async fn async_main() -> Result<()> {
         pool,
         backend_id: config::var("CLIPVAULT_BACKEND_ID", "local"),
         corpus_id: config::var("CLIPVAULT_CORPUS_ID", "clipvault"),
-        role: config::var("CLIPVAULT_BACKEND_ROLE", "primary"),
+        role: BackendRole::parse(&config::var("CLIPVAULT_BACKEND_ROLE", "primary"))?,
         store_label: config::var("CLIPVAULT_PG_DB", "clipvault"),
         tx,
         web_dirs,

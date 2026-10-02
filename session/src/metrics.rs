@@ -16,19 +16,64 @@ pub const USAGE_TABLE: &str = "llm_usage";
 pub const CTX_TABLE: &str = "turn_context";
 
 pub const USAGE_COLS: &[&str] = &[
-    "usage_id", "ts", "session_id", "instance_id", "source", "model", "provider", "api",
-    "message_id", "turn_index", "input_tokens", "output_tokens", "cache_read_tokens",
-    "cache_write_tokens", "reasoning_tokens", "total_tokens", "cost_input", "cost_output",
-    "cost_cache_read", "cost_cache_write", "cost_total", "ttft_ms", "elapsed_ms", "decode_ms",
-    "tok_s_decode", "tok_s_e2e", "stop_reason", "response_id", "host",
+    "usage_id",
+    "ts",
+    "session_id",
+    "instance_id",
+    "source",
+    "model",
+    "provider",
+    "api",
+    "message_id",
+    "turn_index",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+    "total_tokens",
+    "cost_input",
+    "cost_output",
+    "cost_cache_read",
+    "cost_cache_write",
+    "cost_total",
+    "ttft_ms",
+    "elapsed_ms",
+    "decode_ms",
+    "tok_s_decode",
+    "tok_s_e2e",
+    "stop_reason",
+    "response_id",
+    "host",
 ];
 
 pub const CTX_COLS: &[&str] = &[
-    "ctx_id", "ts", "session_id", "instance_id", "source", "model", "message_id", "turn_index",
-    "system_tokens", "preamble_tokens", "tools_tokens", "rules_tokens", "docs_tokens",
-    "project_tokens", "skills_tokens", "prompt_tokens", "history_tokens", "tool_result_tokens",
-    "prompt_total_tokens", "est_chars_per_token", "sections_json", "skill_names",
-    "skill_loaded_tokens", "memory_ids", "tool_schema_names", "host",
+    "ctx_id",
+    "ts",
+    "session_id",
+    "instance_id",
+    "source",
+    "model",
+    "message_id",
+    "turn_index",
+    "system_tokens",
+    "preamble_tokens",
+    "tools_tokens",
+    "rules_tokens",
+    "docs_tokens",
+    "project_tokens",
+    "skills_tokens",
+    "prompt_tokens",
+    "history_tokens",
+    "tool_result_tokens",
+    "prompt_total_tokens",
+    "est_chars_per_token",
+    "sections_json",
+    "skill_names",
+    "skill_loaded_tokens",
+    "memory_ids",
+    "tool_schema_names",
+    "host",
 ];
 
 const SECTION_COLUMNS: &[(&str, &str)] = &[
@@ -40,28 +85,7 @@ const SECTION_COLUMNS: &[(&str, &str)] = &[
     ("skills", "skills_tokens"),
 ];
 
-/// A typed column value that can be handed to `tokio_postgres` as a parameter.
-pub enum PgVal {
-    Text(Option<String>),
-    Int(Option<i64>),
-    Int4(Option<i32>),
-    Float(Option<f64>),
-    Ts(Option<DateTime<Utc>>),
-}
-
-impl PgVal {
-    fn boxed(&self) -> Box<dyn ToSql + Send + Sync> {
-        match self {
-            PgVal::Text(v) => Box::new(v.clone()),
-            PgVal::Int(v) => Box::new(*v),
-            PgVal::Int4(v) => Box::new(*v),
-            PgVal::Float(v) => Box::new(*v),
-            PgVal::Ts(v) => Box::new(*v),
-        }
-    }
-}
-
-pub type Row = Vec<(&'static str, PgVal)>;
+pub use crate::db::{row_get as get, PgVal, Row};
 
 fn s(v: Option<&Value>) -> Option<String> {
     match v {
@@ -149,23 +173,34 @@ pub fn usage_row(payload: &Value) -> Row {
         ("instance_id", text(payload.get("instance_id"))),
         (
             "source",
-            PgVal::Text(Some(s(payload.get("source")).unwrap_or_else(|| "pi".into()))),
+            PgVal::Text(Some(
+                s(payload.get("source")).unwrap_or_else(|| "pi".into()),
+            )),
         ),
         ("model", text(payload.get("model"))),
         ("provider", text(payload.get("provider"))),
         ("api", text(payload.get("api"))),
         ("message_id", PgVal::Text(Some(message_id))),
-        ("turn_index", PgVal::Int4(tok(payload.get("turn_index")).map(|v| v as i32))),
+        (
+            "turn_index",
+            PgVal::Int4(tok(payload.get("turn_index")).map(|v| v as i32)),
+        ),
         ("input_tokens", PgVal::Int(tok(usage.get("input")))),
         ("output_tokens", PgVal::Int(output)),
         ("cache_read_tokens", PgVal::Int(tok(usage.get("cacheRead")))),
-        ("cache_write_tokens", PgVal::Int(tok(usage.get("cacheWrite")))),
+        (
+            "cache_write_tokens",
+            PgVal::Int(tok(usage.get("cacheWrite"))),
+        ),
         ("reasoning_tokens", PgVal::Int(tok(usage.get("reasoning")))),
         ("total_tokens", PgVal::Int(tok(usage.get("totalTokens")))),
         ("cost_input", PgVal::Float(flt(cost.get("input")))),
         ("cost_output", PgVal::Float(flt(cost.get("output")))),
         ("cost_cache_read", PgVal::Float(flt(cost.get("cacheRead")))),
-        ("cost_cache_write", PgVal::Float(flt(cost.get("cacheWrite")))),
+        (
+            "cost_cache_write",
+            PgVal::Float(flt(cost.get("cacheWrite"))),
+        ),
         ("cost_total", PgVal::Float(flt(cost.get("total")))),
         ("ttft_ms", PgVal::Int(ttft)),
         ("elapsed_ms", PgVal::Int(elapsed)),
@@ -183,17 +218,25 @@ pub fn ctx_row(payload: &Value) -> Row {
     let sections = payload.get("sections").cloned().unwrap_or(Value::Null);
     let cpt = flt(payload.get("est_chars_per_token")).unwrap_or(DEFAULT_CHARS_PER_TOKEN);
     let mut row: Vec<(&'static str, PgVal)> = vec![
-        ("ctx_id", PgVal::Text(Some(format!("{session_id}:{message_id}")))),
+        (
+            "ctx_id",
+            PgVal::Text(Some(format!("{session_id}:{message_id}"))),
+        ),
         ("ts", PgVal::Ts(Some(parse_ts(payload)))),
         ("session_id", PgVal::Text(Some(session_id.clone()))),
         ("instance_id", text(payload.get("instance_id"))),
         (
             "source",
-            PgVal::Text(Some(s(payload.get("source")).unwrap_or_else(|| "pi".into()))),
+            PgVal::Text(Some(
+                s(payload.get("source")).unwrap_or_else(|| "pi".into()),
+            )),
         ),
         ("model", text(payload.get("model"))),
         ("message_id", PgVal::Text(Some(message_id))),
-        ("turn_index", PgVal::Int4(tok(payload.get("turn_index")).map(|v| v as i32))),
+        (
+            "turn_index",
+            PgVal::Int4(tok(payload.get("turn_index")).map(|v| v as i32)),
+        ),
         ("est_chars_per_token", PgVal::Float(Some(cpt))),
         (
             "sections_json",
@@ -202,7 +245,10 @@ pub fn ctx_row(payload: &Value) -> Row {
             )),
         ),
         ("skill_names", text(payload.get("skill_names"))),
-        ("skill_loaded_tokens", text(payload.get("skill_loaded_tokens"))),
+        (
+            "skill_loaded_tokens",
+            text(payload.get("skill_loaded_tokens")),
+        ),
         ("memory_ids", text(payload.get("memory_ids"))),
         ("tool_schema_names", text(payload.get("tool_schema_names"))),
         ("host", text(payload.get("host"))),
@@ -226,9 +272,7 @@ pub fn ctx_row(payload: &Value) -> Row {
     let prompt_tokens = tok(payload.get("prompt_tokens"));
     let history_tokens = tok(payload.get("history_tokens"));
     let tool_result_tokens = tok(payload.get("tool_result_tokens"));
-    let parts = total_system
-        + prompt_tokens.unwrap_or(0)
-        + history_tokens.unwrap_or(0);
+    let parts = total_system + prompt_tokens.unwrap_or(0) + history_tokens.unwrap_or(0);
     row.push(("system_tokens", PgVal::Int(Some(total_system))));
     row.push(("prompt_tokens", PgVal::Int(prompt_tokens)));
     row.push(("history_tokens", PgVal::Int(history_tokens)));
@@ -264,6 +308,69 @@ pub async fn insert_row(
         .iter()
         .map(|b| b.as_ref() as &(dyn ToSql + Sync))
         .collect();
-    client.execute(&sql, &refs).await.context("insert metric row")?;
+    client
+        .execute(&sql, &refs)
+        .await
+        .context("insert metric row")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn rate_ignores_short_or_empty_windows() {
+        assert_eq!(rate(Some(50), Some(800)), Some(62.5));
+        assert_eq!(rate(Some(50), Some(100)), None); // below MIN_ELAPSED_MS
+        assert_eq!(rate(Some(0), Some(800)), None);
+    }
+
+    #[test]
+    fn usage_row_derives_decode_and_cost() {
+        let p = json!({
+            "session_id": "s", "message_id": "m",
+            "elapsed_ms": 1000, "ttft_ms": 200,
+            "usage": {"output": 50, "input": 100, "cost": {"total": 0.5}}
+        });
+        let row = usage_row(&p);
+        assert_eq!(get(&row, "usage_id").and_then(PgVal::as_text), Some("s:m"));
+        assert_eq!(get(&row, "decode_ms").and_then(PgVal::as_i64), Some(800));
+        assert_eq!(
+            get(&row, "tok_s_decode").and_then(PgVal::as_f64),
+            Some(62.5)
+        );
+        assert_eq!(get(&row, "cost_total").and_then(PgVal::as_f64), Some(0.5));
+        assert_unique_columns(&row);
+    }
+
+    #[test]
+    fn ctx_row_sums_only_known_sections_but_counts_all() {
+        let p = json!({
+            "session_id": "s", "message_id": "m",
+            "sections": {"rules": 360, "skills": 72, "prompt": 100},
+            "prompt_tokens": 100, "history_tokens": 500
+        });
+        let row = ctx_row(&p);
+        // 100 (rules) + 20 (skills) + 28 (unknown `prompt`) = 148
+        assert_eq!(
+            get(&row, "system_tokens").and_then(PgVal::as_i64),
+            Some(148)
+        );
+        assert_eq!(get(&row, "rules_tokens").and_then(PgVal::as_i64), Some(100));
+        assert_eq!(
+            get(&row, "prompt_total_tokens").and_then(PgVal::as_i64),
+            Some(748)
+        );
+        assert_unique_columns(&row);
+    }
+
+    fn assert_unique_columns(row: &Row) {
+        let mut names: Vec<&str> = row.iter().map(|(c, _)| *c).collect();
+        let n = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), n, "duplicate column in metric row");
+    }
 }

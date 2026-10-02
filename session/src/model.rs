@@ -8,6 +8,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -27,6 +28,34 @@ pub const METRIC_EVENTS: [&str; 2] = ["UsageReport", "ContextReport"];
 
 /// PostgreSQL NOTIFY channel the facade LISTENs on.
 pub const NOTIFY_CHANNEL: &str = "clipvault_hook";
+
+/// The `hook_events` column contract, in insert order. A spooled row must carry
+/// exactly these keys so a batch insert can share one statement.
+pub const HOOK_COLS: [&str; 23] = [
+    "event_id",
+    "ts",
+    "instance_id",
+    "session_id",
+    "hook_event",
+    "source",
+    "cwd",
+    "workspace_roots",
+    "tool_name",
+    "llm_tool_name",
+    "tool_use_id",
+    "prompt",
+    "last_assistant_message",
+    "notification_type",
+    "notification_message",
+    "stop_hook_active",
+    "loop_count",
+    "tool_input",
+    "tool_response",
+    "raw_json",
+    "raw_hash",
+    "host",
+    "pid",
+];
 
 pub const INSERT_SQL: &str = "INSERT INTO hook_events (
         event_id, ts, instance_id, session_id, hook_event, source, cwd,
@@ -138,7 +167,9 @@ impl HookEvent {
             tool_response: dumps(get("tool_response")),
             raw_json,
             raw_hash,
-            host: hostname::get().ok().map(|h| h.to_string_lossy().to_string()),
+            host: hostname::get()
+                .ok()
+                .map(|h| h.to_string_lossy().to_string()),
             pid,
         }
     }
@@ -176,6 +207,44 @@ impl HookEvent {
             .await
             .context("insert hook_event")?;
         Ok(n)
+    }
+
+    /// Typed columns for a batched insert (`db::insert_batch`), matching
+    /// [`HOOK_COLS`]. The flusher uses this so N spooled events share one
+    /// round trip instead of N.
+    pub fn to_row(&self) -> crate::db::Row {
+        use crate::db::PgVal::{Bool, Int4, Text, Ts};
+        vec![
+            ("event_id", Text(Some(self.event_id.clone()))),
+            ("ts", Ts(Some(self.ts))),
+            ("instance_id", Text(Some(self.instance_id.clone()))),
+            ("session_id", Text(self.session_id.clone())),
+            ("hook_event", Text(Some(self.hook_event.clone()))),
+            ("source", Text(Some(self.source.clone()))),
+            ("cwd", Text(self.cwd.clone())),
+            ("workspace_roots", Text(self.workspace_roots.clone())),
+            ("tool_name", Text(self.tool_name.clone())),
+            ("llm_tool_name", Text(self.llm_tool_name.clone())),
+            ("tool_use_id", Text(self.tool_use_id.clone())),
+            ("prompt", Text(self.prompt.clone())),
+            (
+                "last_assistant_message",
+                Text(self.last_assistant_message.clone()),
+            ),
+            ("notification_type", Text(self.notification_type.clone())),
+            (
+                "notification_message",
+                Text(self.notification_message.clone()),
+            ),
+            ("stop_hook_active", Bool(self.stop_hook_active)),
+            ("loop_count", Int4(self.loop_count)),
+            ("tool_input", Text(self.tool_input.clone())),
+            ("tool_response", Text(self.tool_response.clone())),
+            ("raw_json", Text(Some(self.raw_json.clone()))),
+            ("raw_hash", Text(Some(self.raw_hash.clone()))),
+            ("host", Text(self.host.clone())),
+            ("pid", Int4(Some(self.pid))),
+        ]
     }
 
     /// The small SSE stub; tool bodies stay on `GET /api/event?id=`.
@@ -221,17 +290,28 @@ pub fn append_metric_spool(spool_dir: &Path, payload: &Value) -> Result<PathBuf>
 
 fn append_line(spool_dir: &Path, prefix: &str, value: &Value) -> Result<PathBuf> {
     std::fs::create_dir_all(spool_dir)?;
-    let day = Utc::now().format("%Y%m%d");
-    let path = spool_dir.join(format!("{prefix}-{day}.jsonl"));
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    // One file per event, published atomically. The writer consumes whole files,
+    // so a concurrent append can never be read mid-line or lost by a rename.
+    let unique = format!("{prefix}-{nanos}-{}", std::process::id());
+    let tmp = spool_dir.join(format!(".tmp-{unique}"));
+    let final_path = spool_dir.join(format!("{unique}.jsonl"));
     let line = format!("{}\n", serde_json::to_string(value)?);
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("open spool {}", path.display()))?;
-    file.write_all(line.as_bytes())?;
-    file.sync_all().ok();
-    Ok(path)
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&tmp)
+            .with_context(|| format!("open spool {}", tmp.display()))?;
+        file.write_all(line.as_bytes())?;
+        file.sync_all().ok();
+    }
+    std::fs::rename(&tmp, &final_path)
+        .with_context(|| format!("publish spool {}", final_path.display()))?;
+    Ok(final_path)
 }
 
 /// Rebuild a `HookEvent` from a spool line (the `row_value` shape).
@@ -285,9 +365,15 @@ pub fn row_value(row: &HookEvent) -> Value {
     m.insert("llm_tool_name".into(), json!(row.llm_tool_name));
     m.insert("tool_use_id".into(), json!(row.tool_use_id));
     m.insert("prompt".into(), json!(row.prompt));
-    m.insert("last_assistant_message".into(), json!(row.last_assistant_message));
+    m.insert(
+        "last_assistant_message".into(),
+        json!(row.last_assistant_message),
+    );
     m.insert("notification_type".into(), json!(row.notification_type));
-    m.insert("notification_message".into(), json!(row.notification_message));
+    m.insert(
+        "notification_message".into(),
+        json!(row.notification_message),
+    );
     m.insert("stop_hook_active".into(), json!(row.stop_hook_active));
     m.insert("loop_count".into(), json!(row.loop_count));
     m.insert("tool_input".into(), json!(row.tool_input));
@@ -297,4 +383,54 @@ pub fn row_value(row: &HookEvent) -> Value {
     m.insert("host".into(), json!(row.host));
     m.insert("pid".into(), json!(row.pid));
     Value::Object(m)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn hash_is_key_order_independent() {
+        assert_eq!(
+            payload_hash(&json!({"b": 1, "a": 2})),
+            payload_hash(&json!({"a": 2, "b": 1}))
+        );
+    }
+
+    #[test]
+    fn event_id_is_the_hash_prefix() {
+        let payload = json!({"x": 1});
+        let hash = payload_hash(&payload);
+        let row = HookEvent::from_payload(&payload, Some("Stop"), "inst", "trae");
+        assert_eq!(row.event_id, hash[..32]);
+        assert_eq!(row.hook_event, "Stop");
+        assert_eq!(row.instance_id, "inst");
+        assert_eq!(row.source, "trae");
+    }
+
+    #[test]
+    fn notification_message_is_gated_on_the_event() {
+        let payload = json!({"message": "blocked"});
+        assert!(HookEvent::from_payload(&payload, Some("Stop"), "i", "trae")
+            .notification_message
+            .is_none());
+        assert_eq!(
+            HookEvent::from_payload(&payload, Some("Notification"), "i", "trae")
+                .notification_message
+                .as_deref(),
+            Some("blocked")
+        );
+    }
+
+    #[test]
+    fn row_value_round_trips_through_from_row_value() {
+        let payload = json!({"session_id": "s", "prompt": "p", "cwd": "/tmp"});
+        let row = HookEvent::from_payload(&payload, Some("UserPromptSubmit"), "i", "trae");
+        let back = from_row_value(&row_value(&row)).expect("round trip");
+        assert_eq!(back.event_id, row.event_id);
+        assert_eq!(back.hook_event, row.hook_event);
+        assert_eq!(back.session_id, row.session_id);
+        assert_eq!(back.prompt, row.prompt);
+    }
 }
