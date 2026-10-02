@@ -247,18 +247,36 @@ async fn proxy_get(
     let Some(b) = winner(&st, &corpus).await else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
     };
-    let url = format!("{}{}", b.base_url, uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
-    forward(&st, reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap(), &url, None).await
+    let url = format!(
+        "{}{}",
+        b.base_url,
+        uri.path_and_query().map(|p| p.as_str()).unwrap_or("/")
+    );
+    forward(
+        &st,
+        reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap(),
+        &url,
+        None,
+    )
+    .await
 }
 
-async fn proxy_post(State(st): State<Arc<AppState>>, uri: axum::http::Uri, body: axum::body::Bytes) -> Response {
+async fn proxy_post(
+    State(st): State<Arc<AppState>>,
+    uri: axum::http::Uri,
+    body: axum::body::Bytes,
+) -> Response {
     // Writes must reach a primary. Determine the corpus from the session id when
     // present, otherwise use the default corpus.
     let corpus = corpus_for_query(&st, uri.query());
     let Some(b) = primary(&st, &corpus) else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "no primary backend").into_response();
     };
-    let url = format!("{}{}", b.base_url, uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
+    let url = format!(
+        "{}{}",
+        b.base_url,
+        uri.path_and_query().map(|p| p.as_str()).unwrap_or("/")
+    );
     forward(&st, reqwest::Method::POST, &url, Some(body)).await
 }
 
@@ -274,14 +292,17 @@ async fn forward(
     }
     match req.send().await {
         Ok(resp) => {
-            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let content_type = resp
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
                 .cloned()
                 .unwrap_or_else(|| HeaderValue::from_static("application/json; charset=utf-8"));
             match resp.bytes().await {
-                Ok(bytes) => (status, [(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+                Ok(bytes) => {
+                    (status, [(header::CONTENT_TYPE, content_type)], bytes).into_response()
+                }
                 Err(e) => err(StatusCode::BAD_GATEWAY, &e.to_string()).into_response(),
             }
         }

@@ -18,6 +18,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::Stream;
 use tokio_stream::StreamExt as _;
 
+use crate::config;
 use crate::db::{self, Pool};
 use crate::role::BackendRole;
 
@@ -417,8 +418,83 @@ async fn mine(Query(q): Query<BTreeMap<String, String>>) -> Json<Value> {
     }))
 }
 
-async fn ack(Json(_body): Json<Value>) -> Json<Value> {
-    Json(json!({ "ok": false, "error": "ack not yet ported to rust" }))
+async fn ack(State(st): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
+    let scope = match body.get("scope").and_then(Value::as_str) {
+        Some("recent") => "recent",
+        _ => "session",
+    };
+    let status = match body.get("status").and_then(Value::as_str) {
+        Some("dismissed") => "dismissed",
+        _ => "applied",
+    };
+    let finding_id = body
+        .get("finding_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if finding_id.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "finding_id required"));
+    }
+    let session_id = body
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let note: String = body
+        .get("note")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .chars()
+        .take(500)
+        .collect();
+    let metric = body.get("metric").cloned().unwrap_or_else(|| json!({}));
+    let metric_id = metric
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let metric_now = metric.get("now").and_then(Value::as_f64);
+    let target = metric.get("target").and_then(Value::as_f64);
+    let ack_id = format!(
+        "{scope}:{}:{finding_id}",
+        if session_id.is_empty() {
+            "-"
+        } else {
+            &session_id
+        }
+    );
+    let instance_id = config::var("CLIPVAULT_INSTANCE_ID", "");
+    let client = st.pool.get().await.map_err(internal)?;
+    client
+        .execute(
+            "INSERT INTO analysis_acks (ack_id, ts, instance_id, scope, session_id, finding_id, \
+             status, note, metric_id, metric_now, target) \
+             VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+             ON CONFLICT (ack_id) DO UPDATE SET ts = excluded.ts, status = excluded.status, \
+             note = excluded.note, metric_id = excluded.metric_id, metric_now = excluded.metric_now, \
+             target = excluded.target, instance_id = excluded.instance_id",
+            &[
+                &ack_id,
+                &instance_id,
+                &scope,
+                &session_id,
+                &finding_id,
+                &status,
+                &note,
+                &metric_id,
+                &metric_now,
+                &target,
+            ],
+        )
+        .await
+        .map_err(internal)?;
+    Ok(Json(json!({
+        "ok": true,
+        "ack_id": ack_id,
+        "finding_id": finding_id,
+        "status": status,
+    })))
 }
 
 const DIRECTIONS: &[&str] = &[

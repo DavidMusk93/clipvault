@@ -127,3 +127,21 @@ CREATE INDEX IF NOT EXISTS idx_ctx_ts ON turn_context (ts DESC);
 
 -- Idempotent migration for stores whose turn_context predates skill attribution.
 ALTER TABLE turn_context ADD COLUMN IF NOT EXISTS skill_loaded_tokens TEXT;
+
+-- Agent analysis write-back (L3 loop). Latest status per (scope, session, finding)
+-- wins; replaying an ack is idempotent (INV-8).
+CREATE TABLE IF NOT EXISTS analysis_acks (
+    ack_id TEXT PRIMARY KEY,          -- <scope>:<session_id|->:<finding_id>
+    ts TIMESTAMPTZ NOT NULL,
+    instance_id TEXT,
+    scope TEXT NOT NULL,              -- session | recent
+    session_id TEXT,
+    finding_id TEXT NOT NULL,
+    status TEXT NOT NULL,             -- applied | dismissed
+    note TEXT,
+    metric_id TEXT,
+    metric_now DOUBLE PRECISION,
+    target DOUBLE PRECISION
+);
+
+CREATE INDEX IF NOT EXISTS idx_acks_scope_session ON analysis_acks (scope, session_id, ts DESC);
