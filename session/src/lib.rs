@@ -7,6 +7,7 @@
 pub mod config;
 pub mod db;
 pub mod facade;
+pub mod ingest;
 pub mod metrics;
 pub mod mine;
 pub mod model;

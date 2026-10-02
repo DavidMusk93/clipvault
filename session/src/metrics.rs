@@ -315,6 +315,163 @@ pub async fn insert_row(
     Ok(())
 }
 
+/// `INSERT ... ON CONFLICT (key) DO UPDATE` for one row (cold path upsert).
+///
+/// Only columns present in `row` are written, so an absent optional section is
+/// left alone. `preserve` columns keep the existing value when the incoming one
+/// is NULL, so a cold re-ingest never wipes a hot-path-only field.
+pub async fn upsert_row(
+    client: &tokio_postgres::Client,
+    table: &str,
+    key: &str,
+    row: &Row,
+    preserve: &[&str],
+) -> Result<()> {
+    let cols: Vec<&str> = row.iter().map(|(c, _)| *c).collect();
+    if cols.is_empty() {
+        return Ok(());
+    }
+    let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${i}")).collect();
+    let mut sets: Vec<String> = Vec::new();
+    for col in &cols {
+        if *col == key {
+            continue;
+        }
+        if preserve.contains(col) {
+            sets.push(format!("{col} = COALESCE(excluded.{col}, {table}.{col})"));
+        } else {
+            sets.push(format!("{col} = excluded.{col}"));
+        }
+    }
+    let conflict = if sets.is_empty() {
+        "ON CONFLICT DO NOTHING".to_string()
+    } else {
+        format!("ON CONFLICT ({key}) DO UPDATE SET {}", sets.join(", "))
+    };
+    let sql = format!(
+        "INSERT INTO {table} ({}) VALUES ({}) {conflict}",
+        cols.join(", "),
+        placeholders.join(", ")
+    );
+    let values: Vec<&PgVal> = row.iter().map(|(_, v)| v).collect();
+    let boxed: Vec<Box<dyn ToSql + Send + Sync>> = values.iter().map(|v| v.boxed()).collect();
+    let refs: Vec<&(dyn ToSql + Sync)> = boxed
+        .iter()
+        .map(|b| b.as_ref() as &(dyn ToSql + Sync))
+        .collect();
+    client
+        .execute(&sql, &refs)
+        .await
+        .context("upsert metric row")?;
+    Ok(())
+}
+
+/// Typed NULL for a column absent from a row in a heterogeneous batch. A batch
+/// unions its rows' columns, so a missing column needs the *right* NULL type.
+fn default_val(col: &str) -> PgVal {
+    const INT8: &[&str] = &[
+        "system_tokens",
+        "preamble_tokens",
+        "tools_tokens",
+        "rules_tokens",
+        "docs_tokens",
+        "project_tokens",
+        "skills_tokens",
+        "prompt_tokens",
+        "history_tokens",
+        "tool_result_tokens",
+        "prompt_total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "reasoning_tokens",
+        "total_tokens",
+        "ttft_ms",
+        "elapsed_ms",
+        "decode_ms",
+    ];
+    const INT4: &[&str] = &["turn_index"];
+    const FLOAT8: &[&str] = &[
+        "cost_input",
+        "cost_output",
+        "cost_cache_read",
+        "cost_cache_write",
+        "cost_total",
+        "tok_s_decode",
+        "tok_s_e2e",
+        "est_chars_per_token",
+    ];
+    if INT4.contains(&col) {
+        PgVal::Int4(None)
+    } else if INT8.contains(&col) {
+        PgVal::Int(None)
+    } else if FLOAT8.contains(&col) {
+        PgVal::Float(None)
+    } else {
+        PgVal::Text(None)
+    }
+}
+
+/// Batched `INSERT ... ON CONFLICT (key) DO UPDATE`. One round trip per chunk.
+pub async fn upsert_batch(
+    client: &tokio_postgres::Client,
+    table: &str,
+    key: &str,
+    rows: &[Row],
+    preserve: &[&str],
+) -> Result<usize> {
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let mut cols: Vec<&'static str> = Vec::new();
+    for row in rows {
+        for (c, _) in row {
+            if !cols.contains(c) {
+                cols.push(c);
+            }
+        }
+    }
+    let mut tuples: Vec<String> = Vec::with_capacity(rows.len());
+    let mut params: Vec<Box<dyn ToSql + Send + Sync>> = Vec::with_capacity(rows.len() * cols.len());
+    for row in rows {
+        let mut ph: Vec<String> = Vec::with_capacity(cols.len());
+        for c in &cols {
+            let v = get(row, c).cloned().unwrap_or_else(|| default_val(c));
+            params.push(v.boxed());
+            ph.push(format!("${}", params.len()));
+        }
+        tuples.push(format!("({})", ph.join(", ")));
+    }
+    let mut sets: Vec<String> = Vec::new();
+    for col in &cols {
+        if *col == key {
+            continue;
+        }
+        if preserve.contains(col) {
+            sets.push(format!("{col} = COALESCE(excluded.{col}, {table}.{col})"));
+        } else {
+            sets.push(format!("{col} = excluded.{col}"));
+        }
+    }
+    let conflict = if sets.is_empty() {
+        "ON CONFLICT DO NOTHING".to_string()
+    } else {
+        format!("ON CONFLICT ({key}) DO UPDATE SET {}", sets.join(", "))
+    };
+    let sql = format!(
+        "INSERT INTO {table} ({}) VALUES {} {conflict}",
+        cols.join(", "),
+        tuples.join(", ")
+    );
+    let refs: Vec<&(dyn ToSql + Sync)> = params
+        .iter()
+        .map(|b| b.as_ref() as &(dyn ToSql + Sync))
+        .collect();
+    client.execute(&sql, &refs).await.context("upsert batch")?;
+    Ok(rows.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

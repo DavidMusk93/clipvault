@@ -59,6 +59,6 @@ It backs up every file it overwrites (`*.bak-rust-<stamp>`).
 - Done: PostgreSQL 18 on d2 (dedicated volume), SA-v1 facade, hook collector,
   `LISTEN`/`NOTIFY` SSE, `pin`, metrics hot path, spool flush, **mac-home cut
   over to d2**, **cc logical-CDC replica + replica facade**, **client fan-in
-  (`clipvault-aggregator`)**, **`/api/mine` + `ack` in Rust**.
-- Pending: cold metrics ingest from pi JSONL; collector installers for
-  mac-work / sg_d.
+  (`clipvault-aggregator`)**, **`/api/mine` + `ack` in Rust**, **cold metrics
+  ingest (`clipvault-ingest`)**, **sg_d collector**.
+- Pending: mac-work collector (host offline).
