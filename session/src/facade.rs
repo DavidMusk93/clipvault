@@ -163,12 +163,71 @@ async fn events(
             beats = rows.iter().map(db::row_to_value).collect();
         }
         if view != "beats" {
-            let sql = "SELECT event_id, ts, session_id, hook_event, tool_name, llm_tool_name, tool_use_id \
-                FROM hook_events WHERE session_id = $1 AND hook_event IN ('PreToolUse','PostToolUse') \
-                AND coalesce(tool_name,'') <> 'AskUserQuestion' AND coalesce(llm_tool_name,'') <> 'AskUserQuestion' \
-                ORDER BY ts ASC";
-            let rows = client.query(sql, &[&session_id]).await.map_err(internal)?;
-            tools = index_session_tools(&rows.iter().map(db::row_to_value).collect::<Vec<_>>());
+            let paged = matches!(q.get("paged").map(String::as_str), Some("1") | Some("true"));
+            let tool_limit: i64 = q
+                .get("limit")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(500)
+                .clamp(1, 2000);
+            let after_ts = g("after_ts");
+            let after_id = g("after");
+            let mut sql = String::from(
+                "SELECT event_id, ts, session_id, hook_event, tool_name, llm_tool_name, tool_use_id \
+                 FROM hook_events WHERE session_id = $1 AND hook_event IN ('PreToolUse','PostToolUse') \
+                 AND coalesce(tool_name,'') <> 'AskUserQuestion' AND coalesce(llm_tool_name,'') <> 'AskUserQuestion'",
+            );
+            let mut owned: Vec<Box<dyn ToSql + Send + Sync>> = vec![Box::new(session_id.clone())];
+            if paged && !after_id.is_empty() && !after_ts.is_empty() {
+                // Bind the cursor ts as timestamptz (not text): `$n::timestamptz`
+                // makes PG infer the parameter as timestamptz, so a text param
+                // fails to serialize.
+                if let Some(dt) = chrono::NaiveDateTime::parse_from_str(&after_ts, "%Y-%m-%d %H:%M:%S%.f")
+                    .ok()
+                    .map(|n| n.and_utc())
+                {
+                    owned.push(Box::new(dt));
+                    owned.push(Box::new(after_id.clone()));
+                    sql += &format!(
+                        " AND (ts, event_id) > (${}, ${}::text)",
+                        owned.len() - 1,
+                        owned.len()
+                    );
+                }
+            }
+            owned.push(Box::new(if paged { tool_limit + 1 } else { 100_000 }));
+            sql += &format!(" ORDER BY ts ASC, event_id ASC LIMIT ${}", owned.len());
+            let refs: Vec<&(dyn ToSql + Sync)> = owned
+                .iter()
+                .map(|b| b.as_ref() as &(dyn ToSql + Sync))
+                .collect();
+            let rows = client.query(&sql, &refs).await.map_err(internal)?;
+            let mut vals: Vec<Value> = rows.iter().map(db::row_to_value).collect();
+            let has_more = paged && vals.len() as i64 > tool_limit;
+            if has_more {
+                vals.truncate(tool_limit as usize);
+            }
+            if paged {
+                // Paged mode returns raw stubs (no Pre/Post dedup); the client
+                // collapses by tool_use_id across pages so a Post on a later
+                // page still suppresses its Pre.
+                let next_cursor = if has_more {
+                    vals.last().map(|v| {
+                        json!({
+                            "ts": v.get("ts").cloned().unwrap_or(Value::Null),
+                            "event_id": v.get("event_id").cloned().unwrap_or(Value::Null),
+                        })
+                    })
+                } else {
+                    None
+                };
+                return Ok(Json(json!({
+                    "events": vals,
+                    "view": "tools",
+                    "has_more": has_more,
+                    "next_cursor": next_cursor,
+                })));
+            }
+            tools = index_session_tools(&vals);
         }
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::with_capacity(beats.len() + tools.len());
