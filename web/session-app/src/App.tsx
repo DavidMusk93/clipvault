@@ -1,9 +1,10 @@
 import { localDateTime, relLocalTime } from "@render";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SessionT, streamUrl } from "./api/client";
 import { RailCard, sourceLabel } from "./features/session/RailCard";
 import { SessionView } from "./features/session/SessionView";
+import { emit, flush, installTelemetry, mountMetricsPanel } from "./lib/telemetry";
 
 const Analysis = lazy(() => import("./features/analysis/Analysis"));
 
@@ -51,6 +52,12 @@ function CornerStack({
   analysisOpen: boolean;
   onOpenAnalysis: () => void;
 }) {
+  const metricsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = metricsRef.current;
+    if (!el) return;
+    return mountMetricsPanel(el);
+  }, []);
   return (
     <div className="cv-corner-stack">
       <div className="cv-mine-float">
@@ -64,22 +71,35 @@ function CornerStack({
           分析
         </button>
       </div>
+      {/* 调试 float is imperative (metrics-panel.js); keep a React-owned slot so
+          reconciliation never removes it. DOM order 分析 · 调试 puts 分析 on top,
+          so from the bottom the stack reads 调试 · 分析 · ↓ (vanilla). */}
+      <div className="cv-metrics-slot" ref={metricsRef} />
     </div>
   );
 }
 
 function Sessions({
   analysisOpen,
+  paused,
   onOpenAnalysis,
   onCloseAnalysis,
 }: {
   analysisOpen: boolean;
+  paused: boolean;
   onOpenAnalysis: () => void;
   onCloseAnalysis: () => void;
 }) {
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.sessions(80) });
   const [selected, setSelected] = useState<string | null>(null);
   const [q, setQ] = useState("");
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refire on every successful refresh.
+  useEffect(() => {
+    if (sessions.isSuccess) {
+      emit("trae_sessions_list", { value: (sessions.data?.sessions ?? []).length });
+    }
+  }, [sessions.isSuccess, sessions.dataUpdatedAt, sessions.data]);
 
   useEffect(() => {
     const first = sessions.data?.sessions?.[0];
@@ -146,7 +166,7 @@ function Sessions({
       <section className="stage">
         <SessionHead s={current} />
         {selected ? (
-          <SessionView sessionId={selected} />
+          <SessionView sessionId={selected} paused={paused} />
         ) : (
           <div className="thread" id="thread">
             <div className="empty">选择左侧会话</div>
@@ -177,10 +197,17 @@ export function App() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15000 });
   const qc = useQueryClient();
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    installTelemetry();
+    emit("trae_sessions_boot", { value: 1 });
+  }, []);
 
   // Live rail: any hook event on the corpus refreshes the session list, merged
   // to 1s (taste: 列表 1s 合并). The thread has its own per-session stream.
   useEffect(() => {
+    if (paused) return;
     const es = new EventSource(streamUrl());
     let timer = 0;
     const bump = () => {
@@ -201,7 +228,7 @@ export function App() {
       if (timer) window.clearTimeout(timer);
       es.close();
     };
-  }, [qc]);
+  }, [qc, paused]);
 
   useEffect(() => {
     // The parent shell hides its own close button while the analysis sheet
@@ -222,8 +249,15 @@ export function App() {
     const onMsg = (e: MessageEvent) => {
       const t = (e.data as { type?: string } | null)?.type;
       if (t === "clipvault-sessions-resume") {
+        setPaused(false);
         void qc.invalidateQueries();
         post();
+      } else if (t === "clipvault-sessions-pause") {
+        // Panel closed: stop the streams and flush what is queued.
+        setPaused(true);
+        flush();
+      } else if (t === "clipvault-sessions-settled") {
+        emit("trae_sessions_layout", { payload: { phase: "settled", kind: "parent" } });
       }
     };
     window.addEventListener("message", onMsg);
@@ -249,6 +283,7 @@ export function App() {
 
       <Sessions
         analysisOpen={analysisOpen}
+        paused={paused}
         onOpenAnalysis={() => setAnalysisOpen(true)}
         onCloseAnalysis={() => setAnalysisOpen(false)}
       />

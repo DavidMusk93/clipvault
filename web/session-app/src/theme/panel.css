@@ -574,6 +574,12 @@
       bottom: auto;
       z-index: auto;
     }
+    /* The ↓ button lives outside the stack (it belongs to the thread), so lift
+       the stack above it: 16 + 36 + 8 = 60. Vanilla had ↓ inside the stack. */
+    .cv-corner-stack { bottom: 60px; }
+    /* The 调试 float is appended imperatively; the slot generates no box so the
+       float joins the stack's flex flow (same as vanilla). */
+    .cv-metrics-slot { display: contents; }
     .cv-corner-stack .follow {
       position: static;
       right: auto;
@@ -600,8 +606,8 @@
     .follow[hidden] { display: none !important; }
     .follow:active { transform: scale(0.97); }
     .follow.has-new { background: var(--accent); color: #fff; }
-    /* Sits above the 分析 FAB (which owns the corner stack at bottom:16). */
-    .stage > .follow { bottom: 64px; }
+    /* Owns the bottom slot; the corner stack sits above it. */
+    .stage > .follow { right: 16px; bottom: 16px; }
     .bubble pre, .bubble code, .bubble .hljs, .bubble .md-preview, .bubble .kv {
       max-width: 100%; min-width: 0;
     }
