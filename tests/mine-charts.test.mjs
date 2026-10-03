@@ -122,6 +122,31 @@ test('palette and semantic colours are stable and finite', () => {
   }
 });
 
+test('echart: stack legend is HTML; short lines fall back to bars', () => {
+  const s = echart(
+    'stack',
+    [
+      { label: 'a', value: 1, color: '#0071e3' },
+      { label: 'b', value: 3, color: '#c2410c' },
+    ],
+    { unit: 's' },
+  );
+  assert.match(s, /mc-stack-wrap/);
+  assert.match(s, /mc-legend/);
+  assert.match(s, /75\.0%/); // value 3 of 4
+  // A 2-point line is a comparison, not a trend.
+  const l = echart('line', [{ label: 'a', value: 1 }, { label: 'b', value: 2 }], {});
+  const m = l.match(/data-mc="([^"]*)"/);
+  const spec = JSON.parse(
+    m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+  );
+  assert.equal(spec.kind, 'bars');
+  // Donut centre is HTML, not an ECharts title.
+  const d = echart('donut', [{ label: 'a', value: 1 }, { label: 'b', value: 1 }], { center: '50%', centerSub: 'x' });
+  assert.match(d, /mc-donut-wrap/);
+  assert.match(d, /mc-donut-center/);
+});
+
 test('chart markup escapes hostile labels', () => {
   const html = rankBars([{ label: '<img src=x onerror=1>', value: 1 }]);
   assert.doesNotMatch(html, /<img/);

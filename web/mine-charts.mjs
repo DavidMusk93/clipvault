@@ -298,8 +298,11 @@ export function echart(kind, rows, opts = {}) {
     }))
     .filter((r) => r.label !== "" || r.value !== 0);
   if (!items.length) return `<div class="mc-empty">${esc(opts.empty || "无数据")}</div>`;
+  // Taste: a line needs >=3 points; a 2-point "trend" is really a comparison.
+  let k = kind;
+  if (k === "line" && items.length < 3) k = "bars";
   const spec = {
-    kind,
+    kind: k,
     unit: opts.unit || "",
     items,
     center: opts.center || "",
@@ -309,11 +312,43 @@ export function echart(kind, rows, opts = {}) {
     axisLeft: opts.axisLeft || "",
     axisRight: opts.axisRight || "",
   };
+  const aria = esc(opts.aria || "图表");
+  const mc = esc(JSON.stringify(spec));
+
+  // A stack's legend is HTML: ECharts would keep it on one line and run it
+  // under the bar. HTML wraps and grows the block instead.
+  if (k === "stack") {
+    const total = spec.total && spec.total > 0 ? spec.total : items.reduce((a, it) => a + it.value, 0);
+    const legend = items
+      .map(
+        (it) =>
+          `<span class="mc-lg"><i style="background:${it.color}"></i>${esc(it.label)}` +
+          `<b>${esc(fmtValue(it.value, opts.unit))}</b>` +
+          `<em>${total > 0 ? ((100 * it.value) / total).toFixed(1) : "0.0"}%</em></span>`,
+      )
+      .join("");
+    return (
+      `<div class="mc-stack-wrap"><div class="mc-echart" role="img" aria-label="${aria}" ` +
+      `data-mc="${mc}" style="height:16px"></div>` +
+      `<div class="mc-legend">${legend}</div></div>`
+    );
+  }
+
   const h =
     Number(opts.height) ||
-    (kind === "bars" ? Math.max(30, items.length * 28) : kind === "donut" ? 124 : kind === "stack" ? 42 : 64);
-  return (
-    `<div class="mc-echart" role="img" aria-label="${esc(opts.aria || "图表")}" ` +
-    `data-mc="${esc(JSON.stringify(spec))}" style="height:${h}px"></div>`
-  );
+    (k === "bars" ? Math.max(30, items.length * 28) : k === "donut" ? 124 : 64);
+  const holder =
+    `<div class="mc-echart" role="img" aria-label="${aria}" data-mc="${mc}" style="height:${h}px"></div>`;
+  // The donut centre number is HTML, not an ECharts title: ECharts centres the
+  // title *block* (text + subtext), so the subtext fell onto the ring. HTML on
+  // top of the canvas keeps it inside the hole at any size.
+  if (k === "donut" && spec.center) {
+    return (
+      `<div class="mc-donut-wrap">${holder}` +
+      `<div class="mc-donut-center"><b>${esc(spec.center)}</b>` +
+      (spec.centerSub ? `<span>${esc(spec.centerSub)}</span>` : "") +
+      `</div></div>`
+    );
+  }
+  return holder;
 }
