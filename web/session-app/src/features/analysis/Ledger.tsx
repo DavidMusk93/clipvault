@@ -30,26 +30,24 @@ function TableChart({ t }: { t: MineTable }) {
   const total = items.reduce((a, it) => a + it.value, 0);
   const height =
     kind === "donut"
-      ? 124
+      ? 140
       : kind === "columns"
-        ? 52
+        ? 64
         : kind === "stack"
-          ? 16
+          ? 18
           : kind === "bars"
-            ? Math.max(30, items.length * 28)
-            : 64;
+            ? Math.max(32, items.length * 32)
+            : 72;
   const chart = <MineChart spec={{ kind, unit: c.unit || "", items }} height={height} />;
-  if (kind !== "donut") return <div className="my-1.5">{chart}</div>;
+  if (kind !== "donut") return <div className="my-2">{chart}</div>;
   return (
-    <div className="relative my-1.5 max-w-[420px]">
+    <div className="relative my-2 max-w-[420px]">
       {chart}
       <div className="pointer-events-none absolute left-[38%] top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-        <b className="block text-[22px] font-bold leading-none text-ink tabular-nums">
+        <b className="block text-[26px] font-bold leading-none tracking-[-0.02em] text-ink tabular-nums">
           {fmtValue(total, c.unit || "")}
         </b>
-        {t.caption && (
-          <span className="mt-0.5 block text-[11px] text-role-system">{t.caption}</span>
-        )}
+        {t.caption && <span className="mt-1 block text-[12px] text-role-system">{t.caption}</span>}
       </div>
     </div>
   );
@@ -65,16 +63,19 @@ function DataTable({ t }: { t: MineTable }) {
     maxima[c.id] = Math.max(0, ...rows.map((r) => Number(r[c.id]) || 0));
   }
   return (
-    <>
+    <div className="mt-3 first:mt-1">
       {t.caption && (
-        <div className="mt-1.5 text-[11px] font-medium text-role-system">{t.caption}</div>
+        <div className="mb-1.5 text-[12px] font-medium text-role-system">{t.caption}</div>
       )}
       <TableChart t={t} />
-      <Table className="mt-1">
+      <Table className="mt-2 text-[12.5px]">
         <thead>
           <tr>
             {cols.map((c) => (
-              <Th key={c.id} className={MINE_NUM_COLS.has(c.id) ? "text-right" : undefined}>
+              <Th
+                key={c.id}
+                className={`py-1.5 font-normal ${MINE_NUM_COLS.has(c.id) ? "text-right" : ""}`}
+              >
                 {c.title}
               </Th>
             ))}
@@ -88,7 +89,7 @@ function DataTable({ t }: { t: MineTable }) {
                 const raw = row[c.id] ?? "";
                 if (!MINE_NUM_COLS.has(c.id)) {
                   return (
-                    <Td key={c.id} className="max-w-[280px] truncate" title={String(raw)}>
+                    <Td key={c.id} className="max-w-[300px] truncate py-1.5" title={String(raw)}>
                       {String(raw)}
                     </Td>
                   );
@@ -96,8 +97,8 @@ function DataTable({ t }: { t: MineTable }) {
                 const v = Number(raw) || 0;
                 const pct = maxima[c.id] ? Math.max(3, Math.round((100 * v) / maxima[c.id])) : 0;
                 return (
-                  <Td key={c.id} className="text-right tabular-nums">
-                    <span className="relative inline-flex min-w-[52px] items-center justify-end">
+                  <Td key={c.id} className="py-1.5 text-right tabular-nums">
+                    <span className="relative inline-flex min-w-[56px] items-center justify-end">
                       <i
                         className="absolute inset-y-[3px] left-0 rounded bg-honey/25"
                         style={{ width: `${pct}%` }}
@@ -111,7 +112,7 @@ function DataTable({ t }: { t: MineTable }) {
           ))}
         </tbody>
       </Table>
-    </>
+    </div>
   );
 }
 
@@ -123,7 +124,7 @@ export function Ledger({ data }: { data: Mine }) {
   return (
     <Section id="mineLedger">
       <SectionHead title="账本 · 事实" count={blocks.length} hint="始终展开" />
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         {blocks.map(([id, b]) => {
           const axis = b.axis === "user" ? "user" : "agent";
           const tables = b.tables?.length ? b.tables : b.table ? [b.table] : [];
@@ -131,16 +132,16 @@ export function Ledger({ data }: { data: Mine }) {
             <section
               key={id}
               id={`blk-${id}`}
-              className={`scroll-mt-11 rounded-xl border border-black/5 border-l-2 bg-white px-3 py-2 ${
+              className={`scroll-mt-12 rounded-[14px] border border-black/[0.06] border-l-2 bg-white p-4 ${
                 axis === "user" ? "border-l-role-user" : "border-l-role-assistant"
               }`}
             >
-              <div className="mb-1 flex items-baseline gap-2">
-                <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em] text-role-system">
+              <div className="mb-1.5 flex items-baseline gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-role-system">
                   {axis === "user" ? "用户" : "Agent"}
                 </span>
                 <h3
-                  className={`flex-1 text-[13px] font-semibold ${
+                  className={`flex-1 text-[14px] font-semibold tracking-[-0.01em] ${
                     axis === "user" ? "text-role-user" : "text-role-assistant"
                   }`}
                 >
@@ -148,7 +149,7 @@ export function Ledger({ data }: { data: Mine }) {
                 </h3>
               </div>
               {b.note && (
-                <p className="mb-1 text-[11.5px] leading-snug text-role-system">{b.note}</p>
+                <p className="mb-1 text-[12.5px] leading-relaxed text-role-system">{b.note}</p>
               )}
               {tables.map((t, i) => (
                 <DataTable key={t.caption || i} t={t} />

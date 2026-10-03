@@ -65,8 +65,8 @@ const LOSS = "#c2410c";
 const fmt = (v: number, unit: string) => fmtValue(v, unit);
 const pctOf = (v: number, total: number) => (total > 0 ? (100 * v) / total : 0);
 
-const legendText = { fontSize: 11, color: MUTED, fontFamily: FONT };
-const axisText = { fontSize: 10.5, color: MUTED, fontFamily: FONT };
+const legendText = { fontSize: 12, color: MUTED, fontFamily: FONT };
+const axisText = { fontSize: 11.5, color: MUTED, fontFamily: FONT };
 
 export function buildMineOption(spec: MineChartSpec) {
   const { items, unit } = spec;
@@ -83,12 +83,12 @@ export function buildMineOption(spec: MineChartSpec) {
       },
       legend: {
         orient: "vertical",
-        right: 12,
+        right: 14,
         top: "middle",
         icon: "circle",
-        itemWidth: 8,
-        itemHeight: 8,
-        itemGap: 10,
+        itemWidth: 9,
+        itemHeight: 9,
+        itemGap: 12,
         textStyle: legendText,
         formatter: (name: string) => {
           const it = items.find((x) => x.label === name);
@@ -150,7 +150,7 @@ export function buildMineOption(spec: MineChartSpec) {
           return it ? `${it.label}<br/>${fmt(it.value, unit)}${it.sub ? ` · ${it.sub}` : ""}` : "";
         },
       },
-      grid: { left: 0, right: 74, top: 4, bottom: 4, containLabel: true },
+      grid: { left: 0, right: 84, top: 6, bottom: 6, containLabel: true },
       xAxis: { type: "value", max, show: false },
       yAxis: {
         type: "category",
@@ -159,22 +159,22 @@ export function buildMineOption(spec: MineChartSpec) {
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
-          fontSize: 11,
+          fontSize: 12,
           color: INK,
           fontFamily: FONT,
-          width: 230,
+          width: 240,
           overflow: "truncate",
         },
       },
       series: [
         {
           type: "bar",
-          barWidth: 10,
-          itemStyle: { borderRadius: 5 },
+          barWidth: 12,
+          itemStyle: { borderRadius: 6 },
           label: {
             show: true,
             position: "right",
-            fontSize: 11,
+            fontSize: 12,
             color: MUTED,
             fontFamily: FONT,
             formatter: (p: { value: number }) => fmt(p.value, unit),
@@ -204,8 +204,8 @@ export function buildMineOption(spec: MineChartSpec) {
       series: [
         {
           type: "bar",
-          barWidth: "66%",
-          itemStyle: { borderRadius: [3, 3, 0, 0] },
+          barWidth: "56%",
+          itemStyle: { borderRadius: [4, 4, 0, 0] },
           data: items.map((it) => ({ value: it.value, itemStyle: { color: it.color } })),
           markPoint: {
             symbol: "circle",

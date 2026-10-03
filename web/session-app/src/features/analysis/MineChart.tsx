@@ -93,12 +93,12 @@ export function CompositionBar({
     return <div className={cn("text-[11.5px] text-role-system", className)}>无数据</div>;
   const total = shown.reduce((a, it) => a + it.value, 0);
   return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
-      <MineChart spec={{ kind: "stack", unit, items: shown, total }} height={16} />
-      <div className="flex flex-wrap gap-x-3.5 gap-y-0.5 text-[11px] text-role-system">
+    <div className={cn("flex flex-col gap-2", className)}>
+      <MineChart spec={{ kind: "stack", unit, items: shown, total }} height={18} />
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-role-system">
         {shown.map((it) => (
-          <span key={it.label} className="inline-flex items-center gap-1">
-            <i className="size-2 shrink-0 rounded-[2px]" style={{ background: it.color }} />
+          <span key={it.label} className="inline-flex items-center gap-1.5">
+            <i className="size-2.5 shrink-0 rounded-[3px]" style={{ background: it.color }} />
             {it.label}
             <b className="font-semibold text-ink tabular-nums">{fmtValue(it.value, unit)}</b>
             <em className="not-italic tabular-nums">{pct(it.value, total).toFixed(1)}%</em>

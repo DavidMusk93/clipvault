@@ -3,7 +3,7 @@ import { barPct, deltaText, deltaTone, metricOf, mineSpan, mineUsd, sevOf } from
 import { MineChart } from "./MineChart";
 import { Section, SectionHead } from "./Section";
 
-const abbrev = (s: unknown, n = 46): string => {
+const abbrev = (s: unknown, n = 44): string => {
   const t = String(s || "");
   if (t.length <= n) return t;
   const head = Math.ceil((n - 1) / 2);
@@ -23,6 +23,9 @@ function groupRefs(refs: MineRef[] | undefined) {
   return [...seen.values()];
 }
 
+const chipCls =
+  "h-6 rounded-[6px] bg-black/[0.05] px-2 text-[12px] leading-6 text-role-system hover:bg-black/[0.09]";
+
 function Refs({ refs, onTurn }: { refs: MineRef[] | undefined; onTurn: (n: number) => void }) {
   const grouped = groupRefs(refs);
   const noTurn = (refs || []).filter((r) => r.turn === null || r.turn === undefined).slice(0, 4);
@@ -30,14 +33,14 @@ function Refs({ refs, onTurn }: { refs: MineRef[] | undefined; onTurn: (n: numbe
   const shown = grouped.slice(0, 4);
   const more = grouped.length - shown.length;
   return (
-    <div className="mt-1.5 flex flex-wrap gap-1">
+    <div className="mt-2.5 flex flex-wrap gap-1.5">
       {shown.map(({ ref: r, n }) => (
         <button
           key={`${r.turn}-${r.label}-${r.exit_code}`}
           type="button"
           onClick={() => onTurn(Number(r.turn))}
           title={`${r.label || ""} ${r.event_id || ""}`}
-          className="rounded-md bg-black/[0.04] px-1.5 py-0.5 text-[10.5px] text-role-system hover:bg-black/[0.08]"
+          className={chipCls}
         >
           #{Number(r.turn)} {abbrev(r.label)}
           {r.exit_code ? ` · exit ${r.exit_code}` : ""}
@@ -48,16 +51,13 @@ function Refs({ refs, onTurn }: { refs: MineRef[] | undefined; onTurn: (n: numbe
         <button
           type="button"
           onClick={() => onTurn(Number(grouped[4]?.ref.turn))}
-          className="rounded-md bg-black/[0.04] px-1.5 py-0.5 text-[10.5px] text-role-system hover:bg-black/[0.08]"
+          className={chipCls}
         >
           +{more} 更多（点回合看明细）
         </button>
       )}
       {noTurn.map((r) => (
-        <span
-          key={r.label}
-          className="rounded-md bg-black/[0.04] px-1.5 py-0.5 text-[10.5px] text-role-system"
-        >
+        <span key={r.label} className={chipCls}>
           {abbrev(r.label)}
         </span>
       ))}
@@ -75,24 +75,24 @@ function Ack({
   const a = f.ack;
   const m = f.metric;
   const buttons = (
-    <span className="flex items-center gap-1">
+    <span className="flex items-center gap-2">
       <button
         type="button"
         onClick={(e) => onAck(f, "applied", e.currentTarget)}
-        className="rounded-md border border-black/10 px-1.5 py-0.5 text-[10.5px] text-role-system hover:border-role-assistant hover:text-role-assistant"
+        className="h-7 rounded-full border border-black/12 px-3 text-[12px] font-medium text-ink hover:border-role-assistant hover:text-role-assistant"
       >
         标记已应用
       </button>
       <button
         type="button"
         onClick={(e) => onAck(f, "dismissed", e.currentTarget)}
-        className="rounded-md border border-black/10 px-1.5 py-0.5 text-[10.5px] text-role-system hover:border-role-assistant hover:text-role-assistant"
+        className="h-7 rounded-full border border-black/12 px-3 text-[12px] font-medium text-role-system hover:border-role-assistant hover:text-role-assistant"
       >
         忽略
       </button>
     </span>
   );
-  if (!a) return <div className="mt-1.5 flex justify-end">{buttons}</div>;
+  if (!a) return <div className="mt-3 flex justify-end">{buttons}</div>;
   const closed = a.closed === true ? "good" : a.closed === false ? "open" : "note";
   const label =
     a.status === "dismissed"
@@ -109,8 +109,8 @@ function Ack({
         ? "bg-mine-loss/12 text-mine-loss"
         : "bg-black/[0.06] text-role-system";
   return (
-    <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5 text-[10.5px] text-role-system">
-      <span className={`rounded-full px-1.5 py-0.5 font-semibold ${cls}`}>{label}</span>
+    <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[12px] text-role-system">
+      <span className={`rounded-full px-2 py-0.5 font-semibold ${cls}`}>{label}</span>
       <span className="tabular-nums">
         {m?.id || a.metric_id || ""} {String(a.at_now ?? "-")} → {String(a.now ?? "-")}
         {m?.target !== null && m?.target !== undefined
@@ -153,16 +153,18 @@ function LossCard({
   return (
     <article
       id={`loss-${f.id || i}`}
-      className={`scroll-mt-11 rounded-xl border border-black/5 border-l-2 px-3 py-2.5 ${sev.card}`}
+      className={`scroll-mt-12 rounded-[14px] border border-black/[0.06] border-l-2 p-4 ${sev.card}`}
     >
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="text-[11px] font-semibold text-role-system tabular-nums">{i + 1}</span>
-        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${sev.badge}`}>
+      <div className="mb-2 flex items-center gap-2.5">
+        <span className="text-[12px] font-semibold text-role-system tabular-nums">{i + 1}</span>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${sev.badge}`}>
           {sev.label}
         </span>
-        <h4 className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink">{f.title}</h4>
-        <span className="flex items-baseline gap-1 text-[11.5px] text-role-system">
-          <b className="text-[13px] font-semibold tabular-nums text-ink">
+        <h4 className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">
+          {f.title}
+        </h4>
+        <span className="flex items-baseline gap-1.5 text-[12px] text-role-system">
+          <b className="text-[15px] font-semibold tabular-nums text-ink">
             {mineSpan(imp.s)}
             {Number(imp.usd) > 0 ? ` · ${mineUsd(imp.usd)}` : ""}
           </b>
@@ -172,7 +174,7 @@ function LossCard({
 
       {m && (
         <div
-          className={`mb-1.5 flex flex-wrap items-center gap-2 rounded-lg px-2 py-1 text-[11.5px] ${
+          className={`mb-2 flex flex-wrap items-center gap-3 rounded-[10px] px-3 py-1.5 text-[12.5px] ${
             reached ? "bg-mine-good/8" : "bg-black/[0.03]"
           }`}
         >
@@ -188,7 +190,7 @@ function LossCard({
                 目标 {String(m.target)}
                 {m.unit || ""}
               </span>
-              <span className="relative h-1.5 w-16 overflow-hidden rounded-full bg-black/[0.06]">
+              <span className="relative h-1.5 w-20 overflow-hidden rounded-full bg-black/[0.07]">
                 <i
                   className="absolute inset-y-0 left-0 rounded-full bg-mine-loss"
                   style={{ width: `${mm ? barPct(mm) : 0}%` }}
@@ -212,25 +214,27 @@ function LossCard({
         </div>
       )}
 
-      {f.text && <p className="text-[12px] leading-snug text-ink">{f.text}</p>}
-      {f.cause && (
-        <p className="mt-0.5 text-[11.5px] leading-snug text-role-system">
-          <b className="mr-1 font-semibold text-ink">原因</b>
-          {f.cause}
-        </p>
-      )}
-      {f.action && (
-        <p className="mt-0.5 text-[11.5px] leading-snug text-role-assistant">
-          <b className="mr-1 font-semibold">动作</b>
-          {f.action}
-        </p>
-      )}
-      {f.gate && (
-        <p className="mt-0.5 text-[11.5px] leading-snug text-role-system">
-          <b className="mr-1 font-semibold text-ink">闸门</b>
-          {String(f.gate).replace(/^-\s*/, "")}
-        </p>
-      )}
+      <div className="flex flex-col gap-1 text-[13px] leading-relaxed">
+        {f.text && <p className="text-ink">{f.text}</p>}
+        {f.cause && (
+          <p className="text-role-system">
+            <b className="mr-1.5 font-semibold text-ink">原因</b>
+            {f.cause}
+          </p>
+        )}
+        {f.action && (
+          <p className="text-role-assistant">
+            <b className="mr-1.5 font-semibold">动作</b>
+            {f.action}
+          </p>
+        )}
+        {f.gate && (
+          <p className="text-role-system">
+            <b className="mr-1.5 font-semibold text-ink">闸门</b>
+            {String(f.gate).replace(/^-\s*/, "")}
+          </p>
+        )}
+      </div>
       <Refs refs={f.refs} onTurn={onTurn} />
       <Ack f={f} onAck={onAck} />
     </article>
@@ -252,8 +256,8 @@ export function Losses({
   if (!list.length) {
     return (
       <Section id="mineLosses">
-        <SectionHead title="损耗排行 · 按 $ / 秒" count={0} />
-        <p className="text-[11.5px] text-role-system">
+        <SectionHead title="损耗排行" count={0} />
+        <p className="text-[13px] text-role-system">
           {data.n_rows ? "没有信号形成结论" : "还没有足够事件"}
         </p>
       </Section>
@@ -283,19 +287,19 @@ export function Losses({
         count={list.length}
         hint={hasEst ? "含估算项" : undefined}
       />
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-4">
         {byUsd.length > 0 && (
           <div>
-            <div className="mb-0.5 text-[11px] text-role-system">按 $ 排序</div>
-            <MineChart spec={barSpec(byUsd, true)} height={Math.max(30, byUsd.length * 28)} />
+            <div className="mb-1.5 text-[12px] text-role-system">按 $ 排序</div>
+            <MineChart spec={barSpec(byUsd, true)} height={Math.max(32, byUsd.length * 32)} />
           </div>
         )}
         <div>
-          <div className="mb-0.5 text-[11px] text-role-system">按秒排序（含墙钟空档）</div>
-          <MineChart spec={barSpec(byS, false)} height={Math.max(30, byS.length * 28)} />
+          <div className="mb-1.5 text-[12px] text-role-system">按秒排序（含墙钟空档）</div>
+          <MineChart spec={barSpec(byS, false)} height={Math.max(32, byS.length * 32)} />
         </div>
       </div>
-      <div className="mt-2.5 flex flex-col gap-2">
+      <div className="mt-4 flex flex-col gap-3">
         {list.map((f, i) => (
           <LossCard key={f.id || i} f={f} i={i} data={data} onTurn={onTurn} onAck={onAck} />
         ))}
