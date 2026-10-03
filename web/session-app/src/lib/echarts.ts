@@ -104,15 +104,7 @@ export function buildMineOption(spec: MineChartSpec) {
         formatter: (p: { name: string; value: number }) =>
           `${p.name}<br/>${fmt(p.value, unit)} · ${pctOf(p.value, total).toFixed(1)}%`,
       },
-      title: {
-        text: spec.center || "",
-        subtext: spec.centerSub || "",
-        left: "38%",
-        top: "center",
-        textAlign: "center",
-        textStyle: { fontSize: 22, fontWeight: 650, color: INK, fontFamily: FONT },
-        subtextStyle: { fontSize: 11, color: MUTED, fontFamily: FONT },
-      },
+      // No ECharts title: the centre number is an HTML overlay (mine-charts echart).
       legend: {
         orient: "vertical",
         right: 12,
@@ -155,30 +147,17 @@ export function buildMineOption(spec: MineChartSpec) {
         formatter: (p: { seriesName: string; value: number }) =>
           `${p.seriesName}<br/>${fmt(p.value, unit)} · ${pctOf(p.value, total).toFixed(1)}%`,
       },
-      grid: { left: 0, right: 0, top: 6, bottom: 26, containLabel: false },
+      // Bar only: the legend is HTML below the canvas (mine-charts echart).
+      grid: { left: 0, right: 0, top: 0, bottom: 0, containLabel: false },
       xAxis: { type: "value", max: total, show: false },
       yAxis: { type: "category", data: [""], show: false },
-      legend: {
-        bottom: 0,
-        left: "left",
-        icon: "circle",
-        itemWidth: 8,
-        itemHeight: 8,
-        itemGap: 12,
-        textStyle: legendText,
-        formatter: (name: string) => {
-          const it = items.find((x) => x.label === name);
-          return it
-            ? `${name}  ${fmt(it.value, unit)}  ${pctOf(it.value, total).toFixed(1)}%`
-            : name;
-        },
-      },
+      legend: { show: false },
       series: items.map((it) => ({
         type: "bar",
         name: it.label,
         stack: "s",
-        barWidth: 14,
-        itemStyle: { color: it.color, borderColor: SURFACE, borderWidth: 2, borderRadius: 6 },
+        barWidth: 16,
+        itemStyle: { color: it.color, borderColor: SURFACE, borderWidth: 2, borderRadius: 8 },
         emphasis: { focus: "series" },
         data: [it.value],
       })),
@@ -196,7 +175,7 @@ export function buildMineOption(spec: MineChartSpec) {
           return it ? `${it.label}<br/>${fmt(it.value, unit)}${it.sub ? ` · ${it.sub}` : ""}` : "";
         },
       },
-      grid: { left: 0, right: 62, top: 4, bottom: 4, containLabel: true },
+      grid: { left: 0, right: 74, top: 4, bottom: 4, containLabel: true },
       xAxis: { type: "value", max, show: false },
       yAxis: {
         type: "category",

@@ -956,6 +956,27 @@
     .cv-mine-sheet .mc-bar-sub { font-size: 10.5px; color: var(--muted); }
     .cv-mine-sheet .mc-donut { display: flex; align-items: center; gap: 14px; }
     .cv-mine-sheet .mc-donut svg { flex: 0 0 auto; }
+    /* ECharts donut: the centre number is HTML over the canvas (see echart()). */
+    .cv-mine-sheet .mc-donut-wrap { position: relative; max-width: 420px; }
+    .cv-mine-sheet .mc-stack-wrap { display: flex; flex-direction: column; gap: 6px; }
+    .cv-mine-sheet .mc-stack-wrap .mc-legend { margin-top: 0; }
+    .cv-mine-sheet .mc-donut-center {
+      position: absolute;
+      left: 38%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      pointer-events: none;
+    }
+    .cv-mine-sheet .mc-donut-center b {
+      display: block;
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.05;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .cv-mine-sheet .mc-donut-center span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
     .cv-mine-sheet .mc-donut-v { font: 700 19px var(--font-ui); fill: var(--ink); }
     .cv-mine-sheet .mc-donut-s { font: 500 10px var(--font-ui); fill: var(--muted); }
     .cv-mine-sheet .mc-line, .cv-mine-sheet .mc-cols { margin: 4px 0 8px; }
