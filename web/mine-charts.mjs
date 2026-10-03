@@ -311,7 +311,7 @@ export function echart(kind, rows, opts = {}) {
   };
   const h =
     Number(opts.height) ||
-    (kind === "bars" ? Math.max(30, items.length * 28) : kind === "donut" ? 156 : kind === "stack" ? 46 : 64);
+    (kind === "bars" ? Math.max(30, items.length * 28) : kind === "donut" ? 124 : kind === "stack" ? 42 : 64);
   return (
     `<div class="mc-echart" role="img" aria-label="${esc(opts.aria || "图表")}" ` +
     `data-mc="${esc(JSON.stringify(spec))}" style="height:${h}px"></div>`

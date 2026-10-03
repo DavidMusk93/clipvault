@@ -207,6 +207,22 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 
 规则：工具条向源码插入 Markdown，不改预览 DOM。预览只读。自动保存不得回写编辑器、不得 `mergeHead` 墙。霜层默认 `pointer-events: none`（关掉才能点墙），`.notes-panel.open` 才 `auto`；`main`/`chips`/`top-bar` 同时 `inert`。禁止霜层一直 `none` 把拖动手势漏到控制条。
 
+## 布局与节奏（golden ratio + 增量）
+
+**一句话**：用满宽度、按 **1.618 : 1** 分配主次、只在变化处重绘。
+
+| Do | Don't |
+| --- | --- |
+| 主次两栏按 **61.8 / 38.2** 分配；分析判定卡 `grid-template-columns: <score> 1.618fr 1fr`（左：判定+构成，右：缓存环形） | 每块独占一整行，右侧留一大片空 |
+| 内容自适应父容器宽度；表格 / 图表铺满可用宽度 | 固定窄栏 + 两侧空白 |
+| 内边距克制：面板 12–16px、卡片 12–14px、段间距 ≤14px、行高紧凑 | 大 padding / 大 margin / 空行堆叠 |
+| 同一套栅格：同一 `gap`、同一圆角阶、同一字号阶 | 相邻卡片字号 / 圆角 / 间距各不相同 |
+| 数据变了才重绘**那一块**（section 级 `innerHTML` 对比）；SSE 事件**增量 patch** 卡片计数 / 时间 / 预览 | 整页 `innerHTML` 重画、定时全量刷新、图表全量 re-init |
+| 刷新合并到 **≥10s** 或事件驱动；打开面板先画快照 | 1s 级 `invalidate`、每条 hook 重拉列表 |
+| 图表用 ECharts，spec 不变就不重挂（按 section 作用域） | 每次刷新把 20+ 个 canvas 全部重建 |
+
+黄金分割真源：`1.618`。会话面板与分析 sheet 的判定卡、笔记预览（父容器 61.8%）、归档 View 的正文/图板都走同一比例。
+
 ## 品味禁区
 
 | Don't | 为什么 |

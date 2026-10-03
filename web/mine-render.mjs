@@ -503,9 +503,21 @@ export const renderNav = (data) => {
   return `<nav class="mine-nav">${chips.join("")}</nav>`;
 };
 
+/** The four sections + the jump nav. Kept separate so the app can diff and
+ *  repaint only the section whose data changed (incremental; taste 布局与节奏). */
+export const mineSections = (data, { openTurn = null } = {}) => ({
+  nav: renderNav(data),
+  verdict: renderVerdict(data),
+  losses: renderLosses(data),
+  timeline: renderTimeline(data, openTurn),
+  ledger: renderLedger(data),
+});
+
 /** ④ sections body: ① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 → ④ 账本. */
-export const mineBodyHtml = (data, { openTurn = null } = {}) =>
-  renderNav(data) + renderVerdict(data) + renderLosses(data) + renderTimeline(data, openTurn) + renderLedger(data);
+export const mineBodyHtml = (data, { openTurn = null } = {}) => {
+  const s = mineSections(data, { openTurn });
+  return s.nav + s.verdict + s.losses + s.timeline + s.ledger;
+};
 
 /** Header summary line (window + counts + flags). */
 export const mineSummaryHtml = (data) => {
