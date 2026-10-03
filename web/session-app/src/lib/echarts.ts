@@ -1,3 +1,5 @@
+import { fmtValue } from "@charts";
+
 // ECharts is loaded on demand (code-split). Only the pieces we use are
 // registered, so the analysis route does not add ~1 MB to first paint.
 let ready: Promise<typeof import("echarts/core")> | null = null;
@@ -7,13 +9,9 @@ export function loadECharts() {
     ready = (async () => {
       const echarts = await import("echarts/core");
       const { BarChart, LineChart, PieChart } = await import("echarts/charts");
-      const {
-        GridComponent,
-        LegendComponent,
-        MarkPointComponent,
-        TitleComponent,
-        TooltipComponent,
-      } = await import("echarts/components");
+      const { GridComponent, LegendComponent, MarkPointComponent, TooltipComponent } = await import(
+        "echarts/components"
+      );
       const { CanvasRenderer } = await import("echarts/renderers");
       echarts.use([
         BarChart,
@@ -22,7 +20,6 @@ export function loadECharts() {
         GridComponent,
         TooltipComponent,
         LegendComponent,
-        TitleComponent,
         MarkPointComponent,
         CanvasRenderer,
       ]);
@@ -33,10 +30,9 @@ export function loadECharts() {
 }
 
 // ---------------------------------------------------------------------------
-// Session-analysis charts. The shared renderer (web/mine-render.mjs) decides
-// WHICH chart, which unit and which semantic colour (the taste); this module
-// only turns that spec into an ECharts option, themed with the same tokens as
-// `theme/panel.css`. docs/design-web-frontend.md §5.
+// Session-analysis charts. The sheet decides WHICH chart, which unit and which
+// semantic colour (the taste); this turns that spec into an ECharts option,
+// themed with the same tokens as `theme/tokens.css`.
 // ---------------------------------------------------------------------------
 
 export type MineChartItem = {
@@ -57,8 +53,6 @@ export type MineChartSpec = {
   centerSub?: string;
   title?: string;
   total?: number | null;
-  axisLeft?: string;
-  axisRight?: string;
 };
 
 const FONT =
@@ -68,24 +62,7 @@ const MUTED = "#6e6e73";
 const SURFACE = "#fafafa";
 const LOSS = "#c2410c";
 
-const fmt = (v: number, unit: string): string => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  if (unit === "USD") return n >= 0.1 ? `$${n.toFixed(3)}` : `$${n.toFixed(4)}`;
-  if (unit === "%") return `${Math.round(n * 10) / 10}%`;
-  if (unit === "s") {
-    if (Math.abs(n) >= 3600) return `${(n / 3600).toFixed(1)}h`;
-    return `${Number.isInteger(n) ? n : Math.round(n * 10) / 10}s`;
-  }
-  if (unit === "tok") {
-    if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}Mtok`;
-    if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}ktok`;
-    return `${Math.round(n)}tok`;
-  }
-  const t = Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
-  return unit ? `${t}${unit}` : t;
-};
-
+const fmt = (v: number, unit: string) => fmtValue(v, unit);
 const pctOf = (v: number, total: number) => (total > 0 ? (100 * v) / total : 0);
 
 const legendText = { fontSize: 11, color: MUTED, fontFamily: FONT };
@@ -104,7 +81,6 @@ export function buildMineOption(spec: MineChartSpec) {
         formatter: (p: { name: string; value: number }) =>
           `${p.name}<br/>${fmt(p.value, unit)} · ${pctOf(p.value, total).toFixed(1)}%`,
       },
-      // No ECharts title: the centre number is an HTML overlay (mine-charts echart).
       legend: {
         orient: "vertical",
         right: 12,
@@ -147,7 +123,6 @@ export function buildMineOption(spec: MineChartSpec) {
         formatter: (p: { seriesName: string; value: number }) =>
           `${p.seriesName}<br/>${fmt(p.value, unit)} · ${pctOf(p.value, total).toFixed(1)}%`,
       },
-      // Bar only: the legend is HTML below the canvas (mine-charts echart).
       grid: { left: 0, right: 0, top: 0, bottom: 0, containLabel: false },
       xAxis: { type: "value", max: total, show: false },
       yAxis: { type: "category", data: [""], show: false },
@@ -279,92 +254,5 @@ export function buildMineOption(spec: MineChartSpec) {
         areaStyle: { opacity: 0.12, color },
       },
     ],
-  };
-}
-
-type EChartsInstance = {
-  setOption: (o: unknown) => void;
-  on: (event: string, handler: (p: { dataIndex?: number }) => void) => void;
-  resize: () => void;
-  dispose: () => void;
-};
-
-/** Mount every `.mc-echart` inside `root`; returns a disposer. */
-export async function mountMineCharts(
-  root: HTMLElement,
-  onJump: (jump: number | string) => void,
-): Promise<() => void> {
-  const nodes = [...root.querySelectorAll<HTMLElement>(".mc-echart")];
-  if (!nodes.length) return () => {};
-  const echarts = await loadECharts();
-  const insts: EChartsInstance[] = [];
-  for (const node of nodes) {
-    const raw = node.dataset.mc;
-    if (!raw) continue;
-    let spec: MineChartSpec;
-    try {
-      spec = JSON.parse(raw) as MineChartSpec;
-    } catch {
-      continue;
-    }
-    const inst = echarts.init(node) as unknown as EChartsInstance;
-    inst.setOption(buildMineOption(spec));
-    inst.on("click", (p) => {
-      const it = spec.items[p.dataIndex ?? -1];
-      if (it && it.jump != null) onJump(it.jump);
-    });
-    insts.push(inst);
-  }
-  const onResize = () => {
-    for (const i of insts) i.resize();
-  };
-  window.addEventListener("resize", onResize);
-  return () => {
-    window.removeEventListener("resize", onResize);
-    for (const i of insts) i.dispose();
-  };
-}
-
-// Kept for the generic Chart wrapper (unused by the sheet now, still typed).
-export type ChartSpec = { kind: string; label: string; value: string; unit?: string };
-
-export function buildOption(spec: ChartSpec, rows: Record<string, unknown>[]) {
-  const labels = rows.map((r) => String(r[spec.label] ?? ""));
-  const values = rows.map((r) => Number(r[spec.value] ?? 0));
-  const unit = spec.unit ?? "";
-  const axisLabel = { color: "#8e8e93", fontSize: 10 };
-  if (spec.kind === "donut" || spec.kind === "stack") {
-    return {
-      tooltip: { trigger: "item" },
-      series: [
-        {
-          type: "pie",
-          radius: spec.kind === "donut" ? ["42%", "70%"] : ["0%", "70%"],
-          label: { fontSize: 10, color: INK },
-          data: labels.map((name, i) => ({ name, value: values[i] })),
-        },
-      ],
-    };
-  }
-  if (spec.kind === "line") {
-    return {
-      tooltip: { trigger: "axis" },
-      grid: { left: 4, right: 8, top: 12, bottom: 4, containLabel: true },
-      xAxis: { type: "category", data: labels, axisLabel },
-      yAxis: { type: "value", name: unit, axisLabel, nameTextStyle: axisLabel },
-      series: [{ type: "line", smooth: true, areaStyle: { opacity: 0.12 }, data: values }],
-    };
-  }
-  const horizontal = spec.kind === "bars";
-  return {
-    tooltip: { trigger: "axis" },
-    grid: { left: 4, right: 8, top: 12, bottom: 4, containLabel: true },
-    xAxis: horizontal
-      ? { type: "value", name: unit, axisLabel, nameTextStyle: axisLabel }
-      : { type: "category", data: labels, axisLabel },
-    yAxis: horizontal
-      ? { type: "category", data: labels, axisLabel }
-      : { type: "value", name: unit, axisLabel, nameTextStyle: axisLabel },
-    series: [{ type: "bar", data: values, itemStyle: { color: "#c47a2c", borderRadius: 3 } }],
   };
 }

@@ -15,8 +15,27 @@
   --color-role-ask: #c47a2c;
   --color-role-system: #8e8e93;
 
-  --color-mine-loss: #c62828;
-  --color-mine-money: #c47a2c;
+  /* Analysis semantic channels (docs/design-taste.md 「分析」).
+     Colour is an information channel and always carries its number. */
+  --color-mine-time: #0071e3;
+  --color-mine-money: #2f8f83;
+  --color-mine-loss: #c2410c;
+  --color-mine-good: #2e7d32;
+  --color-mine-flat: rgba(60, 60, 67, 0.08);
+
+  /* Finding severity */
+  --color-sev-high: #c2410c;
+  --color-sev-med: #c47a2c;
+  --color-sev-note: #8e8e93;
+  --color-sev-good: #2e7d32;
+
+  /* Turn phase */
+  --color-phase-implement: #c47a2c;
+  --color-phase-review: #6e56cf;
+  --color-phase-debug: #c62828;
+  --color-phase-ship: #2e7d32;
+  --color-phase-taste: #1565c0;
+  --color-phase-other: #8e8e93;
 }
 
 html,
