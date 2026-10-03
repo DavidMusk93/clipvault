@@ -65,7 +65,6 @@ const LOSS = "#c2410c";
 const fmt = (v: number, unit: string) => fmtValue(v, unit);
 const pctOf = (v: number, total: number) => (total > 0 ? (100 * v) / total : 0);
 
-const legendText = { fontSize: 12, color: MUTED, fontFamily: FONT };
 const axisText = { fontSize: 11.5, color: MUTED, fontFamily: FONT };
 
 export function buildMineOption(spec: MineChartSpec) {
@@ -81,25 +80,14 @@ export function buildMineOption(spec: MineChartSpec) {
         formatter: (p: { name: string; value: number }) =>
           `${p.name}<br/>${fmt(p.value, unit)} · ${pctOf(p.value, total).toFixed(1)}%`,
       },
-      legend: {
-        orient: "vertical",
-        right: 14,
-        top: "middle",
-        icon: "circle",
-        itemWidth: 9,
-        itemHeight: 9,
-        itemGap: 12,
-        textStyle: legendText,
-        formatter: (name: string) => {
-          const it = items.find((x) => x.label === name);
-          return it ? `${name}  ${fmt(it.value, unit)}` : name;
-        },
-      },
+      // No ECharts legend: the Donut component renders an HTML legend below, so
+      // long labels wrap and grow the block instead of overlapping the ring.
+      legend: { show: false },
       series: [
         {
           type: "pie",
-          radius: ["56%", "84%"],
-          center: ["38%", "50%"],
+          radius: ["58%", "86%"],
+          center: ["50%", "50%"],
           avoidLabelOverlap: true,
           label: { show: false },
           labelLine: { show: false },
@@ -132,7 +120,7 @@ export function buildMineOption(spec: MineChartSpec) {
         name: it.label,
         stack: "s",
         barWidth: 16,
-        itemStyle: { color: it.color, borderColor: SURFACE, borderWidth: 2, borderRadius: 8 },
+        itemStyle: { color: it.color, borderColor: SURFACE, borderWidth: 2, borderRadius: 0 },
         emphasis: { focus: "series" },
         data: [it.value],
       })),
@@ -170,7 +158,7 @@ export function buildMineOption(spec: MineChartSpec) {
         {
           type: "bar",
           barWidth: 12,
-          itemStyle: { borderRadius: 6 },
+          itemStyle: { borderRadius: 0 },
           label: {
             show: true,
             position: "right",
@@ -205,7 +193,7 @@ export function buildMineOption(spec: MineChartSpec) {
         {
           type: "bar",
           barWidth: "56%",
-          itemStyle: { borderRadius: [4, 4, 0, 0] },
+          itemStyle: { borderRadius: 0 },
           data: items.map((it) => ({ value: it.value, itemStyle: { color: it.color } })),
           markPoint: {
             symbol: "circle",

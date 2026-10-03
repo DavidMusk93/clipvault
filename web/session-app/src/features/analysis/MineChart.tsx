@@ -6,7 +6,7 @@ import {
   type MineChartItem,
   type MineChartSpec,
 } from "../../lib/echarts";
-import { fmtValue, pct } from "./lib";
+import { fmtValue, pct, pickKind } from "./lib";
 
 type Inst = {
   setOption: (o: unknown, opts?: unknown) => void;
@@ -98,7 +98,7 @@ export function CompositionBar({
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-role-system">
         {shown.map((it) => (
           <span key={it.label} className="inline-flex items-center gap-1.5">
-            <i className="size-2.5 shrink-0 rounded-[3px]" style={{ background: it.color }} />
+            <i className="size-2.5 shrink-0" style={{ background: it.color }} />
             {it.label}
             <b className="font-semibold text-ink tabular-nums">{fmtValue(it.value, unit)}</b>
             <em className="not-italic tabular-nums">{pct(it.value, total).toFixed(1)}%</em>
@@ -107,4 +107,88 @@ export function CompositionBar({
       </div>
     </div>
   );
+}
+
+/** Ring + HTML centre number, so the number can never collide with the ring. */
+export function Donut({
+  items,
+  unit = "",
+  center,
+  centerSub,
+  height = 150,
+  className,
+}: {
+  items: MineChartItem[];
+  unit?: string;
+  center?: string;
+  centerSub?: string;
+  height?: number;
+  className?: string;
+}) {
+  const total = items.reduce((a, it) => a + Number(it.value), 0);
+  return (
+    <div className={cn("flex max-w-[520px] flex-col gap-2", className)}>
+      <div className="relative" style={{ height }}>
+        <MineChart spec={{ kind: "donut", unit, items }} height={height} />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+          <b className="block text-[26px] font-bold leading-none tracking-[-0.02em] text-ink tabular-nums">
+            {center ?? fmtValue(total, unit)}
+          </b>
+          {centerSub && (
+            <span className="mt-1 block text-[12px] text-role-system">{centerSub}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-role-system">
+        {items.map((it) => (
+          <span key={it.label} className="inline-flex items-center gap-1.5">
+            <i className="size-2.5 shrink-0" style={{ background: it.color }} />
+            {it.label}
+            <b className="font-semibold text-ink tabular-nums">{fmtValue(it.value, unit)}</b>
+            <em className="not-italic tabular-nums">{pct(it.value, total).toFixed(1)}%</em>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A chart whose kind follows the data shape: a declared `bars` becomes a ring
+ * when the parts are few or one dominates (the bars would be slivers in empty
+ * space). See `pickKind`.
+ */
+export function AnalysisChart({
+  kind,
+  items,
+  unit = "",
+  center,
+  centerSub,
+  height,
+  onJump,
+}: {
+  kind: string;
+  items: MineChartItem[];
+  unit?: string;
+  center?: string;
+  centerSub?: string;
+  height?: number;
+  onJump?: (jump: number | string) => void;
+}) {
+  const picked = pickKind(kind, items);
+  if (picked === "donut") {
+    return (
+      <Donut items={items} unit={unit} center={center} centerSub={centerSub} height={height} />
+    );
+  }
+  const h =
+    height ??
+    (picked === "bars"
+      ? Math.max(32, items.length * 32)
+      : picked === "columns"
+        ? 64
+        : picked === "stack"
+          ? 18
+          : 72);
+  return <MineChart spec={{ kind: picked, unit, items }} height={h} onJump={onJump} />;
 }

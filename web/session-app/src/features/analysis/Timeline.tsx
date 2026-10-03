@@ -143,9 +143,9 @@ export function Timeline({
                   </span>
                 </span>
                 <span className="w-full truncate text-[13px] text-ink">{t.prompt}</span>
-                <span className="h-1.5 w-full overflow-hidden rounded-full bg-black/[0.05]">
+                <span className="h-1.5 w-full overflow-hidden bg-black/[0.05]">
                   <i
-                    className="block h-full rounded-full"
+                    className="block h-full"
                     style={{
                       width: `${Math.max(3, Math.round((100 * (Number(t.wall_s) || 0)) / maxWall))}%`,
                       background: Number(t.fails) > 0 ? "#c2410c" : phaseColor(t.phase, 0),

@@ -1,54 +1,33 @@
 import type { Mine, MineTable } from "../../api/mine";
 import { Table, Td, Th } from "../../components/ui/table";
-import { colorAt, fmtValue, isKnownPhase, MINE_NUM_COLS, phaseColor, phaseLabel } from "./lib";
-import { MineChart } from "./MineChart";
+import { colorAt, isKnownPhase, MINE_NUM_COLS, phaseColor, phaseLabel, pickKind } from "./lib";
+import { AnalysisChart } from "./MineChart";
 import { Section, SectionHead } from "./Section";
-
-const KINDS = ["stack", "donut", "bars", "columns", "line"] as const;
-type Kind = (typeof KINDS)[number];
-const kindOf = (k: string): Kind =>
-  (KINDS as readonly string[]).includes(k) ? (k as Kind) : "bars";
 
 function TableChart({ t }: { t: MineTable }) {
   const c = t.chart;
   if (!c) return null;
   const rows = t.rows || [];
   if (!rows.length) return null;
-  const kind = kindOf(c.kind);
+  const picked = pickKind(
+    c.kind,
+    rows.map((r) => ({ value: Number(r[c.value] ?? 0) })),
+  );
   const items = rows.map((r, i) => {
     const raw = String(r[c.label] ?? "");
     const phase = isKnownPhase(raw);
-    const label = (kind === "donut" || kind === "columns") && phase ? phaseLabel(raw) : raw;
+    const label = (picked === "donut" || picked === "columns") && phase ? phaseLabel(raw) : raw;
     return {
       label,
       value: Number(r[c.value] ?? 0),
-      color: kind === "donut" || kind === "columns" ? phaseColor(raw, i) : colorAt(i),
+      color: picked === "donut" || picked === "columns" ? phaseColor(raw, i) : colorAt(i),
       flag: Number(r.fails || 0) > 0,
       jump: r.index as number | undefined,
     };
   });
-  const total = items.reduce((a, it) => a + it.value, 0);
-  const height =
-    kind === "donut"
-      ? 140
-      : kind === "columns"
-        ? 64
-        : kind === "stack"
-          ? 18
-          : kind === "bars"
-            ? Math.max(32, items.length * 32)
-            : 72;
-  const chart = <MineChart spec={{ kind, unit: c.unit || "", items }} height={height} />;
-  if (kind !== "donut") return <div className="my-2">{chart}</div>;
   return (
-    <div className="relative my-2 max-w-[420px]">
-      {chart}
-      <div className="pointer-events-none absolute left-[38%] top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-        <b className="block text-[26px] font-bold leading-none tracking-[-0.02em] text-ink tabular-nums">
-          {fmtValue(total, c.unit || "")}
-        </b>
-        {t.caption && <span className="mt-1 block text-[12px] text-role-system">{t.caption}</span>}
-      </div>
+    <div className="my-2">
+      <AnalysisChart kind={c.kind} items={items} unit={c.unit || ""} centerSub={t.caption} />
     </div>
   );
 }
@@ -100,7 +79,7 @@ function DataTable({ t }: { t: MineTable }) {
                   <Td key={c.id} className="py-1.5 text-right tabular-nums">
                     <span className="relative inline-flex min-w-[56px] items-center justify-end">
                       <i
-                        className="absolute inset-y-[3px] left-0 rounded bg-honey/25"
+                        className="absolute inset-y-[3px] left-0 bg-honey/25"
                         style={{ width: `${pct}%` }}
                       />
                       <span className="relative">{String(raw)}</span>

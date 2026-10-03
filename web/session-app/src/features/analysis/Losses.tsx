@@ -1,6 +1,6 @@
 import type { Mine, MineFinding, MineRef } from "../../api/mine";
-import { barPct, deltaText, deltaTone, metricOf, mineSpan, mineUsd, sevOf } from "./lib";
-import { MineChart } from "./MineChart";
+import { barPct, deltaText, deltaTone, metricOf, mineSpan, mineUsd, pickKind, sevOf } from "./lib";
+import { AnalysisChart } from "./MineChart";
 import { Section, SectionHead } from "./Section";
 
 const abbrev = (s: unknown, n = 44): string => {
@@ -190,9 +190,9 @@ function LossCard({
                 目标 {String(m.target)}
                 {m.unit || ""}
               </span>
-              <span className="relative h-1.5 w-20 overflow-hidden rounded-full bg-black/[0.07]">
+              <span className="relative h-1.5 w-20 overflow-hidden bg-black/[0.07]">
                 <i
-                  className="absolute inset-y-0 left-0 rounded-full bg-mine-loss"
+                  className="absolute inset-y-0 left-0 bg-mine-loss"
                   style={{ width: `${mm ? barPct(mm) : 0}%` }}
                 />
               </span>
@@ -268,17 +268,18 @@ export function Losses({
     .filter((f) => Number(f.impact?.usd) > 0)
     .sort((a, b) => Number(b.impact.usd) - Number(a.impact.usd));
   const byS = [...list].sort((a, b) => Number(b.impact?.s || 0) - Number(a.impact?.s || 0));
-  const barSpec = (rows: MineFinding[], useUsd: boolean) => ({
-    kind: "bars" as const,
-    unit: useUsd ? "USD" : "s",
-    items: rows.map((f) => ({
+  const items = (rows: MineFinding[], useUsd: boolean) =>
+    rows.map((f) => ({
       label: f.title || f.id,
       value: useUsd ? Number(f.impact.usd) : Number(f.impact?.s) || 0,
       sub: f.impact?.kind === "estimated" ? "估算" : "实测",
       color: sevOf(f.sev).color,
       jump: `loss-${f.id}`,
-    })),
-  });
+    }));
+  const usdItems = items(byUsd, true);
+  const sItems = items(byS, false);
+  const usdDonut = pickKind("bars", usdItems) === "donut";
+  const sDonut = pickKind("bars", sItems) === "donut";
 
   return (
     <Section id="mineLosses">
@@ -288,15 +289,19 @@ export function Losses({
         hint={hasEst ? "含估算项" : undefined}
       />
       <div className="flex flex-col gap-4">
-        {byUsd.length > 0 && (
+        {usdItems.length > 0 && (
           <div>
-            <div className="mb-1.5 text-[12px] text-role-system">按 $ 排序</div>
-            <MineChart spec={barSpec(byUsd, true)} height={Math.max(32, byUsd.length * 32)} />
+            <div className="mb-1.5 text-[12px] text-role-system">
+              {usdDonut ? "按 $ 占比" : "按 $ 排序"}
+            </div>
+            <AnalysisChart kind="bars" items={usdItems} unit="USD" centerSub="损耗构成（$）" />
           </div>
         )}
         <div>
-          <div className="mb-1.5 text-[12px] text-role-system">按秒排序（含墙钟空档）</div>
-          <MineChart spec={barSpec(byS, false)} height={Math.max(32, byS.length * 32)} />
+          <div className="mb-1.5 text-[12px] text-role-system">
+            {sDonut ? "按秒占比（含墙钟空档）" : "按秒排序（含墙钟空档）"}
+          </div>
+          <AnalysisChart kind="bars" items={sItems} unit="s" centerSub="损耗构成（秒）" />
         </div>
       </div>
       <div className="mt-4 flex flex-col gap-3">
