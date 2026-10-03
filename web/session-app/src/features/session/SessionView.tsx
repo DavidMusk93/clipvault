@@ -4,20 +4,32 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type EventStubT, streamUrl } from "../../api/client";
 import { cn } from "../../lib/cn";
+import { emit } from "../../lib/telemetry";
 import { ENGINES } from "./engines";
 import { bundleHtml, focusHtml } from "./render";
 
 const NEAR = 64;
+let ttfpSent = false;
 
-export function SessionView({ sessionId }: { sessionId: string }) {
+export function SessionView({ sessionId, paused }: { sessionId: string; paused?: boolean }) {
   const beats = useQuery({
     queryKey: ["beats", sessionId],
-    queryFn: () => api.beats(sessionId),
+    queryFn: async () => {
+      const t0 = performance.now();
+      const r = await api.beats(sessionId);
+      emit("trae_sessions_net", { dur_ms: performance.now() - t0, payload: { kind: "beats" } });
+      return r;
+    },
     staleTime: 30_000,
   });
   const tools = useInfiniteQuery({
     queryKey: ["tools", sessionId],
-    queryFn: ({ pageParam }) => api.eventsPaged(sessionId, pageParam),
+    queryFn: async ({ pageParam }) => {
+      const t0 = performance.now();
+      const r = await api.eventsPaged(sessionId, pageParam);
+      emit("trae_sessions_net", { dur_ms: performance.now() - t0, payload: { kind: "tools" } });
+      return r;
+    },
     initialPageParam: null as { ts: string; event_id: string } | null,
     getNextPageParam: (last) => (last.has_more ? (last.next_cursor ?? undefined) : undefined),
     staleTime: 30_000,
@@ -26,12 +38,13 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const [live, setLive] = useState<EventStubT[]>([]);
   useEffect(() => {
     setLive([]);
-    if (!sessionId) return;
+    if (!sessionId || paused) return;
     const es = new EventSource(streamUrl());
     es.onmessage = (ev) => {
       try {
         const d = JSON.parse(ev.data) as EventStubT & { type?: string };
         if (d.type === "hook_event" && d.session_id === sessionId && d.event_id) {
+          emit("trae_sessions_hook", { value: 1 });
           setLive((prev) => (prev.some((x) => x.event_id === d.event_id) ? prev : [...prev, d]));
         }
       } catch {
@@ -39,7 +52,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
       }
     };
     return () => es.close();
-  }, [sessionId]);
+  }, [sessionId, paused]);
 
   // Display logic lives in web/session-render.mjs: chronological IM rows
   // (Pre/Post collapse, SessionStart drop), then beats vs bundled tool index.
@@ -57,6 +70,29 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     () => new Map(imRows.map((r) => [String(r.event.event_id || ""), r])),
     [imRows],
   );
+
+  // Telemetry: first paint / load / errors (the 调试 panel's key names).
+  useEffect(() => {
+    if (items.length > 0) {
+      emit("trae_sessions_paint", { value: items.length, payload: { kind: "thread" } });
+      if (!ttfpSent) {
+        ttfpSent = true;
+        emit("trae_sessions_ttfp", { dur_ms: performance.now() });
+      }
+    }
+  }, [items.length]);
+
+  useEffect(() => {
+    if (beats.isSuccess && tools.isSuccess) {
+      emit("trae_sessions_load", { value: items.length });
+    }
+  }, [beats.isSuccess, tools.isSuccess, items.length]);
+
+  useEffect(() => {
+    if (beats.isError || tools.isError) {
+      emit("trae_sessions_error", { payload: { reason: "fetch" } });
+    }
+  }, [beats.isError, tools.isError]);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset expansion when the session changes.
