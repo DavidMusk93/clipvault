@@ -181,14 +181,13 @@ function Sessions({
         )}
         <CornerStack analysisOpen={analysisOpen} onOpenAnalysis={onOpenAnalysis} />
 
-        {/* Sheet covers the thread, not the rail: it belongs to .stage (vanilla
-            appended it to .stage too). Analysis renders the .cv-mine-sheet itself
-            so it can own the is-updating / is-pending state. */}
+        {/* Sheet covers the thread, not the rail. Analysis renders the sheet
+            frame itself so it owns its own state. */}
         {analysisOpen && (
           <Suspense
             fallback={
-              <div className="cv-mine-sheet">
-                <p className="mine-empty">加载分析…</p>
+              <div className="absolute inset-x-2 bottom-[52px] top-2 z-10 flex items-center justify-center rounded-2xl border border-black/10 bg-[#fafafa] text-[11.5px] text-role-system">
+                加载分析…
               </div>
             }
           >

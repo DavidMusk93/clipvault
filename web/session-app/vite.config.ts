@@ -17,9 +17,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@render": fileURLToPath(new URL("../session-render.mjs", import.meta.url)),
-      // Shared session-analysis (mine) display logic: the React sheet renders
-      // the same HTML as the vanilla panel (docs/design-web-frontend.md §5).
-      "@mine": fileURLToPath(new URL("../mine-render.mjs", import.meta.url)),
+      // Shared chart palette + formatters (also used by the vanilla rollback).
+      "@charts": fileURLToPath(new URL("../mine-charts.mjs", import.meta.url)),
     },
   },
   server: { fs: { allow: [".."] } },

@@ -151,9 +151,13 @@ the one server change this design depends on.
    HTML. If the vanilla shell loads a stylesheet directly (e.g. the FAB chrome in
    `/assets/metrics-panel.css`), fold those rules into `panel.css` so the app is
    self-contained.
-   The 「分析」sheet obeys the same rule: its four sections (① 损耗判定 → ② 损耗排行
-   → ③ 回合时间轴 → ④ 账本) come from `web/mine-render.mjs` (aliased `@mine`), the
-   React sheet only owns scope/dir state, auto-refresh and the delegated clicks.
+   The 「分析」sheet is a **component tree**, not shared HTML: `features/analysis/*`
+   rebuilds the taste (① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 → ④ 账本, semantic
+   colour, golden-ratio verdict) with Radix/shadcn primitives + Tailwind tokens +
+   ECharts. The old vanilla markup is **not** the spec — the taste is (see
+   docs/design-taste.md 「分析」/「布局与节奏」). Charts come from `MineChart`
+   (`lib/echarts.ts` `buildMineOption`); the palette/formatters are shared with the
+   vanilla rollback via `web/mine-charts.mjs` (aliased `@charts`).
 2. **Tokens are code**: `theme/tokens.css` is generated from `docs/design-taste.md`;
    no component hardcodes a hex.
 3. **Every API response is Zod-parsed**; the Rust struct and the TS schema are
@@ -162,10 +166,9 @@ the one server change this design depends on.
    component library runtime is added as a black box.
 5. **Charts are declarative wrappers** around ECharts with the design tokens;
    chart kind is declared where the data is built (already the case in `/api/mine`).
-   The shared renderer emits a `.mc-echart` placeholder carrying the spec
-   (kind / unit / per-datum colour); the app mounts the ECharts instance
-   (`lib/echarts.ts` `mountMineCharts`). The vanilla rollback keeps the SVG
-   builders in `web/mine-charts.mjs`.
+   `<MineChart spec>` owns one instance (init / resize / dispose) and skips
+   `setOption` when the spec did not change, so a parent re-render never rebuilds
+   an unchanged chart.
 6. **A11y**: Radix primitives + focus management; the panel is keyboard reachable.
 7. **Deploy builds**: `deploy-server.sh` runs the web build; CI runs `vitest`.
 

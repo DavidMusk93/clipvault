@@ -1,32 +1,16 @@
-import {
-  mineDataSig,
-  mineDirectionsHtml,
-  mineDraftMarkdown,
-  mineSections,
-  mineSummaryHtml,
-} from "@mine";
-import type { MouseEvent as ReactMouseEvent } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { getMine, type Mine } from "../../api/mine";
-import { mountMineCharts } from "../../lib/echarts";
-
-/**
- * 「分析」sheet. The four sections (① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 →
- * ④ 账本) are rendered by the SHARED display logic in `web/mine-render.mjs`
- * (aliased `@mine`) — the same HTML the vanilla panel produced, so the CSS in
- * `theme/panel.css` gives the same look. Do not fork a second implementation
- * (docs/design-web-frontend.md §5, docs/design-taste.md 「分析」).
- */
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ackFinding, getMine, type Mine, type MineFinding } from "../../api/mine";
+import { Ledger } from "./Ledger";
+import { Losses } from "./Losses";
+import { mineDraftMarkdown } from "./lib";
+import { Timeline } from "./Timeline";
+import { Verdict } from "./Verdict";
 
 const MINE_KEY = "cv.trae.mine.v1";
 const AUTO_MS = 15000;
-const SECTION_KEYS = ["nav", "verdict", "losses", "timeline", "ledger"] as const;
-const EMPTY_SECTIONS = { nav: "", verdict: "", losses: "", timeline: "", ledger: "" };
-const BASE =
-  typeof location !== "undefined" && location.pathname.startsWith("/trae") ? "/trae" : "";
 
 type Scope = "session" | "recent";
-type Dir = { id: string; title: string };
 
 function readSaved(): { scope: Scope; dirs: string[] } {
   try {
@@ -48,6 +32,16 @@ function readSaved(): { scope: Scope; dirs: string[] } {
   return { scope: "session", dirs: [] };
 }
 
+const chip = (on: boolean) =>
+  `h-6 shrink-0 rounded-full border px-2 text-[11.5px] font-semibold transition-colors ${
+    on ? "border-honey bg-honey/12 text-honey" : "border-black/15 text-ink hover:bg-black/5"
+  }`;
+
+/**
+ * 「分析」sheet — rebuilt from the taste (docs/design-taste.md 「分析」), not from
+ * the vanilla markup: ① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 → ④ 账本, semantic
+ * colour, golden-ratio verdict, incremental refresh. Charts are ECharts.
+ */
 export default function Analysis({
   sessionId,
   onClose,
@@ -58,249 +52,76 @@ export default function Analysis({
   const saved = useMemo(readSaved, []);
   const [scope, setScope] = useState<Scope>(saved.scope);
   const [dirs, setDirs] = useState<string[]>(saved.dirs);
-  const [data, setData] = useState<Mine | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [updating, setUpdating] = useState(false);
-  const [pending, setPending] = useState(false);
   const [openTurn, setOpenTurn] = useState<number | null>(null);
   const [copyLabel, setCopyLabel] = useState("复制 AGENTS 草稿");
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const sigRef = useRef("");
-  const scrollRef = useRef(0);
-  const loadingRef = useRef(false);
-  const openTurnRef = useRef<number | null>(null);
-  openTurnRef.current = openTurn;
-
-  const directions: Dir[] = useMemo(() => {
-    const d = (data as { directions?: Dir[] } | null)?.directions;
-    return Array.isArray(d) ? d : [];
-  }, [data]);
-
-  const persist = useCallback((nextScope: Scope, nextDirs: string[]) => {
+  const persist = (nextScope: Scope, nextDirs: string[]) => {
     try {
       localStorage.setItem(MINE_KEY, JSON.stringify({ scope: nextScope, dirs: nextDirs }));
     } catch {
       /* ignore */
     }
-  }, []);
+  };
 
-  const load = useCallback(
-    async ({ auto = false }: { auto?: boolean } = {}) => {
-      if (loadingRef.current) return;
-      loadingRef.current = true;
-      let updTimer = 0;
-      if (auto) {
-        // Surface the pill only when the round-trip is slow; avoids flicker.
-        updTimer = window.setTimeout(() => setUpdating(true), 500);
-      } else {
-        setPending(false);
-        setError("");
-        setLoading(true);
-      }
-      try {
-        const d = await getMine(scope, dirs, !auto, sessionId);
-        const sig = mineDataSig(d);
-        if (auto && sig === sigRef.current) return;
-        sigRef.current = sig;
-        scrollRef.current = auto ? (bodyRef.current?.scrollTop ?? 0) : 0;
-        setData(d);
-        setError("");
-      } catch (err) {
-        if (!auto) setError(String((err as Error)?.message || err));
-      } finally {
-        loadingRef.current = false;
-        if (updTimer) window.clearTimeout(updTimer);
-        setUpdating(false);
-        setLoading(false);
-      }
-    },
-    [scope, dirs, sessionId],
-  );
+  const q = useQuery({
+    queryKey: ["mine", scope, dirs.join(","), sessionId],
+    queryFn: () => getMine(scope, dirs, true, sessionId),
+    staleTime: 30_000,
+    refetchInterval: AUTO_MS,
+    refetchIntervalInBackground: false,
+  });
+  const data: Mine | null = q.data ?? null;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: collapse the open turn when the scope changes.
   useEffect(() => {
-    void load({ auto: false });
-  }, [load]);
+    setOpenTurn(null);
+  }, [scope, dirs, sessionId]);
 
-  // Coalesced auto refresh: at most one recompute per AUTO_MS while the sheet is
-  // open, and only when it is actually visible. If a turn detail is expanded,
-  // mark stale instead of repainting. Taste: 不要频繁刷新，增量式。
-  useEffect(() => {
-    const t = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      if (openTurnRef.current !== null) {
-        setPending(true);
-        return;
-      }
-      void load({ auto: true });
-    }, AUTO_MS);
-    return () => window.clearInterval(t);
-  }, [load]);
+  const directions = data?.directions ?? [];
+  const findings = data?.findings || [];
 
-  const sections = useMemo(
-    () => (data ? mineSections(data, { openTurn }) : EMPTY_SECTIONS),
-    [data, openTurn],
-  );
-  const summaryHtml = useMemo(() => (data ? mineSummaryHtml(data) : ""), [data]);
-  const dirsHtml = useMemo(() => mineDirectionsHtml(directions, dirs), [directions, dirs]);
+  const toggleDir = (id: string) => {
+    const base = dirs.length ? dirs.slice() : directions.map((d) => d.id);
+    const i = base.indexOf(id);
+    if (i >= 0) base.splice(i, 1);
+    else base.push(id);
+    setDirs(base);
+    persist(scope, base);
+  };
 
-  // Restore the reading position across a repaint (auto refresh / turn toggle).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-restore when the rendered sections change.
-  useLayoutEffect(() => {
-    const el = bodyRef.current;
-    if (el) el.scrollTop = scrollRef.current;
-  }, [sections]);
-
-  const jumpTo = (id: string) => {
-    const el = bodyRef.current?.querySelector(`[id="${id}"]`);
+  const jump = (id: string) => {
+    const el = scrollRef.current?.querySelector(`#${CSS.escape(id)}`);
     if (!el) return;
     el.scrollIntoView({ block: "start" });
     el.classList.add("is-hit");
     window.setTimeout(() => el.classList.remove("is-hit"), 1200);
   };
 
-  const toggleTurn = (n: number) => {
-    const next = openTurnRef.current === n ? null : n;
-    scrollRef.current = bodyRef.current?.scrollTop ?? 0;
-    setOpenTurn(next);
-    requestAnimationFrame(() => {
-      bodyRef.current?.querySelector(`#turn-${n}`)?.scrollIntoView({ block: "center" });
-      if (next === null && pending) {
-        setPending(false);
-        void load({ auto: true });
-      }
-    });
-  };
+  const toggleTurn = (n: number) => setOpenTurn((prev) => (prev === n ? null : n));
 
-  // Mount ECharts into each section's `.mc-echart` placeholders — only for the
-  // sections whose HTML actually changed (incremental; charts are not rebuilt
-  // when nothing in their section moved).
-  const sectionEls = useRef<Record<string, HTMLDivElement | null>>({});
-  const chartState = useRef(new Map<string, { html: string; dispose: () => void }>());
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the click handler reads the current turn/jump closures.
-  useEffect(() => {
-    const onJump = (jump: number | string) => {
-      if (typeof jump === "number") toggleTurn(jump);
-      else jumpTo(String(jump));
-    };
-    for (const k of SECTION_KEYS) {
-      const el = sectionEls.current[k];
-      if (!el) continue;
-      const html = sections[k];
-      const prev = chartState.current.get(k);
-      if (prev && prev.html === html) continue;
-      prev?.dispose();
-      const rec: { html: string; dispose: () => void } = { html, dispose: () => {} };
-      chartState.current.set(k, rec);
-      void mountMineCharts(el, onJump).then((dispose) => {
-        if (chartState.current.get(k) === rec) rec.dispose = dispose;
-        else dispose();
-      });
-    }
-  }, [sections]);
-
-  useEffect(
-    () => () => {
-      for (const rec of chartState.current.values()) rec.dispose();
-      chartState.current.clear();
-    },
-    [],
-  );
-
-  const ack = async (btn: HTMLElement) => {
-    const fid = btn.getAttribute("data-ack") || "";
-    const status = btn.getAttribute("data-ack-status") || "";
-    const found = (
-      (data?.findings as {
-        id: string;
-        metric?: { id?: string; now?: unknown; target?: unknown };
-      }[]) || []
-    ).find((x) => String(x.id) === fid);
-    const m = found?.metric || {};
-    const label = btn.textContent || "";
-    btn.textContent = "记录中…";
+  const onAck = async (f: MineFinding, status: string, btn?: HTMLElement) => {
+    const m = f.metric;
+    const label = btn?.textContent || "";
+    if (btn) btn.textContent = "记录中…";
     try {
-      const res = await fetch(`${BASE}/api/mine/ack`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scope,
-          session_id: scope === "session" ? sessionId : "",
-          finding_id: fid,
-          status,
-          metric: { id: m.id || "", now: m.now ?? null, target: m.target ?? null },
-        }),
+      await ackFinding({
+        scope,
+        session_id: scope === "session" ? sessionId : "",
+        finding_id: f.id,
+        status,
+        metric: { id: m?.id || "", now: m?.now ?? null, target: m?.target ?? null },
       });
-      if (!res.ok) throw new Error(`ack ${res.status}`);
-      await load({ auto: false });
+      await q.refetch();
     } catch {
-      btn.textContent = "失败";
-      window.setTimeout(() => {
-        btn.textContent = label;
-      }, 1500);
+      if (btn) {
+        btn.textContent = "失败";
+        window.setTimeout(() => {
+          btn.textContent = label;
+        }, 1500);
+      }
     }
   };
-
-  const onClick = (ev: ReactMouseEvent<HTMLElement>) => {
-    const t = ev.target as HTMLElement;
-    const jump = t.closest("[data-jump]");
-    if (jump) {
-      jumpTo(jump.getAttribute("data-jump") || "");
-      return;
-    }
-    const turnBtn = t.closest("[data-mine-turn]");
-    if (turnBtn) {
-      toggleTurn(Number(turnBtn.getAttribute("data-mine-turn")));
-      return;
-    }
-    const refBtn = t.closest("[data-turn]");
-    if (refBtn) {
-      toggleTurn(Number(refBtn.getAttribute("data-turn")));
-      return;
-    }
-    const ackBtn = t.closest("[data-ack]");
-    if (ackBtn) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      void ack(ackBtn as HTMLElement);
-      return;
-    }
-    const scopeBtn = t.closest("[data-scope]");
-    if (scopeBtn) {
-      const next = (scopeBtn.getAttribute("data-scope") as Scope) || "session";
-      setOpenTurn(null);
-      setScope(next);
-      persist(next, dirs);
-      return;
-    }
-    const dirBtn = t.closest("[data-dir]");
-    if (dirBtn) {
-      const id = dirBtn.getAttribute("data-dir") || "";
-      const base = dirs.length ? dirs.slice() : directions.map((d) => d.id);
-      const i = base.indexOf(id);
-      if (i >= 0) base.splice(i, 1);
-      else base.push(id);
-      setOpenTurn(null);
-      setDirs(base);
-      persist(scope, base);
-    }
-  };
-
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const onClickRef = useRef(onClick);
-  onClickRef.current = onClick;
-
-  // Delegated clicks (jump / turn / ref / ack / scope / dir). A native listener
-  // keeps the container a plain div, like the thread's own delegation.
-  useEffect(() => {
-    const el = sheetRef.current;
-    if (!el) return;
-    const handler = (ev: Event) =>
-      onClickRef.current(ev as unknown as ReactMouseEvent<HTMLElement>);
-    el.addEventListener("click", handler);
-    return () => el.removeEventListener("click", handler);
-  }, []);
 
   const copyDraft = async () => {
     if (!data) return;
@@ -313,73 +134,121 @@ export default function Analysis({
     }
   };
 
+  const summary = useMemo(() => {
+    if (!data?.ok) return null;
+    const w = data.window || {};
+    const s = data.summary || {};
+    return (
+      <p className="mb-1.5 text-[12px] tabular-nums text-role-system">
+        {String(w.from || "?")} → {String(w.to || "?")} · {s.n_turns || 0} 回合 · {s.n_tools || 0}{" "}
+        工具
+        {w.instances?.length ? ` · ${w.instances.join("/")}` : ""}
+        {w.truncated ? (
+          <span className="ml-1.5 rounded-full bg-mine-loss/12 px-1.5 text-[11px] font-semibold text-mine-loss">
+            12000 行截断
+          </span>
+        ) : null}
+        {data.baseline?.source ? (
+          <span className="ml-1.5 rounded-full bg-black/[0.06] px-1.5 text-[11px] text-role-system">
+            对照 {data.baseline.source}
+          </span>
+        ) : null}
+        {!s.usage_turns ? (
+          <span className="ml-1.5 rounded-full bg-mine-money/12 px-1.5 text-[11px] text-mine-money">
+            无计费数据
+          </span>
+        ) : null}
+      </p>
+    );
+  }, [data]);
+
   return (
-    <div
-      ref={sheetRef}
-      className={`cv-mine-sheet${updating ? " is-updating" : ""}${pending ? " is-pending" : ""}`}
-    >
-      <div className="mine-head">
-        <div className="mine-head-row">
-          <h2>会话分析</h2>
+    <div className="absolute inset-x-2 bottom-[52px] top-2 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-black/10 bg-[#fafafa] shadow-[0_16px_48px_rgba(0,0,0,0.16)]">
+      <div className="flex-none rounded-t-2xl border-b border-black/5 bg-white px-3.5 pb-2 pt-2.5">
+        <div className="mb-1.5 flex items-center gap-2">
+          <h2 className="flex-1 text-[16px] font-semibold tracking-[-0.02em] text-ink">会话分析</h2>
           <button
             type="button"
-            className="mine-copy"
-            onClick={(e) => {
-              e.stopPropagation();
-              void copyDraft();
-            }}
+            onClick={() => void copyDraft()}
+            className="h-7 rounded-lg border border-black/10 bg-white px-2 text-[11.5px] font-semibold text-ink hover:bg-black/5"
           >
             {copyLabel}
           </button>
           <button
             type="button"
-            className="mine-x"
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
+            onClick={onClose}
+            className="h-7 rounded-lg border border-black/10 bg-white px-2 text-[11.5px] font-semibold text-ink hover:bg-black/5"
           >
             关闭
           </button>
         </div>
-        {summaryHtml ? (
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped string builders in @mine.
-          <p className="mine-sum" dangerouslySetInnerHTML={{ __html: summaryHtml }} />
-        ) : null}
-        <div className="mine-scopes">
-          <button
-            type="button"
-            className={`mine-chip${scope === "session" ? " is-on" : ""}`}
-            data-scope="session"
-          >
-            当前会话
-          </button>
-          <button
-            type="button"
-            className={`mine-chip${scope === "recent" ? " is-on" : ""}`}
-            data-scope="recent"
-          >
-            最近 7 天
-          </button>
+        {summary}
+        <div className="flex flex-wrap gap-1.5">
+          {(["session", "recent"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => {
+                setScope(s);
+                persist(s, dirs);
+              }}
+              className={chip(scope === s)}
+            >
+              {s === "session" ? "当前会话" : "最近 7 天"}
+            </button>
+          ))}
+          {directions.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => toggleDir(d.id)}
+              className={chip(!dirs.length || dirs.includes(d.id))}
+            >
+              {d.title}
+            </button>
+          ))}
         </div>
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: escaped string builders in @mine. */}
-        <div className="mine-dirs" dangerouslySetInnerHTML={{ __html: dirsHtml }} />
       </div>
-      <div className="mine-scroll" ref={bodyRef}>
-        {loading && !data ? <p className="mine-empty">分析中…</p> : null}
-        {error && !loading ? <p className="mine-empty">分析失败 · {error}</p> : null}
-        {data
-          ? SECTION_KEYS.map((k) => (
-              <div
-                key={k}
-                ref={(el) => {
-                  sectionEls.current[k] = el;
-                }}
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped string builders in @mine.
-                dangerouslySetInnerHTML={{ __html: sections[k] }}
-              />
-            ))
-          : null}
+
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-auto overscroll-contain px-3.5 py-2.5"
+      >
+        {q.isPending && !data ? <p className="text-[11.5px] text-role-system">分析中…</p> : null}
+        {q.isError && !data ? (
+          <p className="text-[11.5px] text-mine-loss">分析失败 · {String(q.error)}</p>
+        ) : null}
+        {data?.ok ? (
+          <>
+            <nav className="mb-2.5 flex flex-wrap gap-1.5">
+              {[
+                ["mineLosses", `损耗 ${findings.length}`],
+                ...(data.turns?.length
+                  ? ([["mineTimeline", `回合 ${data.turns.length}`]] as const)
+                  : []),
+                ["mineLedger", `账本 ${Object.keys(data.blocks || {}).length}`],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => jump(id)}
+                  className="h-6 rounded-full bg-black/[0.05] px-2.5 text-[11.5px] font-medium text-ink hover:bg-black/10"
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+            <Verdict data={data} />
+            <Losses data={data} onTurn={toggleTurn} onAck={onAck} />
+            <Timeline data={data} openTurn={openTurn} onToggleTurn={toggleTurn} />
+            <Ledger data={data} />
+          </>
+        ) : null}
+        {data && !data.ok ? (
+          <p className="text-[11.5px] text-mine-loss">
+            分析失败{data.error ? ` · ${data.error}` : ""}
+          </p>
+        ) : null}
       </div>
     </div>
   );
