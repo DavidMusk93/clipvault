@@ -92,6 +92,30 @@ export const phaseColor = (phase: string, i: number) => PHASE_COLORS[phase] || c
 export const phaseLabel = (phase: string) => PHASE_LABEL[phase] || "其他";
 export const isKnownPhase = (phase: string) => (MINE_PHASES as readonly string[]).includes(phase);
 
+export const CHART_KINDS = ["stack", "donut", "bars", "columns", "line"] as const;
+export type ChartKind = (typeof CHART_KINDS)[number];
+
+/**
+ * Shape follows the data, not the backend's declared kind. A bar chart with few
+ * parts, or one part dominating, is really a part-to-whole question — the bars
+ * sit as slivers in a sea of empty space. Use a ring instead (taste: 「分析」图表
+ * 选型 + 「色彩条直角」).
+ */
+export function pickKind(declared: string, items: { value: number }[]): ChartKind {
+  const kind = (CHART_KINDS as readonly string[]).includes(declared)
+    ? (declared as ChartKind)
+    : "bars";
+  if (kind === "line" && items.length < 3) return "bars";
+  if (kind === "bars") {
+    const positive = items.filter((i) => Number(i.value) > 0);
+    if (!positive.length) return "bars";
+    const total = positive.reduce((a, i) => a + Number(i.value), 0);
+    const max = Math.max(...positive.map((i) => Number(i.value)));
+    if (positive.length <= 4 || (total > 0 && max / total >= 0.7)) return "donut";
+  }
+  return kind;
+}
+
 export const mineSpan = (v: unknown): string => {
   const n = Number(v) || 0;
   if (n >= 3600) return `${(n / 3600).toFixed(1)}h`;

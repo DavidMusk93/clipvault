@@ -1,6 +1,6 @@
 import type { Mine } from "../../api/mine";
 import { deltaText, deltaTone, metricOf, mineSpan, mineUsd } from "./lib";
-import { CompositionBar, MineChart } from "./MineChart";
+import { CompositionBar, Donut } from "./MineChart";
 import { Section, SectionHead } from "./Section";
 
 const scoreClass = (score: number) =>
@@ -136,15 +136,12 @@ export function Verdict({ data }: { data: Mine }) {
 
         <div className="min-w-0 border-l border-black/[0.06] pl-5">
           {s.usage_turns ? (
-            <div className="relative max-w-[420px]">
-              <MineChart spec={{ kind: "donut", unit: "tok", items: cacheItems }} height={140} />
-              <div className="pointer-events-none absolute left-[38%] top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-                <b className="block text-[26px] font-bold leading-none tracking-[-0.02em] text-ink tabular-nums">
-                  {s.cache_hit_pct}%
-                </b>
-                <span className="mt-1 block text-[12px] text-role-system">缓存命中</span>
-              </div>
-            </div>
+            <Donut
+              items={cacheItems}
+              unit="tok"
+              center={`${s.cache_hit_pct}%`}
+              centerSub="缓存命中"
+            />
           ) : (
             <div className="flex h-[140px] items-center text-[13px] text-role-system">
               无计费数据
