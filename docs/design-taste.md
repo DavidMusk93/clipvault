@@ -223,6 +223,22 @@ X Article（`x.com/i/article` / 长帖 dump）：正文插图是 Draft.js atomic
 
 黄金分割真源：`1.618`。会话面板与分析 sheet 的判定卡、笔记预览（父容器 61.8%）、归档 View 的正文/图板都走同一比例。
 
+### Apple HIG 基线（Web 端）
+
+拥挤是失败态。Apple 的解法是**分组 + 呼吸 + 类型层级**，不是把信息塞满：
+
+| 维度 | 规则 |
+| --- | --- |
+| 间距 | 8pt 栅格：`4 / 8 / 12 / 16 / 20 / 24 / 32`。section 间 **24**，卡片内 **16**，行内 **8–12** |
+| 字号（SF） | 标题 17 · 卡标题 15 · 正文 13 · 次要 12.5 · 说明 11.5；`line-height 1.4–1.5`。禁止把正文降到 11px 以下换密度 |
+| 层级 | 标题（ink / semibold）→ 数值（semibold + 语义色）→ 标签（role-system）→ 说明（role-system）。一层一个字号，不靠颜色堆叠 |
+| 分组 | 系统 grouped 底 `#F5F5F7` + 白卡（`rounded-[14–16px]`、`border-black/6`、无重阴影）；卡间 **12** |
+| 控件 | 高度 ≥28（pill 28–32）；圆角：sheet 18、卡片 14–16、控件 pill 或 8–10 |
+| 克制 chrome | 筛选器不进 header 墙：scope 用 **segmented control**，方向用**「方向 N/M」disclosure** 收起；默认干净，展开才出现 |
+| 图表 | 坐标/数值标签 ≥12px，bar 宽 ≥12，`grid` 给右侧数值留 84px |
+
+反例（已踩）：15 个 chip 平铺成两行、KPI/正文 10–11px、卡片 padding 10px、section 间距 12px——信息没少但可读性崩了。
+
 ## 品味禁区
 
 | Don't | 为什么 |

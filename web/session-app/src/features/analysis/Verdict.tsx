@@ -12,7 +12,7 @@ const scoreClass = (score: number) =>
         ? "text-mine-loss"
         : "text-red-700";
 
-/** ① 损耗判定: score + KPI + 时间/钱构成 + 缓存环形. */
+/** ① 损耗判定: score + KPI + 时间/钱构成 + 缓存环形 (golden-ratio grid). */
 export function Verdict({ data }: { data: Mine }) {
   const s = data.summary || {};
   const h = s.health || { score: 0, grade: "" };
@@ -78,28 +78,32 @@ export function Verdict({ data }: { data: Mine }) {
         count={losses.length}
         hint={`可归因 ${mineSpan(lossS)}${lossUsd ? ` · ${mineUsd(lossUsd)}` : ""}`}
       />
-      <div className="grid grid-cols-[78px_1.618fr_1fr] gap-x-3.5 gap-y-2.5 rounded-2xl border border-black/5 bg-white px-3.5 py-3">
-        <div className="row-span-2 flex flex-col items-center justify-center border-r border-black/5 pr-3.5">
-          <b className={`text-[34px] font-bold leading-none tabular-nums ${scoreClass(score)}`}>
+      <div className="grid grid-cols-[88px_1.618fr_1fr] gap-x-5 gap-y-3 rounded-[16px] border border-black/[0.06] bg-white p-4">
+        <div className="row-span-2 flex flex-col items-center justify-center border-r border-black/[0.06] pr-5">
+          <b
+            className={`text-[40px] font-bold leading-none tracking-[-0.03em] tabular-nums ${scoreClass(score)}`}
+          >
             {h.score ?? "—"}
           </b>
-          <span className="mt-1 text-[11.5px] text-role-system">{h.grade}</span>
+          <span className="mt-1.5 text-[12px] text-role-system">{h.grade}</span>
         </div>
 
-        <div className="col-span-2 flex flex-wrap gap-x-4 gap-y-1">
+        <div className="col-span-2 flex flex-wrap gap-x-7 gap-y-3">
           {kpis.map((k) => {
             const m = metricOf(data, k.id);
             const d = deltaText(m);
             const tone = deltaTone(m);
             return (
-              <div key={k.id} className="flex min-w-[62px] flex-col">
-                <b className={`text-[16px] font-semibold leading-tight tabular-nums ${k.tone}`}>
+              <div key={k.id} className="flex min-w-[68px] flex-col gap-0.5">
+                <b
+                  className={`text-[20px] font-semibold leading-none tracking-[-0.01em] tabular-nums ${k.tone}`}
+                >
                   {k.value}
                 </b>
-                <span className="text-[11px] text-role-system">{k.label}</span>
+                <span className="text-[11.5px] text-role-system">{k.label}</span>
                 {d && (
                   <em
-                    className={`text-[10.5px] not-italic ${
+                    className={`text-[11px] not-italic ${
                       tone === "up"
                         ? "text-mine-loss"
                         : tone === "down"
@@ -115,12 +119,12 @@ export function Verdict({ data }: { data: Mine }) {
           })}
         </div>
 
-        <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-w-0 flex-col gap-3 pt-1">
           <CompositionBar items={timeItems} unit="s" />
           {tokenItems.some((t) => t.value > 0) && <CompositionBar items={tokenItems} unit="tok" />}
           {loop && (
-            <div className="flex items-center gap-1.5 text-[11.5px] text-role-system">
-              <b className="rounded-full bg-role-assistant/10 px-1.5 text-[10.5px] text-role-assistant">
+            <div className="flex items-center gap-2 text-[12px] text-role-system">
+              <b className="rounded-full bg-role-assistant/10 px-2 py-0.5 text-[11px] font-semibold text-role-assistant">
                 闭环
               </b>
               声明 {loop.total} 条 · 闭环 {(loop.closed || []).length} · 未改善{" "}
@@ -130,19 +134,19 @@ export function Verdict({ data }: { data: Mine }) {
           )}
         </div>
 
-        <div className="min-w-0 border-l border-black/5 pl-3.5">
+        <div className="min-w-0 border-l border-black/[0.06] pl-5">
           {s.usage_turns ? (
             <div className="relative max-w-[420px]">
-              <MineChart spec={{ kind: "donut", unit: "tok", items: cacheItems }} height={124} />
+              <MineChart spec={{ kind: "donut", unit: "tok", items: cacheItems }} height={140} />
               <div className="pointer-events-none absolute left-[38%] top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-                <b className="block text-[22px] font-bold leading-none text-ink tabular-nums">
+                <b className="block text-[26px] font-bold leading-none tracking-[-0.02em] text-ink tabular-nums">
                   {s.cache_hit_pct}%
                 </b>
-                <span className="mt-0.5 block text-[11px] text-role-system">缓存命中</span>
+                <span className="mt-1 block text-[12px] text-role-system">缓存命中</span>
               </div>
             </div>
           ) : (
-            <div className="flex h-[124px] items-center text-[11.5px] text-role-system">
+            <div className="flex h-[140px] items-center text-[13px] text-role-system">
               无计费数据
             </div>
           )}

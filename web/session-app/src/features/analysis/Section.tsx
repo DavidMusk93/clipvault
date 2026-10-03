@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
-/** Section frame: ① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 → ④ 账本. */
+/** Section frame: ① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 → ④ 账本.
+ *  Apple HIG: 24px between groups, 12px section-header → content. */
 export function Section({
   id,
   children,
@@ -12,7 +13,7 @@ export function Section({
   className?: string;
 }) {
   return (
-    <section id={id} className={cn("mb-3.5 scroll-mt-11", className)}>
+    <section id={id} className={cn("mb-6 scroll-mt-12", className)}>
       {children}
     </section>
   );
@@ -30,14 +31,14 @@ export function SectionHead({
   children?: ReactNode;
 }) {
   return (
-    <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-role-system">
-      <span>{title}</span>
+    <div className="mb-3 flex items-center gap-2">
+      <h3 className="text-[13px] font-semibold tracking-[-0.01em] text-ink">{title}</h3>
       {count != null && (
-        <span className="rounded-full bg-black/10 px-1.5 text-[10px] leading-[18px] tabular-nums">
+        <span className="rounded-full bg-black/[0.07] px-2 py-0.5 text-[11px] font-medium tabular-nums text-role-system">
           {count}
         </span>
       )}
-      <span className="ml-auto flex items-center gap-2 text-[11px] font-medium normal-case tracking-normal">
+      <span className="ml-auto flex items-center gap-2 text-[12px] text-role-system">
         {hint}
         {children}
       </span>
