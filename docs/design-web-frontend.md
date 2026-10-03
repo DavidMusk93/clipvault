@@ -151,6 +151,9 @@ the one server change this design depends on.
    HTML. If the vanilla shell loads a stylesheet directly (e.g. the FAB chrome in
    `/assets/metrics-panel.css`), fold those rules into `panel.css` so the app is
    self-contained.
+   The 「分析」sheet obeys the same rule: its four sections (① 损耗判定 → ② 损耗排行
+   → ③ 回合时间轴 → ④ 账本) come from `web/mine-render.mjs` (aliased `@mine`), the
+   React sheet only owns scope/dir state, auto-refresh and the delegated clicks.
 2. **Tokens are code**: `theme/tokens.css` is generated from `docs/design-taste.md`;
    no component hardcodes a hex.
 3. **Every API response is Zod-parsed**; the Rust struct and the TS schema are

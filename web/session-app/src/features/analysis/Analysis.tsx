@@ -1,226 +1,335 @@
-import { AlertTriangle } from "lucide-react";
-import { type MineBlock, type MineTable, useMine } from "../../api/mine";
-import { Badge } from "../../components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
-import { Table, Td, Th } from "../../components/ui/table";
-import { Chart } from "./Chart";
+import {
+  mineBodyHtml,
+  mineDataSig,
+  mineDirectionsHtml,
+  mineDraftMarkdown,
+  mineSummaryHtml,
+} from "@mine";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { getMine, type Mine } from "../../api/mine";
 
-const MAX_ROWS = 30;
+/**
+ * 「分析」sheet. The four sections (① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 →
+ * ④ 账本) are rendered by the SHARED display logic in `web/mine-render.mjs`
+ * (aliased `@mine`) — the same HTML the vanilla panel produced, so the CSS in
+ * `theme/panel.css` gives the same look. Do not fork a second implementation
+ * (docs/design-web-frontend.md §5, docs/design-taste.md 「分析」).
+ */
 
-function Kpi({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="min-w-[92px] rounded-lg bg-white/70 px-3 py-2 ring-1 ring-black/5">
-      <div className="text-[10px] text-role-system">{label}</div>
-      <div className={`text-[15px] font-semibold ${tone ?? "text-ink"}`}>{value}</div>
-    </div>
+const MINE_KEY = "cv.trae.mine.v1";
+const AUTO_MS = 5000;
+const BASE =
+  typeof location !== "undefined" && location.pathname.startsWith("/trae") ? "/trae" : "";
+
+type Scope = "session" | "recent";
+type Dir = { id: string; title: string };
+
+function readSaved(): { scope: Scope; dirs: string[] } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MINE_KEY) || "null") as {
+      scope?: string;
+      dirs?: unknown;
+    } | null;
+    if (saved && typeof saved === "object") {
+      return {
+        scope: saved.scope === "recent" ? "recent" : "session",
+        dirs: Array.isArray(saved.dirs)
+          ? saved.dirs.filter((d): d is string => typeof d === "string")
+          : [],
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { scope: "session", dirs: [] };
+}
+
+export default function Analysis({
+  sessionId,
+  onClose,
+}: {
+  sessionId: string;
+  onClose: () => void;
+}) {
+  const saved = useMemo(readSaved, []);
+  const [scope, setScope] = useState<Scope>(saved.scope);
+  const [dirs, setDirs] = useState<string[]>(saved.dirs);
+  const [data, setData] = useState<Mine | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [openTurn, setOpenTurn] = useState<number | null>(null);
+  const [copyLabel, setCopyLabel] = useState("复制 AGENTS 草稿");
+
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const sigRef = useRef("");
+  const scrollRef = useRef(0);
+  const loadingRef = useRef(false);
+  const openTurnRef = useRef<number | null>(null);
+  openTurnRef.current = openTurn;
+
+  const directions: Dir[] = useMemo(() => {
+    const d = (data as { directions?: Dir[] } | null)?.directions;
+    return Array.isArray(d) ? d : [];
+  }, [data]);
+
+  const persist = useCallback((nextScope: Scope, nextDirs: string[]) => {
+    try {
+      localStorage.setItem(MINE_KEY, JSON.stringify({ scope: nextScope, dirs: nextDirs }));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const load = useCallback(
+    async ({ auto = false }: { auto?: boolean } = {}) => {
+      if (loadingRef.current) return;
+      loadingRef.current = true;
+      let updTimer = 0;
+      if (auto) {
+        // Surface the pill only when the round-trip is slow; avoids flicker.
+        updTimer = window.setTimeout(() => setUpdating(true), 500);
+      } else {
+        setPending(false);
+        setError("");
+        setLoading(true);
+      }
+      try {
+        const d = await getMine(scope, dirs, !auto, sessionId);
+        const sig = mineDataSig(d);
+        if (auto && sig === sigRef.current) return;
+        sigRef.current = sig;
+        scrollRef.current = auto ? (bodyRef.current?.scrollTop ?? 0) : 0;
+        setData(d);
+        setError("");
+      } catch (err) {
+        if (!auto) setError(String((err as Error)?.message || err));
+      } finally {
+        loadingRef.current = false;
+        if (updTimer) window.clearTimeout(updTimer);
+        setUpdating(false);
+        setLoading(false);
+      }
+    },
+    [scope, dirs, sessionId],
   );
-}
 
-function fmtNum(v: unknown): string {
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n)) return String(v ?? "—");
-  if (Math.abs(n) >= 1000) return n.toLocaleString();
-  return String(Math.round(n * 1000) / 1000);
-}
+  useEffect(() => {
+    void load({ auto: false });
+  }, [load]);
 
-function BlockTable({ table }: { table: MineTable }) {
-  const rows = (table.rows ?? []).slice(0, MAX_ROWS);
-  const cols = table.cols ?? [];
+  // Coalesced auto refresh: at most one recompute per AUTO_MS while the sheet is
+  // open. If a turn detail is expanded, mark stale instead of repainting.
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (openTurnRef.current !== null) {
+        setPending(true);
+        return;
+      }
+      void load({ auto: true });
+    }, AUTO_MS);
+    return () => window.clearInterval(t);
+  }, [load]);
+
+  const bodyHtml = useMemo(() => (data ? mineBodyHtml(data, { openTurn }) : ""), [data, openTurn]);
+  const summaryHtml = useMemo(() => (data ? mineSummaryHtml(data) : ""), [data]);
+  const dirsHtml = useMemo(() => mineDirectionsHtml(directions, dirs), [directions, dirs]);
+
+  // Restore the reading position across a repaint (auto refresh / turn toggle).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-restore when the rendered HTML changes.
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (el) el.scrollTop = scrollRef.current;
+  }, [bodyHtml]);
+
+  const jumpTo = (id: string) => {
+    const el = bodyRef.current?.querySelector(`[id="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "start" });
+    el.classList.add("is-hit");
+    window.setTimeout(() => el.classList.remove("is-hit"), 1200);
+  };
+
+  const toggleTurn = (n: number) => {
+    const next = openTurnRef.current === n ? null : n;
+    scrollRef.current = bodyRef.current?.scrollTop ?? 0;
+    setOpenTurn(next);
+    requestAnimationFrame(() => {
+      bodyRef.current?.querySelector(`#turn-${n}`)?.scrollIntoView({ block: "center" });
+      if (next === null && pending) {
+        setPending(false);
+        void load({ auto: true });
+      }
+    });
+  };
+
+  const ack = async (btn: HTMLElement) => {
+    const fid = btn.getAttribute("data-ack") || "";
+    const status = btn.getAttribute("data-ack-status") || "";
+    const found = (
+      (data?.findings as {
+        id: string;
+        metric?: { id?: string; now?: unknown; target?: unknown };
+      }[]) || []
+    ).find((x) => String(x.id) === fid);
+    const m = found?.metric || {};
+    const label = btn.textContent || "";
+    btn.textContent = "记录中…";
+    try {
+      const res = await fetch(`${BASE}/api/mine/ack`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope,
+          session_id: scope === "session" ? sessionId : "",
+          finding_id: fid,
+          status,
+          metric: { id: m.id || "", now: m.now ?? null, target: m.target ?? null },
+        }),
+      });
+      if (!res.ok) throw new Error(`ack ${res.status}`);
+      await load({ auto: false });
+    } catch {
+      btn.textContent = "失败";
+      window.setTimeout(() => {
+        btn.textContent = label;
+      }, 1500);
+    }
+  };
+
+  const onClick = (ev: ReactMouseEvent<HTMLElement>) => {
+    const t = ev.target as HTMLElement;
+    const jump = t.closest("[data-jump]");
+    if (jump) {
+      jumpTo(jump.getAttribute("data-jump") || "");
+      return;
+    }
+    const turnBtn = t.closest("[data-mine-turn]");
+    if (turnBtn) {
+      toggleTurn(Number(turnBtn.getAttribute("data-mine-turn")));
+      return;
+    }
+    const refBtn = t.closest("[data-turn]");
+    if (refBtn) {
+      toggleTurn(Number(refBtn.getAttribute("data-turn")));
+      return;
+    }
+    const ackBtn = t.closest("[data-ack]");
+    if (ackBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void ack(ackBtn as HTMLElement);
+      return;
+    }
+    const scopeBtn = t.closest("[data-scope]");
+    if (scopeBtn) {
+      const next = (scopeBtn.getAttribute("data-scope") as Scope) || "session";
+      setOpenTurn(null);
+      setScope(next);
+      persist(next, dirs);
+      return;
+    }
+    const dirBtn = t.closest("[data-dir]");
+    if (dirBtn) {
+      const id = dirBtn.getAttribute("data-dir") || "";
+      const base = dirs.length ? dirs.slice() : directions.map((d) => d.id);
+      const i = base.indexOf(id);
+      if (i >= 0) base.splice(i, 1);
+      else base.push(id);
+      setOpenTurn(null);
+      setDirs(base);
+      persist(scope, base);
+    }
+  };
+
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const onClickRef = useRef(onClick);
+  onClickRef.current = onClick;
+
+  // Delegated clicks (jump / turn / ref / ack / scope / dir). A native listener
+  // keeps the container a plain div, like the thread's own delegation.
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) return;
+    const handler = (ev: Event) =>
+      onClickRef.current(ev as unknown as ReactMouseEvent<HTMLElement>);
+    el.addEventListener("click", handler);
+    return () => el.removeEventListener("click", handler);
+  }, []);
+
+  const copyDraft = async () => {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(mineDraftMarkdown(data));
+      setCopyLabel("已复制");
+      window.setTimeout(() => setCopyLabel("复制 AGENTS 草稿"), 1200);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+
   return (
-    <div className="mb-3">
-      {table.caption && (
-        <div className="mb-1 text-[11px] font-medium text-role-system">{table.caption}</div>
-      )}
-      {table.chart && rows.length > 0 && (
-        <div className="mb-2 rounded-lg bg-white/60 p-1">
-          <Chart spec={table.chart} rows={rows} />
+    <div
+      ref={sheetRef}
+      className={`cv-mine-sheet${updating ? " is-updating" : ""}${pending ? " is-pending" : ""}`}
+    >
+      <div className="mine-head">
+        <div className="mine-head-row">
+          <h2>会话分析</h2>
+          <button
+            type="button"
+            className="mine-copy"
+            onClick={(e) => {
+              e.stopPropagation();
+              void copyDraft();
+            }}
+          >
+            {copyLabel}
+          </button>
+          <button
+            type="button"
+            className="mine-x"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+          >
+            关闭
+          </button>
         </div>
-      )}
-      {cols.length > 0 && (
-        <Table>
-          <thead>
-            <tr>
-              {cols.map((c) => (
-                <Th key={c.id}>{c.title}</Th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional facts
-              <tr key={i}>
-                {cols.map((c) => (
-                  <Td key={c.id}>{fmtNum(r[c.id])}</Td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </div>
-  );
-}
-
-function Block({ block }: { block: MineBlock }) {
-  const tables = block.tables ?? (block.table ? [block.table] : []);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{block.title}</CardTitle>
-        <Badge>{block.axis}</Badge>
-      </CardHeader>
-      <CardContent>
-        {block.note && (
-          <p className="mb-2 text-[11px] leading-relaxed text-role-system">{block.note}</p>
-        )}
-        {tables.map((t, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: block tables are ordered facts
-          <BlockTable key={i} table={t} />
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-export default function Analysis() {
-  const mine = useMine("recent", [], true);
-
-  if (mine.isPending) return <p className="p-4 text-[12px] text-role-system">分析中…</p>;
-  if (mine.isError)
-    return <p className="p-4 text-[12px] text-mine-loss">分析失败：{String(mine.error)}</p>;
-
-  const d = mine.data;
-  const h = d.summary?.health;
-  const blocks = Object.entries(d.blocks ?? {});
-
-  return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {h && (
-          <div className="flex items-center gap-2 rounded-lg bg-honey/10 px-3 py-2 ring-1 ring-honey/20">
-            <span className="text-[20px] font-semibold text-honey">{h.score}</span>
-            <span className="text-[12px] font-medium text-honey">{h.grade}</span>
-          </div>
-        )}
-        <Kpi label="回合" value={fmtNum(d.summary?.n_turns ?? 0)} />
-        <Kpi label="工具" value={fmtNum(d.summary?.n_tools ?? 0)} />
-        <Kpi label="费用" value={`$${fmtNum(d.summary?.cost_usd ?? 0)}`} tone="text-honey" />
-        <Kpi label="缓存命中" value={`${fmtNum(d.summary?.cache_hit_pct ?? 0)}%`} />
-        <Kpi label="浪费" value={`${fmtNum(h?.waste_pct ?? 0)}%`} />
-        <Kpi label="失败" value={`${fmtNum(h?.fail_rate ?? 0)}%`} />
+        {summaryHtml ? (
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped string builders in @mine.
+          <p className="mine-sum" dangerouslySetInnerHTML={{ __html: summaryHtml }} />
+        ) : null}
+        <div className="mine-scopes">
+          <button
+            type="button"
+            className={`mine-chip${scope === "session" ? " is-on" : ""}`}
+            data-scope="session"
+          >
+            当前会话
+          </button>
+          <button
+            type="button"
+            className={`mine-chip${scope === "recent" ? " is-on" : ""}`}
+            data-scope="recent"
+          >
+            最近 7 天
+          </button>
+        </div>
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: escaped string builders in @mine. */}
+        <div className="mine-dirs" dangerouslySetInnerHTML={{ __html: dirsHtml }} />
       </div>
-
-      {(d.findings ?? []).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>结论与动作</CardTitle>
-            <span className="text-[10px] text-role-system">{d.findings?.length} 条</span>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            {(d.findings ?? []).map((f) => (
-              <div key={f.id} className="rounded-lg border border-black/5 p-3">
-                <div className="mb-1 flex items-center gap-2">
-                  <Badge sev={f.sev}>{f.sev}</Badge>
-                  <span className="text-[12px] font-semibold">{f.title}</span>
-                  <span className="ml-auto text-[10px] text-role-system">
-                    {fmtNum(f.impact.s)}s / ${fmtNum(f.impact.usd)} · {f.impact.kind}
-                  </span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-ink/80">{f.text}</p>
-                {f.action && (
-                  <p className="mt-1 flex items-start gap-1 text-[11px] leading-relaxed text-role-assistant">
-                    <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-                    {f.action}
-                  </p>
-                )}
-                {f.ack && (
-                  <p className="mt-1 text-[10px] text-role-system">
-                    闭环：[{f.ack.status}]{" "}
-                    {f.ack.closed === true
-                      ? "已达成"
-                      : f.ack.closed === false
-                        ? "未改善"
-                        : "无目标"}
-                  </p>
-                )}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {(d.losses ?? []).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>损耗账本</CardTitle>
-            <span className="text-[10px] text-role-system">按 $ / 秒</span>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>损耗</Th>
-                  <Th>秒</Th>
-                  <Th>USD</Th>
-                  <Th>类型</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {(d.losses ?? []).map((l) => (
-                  <tr key={l.id}>
-                    <Td>{l.label}</Td>
-                    <Td>{fmtNum(l.s)}</Td>
-                    <Td>{fmtNum(l.usd)}</Td>
-                    <Td className="text-role-system">{l.kind}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {(d.metrics ?? []).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>指标</CardTitle>
-            <span className="text-[10px] text-role-system">Δ = 对基线</span>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>指标</Th>
-                  <Th>值</Th>
-                  <Th>目标</Th>
-                  <Th>Δ</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {(d.metrics ?? []).map((m) => (
-                  <tr key={m.id}>
-                    <Td>{m.label}</Td>
-                    <Td>
-                      {fmtNum(m.value)}
-                      {m.unit}
-                    </Td>
-                    <Td className="text-role-system">
-                      {m.target == null ? "—" : `${fmtNum(m.target)}${m.unit}`}
-                    </Td>
-                    <Td className={m.delta == null ? "text-role-system" : "text-honey"}>
-                      {m.delta == null ? "—" : (m.delta > 0 ? "+" : "") + fmtNum(m.delta)}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {blocks.map(([id, b]) => (
-        <Block key={id} block={b} />
-      ))}
+      <div className="mine-scroll" ref={bodyRef}>
+        {loading && !data ? <p className="mine-empty">分析中…</p> : null}
+        {error && !loading ? <p className="mine-empty">分析失败 · {error}</p> : null}
+        {data ? (
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped string builders in @mine.
+          <div dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+        ) : null}
+      </div>
     </div>
   );
 }

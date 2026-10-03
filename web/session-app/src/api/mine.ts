@@ -122,8 +122,14 @@ export type MineTable = z.infer<typeof Table>;
 const BASE =
   typeof location !== "undefined" && location.pathname.startsWith("/trae") ? "/trae" : "";
 
-async function getMine(scope: string, dirs: string[], baseline: boolean): Promise<Mine> {
+export async function getMine(
+  scope: string,
+  dirs: string[],
+  baseline: boolean,
+  sessionId = "",
+): Promise<Mine> {
   const params = new URLSearchParams({ scope, format: "full" });
+  if (scope === "session" && sessionId) params.set("session_id", sessionId);
   if (dirs.length) params.set("dirs", dirs.join(","));
   if (baseline) params.set("baseline", "1");
   const res = await fetch(`${BASE}/api/mine?${params}`, {
@@ -133,10 +139,10 @@ async function getMine(scope: string, dirs: string[], baseline: boolean): Promis
   return MineSchema.parse(await res.json());
 }
 
-export function useMine(scope: string, dirs: string[], baseline: boolean) {
+export function useMine(scope: string, dirs: string[], baseline: boolean, sessionId = "") {
   return useQuery({
-    queryKey: ["mine", scope, dirs.join(","), baseline],
-    queryFn: () => getMine(scope, dirs, baseline),
+    queryKey: ["mine", scope, dirs.join(","), baseline, sessionId],
+    queryFn: () => getMine(scope, dirs, baseline, sessionId),
     staleTime: 30_000,
   });
 }
