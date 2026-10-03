@@ -1,8 +1,8 @@
 import {
-  mineBodyHtml,
   mineDataSig,
   mineDirectionsHtml,
   mineDraftMarkdown,
+  mineSections,
   mineSummaryHtml,
 } from "@mine";
 import type { MouseEvent as ReactMouseEvent } from "react";
@@ -19,7 +19,9 @@ import { mountMineCharts } from "../../lib/echarts";
  */
 
 const MINE_KEY = "cv.trae.mine.v1";
-const AUTO_MS = 5000;
+const AUTO_MS = 15000;
+const SECTION_KEYS = ["nav", "verdict", "losses", "timeline", "ledger"] as const;
+const EMPTY_SECTIONS = { nav: "", verdict: "", losses: "", timeline: "", ledger: "" };
 const BASE =
   typeof location !== "undefined" && location.pathname.startsWith("/trae") ? "/trae" : "";
 
@@ -122,9 +124,11 @@ export default function Analysis({
   }, [load]);
 
   // Coalesced auto refresh: at most one recompute per AUTO_MS while the sheet is
-  // open. If a turn detail is expanded, mark stale instead of repainting.
+  // open, and only when it is actually visible. If a turn detail is expanded,
+  // mark stale instead of repainting. Taste: 不要频繁刷新，增量式。
   useEffect(() => {
     const t = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       if (openTurnRef.current !== null) {
         setPending(true);
         return;
@@ -134,16 +138,19 @@ export default function Analysis({
     return () => window.clearInterval(t);
   }, [load]);
 
-  const bodyHtml = useMemo(() => (data ? mineBodyHtml(data, { openTurn }) : ""), [data, openTurn]);
+  const sections = useMemo(
+    () => (data ? mineSections(data, { openTurn }) : EMPTY_SECTIONS),
+    [data, openTurn],
+  );
   const summaryHtml = useMemo(() => (data ? mineSummaryHtml(data) : ""), [data]);
   const dirsHtml = useMemo(() => mineDirectionsHtml(directions, dirs), [directions, dirs]);
 
   // Restore the reading position across a repaint (auto refresh / turn toggle).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-restore when the rendered HTML changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-restore when the rendered sections change.
   useLayoutEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = scrollRef.current;
-  }, [bodyHtml]);
+  }, [sections]);
 
   const jumpTo = (id: string) => {
     const el = bodyRef.current?.querySelector(`[id="${id}"]`);
@@ -166,29 +173,40 @@ export default function Analysis({
     });
   };
 
-  // Mount ECharts into the shared renderer's `.mc-echart` placeholders. Re-run
-  // whenever the body HTML changes (turn toggle / refresh) and dispose first.
-  const chartsDispose = useRef<(() => void) | null>(null);
+  // Mount ECharts into each section's `.mc-echart` placeholders — only for the
+  // sections whose HTML actually changed (incremental; charts are not rebuilt
+  // when nothing in their section moved).
+  const sectionEls = useRef<Record<string, HTMLDivElement | null>>({});
+  const chartState = useRef(new Map<string, { html: string; dispose: () => void }>());
   // biome-ignore lint/correctness/useExhaustiveDependencies: the click handler reads the current turn/jump closures.
   useEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    let cancelled = false;
-    chartsDispose.current?.();
-    chartsDispose.current = null;
-    void mountMineCharts(el, (jump) => {
+    const onJump = (jump: number | string) => {
       if (typeof jump === "number") toggleTurn(jump);
       else jumpTo(String(jump));
-    }).then((dispose) => {
-      if (cancelled) dispose();
-      else chartsDispose.current = dispose;
-    });
-    return () => {
-      cancelled = true;
     };
-  }, [bodyHtml]);
+    for (const k of SECTION_KEYS) {
+      const el = sectionEls.current[k];
+      if (!el) continue;
+      const html = sections[k];
+      const prev = chartState.current.get(k);
+      if (prev && prev.html === html) continue;
+      prev?.dispose();
+      const rec: { html: string; dispose: () => void } = { html, dispose: () => {} };
+      chartState.current.set(k, rec);
+      void mountMineCharts(el, onJump).then((dispose) => {
+        if (chartState.current.get(k) === rec) rec.dispose = dispose;
+        else dispose();
+      });
+    }
+  }, [sections]);
 
-  useEffect(() => () => chartsDispose.current?.(), []);
+  useEffect(
+    () => () => {
+      for (const rec of chartState.current.values()) rec.dispose();
+      chartState.current.clear();
+    },
+    [],
+  );
 
   const ack = async (btn: HTMLElement) => {
     const fid = btn.getAttribute("data-ack") || "";
@@ -350,10 +368,18 @@ export default function Analysis({
       <div className="mine-scroll" ref={bodyRef}>
         {loading && !data ? <p className="mine-empty">分析中…</p> : null}
         {error && !loading ? <p className="mine-empty">分析失败 · {error}</p> : null}
-        {data ? (
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped string builders in @mine.
-          <div dangerouslySetInnerHTML={{ __html: bodyHtml }} />
-        ) : null}
+        {data
+          ? SECTION_KEYS.map((k) => (
+              <div
+                key={k}
+                ref={(el) => {
+                  sectionEls.current[k] = el;
+                }}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: escaped string builders in @mine.
+                dangerouslySetInnerHTML={{ __html: sections[k] }}
+              />
+            ))
+          : null}
       </div>
     </div>
   );

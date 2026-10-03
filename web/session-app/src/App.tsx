@@ -8,6 +8,9 @@ import { emit, flush, installTelemetry, mountMetricsPanel } from "./lib/telemetr
 
 const Analysis = lazy(() => import("./features/analysis/Analysis"));
 
+/** Store timestamps are naive UTC; keep the patched card on the same clock. */
+const utcNaiveNow = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
 function sessionTitle(s: SessionT): string {
   const p = String(s.last_prompt || "")
     .trim()
@@ -90,7 +93,11 @@ function Sessions({
   onOpenAnalysis: () => void;
   onCloseAnalysis: () => void;
 }) {
-  const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.sessions(80) });
+  const sessions = useQuery({
+    queryKey: ["sessions"],
+    queryFn: () => api.sessions(80),
+    refetchInterval: 60000,
+  });
   const [selected, setSelected] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
@@ -194,7 +201,11 @@ function Sessions({
 }
 
 export function App() {
-  const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15000 });
+  const health = useQuery({
+    queryKey: ["health"],
+    queryFn: api.health,
+    refetchInterval: 60000,
+  });
   const qc = useQueryClient();
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -204,25 +215,49 @@ export function App() {
     emit("trae_sessions_boot", { value: 1 });
   }, []);
 
-  // Live rail: any hook event on the corpus refreshes the session list, merged
-  // to 1s (taste: 列表 1s 合并). The thread has its own per-session stream.
+  // Live rail, incremental: a hook event patches the matching card in place
+  // (count / last_ts / prompt) instead of refetching the whole list. A full
+  // refetch is coalesced only when a session we don't know about appears.
   useEffect(() => {
     if (paused) return;
     const es = new EventSource(streamUrl());
     let timer = 0;
-    const bump = () => {
+    const refetchSoon = () => {
       if (timer) return;
       timer = window.setTimeout(() => {
         timer = 0;
         void qc.invalidateQueries({ queryKey: ["sessions"] });
-      }, 1000);
+      }, 3000);
     };
     es.onmessage = (ev) => {
+      let d: { type?: string; session_id?: string; hook_event?: string; preview?: string } | null =
+        null;
       try {
-        if ((JSON.parse(ev.data) as { type?: string }).type === "hook_event") bump();
+        d = JSON.parse(ev.data);
       } catch {
-        /* ping / connected */
+        return;
       }
+      if (d?.type !== "hook_event" || !d.session_id) return;
+      const sid = d.session_id;
+      const ts = utcNaiveNow();
+      let known = false;
+      qc.setQueryData<{ sessions: SessionT[] }>(["sessions"], (old) => {
+        if (!old?.sessions) return old;
+        const i = old.sessions.findIndex((s) => s.session_id === sid);
+        if (i < 0) return old;
+        known = true;
+        const sessions = old.sessions.slice();
+        const s = { ...sessions[i] };
+        s.event_count = (s.event_count ?? 0) + 1;
+        s.last_ts = ts;
+        if (d?.hook_event === "UserPromptSubmit" && d.preview) s.last_prompt = d.preview;
+        sessions[i] = s;
+        return { ...old, sessions };
+      });
+      qc.setQueryData<{ events?: number; last_ts?: string }>(["health"], (old) =>
+        old ? { ...old, events: (old.events ?? 0) + 1, last_ts: ts } : old,
+      );
+      if (!known) refetchSoon();
     };
     return () => {
       if (timer) window.clearTimeout(timer);
