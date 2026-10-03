@@ -277,3 +277,43 @@ export function chartFor(kind, rows, opts = {}) {
   if (kind === "stack") return stackBar(rows, opts);
   return "";
 }
+
+/**
+ * ECharts placeholder. The shared renderer still decides *which* chart, which
+ * unit and which semantic colour (the taste); the React app mounts the actual
+ * ECharts instance from this spec (docs/design-web-frontend.md §5: charts are
+ * declarative wrappers around ECharts with the design tokens). The vanilla
+ * rollback keeps using the SVG builders above.
+ */
+export function echart(kind, rows, opts = {}) {
+  const items = (rows || [])
+    .map((r, i) => ({
+      label: String((r && r.label) ?? ""),
+      value: Number((r && r.value) ?? 0),
+      color: (r && r.color) || colorAt(i),
+      flag: !!(r && r.flag),
+      jump: r && r.jump != null ? r.jump : null,
+      sub: String((r && r.sub) ?? ""),
+      note: String((r && r.note) ?? ""),
+    }))
+    .filter((r) => r.label !== "" || r.value !== 0);
+  if (!items.length) return `<div class="mc-empty">${esc(opts.empty || "无数据")}</div>`;
+  const spec = {
+    kind,
+    unit: opts.unit || "",
+    items,
+    center: opts.center || "",
+    centerSub: opts.centerSub || "",
+    title: opts.title || "",
+    total: Number.isFinite(Number(opts.total)) ? Number(opts.total) : null,
+    axisLeft: opts.axisLeft || "",
+    axisRight: opts.axisRight || "",
+  };
+  const h =
+    Number(opts.height) ||
+    (kind === "bars" ? Math.max(30, items.length * 28) : kind === "donut" ? 156 : kind === "stack" ? 46 : 64);
+  return (
+    `<div class="mc-echart" role="img" aria-label="${esc(opts.aria || "图表")}" ` +
+    `data-mc="${esc(JSON.stringify(spec))}" style="height:${h}px"></div>`
+  );
+}

@@ -162,6 +162,10 @@ the one server change this design depends on.
    component library runtime is added as a black box.
 5. **Charts are declarative wrappers** around ECharts with the design tokens;
    chart kind is declared where the data is built (already the case in `/api/mine`).
+   The shared renderer emits a `.mc-echart` placeholder carrying the spec
+   (kind / unit / per-datum colour); the app mounts the ECharts instance
+   (`lib/echarts.ts` `mountMineCharts`). The vanilla rollback keeps the SVG
+   builders in `web/mine-charts.mjs`.
 6. **A11y**: Radix primitives + focus management; the panel is keyboard reachable.
 7. **Deploy builds**: `deploy-server.sh` runs the web build; CI runs `vitest`.
 

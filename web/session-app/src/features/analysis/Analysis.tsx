@@ -8,6 +8,7 @@ import {
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getMine, type Mine } from "../../api/mine";
+import { mountMineCharts } from "../../lib/echarts";
 
 /**
  * 「分析」sheet. The four sections (① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 →
@@ -164,6 +165,30 @@ export default function Analysis({
       }
     });
   };
+
+  // Mount ECharts into the shared renderer's `.mc-echart` placeholders. Re-run
+  // whenever the body HTML changes (turn toggle / refresh) and dispose first.
+  const chartsDispose = useRef<(() => void) | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the click handler reads the current turn/jump closures.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    let cancelled = false;
+    chartsDispose.current?.();
+    chartsDispose.current = null;
+    void mountMineCharts(el, (jump) => {
+      if (typeof jump === "number") toggleTurn(jump);
+      else jumpTo(String(jump));
+    }).then((dispose) => {
+      if (cancelled) dispose();
+      else chartsDispose.current = dispose;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bodyHtml]);
+
+  useEffect(() => () => chartsDispose.current?.(), []);
 
   const ack = async (btn: HTMLElement) => {
     const fid = btn.getAttribute("data-ack") || "";

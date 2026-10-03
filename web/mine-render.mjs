@@ -14,12 +14,8 @@ import {
   PHASE_COLORS,
   SEV_COLORS,
   colorAt,
-  columns,
-  donut,
+  echart,
   fmtValue,
-  lineChart,
-  rankBars,
-  stackBar,
 } from "./mine-charts.mjs";
 import { localDateTime } from "./session-render.mjs";
 
@@ -117,40 +113,50 @@ export const renderChartFor = (t) => {
   if (!c) return "";
   const rows = chartRows(t);
   const unit = c.unit || "";
-  const base = { unit, aria: t.caption || "" };
+  const aria = t.caption || "";
   if (c.kind === "donut") {
     const total = rows.reduce((a, r) => a + r.value, 0);
-    return donut(
+    return echart(
+      "donut",
       rows.map((r, i) => ({
         label: MINE_PHASE_LABEL[r.label] || r.label,
         value: r.value,
         color: phaseColor(r.label, i),
       })),
-      { ...base, center: fmtValue(total, unit), centerSub: t.caption || "" },
+      { unit, center: fmtValue(total, unit), centerSub: t.caption || "", aria },
     );
   }
   if (c.kind === "stack") {
-    return stackBar(rows.map((r, i) => ({ label: r.label, value: r.value, color: colorAt(i) })), base);
+    return echart(
+      "stack",
+      rows.map((r, i) => ({ label: r.label, value: r.value, color: colorAt(i) })),
+      { unit, aria },
+    );
   }
   if (c.kind === "line") {
-    return lineChart(rows.map((r) => ({ label: r.label, value: r.value })), {
-      ...base,
-      title: t.caption,
-      color: "#2f8f83",
-    });
+    return echart(
+      "line",
+      rows.map((r) => ({ label: r.label, value: r.value, color: "#2f8f83" })),
+      { unit, title: t.caption, aria },
+    );
   }
   if (c.kind === "columns") {
-    return columns(
+    return echart(
+      "columns",
       rows.map((r) => ({
         label: MINE_PHASE_LABEL[r.label] || r.label,
         value: r.value,
         flag: Number(r.raw.fails || 0) > 0,
         jump: r.raw.index,
       })),
-      { ...base, height: 52 },
+      { unit, height: 52, aria },
     );
   }
-  return rankBars(rows.map((r, i) => ({ label: r.label, value: r.value, color: colorAt(i) })), base);
+  return echart(
+    "bars",
+    rows.map((r, i) => ({ label: r.label, value: r.value, color: colorAt(i) })),
+    { unit, aria },
+  );
 };
 
 export const renderTable = (t) => {
@@ -222,27 +228,30 @@ export const renderVerdict = (data) => {
   const tCw = Number(s.cache_write) || 0;
   const tCr = Number(s.cache_read) || 0;
   const tokTotal = tOut + tCw + tCr;
-  const timeStack = stackBar(
+  const timeStack = echart(
+    "stack",
     [
       { label: "工作（不含失败）", value: workOk, color: "#0071e3" },
       { label: "等待", value: Number(s.wait_s) || 0, color: "rgba(60,60,67,0.38)" },
       { label: "失败", value: Number(s.fail_s) || 0, color: "#c2410c" },
-    ],
+    ].filter((p) => p.value > 0),
     { unit: "s", aria: `时间构成 ${mineSpan(wall)}` },
   );
   const tokenStack = tokTotal
-    ? stackBar(
+    ? echart(
+        "stack",
         [
           { label: "输出", value: tOut, color: "#2f8f83" },
           { label: "写缓存", value: tCw, color: "#c47a2c" },
           { label: "缓存读", value: tCr, color: "rgba(47,143,131,0.40)" },
-        ],
+        ].filter((p) => p.value > 0),
         { unit: "tok", aria: "tokens 构成" },
       )
     : "";
   const cache = (data.series || {}).cache || {};
   const cacheGauge = s.usage_turns
-    ? donut(
+    ? echart(
+        "donut",
         [
           { label: "缓存读", value: Number(cache.read) || 0, color: "#2f8f83" },
           { label: "未缓存输入", value: Number(cache.uncached) || 0, color: "#c47a2c" },
@@ -334,7 +343,8 @@ export const renderLosses = (data) => {
     (a, b) => Number((b.impact || {}).s || 0) - Number((a.impact || {}).s || 0),
   );
   const shapeRows = (rows, useUsd) =>
-    rankBars(
+    echart(
+      "bars",
       rows.map((f) => ({
         label: f.title || f.id,
         value: useUsd ? Number(f.impact.usd) : Number((f.impact || {}).s) || 0,
@@ -438,24 +448,21 @@ export const renderTimeline = (data, openTurn = null) => {
     })
     .join("");
   const inst = ((data.window || {}).instances || []).join("、");
-  const wallChart = columns(
-    turns.map((t) => ({
-      label: localDateTime(t.ts) || `#${t.index}`,
-      value: Number(t.wall_s) || 0,
-      flag: Number(t.fails) > 0,
-      jump: t.index,
-      note: `${Number(t.tools)} 工具${t.fails ? ` · ${Number(t.fails)} 失败` : ""}`,
-    })),
-    {
-      unit: "s",
-      height: 52,
-      title: "每回合墙钟",
-      total: turns.reduce((a, t) => a + (Number(t.wall_s) || 0), 0),
-      aria: "回合墙钟分布",
-      axisLeft: localDateTime(turns[0].ts) || "",
-      axisRight: localDateTime(turns[turns.length - 1].ts) || "",
-    },
-  );
+  const wallTotal = turns.reduce((a, t) => a + (Number(t.wall_s) || 0), 0);
+  const wallChart =
+    `<div class="mc-line-head"><span>每回合墙钟</span><b>${escMine(fmtValue(wallTotal, "s"))}</b></div>` +
+    echart(
+      "columns",
+      turns.map((t) => ({
+        label: localDateTime(t.ts) || `#${t.index}`,
+        value: Number(t.wall_s) || 0,
+        flag: Number(t.fails) > 0,
+        jump: t.index,
+        note: `${Number(t.tools)} 工具${t.fails ? ` · ${Number(t.fails)} 失败` : ""}`,
+      })),
+      { unit: "s", height: 52, aria: "回合墙钟分布" },
+    ) +
+    `<div class="mc-axis-row"><span>${escMine(localDateTime(turns[0].ts) || "")}</span><span>${escMine(localDateTime(turns[turns.length - 1].ts) || "")}</span></div>`;
   return `<section class="mine-sec" id="mineTimeline">
       <div class="mine-sec-h">回合时间轴<span class="mine-count">${turns.length}</span><span class="mine-hint">柱=墙钟（红点=该回合有失败）· 点击就地展开</span></div>
       ${inst && inst.includes("、") ? `<p class="mine-line"><b>多实例</b>窗口含 ${escMine(inst)}，按事件时间合并。</p>` : ""}
