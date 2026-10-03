@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import {
   CHART_PALETTE, PHASE_COLORS, SEV_COLORS, chartFor, colorAt, columns, donut,
-  fmtCompact, fmtValue, lineChart, rankBars, stackBar,
+  echart, fmtCompact, fmtValue, lineChart, rankBars, stackBar,
 } from '../web/mine-charts.mjs';
 
 test('stackBar keeps adjacent ratios visually separate', () => {
@@ -127,4 +127,29 @@ test('chart markup escapes hostile labels', () => {
   assert.doesNotMatch(html, /<img/);
   assert.match(html, /&lt;img/);
   assert.doesNotMatch(stackBar([{ label: '"><script>', value: 1 }]), /<script>/);
+});
+
+test('echart emits a JSON spec the app mounts (component-library charts)', () => {
+  const html = echart('bars', [
+    { label: 'a', value: 2, color: '#c2410c' },
+    { label: 'b', value: 1, color: '#c47a2c', flag: true, jump: 'loss-a' },
+  ], { unit: 's' });
+  assert.match(html, /class="mc-echart"/);
+  const m = html.match(/data-mc="([^"]*)"/);
+  assert.ok(m, 'spec attribute present');
+  const spec = JSON.parse(
+    m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+  );
+  assert.equal(spec.kind, 'bars');
+  assert.equal(spec.unit, 's');
+  assert.equal(spec.items.length, 2);
+  assert.equal(spec.items[1].jump, 'loss-a');
+  assert.match(html, /height:\d+px/);
+  // No inline SVG any more; the app renders it.
+  assert.doesNotMatch(html, /<svg/);
+  // Empty data still yields the empty state, never a broken holder.
+  assert.match(echart('bars', [], {}), /mc-empty/);
+  // A hostile label survives escaping and round-trips through the attribute.
+  const evil = echart('bars', [{ label: '"><script>x</script>', value: 1 }], {});
+  assert.doesNotMatch(evil, /<script>/);
 });

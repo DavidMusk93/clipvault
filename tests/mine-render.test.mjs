@@ -99,6 +99,22 @@ test('user text is escaped; no raw markup leaks into the sheet', () => {
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
 });
 
+test('charts are ECharts placeholders, not inline SVG', () => {
+  const html = mineBodyHtml(FIXTURE);
+  assert.match(html, /class="mc-echart"/);
+  assert.doesNotMatch(html, /<svg/);
+  // the spec is parseable JSON (the app mounts it)
+  const specs = [...html.matchAll(/data-mc="([^"]*)"/g)].map((m) =>
+    JSON.parse(
+      m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'),
+    ),
+  );
+  assert.ok(specs.length >= 3, String(specs.length));
+  assert.ok(specs.some((s) => s.kind === 'stack'));
+  assert.ok(specs.some((s) => s.kind === 'donut'));
+  assert.ok(specs.some((s) => s.kind === 'bars'));
+});
+
 test('an open turn renders its detail in place', () => {
   const html = mineBodyHtml(FIXTURE, { openTurn: 2 });
   assert.match(html, /mine-turn-detail/);

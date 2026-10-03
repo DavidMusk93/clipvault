@@ -1207,6 +1207,9 @@
     }
     .cv-mine-sheet .mine-copy:hover, .cv-mine-sheet .mine-x:hover { background: rgba(120, 120, 128, 0.10); }
     .cv-mine-sheet .mine-empty { color: var(--muted); font-size: 13px; }
+    /* ECharts mounts here; height comes from the placeholder's inline style. */
+    .cv-mine-sheet .mc-echart { width: 100%; }
+    .cv-mine-sheet .mc-echart canvas { border-radius: 4px; }
     .cv-mine-fab.is-on {
       color: var(--honey);
       border-color: var(--honey);
