@@ -82,28 +82,37 @@ pub async fn insert_batch(
     if rows.is_empty() {
         return Ok(0);
     }
-    let mut tuples: Vec<String> = Vec::with_capacity(rows.len());
-    let mut params: Vec<Box<dyn ToSql + Send + Sync>> = Vec::with_capacity(rows.len() * cols.len());
-    for row in rows {
-        let mut placeholders: Vec<String> = Vec::with_capacity(cols.len());
-        for col in cols {
-            let value = row_get(row, col).cloned().unwrap_or(PgVal::Text(None));
-            params.push(value.boxed());
-            placeholders.push(format!("${}", params.len()));
+    // PostgreSQL accepts at most 65535 bind parameters per statement. Split
+    // large batches so a burst can never exceed that; otherwise the single
+    // statement fails and the caller drops to the far slower per-row fallback.
+    let per_stmt = (65535 / cols.len().max(1)).max(1);
+    let mut inserted = 0;
+    for chunk in rows.chunks(per_stmt) {
+        let mut tuples: Vec<String> = Vec::with_capacity(chunk.len());
+        let mut params: Vec<Box<dyn ToSql + Send + Sync>> =
+            Vec::with_capacity(chunk.len() * cols.len());
+        for row in chunk {
+            let mut placeholders: Vec<String> = Vec::with_capacity(cols.len());
+            for col in cols {
+                let value = row_get(row, col).cloned().unwrap_or(PgVal::Text(None));
+                params.push(value.boxed());
+                placeholders.push(format!("${}", params.len()));
+            }
+            tuples.push(format!("({})", placeholders.join(", ")));
         }
-        tuples.push(format!("({})", placeholders.join(", ")));
+        let sql = format!(
+            "INSERT INTO {table} ({}) VALUES {} ON CONFLICT DO NOTHING",
+            cols.join(", "),
+            tuples.join(", ")
+        );
+        let refs: Vec<&(dyn ToSql + Sync)> = params
+            .iter()
+            .map(|b| b.as_ref() as &(dyn ToSql + Sync))
+            .collect();
+        client.execute(&sql, &refs).await?;
+        inserted += chunk.len();
     }
-    let sql = format!(
-        "INSERT INTO {table} ({}) VALUES {} ON CONFLICT DO NOTHING",
-        cols.join(", "),
-        tuples.join(", ")
-    );
-    let refs: Vec<&(dyn ToSql + Sync)> = params
-        .iter()
-        .map(|b| b.as_ref() as &(dyn ToSql + Sync))
-        .collect();
-    client.execute(&sql, &refs).await?;
-    Ok(rows.len())
+    Ok(inserted)
 }
 
 pub fn build_pool(cfg: tokio_postgres::Config) -> Result<Pool> {
