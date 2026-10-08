@@ -15,7 +15,7 @@
 //!          +---- one JSONL file per event ----+
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
 use clipvault_session::config;
@@ -28,6 +28,42 @@ use tokio::task::JoinHandle;
 use tokio_postgres::{Client, NoTls};
 
 const WATCHDOG: Duration = Duration::from_secs(30);
+const PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
+
+/// Age after which a consumed spool file is deleted from `done/`. Set
+/// `CLIPVAULT_DONE_RETENTION_DAYS=0` to keep every file forever.
+fn done_retention() -> Option<Duration> {
+    let days = config::var("CLIPVAULT_DONE_RETENTION_DAYS", "7")
+        .parse::<u64>()
+        .ok()?;
+    (days > 0).then(|| Duration::from_secs(days * 24 * 3600))
+}
+
+/// Drop `done/` files older than `retention` (they are already in PostgreSQL).
+/// Without this the archive grows without bound: one file per drained event.
+fn prune_done(spool_dir: &Path, retention: Duration) -> usize {
+    let Ok(read) = std::fs::read_dir(spool_dir.join("done")) else {
+        return 0;
+    };
+    let now = SystemTime::now();
+    let mut removed = 0;
+    for entry in read.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let expired = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .map(|age| age >= retention)
+            .unwrap_or(false);
+        if expired && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -38,10 +74,21 @@ async fn main() -> Result<()> {
     ));
     std::fs::create_dir_all(&spool_dir).ok();
 
+    let retention = done_retention();
     let mut sink = PgSink::new(config::pg_config()?);
     if once {
         println!("flushed {} rows", sink.drain(&spool_dir).await);
+        if let Some(r) = retention {
+            prune_done(&spool_dir, r);
+        }
         return Ok(());
+    }
+
+    if let Some(r) = retention {
+        let n = prune_done(&spool_dir, r);
+        if n > 0 {
+            eprintln!("clipvault-flush: pruned {n} done/ files");
+        }
     }
 
     let wake_addr = config::var("CLIPVAULT_FLUSH_WAKE", "127.0.0.1:19499");
@@ -51,6 +98,7 @@ async fn main() -> Result<()> {
     eprintln!("clipvault-flush: listening for wakeups on {wake_addr}");
 
     let mut buf = [0u8; 16];
+    let mut last_prune = Instant::now();
     loop {
         tokio::select! {
             r = socket.recv_from(&mut buf) => {
@@ -63,6 +111,15 @@ async fn main() -> Result<()> {
         }
         // Drain until empty so a burst of wakeups collapses into one pass.
         while sink.drain(&spool_dir).await > 0 {}
+        if let Some(r) = retention {
+            if last_prune.elapsed() >= PRUNE_INTERVAL {
+                let n = prune_done(&spool_dir, r);
+                if n > 0 {
+                    eprintln!("clipvault-flush: pruned {n} done/ files");
+                }
+                last_prune = Instant::now();
+            }
+        }
     }
 }
 
