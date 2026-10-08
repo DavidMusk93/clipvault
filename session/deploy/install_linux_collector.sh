@@ -19,21 +19,33 @@ D2="${CLIPVAULT_D2_SSH:-d2}"
 ENV_DIR="${CLIPVAULT_REMOTE_HOOKS_ENV:-/root/.trae-cn/hooks_env}"
 PI_EXT_DIR="${CLIPVAULT_REMOTE_PI_EXT:-/root/.pi/agent/extensions}"
 
-echo "host=$HOST instance=$INSTANCE d2=$D2 env=$ENV_DIR"
+# When the collector host IS d2, PostgreSQL is local: the host already owns the
+# binaries and the password file, and no `ssh -L 55432` tunnel is needed.
+LOCAL_PG=0
+{ [ "$HOST" = "$D2" ] || [ "${CLIPVAULT_PG_LOCAL:-}" = "1" ]; } && LOCAL_PG=1
+
+echo "host=$HOST instance=$INSTANCE d2=$D2 local_pg=$LOCAL_PG env=$ENV_DIR"
 
 # The pi adapter is a repo file; push it after the host is prepared.
 PI_TS="$REPO_ROOT/trae_hooks/pi/clipvault-session.ts"
 
-ssh -o BatchMode=yes -o ConnectTimeout=12 "$HOST" "INSTANCE='$INSTANCE' D2='$D2' ENV_DIR='$ENV_DIR' PI_EXT_DIR='$PI_EXT_DIR' bash -s" <<'REMOTE'
+ssh -o BatchMode=yes -o ConnectTimeout=12 "$HOST" "INSTANCE='$INSTANCE' D2='$D2' LOCAL_PG='$LOCAL_PG' ENV_DIR='$ENV_DIR' PI_EXT_DIR='$PI_EXT_DIR' bash -s" <<'REMOTE'
 set -euo pipefail
 umask 077
 mkdir -p "$ENV_DIR" /root/clipvault/bin /root/.config/clipvault /var/tmp/clipvault-hooks/spool "$PI_EXT_DIR"
 
-# 1. binaries + password from d2 (the host can reach d2)
-for f in clipvault-hook clipvault-flush; do
-  scp -q -o BatchMode=yes "d2:/root/clipvault/bin/$f" "/root/clipvault/bin/$f"
-done
-scp -q -o BatchMode=yes "d2:/root/.config/clipvault/pg.password" "/root/.config/clipvault/pg.password"
+# 1. binaries + password from d2 (local copy when the host IS d2)
+if [ "$LOCAL_PG" = "1" ]; then
+  for f in clipvault-hook clipvault-flush; do
+    [ -x "/root/clipvault/bin/$f" ] || { echo "missing /root/clipvault/bin/$f" >&2; exit 1; }
+  done
+  [ -f /root/.config/clipvault/pg.password ] || { echo "missing pg.password" >&2; exit 1; }
+else
+  for f in clipvault-hook clipvault-flush; do
+    scp -q -o BatchMode=yes "d2:/root/clipvault/bin/$f" "/root/clipvault/bin/$f"
+  done
+  scp -q -o BatchMode=yes "d2:/root/.config/clipvault/pg.password" "/root/.config/clipvault/pg.password"
+fi
 chmod 755 /root/clipvault/bin/clipvault-hook /root/clipvault/bin/clipvault-flush
 chmod 600 /root/.config/clipvault/pg.password
 
@@ -78,7 +90,8 @@ exit 0
 EOF
 chmod 755 "$ENV_DIR/clipvault_hook.sh"
 
-# 3. systemd: PG tunnel + flush daemon
+# 3. systemd: PG tunnel (remote hosts only) + flush daemon
+if [ "$LOCAL_PG" != "1" ]; then
 cat > /etc/systemd/system/clipvault-pg-tunnel.service <<EOF
 [Unit]
 Description=ClipVault PostgreSQL tunnel to d2
@@ -91,11 +104,13 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+fi
 
-cat > /etc/systemd/system/clipvault-flush.service <<'EOF'
+if [ "$LOCAL_PG" = "1" ]; then TUNNEL_DEP=""; else TUNNEL_DEP=" clipvault-pg-tunnel.service"; fi
+cat > /etc/systemd/system/clipvault-flush.service <<EOF
 [Unit]
 Description=ClipVault session spool writer
-After=network-online.target clipvault-pg-tunnel.service
+After=network-online.target${TUNNEL_DEP}
 Wants=network-online.target
 [Service]
 Type=simple
@@ -115,9 +130,15 @@ EOF
 
 systemctl daemon-reload
 systemctl disable --now clipvault-hook-flush.service 2>/dev/null || true
-systemctl enable --now clipvault-pg-tunnel.service clipvault-flush.service
-sleep 2
-echo "tunnel=$(systemctl is-active clipvault-pg-tunnel) flush=$(systemctl is-active clipvault-flush)"
+if [ "$LOCAL_PG" = "1" ]; then
+  systemctl enable --now clipvault-flush.service
+  sleep 2
+  echo "flush=$(systemctl is-active clipvault-flush)"
+else
+  systemctl enable --now clipvault-pg-tunnel.service clipvault-flush.service
+  sleep 2
+  echo "tunnel=$(systemctl is-active clipvault-pg-tunnel) flush=$(systemctl is-active clipvault-flush)"
+fi
 REMOTE
 
 # 4. pi adapter (repo file)
