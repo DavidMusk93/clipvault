@@ -7,6 +7,7 @@ final class HTTPByteSink {
     let fd: Int32
     private let lock = NSLock()
     private var closed = false
+    private var fdClosed = false
     private var closeHandlers: [() -> Void] = []
     private var readSource: DispatchSourceRead?
 
@@ -139,13 +140,37 @@ final class HTTPByteSink {
             return
         }
         closed = true
-        readSource?.cancel()
+        let src = readSource
         readSource = nil
         let handlers = closeHandlers
         closeHandlers.removeAll()
+        if src != nil { fdClosed = true }
         lock.unlock()
-        Darwin.close(fd)
+
+        // Wake any in-flight send()/receive() without recycling the fd number.
+        _ = Darwin.shutdown(fd, SHUT_RDWR)
+        if let src {
+            // The fd's ownership moves to the read source: close it only once the source is
+            // fully cancelled. Closing first leaves a live kevent registration behind, which
+            // libdispatch reports as "kevent vanished" and then dereferences freed state ->
+            // SIGSEGV. Incident 2026-10-09: a 4271-op pull replay crashed the server 3 times.
+            let closing = fd
+            src.setCancelHandler { Darwin.close(closing) }
+            src.cancel()
+        } else {
+            closeOwnedFD()
+        }
         for h in handlers { h() }
+    }
+
+    /// Close at most once, whoever gets there first (cancel() or the source's cancel handler).
+    private func closeOwnedFD() {
+        lock.lock()
+        let already = fdClosed
+        fdClosed = true
+        lock.unlock()
+        guard !already else { return }
+        Darwin.close(fd)
     }
 
     static func setNonBlocking(_ fd: Int32) {
@@ -218,9 +243,17 @@ final class OriginUnixServer {
     }
 
     func stop() {
-        acceptSource?.cancel()
-        acceptSource = nil
-        if listenFd >= 0 {
+        if let src = acceptSource {
+            acceptSource = nil
+            let closing = listenFd
+            listenFd = -1
+            if closing >= 0 {
+                // Same ownership rule as HTTPByteSink.cancel(): close the listen fd from the
+                // source's cancel handler, never while its kevent registration is still live.
+                src.setCancelHandler { Darwin.close(closing) }
+            }
+            src.cancel()
+        } else if listenFd >= 0 {
             Darwin.close(listenFd)
             listenFd = -1
         }
