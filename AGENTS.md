@@ -205,6 +205,8 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | 有序列 shortest-col 绝对定位；prepend 重算坐标 | 新卡堆某一列 / flex 空列一条线 |
 | 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
 | 卡片晚到高度（图片/表格/OCR/字体）→ `dataset.packedH` + ResizeObserver 只 repack 该列 | 全量 rebuild；预览 `img` 不限高（`.md-preview img` 必须 max-height） |
+| 拉数据 burst（对端 apply / 连打复制）→ 合并成**一次** head merge（`scheduleUpdateIngest` → `wallFlushPlan`） | 每个 `update` 一次 `/api/clips?id=` + 一次重排（N 项 × N 页 = CPU 风暴） |
+| 无人看（隐藏，或 `WALL_IDLE_MS` 无 pointer/key/wheel/touch 输入）→ `parkWall` 停画停解码，SSE 与模型照留；回输入 `wakeWall` 一次补画 | 无人看仍跟每个事件重排/解码；把无头页当常驻客户端（`visibilityState`/`hasFocus()` 对无头一直说谎，判据是**真输入**） |
 | 745KB 笔记编辑器首屏不加载；打开笔记才拉 `notes-editor.js` | 把编辑器 bundle 塞进 `<head>` 挡墙首屏 |
 
 | 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
@@ -395,6 +397,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 症状 | name |
 | --- | --- |
 | 墙刷新 | `wall_fetch` `wall_merge` `wall_paint` `wall_resync` |
+| 墙停画生命周期 | `wall_lifecycle` phase=park/wake + reason（hidden/idle/input/visible）；`wall_merge` kind=burst phase=coalesce n |
 | 墙插入 CLS | `wall_cls` kind=m3-card phase=wall；`wall_paint` kind=prepend phase=keep\|top |
 | 墙长任务 | `wall_longtask` phase=loaf\|longtask + kind/reason/host |
 | 开合 sheet | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` |

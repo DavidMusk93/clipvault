@@ -3168,6 +3168,90 @@ window.ClipViewMasonry = Masonry;
     /** Col heights for incremental pack (load-more). Null → need full rebuild. */
     let colHeights = null;
 
+    // ---- Wall lifecycle: attended vs parked ---------------------------------
+    // A page nobody is looking at must stop building and painting cards, or an
+    // unattended tab (a headless / orphaned Chrome) re-lays the whole wall on
+    // every clipboard event forever. `visibilityState` and `hasFocus()` both lie
+    // for headless clients (they stay "visible" and focused), so the durable
+    // signal is real user input: no pointer / key / wheel / touch for
+    // WALL_IDLE_MS. Parking stops paint only; the SSE socket and the in-memory
+    // model stay live, and wake repaints once from the complete model.
+    const WALL_IDLE_MS = 90000;
+    let wallParked = false;
+    let wallParkedAt = 0;
+    let wallIdleTimer = 0;
+    let wallIdleDue = 0;
+    let wallLastInputAt = Date.now();
+    let parkedPaintDirty = false;
+    let parkedHeadStale = false;
+
+    function scheduleWallIdleCheck() {
+      clearTimeout(wallIdleTimer);
+      wallIdleDue = Date.now() + WALL_IDLE_MS;
+      wallIdleTimer = window.setTimeout(() => {
+        wallIdleTimer = 0;
+        if (wallShouldPark(Date.now(), document.hidden, wallLastInputAt, WALL_IDLE_MS)) {
+          parkWall(document.hidden ? 'hidden' : 'idle');
+          return;
+        }
+        scheduleWallIdleCheck();
+      }, WALL_IDLE_MS);
+    }
+
+    /** Pure park decision: hidden, or no user input for the idle lease. */
+    function wallShouldPark(now, hidden, lastInputAt, idleMs) {
+      if (hidden) return true;
+      return (now - lastInputAt) >= idleMs;
+    }
+
+    /** Pure flush plan: an empty batch is a no-op, a burst is one head merge. */
+    function wallFlushPlan(ids, max) {
+      if (!ids || !ids.length) return 'none';
+      return ids.length > max ? 'head' : 'ids';
+    }
+
+    function parkWall(reason) {
+      if (wallParked) return;
+      wallParked = true;
+      wallParkedAt = Date.now();
+      clearTimeout(wallIdleTimer);
+      wallIdleTimer = 0;
+      nm('wall_lifecycle', { payload: { phase: 'park', reason } });
+    }
+
+    function wakeWall(reason) {
+      wallLastInputAt = Date.now();
+      if (!wallParked) { scheduleWallIdleCheck(); return; }
+      wallParked = false;
+      const held = Math.max(0, Date.now() - wallParkedAt);
+      nm('wall_lifecycle', { dur_ms: held, ok: true, payload: { phase: 'wake', reason } });
+      // Apply anything buffered while parked before the single catch-up paint.
+      const hadIds = pendingUpdateIds.size > 0;
+      if (updateFlushTimer) { clearTimeout(updateFlushTimer); updateFlushTimer = 0; }
+      if (parkedHeadStale) {
+        // Buffer overflowed while away — one head merge instead of a huge id list.
+        parkedHeadStale = false;
+        pendingUpdateIds.clear();
+        scheduleResync();
+      } else if (hadIds) {
+        flushParkedUpdates();
+      }
+      if (parkedPaintDirty && !hadIds) {
+        parkedPaintDirty = false;
+        rebuildFromData({ preserveScroll: true });
+      }
+      parkedPaintDirty = false;
+      scheduleWallIdleCheck();
+    }
+
+    function noteWallInput() {
+      wallLastInputAt = Date.now();
+      if (wallParked) { wakeWall('input'); return; }
+      // Throttle: a continuous pointer stream need not reset the timer every move.
+      if (wallIdleTimer && wallIdleDue - Date.now() > WALL_IDLE_MS - 1000) return;
+      scheduleWallIdleCheck();
+    }
+
     function esc(s) {
       return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
@@ -7679,6 +7763,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     function replaceCardInPlace(item) {
+      if (wallParked) { parkedPaintDirty = true; return; }
       const old = cardCache.get(item.id);
       const before = old ? Masonry.measureHeight(old) : 0;
       const next = buildCard(item);
@@ -8385,6 +8470,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     function ensureCard(item) {
+      if (wallParked) { parkedPaintDirty = true; return null; }
       let c = cardCache.get(item.id);
       const pinBit = itemIsPinned(item) ? '1' : '0';
       if (c && c.dataset.pinned === pinBit) {
@@ -8507,6 +8593,7 @@ window.ClipViewMasonry = Masonry;
      * @returns {Promise<void>}
      */
     function removeCardFromMasonry(id, opts = {}) {
+      if (wallParked) { parkedPaintDirty = true; return Promise.resolve(); }
       const animate = opts.animate !== false;
       const card = cardCache.get(id);
       eventsCache.delete(id);
@@ -8597,6 +8684,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     function rebuildFromData({ preserveScroll = true } = {}) {
+      if (wallParked) { parkedPaintDirty = true; return; }
       const t0 = performance.now();
       const host = document.getElementById('grid');
       const pinRail = document.getElementById('pinRail');
@@ -8662,6 +8750,7 @@ window.ClipViewMasonry = Masonry;
     function ensureCardResizeObserver() {
       if (cardResizeObs || typeof ResizeObserver === 'undefined') return;
       cardResizeObs = new ResizeObserver((entries) => {
+        if (wallParked) { parkedPaintDirty = true; return; }
         for (const en of entries) {
           const el = en.target;
           const packed = Number(el.dataset.packedH);
@@ -8705,6 +8794,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     function layoutMasonry(host, orderedCards, { preserveScroll = true } = {}) {
+      if (wallParked) { parkedPaintDirty = true; return; }
       if (!host) return;
       const seenEl = new Set();
       const cards = (orderedCards || []).filter((c) => {
@@ -8843,6 +8933,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     function appendCardsIncremental(newItems) {
+      if (wallParked) { parkedPaintDirty = true; return; }
       const host = document.getElementById('grid');
       if (!host) return;
       const viewIds = new Set(clientFilter(clips).map((i) => i.id));
@@ -8853,6 +8944,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     function prependCardsIncremental(newItems) {
+      if (wallParked) { parkedPaintDirty = true; return; }
       const host = document.getElementById('grid');
       if (!host) return;
       if (healMasonryIfDegenerate(host)) return;
@@ -8901,6 +8993,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     function scheduleRebalance() {
+      if (wallParked) { parkedPaintDirty = true; return; }
       clearTimeout(rebalanceTimer);
       rebalanceTimer = setTimeout(() => requestAnimationFrame(() => {
         const host = document.getElementById('grid');
@@ -9303,6 +9396,58 @@ window.ClipViewMasonry = Masonry;
     let resyncQueued = false;
     const SSE_STALE_MS = 18000;
 
+    // ---- Live update coalescing ---------------------------------------------
+    // A sync apply / capture burst posts one `update` per item. Ingesting each
+    // separately costs one `/api/clips?id=` fetch + one masonry repaint per
+    // item, on every tab — an N-item pull became N paints × tabs. Coalesce a
+    // burst into a single head merge: one fetch, one repaint.
+    const UPDATE_FLUSH_MS = 60;
+    const UPDATE_BURST_MAX = 4;
+    const UPDATE_PARKED_MAX = 512;
+    let pendingUpdateIds = new Set();
+    let updateFlushTimer = 0;
+
+    function scheduleUpdateIngest(id) {
+      const sid = String(id || '');
+      if (!sid) { scheduleResync(); return; }
+      // Parked: buffer only — no fetch, no timer, no paint. Wake applies the
+      // batch in one pass. The cap keeps a never-woken orphan from growing.
+      if (wallParked) {
+        if (pendingUpdateIds.size >= UPDATE_PARKED_MAX) { parkedHeadStale = true; return; }
+        pendingUpdateIds.add(sid);
+        return;
+      }
+      pendingUpdateIds.add(sid);
+      if (updateFlushTimer) return;
+      updateFlushTimer = window.setTimeout(flushPendingUpdates, UPDATE_FLUSH_MS);
+    }
+
+    /** One batched fetch + one repaint for everything buffered while parked. */
+    async function flushParkedUpdates() {
+      const ids = [...pendingUpdateIds];
+      pendingUpdateIds.clear();
+      if (!ids.length) return;
+      const got = [];
+      for (let i = 0; i < ids.length; i += 64) {
+        try { got.push(...await fetchClipsByIds(ids.slice(i, i + 64))); } catch (_) {}
+      }
+      applyFreshItems(got);
+    }
+
+    function flushPendingUpdates() {
+      updateFlushTimer = 0;
+      const ids = [...pendingUpdateIds];
+      pendingUpdateIds.clear();
+      const plan = wallFlushPlan(ids, UPDATE_BURST_MAX);
+      if (plan === 'none') return;
+      if (plan === 'head') {
+        nm('wall_merge', { payload: { kind: 'burst', phase: 'coalesce', n: ids.length } });
+        scheduleResync();
+        return;
+      }
+      for (const id of ids) ingestClipById(id);
+    }
+
     function noteSSEEvent() { sseLastEventAt = Date.now(); }
 
     function scheduleResync() {
@@ -9405,7 +9550,7 @@ window.ClipViewMasonry = Masonry;
       }
       if (d.type === 'update') {
         if (d.id && !searchQuery && currentView !== 'trash') {
-          ingestClipById(d.id);
+          scheduleUpdateIngest(d.id);
           return;
         }
         scheduleResync();
@@ -9596,8 +9741,10 @@ window.ClipViewMasonry = Masonry;
     function onFeedVisible() {
       if (document.visibilityState === 'hidden') {
         considerElect();
+        parkWall('hidden');
         return;
       }
+      wakeWall('visible');
       clearTimeout(sseElectTimer);
       sseElectTimer = window.setTimeout(considerElect, sseBc ? 100 : 0);
       // Frozen/background EventSource often stays OPEN without pings.
@@ -9612,6 +9759,14 @@ window.ClipViewMasonry = Masonry;
     window.addEventListener('pageshow', onFeedVisible);
     window.addEventListener('focus', onFeedVisible);
     window.addEventListener('online', onFeedVisible);
+    // Real user input is the only honest "someone is watching" signal (headless
+    // clients report visible + focused forever). Any input wakes; silence parks.
+    // No `scroll`: our own preserve-scroll anchor fires scroll, which would make
+    // a parked page look attended forever.
+    for (const evName of ['pointerdown', 'pointermove', 'pointerenter', 'keydown', 'wheel', 'touchstart']) {
+      window.addEventListener(evName, noteWallInput, { passive: true, capture: true });
+    }
+    scheduleWallIdleCheck();
     if (!window.__cvSseWatch) {
       window.__cvSseWatch = window.setInterval(() => {
         if (document.visibilityState === 'hidden') return;
@@ -9721,6 +9876,7 @@ window.ClipViewMasonry = Masonry;
       sheet_cls: { label: '开合偏移', unit: 'cls', budget: 0.1 },
       chrome_shift: { label: '顶栏位移', unit: 'cls', budget: 0.1 },
       wall_layout_drift: { label: '布局漂移(px)', unit: 'count', budget: 0 },
+      wall_lifecycle: { label: '停画生命周期', unit: 'ms', budget: null },
       trae_sessions_switch: { label: '切换会话', unit: 'ms', budget: 300 },
       trae_sessions_tools: { label: '工具索引', unit: 'ms', budget: 200 },
       trae_sessions_load: { label: '加载事件', unit: 'ms', budget: 150 },
