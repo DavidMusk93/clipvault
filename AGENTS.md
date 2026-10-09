@@ -117,6 +117,7 @@ Capture 禁止就地改成笔记。Compose 禁止写成第二套剪贴板。
 ```
 
 禁止：第二层 HTTP（UDS 上再讲 HTTP/1.1）、第二浏览器端口、SwiftNIO/BoringSSL 当边车。
+禁止：一个数据目录跑两个 `ClipVaultServer`。`$CLIPVAULT_HOME/run/server.lock` 的 flock 是唯一所有权；第二个进程必须在 `DatabaseManager()` 之前退出（否则第二个会 `unlink` 掉 `run/http.sock`、抢 :80/:443，`clipvault-http` 落到 `bind Address already in use -> exit 2` 循环）。监督子进程 `stop()` 必须先等到旧 `clipvault-http` 退出再拉起新的。自检：`./scripts/verify-single-instance.sh`（server=1 且 front=1 且 lock owner==server pid）。
 禁止 origin 再拼 `HTTP/1.1` 文本；handler 只走 CV01 `sendJSON`/`sendBinary`。
 clipvault-http 无 `http_req` 点禁止改边车性能。
 TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 root socket activation。
@@ -484,6 +485,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 ./scripts/deploy-server.sh        # swift + cargo clipvault-http + launchctl + verify
 ./scripts/restart-clipflow.sh     # 已有二进制
 ./scripts/verify-data-home.sh     # 失败 = 禁止说「已恢复」
+./scripts/verify-single-instance.sh  # server=1 · front=1 · lock owner==server pid
 # 明文自检：curl --noproxy '*' --http2-prior-knowledge http://127.0.0.1/api/clips?limit=1
 ```
 

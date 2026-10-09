@@ -60,16 +60,30 @@ sleep 0.5
 for pid in $(ps aux | awk '/Keepsake\/bin\/(ClipFlowServer|ClipVaultServer)/ && !/awk/{print $2}'); do
   kill "$pid" 2>/dev/null || true
 done
-sleep 0.5
+# Wait for the old owner (and its clipvault-http) to actually exit, so the new
+# server does not race the lock or :8080. A still-draining front was the
+# 2026-10-09 `Address already in use` -> exit 2 loop.
+for _ in $(seq 1 40); do
+  pgrep -f "Keepsake/bin/(ClipVaultServer|ClipFlowServer|clipvault-http)" >/dev/null || break
+  sleep 0.25
+done
 if [ -f "$HOME/Library/LaunchAgents/${LABEL}.plist" ]; then
   :
 else
   cp "$REPO_ROOT/LaunchAgents/com.davidmusk.clipvault.plist" "$HOME/Library/LaunchAgents/${LABEL}.plist"
 fi
 launchctl bootstrap "$GUI" "$PLIST" 2>/dev/null || true
-launchctl kickstart -k "$GUI/$LABEL"
-sleep 2.0
+# Never `kickstart -k`: bootstrap already starts it (RunAtLoad), and -k would
+# kill that fresh instance, leaving its clipvault-http holding :8080.
+launchctl kickstart "$GUI/$LABEL" 2>/dev/null || true
+# Wait for the single owner to come up before verifying.
+for _ in $(seq 1 40); do
+  pgrep -f "Keepsake/bin/ClipVaultServer" >/dev/null && break
+  sleep 0.25
+done
+sleep 1.0
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 "$SCRIPT_DIR/verify-data-home.sh"
+"$SCRIPT_DIR/verify-single-instance.sh"
 echo "restart-clipvault: OK"
