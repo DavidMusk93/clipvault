@@ -8,6 +8,21 @@ setlinebuf(stderr)
 
 print("🚀 启动 ClipVault 后台守护进程与 Web 服务")
 
+// One owner per data home. Acquire before DatabaseManager() so a second launch
+// can never open a second SQLite writer or steal run/http.sock (2026-10-09).
+let dataRoot = DatabaseManager.resolveDataRoot()
+let lockPath = dataRoot
+    .appendingPathComponent("run", isDirectory: true)
+    .appendingPathComponent("server.lock")
+    .path
+guard let instanceLock = SingleInstanceLock.acquire(path: lockPath) else {
+    let owner = SingleInstanceLock.ownerPid(path: lockPath).map { " (owner pid=\($0))" } ?? ""
+    FileHandle.standardError.write(Data(
+        "[Server] another ClipVaultServer owns \(dataRoot.path)\(owner); exiting — one server per data home\n".utf8))
+    exit(1)
+}
+_ = instanceLock // held for the process lifetime; flock frees it on death
+
 let db = DatabaseManager()
 // Plane A: per-host disaster backup (never a sync bus)
 let backup = CloudDocsBackupService.bootstrap(database: db)

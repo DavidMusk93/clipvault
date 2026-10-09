@@ -512,6 +512,34 @@ async fn serve_tls(listener: TcpListener, acceptor: TlsAcceptor, sock: PathBuf) 
     }
 }
 
+/// How long to wait for a just-reaped `clipvault-http` (or a crashed parent's
+/// orphan, which exits within its 1s `watch_parent` poll) to release :80/:443.
+const BIND_ATTEMPTS: u32 = 20;
+const BIND_RETRY: Duration = Duration::from_millis(250);
+
+/// Bind, retrying briefly while a previous listener is still draining. Exiting
+/// on the first `EADDRINUSE` is what produced the 2026-10-09 bind-fail loop.
+async fn bind_with_retry(
+    addr: SocketAddr,
+    attempts: u32,
+    delay: Duration,
+) -> std::io::Result<TcpListener> {
+    let attempts = attempts.max(1);
+    let mut last: Option<std::io::Error> = None;
+    for attempt in 0..attempts {
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(err) => {
+                last = Some(err);
+                if attempt + 1 < attempts {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "bind failed")))
+}
+
 fn watch_parent() {
     if let Ok(Ok(pid)) = std::env::var("CLIPVAULT_PARENT_PID").map(|s| s.parse::<i32>()) {
         tokio::spawn(async move {
@@ -557,7 +585,7 @@ async fn main() {
             }
         };
         for addr in addrs {
-            match TcpListener::bind(addr).await {
+            match bind_with_retry(addr, BIND_ATTEMPTS, BIND_RETRY).await {
                 Ok(l) => {
                     eprintln!("[http] bound {addr} (tls h2)");
                     joins.push(tokio::spawn(serve_tls(l, acceptor.clone(), sock.clone())));
@@ -567,7 +595,7 @@ async fn main() {
         }
     } else {
         for addr in addrs {
-            match TcpListener::bind(addr).await {
+            match bind_with_retry(addr, BIND_ATTEMPTS, BIND_RETRY).await {
                 Ok(l) => {
                     eprintln!("[http] bound {addr} (h2c + http/1.1)");
                     joins.push(tokio::spawn(serve_plain(l, sock.clone())));
@@ -580,4 +608,45 @@ async fn main() {
         std::process::exit(2);
     }
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A free port binds on the first attempt.
+    #[tokio::test]
+    async fn bind_retry_succeeds_when_free() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        // :0 always yields a fresh port, so this must succeed immediately.
+        let listener = bind_with_retry(addr, 3, Duration::from_millis(10)).await.unwrap();
+        assert_ne!(listener.local_addr().unwrap().port(), 0);
+    }
+
+    /// While a previous listener holds the port, retries exhaust and report the
+    /// last error; once it is released, the retry window still binds. This is the
+    /// 2026-10-09 orphan-front window (`Address already in use` -> exit 2 -> loop).
+    #[tokio::test]
+    async fn bind_retry_waits_for_release() {
+        let held = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = held.local_addr().unwrap();
+
+        let err = bind_with_retry(addr, 3, Duration::from_millis(10)).await;
+        assert!(err.is_err(), "must not steal a held listener");
+
+        drop(held);
+        let ok = bind_with_retry(addr, 20, Duration::from_millis(25)).await;
+        assert!(ok.is_ok(), "must bind once the previous listener is released");
+    }
+
+    /// A single attempt never sleeps and surfaces the bind error verbatim.
+    #[tokio::test]
+    async fn bind_retry_single_attempt_reports_error() {
+        let held = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = held.local_addr().unwrap();
+        let t0 = Instant::now();
+        let err = bind_with_retry(addr, 1, Duration::from_secs(5)).await;
+        assert!(err.is_err());
+        assert!(t0.elapsed() < Duration::from_millis(200), "one attempt must not wait");
+    }
 }
