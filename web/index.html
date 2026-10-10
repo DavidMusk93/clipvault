@@ -544,6 +544,111 @@
     .masonry-col {
       display: none;
     }
+
+    /* —— Day groups: one masonry canvas per capture day ——
+       An unbounded wall re-measures every card on every repack. Slicing by
+       capture day keeps each pack local to one day, gives the header real
+       stats, and backs the timeline rail. Grouping never reorders capture time. */
+    .wall-feed {
+      display: block;
+      width: 100%;
+      min-width: 0;
+    }
+    .day-group {
+      display: block;
+      width: 100%;
+      min-width: 0;
+    }
+    .day-group + .day-group { margin-top: 10px; }
+    .day-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px 12px;
+      flex-wrap: wrap;
+      min-width: 0;
+      margin: 16px 2px 12px;
+      padding: 0 2px;
+    }
+    .day-group:first-child > .day-head { margin-top: 4px; }
+    .day-head-main {
+      display: inline-flex; align-items: baseline; gap: 8px;
+      min-width: 0; flex: 1 1 auto;
+    }
+    .day-title {
+      font-size: 16px; font-weight: 650; letter-spacing: -0.022em;
+      color: var(--ink); line-height: 1.25; margin: 0;
+    }
+    .day-date {
+      font-size: 12px; font-weight: 500; color: var(--muted);
+      font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+    .day-stats {
+      display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap;
+      min-width: 0;
+    }
+    .day-stat.is-total {
+      display: inline-flex; align-items: center;
+      font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 7px;
+      color: #8a5518; background: rgba(196, 122, 44, 0.16);
+      letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .day-stats .badge { font-variant-numeric: tabular-nums; }
+
+    /* —— Timeline rail: jump between capture days —— */
+    .day-rail {
+      position: fixed;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 60;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      max-height: 62vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 6px 4px;
+      scrollbar-width: none;
+      opacity: 0.94;
+    }
+    .day-rail[hidden] { display: none; }
+    .day-rail::-webkit-scrollbar { display: none; }
+    .day-rail-btn {
+      border: 0.5px solid transparent;
+      background: rgba(255, 255, 255, 0.82);
+      color: var(--muted);
+      font: 600 11px/1 var(--font-ui);
+      letter-spacing: -0.01em;
+      font-variant-numeric: tabular-nums;
+      padding: 5px 9px;
+      border-radius: 980px;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+    }
+    .day-rail-btn:hover { background: #fff; color: var(--ink); }
+    .day-rail-btn.is-active { background: var(--ink); color: #fff; border-color: var(--ink); }
+    .day-rail-btn:active { transform: scale(0.96); }
+    @media (min-width: 821px) {
+      /* Reserve the gutter so the rail never covers the rightmost column. */
+      body.has-day-rail main { padding-right: 84px; }
+    }
+    @media (max-width: 820px) {
+      .day-rail { display: none !important; }
+    }
+    body.notes-open .day-rail,
+    body.sessions-open .day-rail { display: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .day-rail-btn:active { transform: none; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .day-rail-btn { background: #fff; }
+    }
     .empty {
       width: 100%; text-align: center; padding: 72px 20px; color: var(--muted);
       font-size: 15px; letter-spacing: -0.01em;
@@ -2654,13 +2759,14 @@
         <i></i>
       </div>
     </section>
-    <div id="grid" class="masonry" aria-live="polite">
+    <div id="grid" class="wall-feed" aria-live="polite">
       <div class="empty"><span class="material-symbols-outlined" style="font-size:36px">progress_activity</span>
         <p style="margin-top:12px">加载中…</p></div>
     </div>
     <div id="sentinel" class="sentinel" aria-hidden="true"></div>
     <div id="loadingMore" class="loading-more" hidden>加载更多…</div>
   </main>
+  <nav id="dayRail" class="day-rail" aria-label="时间线跳转" data-ui-zone="dayrail" hidden></nav>
   </div>
 
   <!-- Image lightbox / preview -->
@@ -3026,6 +3132,112 @@
     };
     window.ClipViewPagination = Pagination;
 
+    /**
+     * Day grouping for the wall (pure; mirrored by tests/day-groups.test.mjs).
+     * A capture day is the **wall clock** day from the server `timeLocal`
+     * (`yyyy/MM/dd …`), falling back to `timestamp` in the display zone. The
+     * group order is first-seen, so a newest-first list yields newest day first.
+     */
+    const DayGroups = {
+      /** Local calendar day key `YYYY-MM-DD` from unix ms. */
+      localDayKey(ms) {
+        const n = Number(ms);
+        const d = new Date(n);
+        if (!Number.isFinite(n) || Number.isNaN(d.getTime())) return 'unknown';
+        const p = (v) => String(v).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+      },
+      /** Normalize a server wall clock (`2026/10/10 …` or ISO) to `YYYY-MM-DD`. */
+      normDayKey(raw) {
+        const s = String(raw == null ? '' : raw).trim();
+        const m = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+        if (!m) return 'unknown';
+        const p = (v) => String(v).padStart(2, '0');
+        return m[1] + '-' + p(Number(m[2])) + '-' + p(Number(m[3]));
+      },
+      /** Capture day for one item: server wall clock first, timestamp fallback. */
+      keyForItem(item) {
+        if (!item) return 'unknown';
+        const byWall = DayGroups.normDayKey(item.timeLocal);
+        if (byWall !== 'unknown') return byWall;
+        const ts = Number(item.timestamp != null ? item.timestamp : item.ts);
+        if (Number.isFinite(ts)) return DayGroups.localDayKey(ts * 1000);
+        return 'unknown';
+      },
+      /** Ordered (newest-first) items → [{ day, items }] preserving order. */
+      group(items) {
+        const out = [];
+        const index = new Map();
+        for (const it of items || []) {
+          if (!it || it.id == null) continue;
+          const day = DayGroups.keyForItem(it);
+          let g = index.get(day);
+          if (!g) { g = { day, items: [] }; index.set(day, g); out.push(g); }
+          g.items.push(it);
+        }
+        return out;
+      },
+      /** Per-day counts. html/rtf collapse into one `rich` bucket for the header. */
+      stats(items) {
+        const byType = Object.create(null);
+        let total = 0;
+        for (const it of items || []) {
+          if (!it) continue;
+          total += 1;
+          const t = String(it.type || 'other').toLowerCase();
+          const bucket = (t === 'html' || t === 'rtf') ? 'rich' : t;
+          byType[bucket] = (byType[bucket] || 0) + 1;
+        }
+        return { total, byType };
+      },
+      parts(day) {
+        const m = String(day || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return null;
+        return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+      },
+      addDays(day, delta) {
+        const p = DayGroups.parts(day);
+        if (!p) return '';
+        const dt = new Date(p.y, p.m - 1, p.d + (Number(delta) || 0));
+        const pad = (n) => String(n).padStart(2, '0');
+        return dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate());
+      },
+      weekday(day) {
+        const p = DayGroups.parts(day);
+        if (!p) return '';
+        return '周' + ['日', '一', '二', '三', '四', '五', '六'][new Date(p.y, p.m - 1, p.d).getDay()];
+      },
+      /** Header title: 今天 / 昨天 / 10月9日 / 2025年10月9日. */
+      shortLabel(day, todayKey) {
+        if (!day || day === 'unknown') return '更早';
+        if (todayKey && day === todayKey) return '今天';
+        if (todayKey && day === DayGroups.addDays(todayKey, -1)) return '昨天';
+        const p = DayGroups.parts(day);
+        if (!p) return day;
+        const sameYear = !todayKey || todayKey.slice(0, 4) === day.slice(0, 4);
+        return (sameYear ? '' : p.y + '年') + p.m + '月' + p.d + '日';
+      },
+      /** Rail label: short, no year unless it differs from the current year. */
+      railLabel(day, todayKey) {
+        if (!day || day === 'unknown') return '更早';
+        if (todayKey && day === todayKey) return '今天';
+        if (todayKey && day === DayGroups.addDays(todayKey, -1)) return '昨天';
+        const p = DayGroups.parts(day);
+        if (!p) return day;
+        if (todayKey && todayKey.slice(0, 4) !== day.slice(0, 4)) return p.y + '/' + p.m + '/' + p.d;
+        return p.m + '/' + p.d;
+      },
+      /** Absolute day line for the header / rail tooltip: `2026/10/10 周六`. */
+      dayDateText(day) {
+        const p = DayGroups.parts(day);
+        if (!p) return '';
+        const pad = (n) => String(n).padStart(2, '0');
+        const wd = DayGroups.weekday(day);
+        return p.y + '/' + pad(p.m) + '/' + pad(p.d) + (wd ? ' ' + wd : '');
+      }
+    };
+    window.ClipViewDayGroups = DayGroups;
+
         const MASONRY_GAP = 14; /* must match CSS --gap */
 
     const Masonry = {
@@ -3119,9 +3331,8 @@
     };
 window.ClipViewMasonry = Masonry;
     Masonry.relayout = function relayoutMasonry() {
-      const host = document.getElementById('grid');
-      if (!host || typeof wallRestCards !== 'function') return;
-      layoutMasonry(host, wallRestCards(), { preserveScroll: true });
+      if (wallParked) { parkedPaintDirty = true; return; }
+      relayoutAllDays({ preserveScroll: true });
     };
 
     /** @type {Array<object>} */
@@ -5575,6 +5786,7 @@ window.ClipViewMasonry = Masonry;
         ${sub}
         <button type="button" class="empty-action" data-wall-retry>重试</button>
       </div>`;
+      renderDayRail([]);
     }
 
     /** Load-more miss: stay at the bottom, keep the retry in view. */
@@ -8604,11 +8816,32 @@ window.ClipViewMasonry = Masonry;
 
       const applyRemove = () => {
         if (!cardCache.has(id) && !card.isConnected) return;
-        const host = document.getElementById('grid');
+        const feed = document.getElementById('grid');
+        const sec = card.closest ? card.closest('.day-group') : null;
+        const day = sec && sec.dataset.day;
         unobserveCard(card);
         card.remove();
         cardCache.delete(id);
-        if (host) layoutMasonry(host, wallRestCards(), { preserveScroll: true });
+        if (!feed) return;
+        // A removed card can empty its day (drop the section) and, on filters,
+        // take the rail away — both change feed width, so reflow every day.
+        if (renderDayRail(DayGroups.group(wallRestItems()))) {
+          rebuildFromData({ preserveScroll: true });
+          return;
+        }
+        if (day) {
+          const daySec = daySectionEl(feed, day);
+          const dayHost = dayHostOf(daySec);
+          const left = dayHost ? dayHost.querySelectorAll(':scope > .m3-card').length : 0;
+          if (!left && daySec) {
+            unobserveDaySection(daySec);
+            daySec.remove();
+          } else if (dayHost) {
+            refreshDayHeadsFor(new Set([day]));
+            layoutMasonry(dayHost, [...dayHost.querySelectorAll(':scope > .m3-card')], { preserveScroll: true });
+          }
+        }
+        updateDayRailActive();
       };
 
       if (animate && card.isConnected) {
@@ -8683,6 +8916,294 @@ window.ClipViewMasonry = Masonry;
       fetchPage({ reset: true });
     }
 
+    // ---- Day-group rendering -------------------------------------------------
+    // One masonry canvas per capture day. An unbounded wall re-measures every
+    // card on every repack; slicing by day keeps each pack local, backs the
+    // header stats, and gives the timeline rail a target. Capture order wins —
+    // grouping only partitions the already-sorted list.
+    function wallFeedEl() { return document.getElementById('grid'); }
+
+    function wallRestItems() {
+      const view = clientFilter(clips);
+      const inTrash = currentView === 'trash';
+      return inTrash ? view : view.filter((it) => !itemIsPinned(it));
+    }
+
+    /** "Today" in the wall display zone (mirrors the server wall clock). */
+    function wallTodayKey() {
+      try {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: displayTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit',
+        }).formatToParts(new Date());
+        const get = (t) => (parts.find((p) => p.type === t) || {}).value || '';
+        const y = get('year'), m = get('month'), d = get('day');
+        if (y && m && d) return y + '-' + m + '-' + d;
+      } catch (_) {}
+      return DayGroups.localDayKey(Date.now());
+    }
+
+    function daySectionEl(feed, day) {
+      if (!feed || !day) return null;
+      for (const sec of feed.querySelectorAll(':scope > .day-group')) {
+        if (sec.dataset.day === day) return sec;
+      }
+      return null;
+    }
+
+    function dayHostOf(sec) {
+      return sec ? sec.querySelector(':scope > .day-masonry') : null;
+    }
+
+    function dayBucketMeta(bucket) {
+      const map = {
+        rich:  { label: '富文本', icon: 'code', cls: 'type-html' },
+        image: { label: '图片', icon: 'image', cls: 'type-image' },
+        url:   { label: '链接', icon: 'link', cls: 'type-url' },
+        text:  { label: '文本', icon: 'text_fields', cls: 'type-text' },
+        pdf:   { label: 'PDF', icon: 'picture_as_pdf', cls: 'type-pdf' },
+        file:  { label: '文件', icon: 'folder', cls: 'type-file' },
+      };
+      return map[bucket] || { label: bucket === 'other' ? '其他' : String(bucket || ''), icon: 'label', cls: 'type-other' };
+    }
+
+    function dayHeadMarkup(group) {
+      const st = DayGroups.stats(group.items);
+      const todayKey = wallTodayKey();
+      const title = DayGroups.shortLabel(group.day, todayKey);
+      const dateText = DayGroups.dayDateText(group.day);
+      const pills = Object.keys(st.byType)
+        .sort((a, b) => st.byType[b] - st.byType[a])
+        .map((bucket) => {
+          const meta = dayBucketMeta(bucket);
+          return `<span class="badge ${meta.cls}"><span class="material-symbols-outlined">${meta.icon}</span>${meta.label} ${st.byType[bucket]}</span>`;
+        }).join('');
+      return `<div class="day-head-main">
+          <h2 class="day-title">${esc(title)}</h2>
+          ${dateText && dateText !== title ? `<span class="day-date">${esc(dateText)}</span>` : ''}
+        </div>
+        <div class="day-stats"><span class="day-stat is-total">共 ${st.total} 条</span>${pills}</div>`;
+    }
+
+    function ensureDaySection(feed, day) {
+      let sec = daySectionEl(feed, day);
+      if (!sec) {
+        sec = document.createElement('section');
+        sec.className = 'day-group';
+        sec.dataset.day = day;
+        sec.innerHTML = '<header class="day-head" data-ui="day-head"></header><div class="masonry day-masonry"></div>';
+        feed.appendChild(sec);
+      }
+      return sec;
+    }
+
+    function updateDayHead(sec, group) {
+      const head = sec && sec.querySelector(':scope > .day-head');
+      if (head) head.innerHTML = dayHeadMarkup(group);
+    }
+
+    /** Create/remove/reorder day sections to match the ordered groups (newest first). */
+    function reconcileDaySections(feed, groups) {
+      for (const ch of [...feed.children]) {
+        if (!ch.classList.contains('day-group')) ch.remove();
+      }
+      const want = new Set(groups.map((g) => g.day));
+      for (const sec of [...feed.querySelectorAll(':scope > .day-group')]) {
+        if (!want.has(sec.dataset.day)) {
+          unobserveDaySection(sec);
+          sec.remove();
+        }
+      }
+      for (const g of groups) {
+        const sec = ensureDaySection(feed, g.day);
+        updateDayHead(sec, g);
+        feed.appendChild(sec);
+      }
+    }
+
+    /** Refresh headers for days whose item set changed (append/prepend/remove). */
+    function refreshDayHeadsFor(days) {
+      const feed = wallFeedEl();
+      if (!feed || !days || !days.size) return;
+      const byDay = new Map();
+      for (const it of wallRestItems()) {
+        const d = DayGroups.keyForItem(it);
+        if (!days.has(d)) continue;
+        if (!byDay.has(d)) byDay.set(d, []);
+        byDay.get(d).push(it);
+      }
+      for (const d of days) {
+        const sec = daySectionEl(feed, d);
+        if (sec) updateDayHead(sec, { day: d, items: byDay.get(d) || [] });
+      }
+    }
+
+    /** First card at/under the viewport line, for whole-feed scroll preservation. */
+    function captureWallAnchor() {
+      const y0 = window.scrollY || document.documentElement.scrollTop || 0;
+      if (y0 < 24) return null;
+      const feed = wallFeedEl();
+      if (!feed) return null;
+      for (const card of feed.querySelectorAll('.m3-card')) {
+        const r = card.getBoundingClientRect();
+        if (r.bottom > 80) return { id: card.dataset.id || '', top: r.top };
+      }
+      return null;
+    }
+
+    function restoreWallAnchor(anchor) {
+      if (!anchor || !anchor.id) return;
+      requestAnimationFrame(() => {
+        const el = cardCache.get(anchor.id);
+        if (!el || !el.isConnected) return;
+        const y = el.getBoundingClientRect().top + (window.scrollY || 0) - anchor.top;
+        try { window.scrollTo({ top: Math.max(0, y), left: 0, behavior: 'instant' }); }
+        catch (_) { window.scrollTo(0, Math.max(0, y)); }
+      });
+    }
+
+    /** Re-pack only the given days — the local slice is the whole point. */
+    function relayoutDays(days, { preserveScroll = true } = {}) {
+      if (wallParked) { parkedPaintDirty = true; return; }
+      const feed = wallFeedEl();
+      if (!feed || !days || !days.size) return;
+      const anchor = preserveScroll ? captureWallAnchor() : null;
+      for (const day of days) {
+        const host = dayHostOf(daySectionEl(feed, day));
+        if (!host) continue;
+        layoutMasonry(host, [...host.querySelectorAll(':scope > .m3-card')], { preserveScroll: false });
+      }
+      if (anchor) restoreWallAnchor(anchor);
+    }
+
+    function relayoutAllDays({ preserveScroll = true } = {}) {
+      if (wallParked) { parkedPaintDirty = true; return; }
+      const feed = wallFeedEl();
+      if (!feed) return;
+      const anchor = preserveScroll ? captureWallAnchor() : null;
+      for (const sec of feed.querySelectorAll(':scope > .day-group')) {
+        const host = dayHostOf(sec);
+        if (!host) continue;
+        layoutMasonry(host, [...host.querySelectorAll(':scope > .m3-card')], { preserveScroll: false });
+      }
+      if (anchor) restoreWallAnchor(anchor);
+    }
+
+    // ---- Timeline rail -------------------------------------------------------
+    const DAY_RAIL_LIMIT = 48;
+    let dayRailKeys = [];
+    let dayRailActive = '';
+    let daySectionObs = null;
+
+    function observeDaySection(sec) {
+      if (!sec || typeof IntersectionObserver === 'undefined') return;
+      if (!daySectionObs) {
+        daySectionObs = new IntersectionObserver(() => updateDayRailActive(), {
+          rootMargin: '-120px 0px -55% 0px', threshold: 0,
+        });
+      }
+      try { daySectionObs.observe(sec); } catch (_) {}
+    }
+
+    function unobserveDaySection(sec) {
+      try { daySectionObs && sec && daySectionObs.unobserve(sec); } catch (_) {}
+    }
+
+    function observeDaySections() {
+      const feed = wallFeedEl();
+      if (!feed) return;
+      for (const sec of feed.querySelectorAll(':scope > .day-group')) observeDaySection(sec);
+      updateDayRailActive();
+    }
+
+    /** Active day = the last section whose top has crossed the chrome line. */
+    function updateDayRailActive() {
+      const nav = document.getElementById('dayRail');
+      if (!nav || nav.hidden) return;
+      const feed = wallFeedEl();
+      if (!feed) return;
+      const secs = [...feed.querySelectorAll(':scope > .day-group')];
+      if (!secs.length) return;
+      let current = secs[0].dataset.day;
+      for (const sec of secs) {
+        if (sec.getBoundingClientRect().top <= 120) current = sec.dataset.day;
+      }
+      setDayRailActive(current);
+    }
+
+    /** Paint the active rail button (no geometry read — safe mid smooth-scroll). */
+    function setDayRailActive(day) {
+      if (!day || day === dayRailActive) return;
+      dayRailActive = day;
+      const nav = document.getElementById('dayRail');
+      if (!nav || nav.hidden) return;
+      nav.querySelectorAll('.day-rail-btn').forEach((b) => {
+        b.classList.toggle('is-active', b.dataset.dayJump === day);
+      });
+    }
+
+    /** IntersectionObserver only fires on band entry/exit; a day can cross the
+     * chrome line while still inside the band, so scroll re-evaluates too. */
+    let dayRailRaf = 0;
+    function scheduleDayRailActive() {
+      if (dayRailRaf) return;
+      dayRailRaf = requestAnimationFrame(() => {
+        dayRailRaf = 0;
+        updateDayRailActive();
+      });
+    }
+
+    function jumpToDay(day) {
+      const feed = wallFeedEl();
+      const sec = feed ? daySectionEl(feed, day) : null;
+      if (!sec) return;
+      const top = sec.getBoundingClientRect().top + (window.scrollY || 0) - 108;
+      try { window.scrollTo({ top: Math.max(0, top), behavior: reduceMotion() ? 'auto' : 'smooth' }); }
+      catch (_) { window.scrollTo(0, Math.max(0, top)); }
+      setDayRailActive(day);
+      nm('wall_day_jump', { payload: { day, days: dayRailKeys.length } });
+    }
+
+    /**
+     * Build the rail. Returns true when rail visibility changed: the reserved
+     * gutter reshapes the feed, so the caller must reflow every day (not just
+     * the one that grew) or columns would disagree across sections.
+     */
+    function renderDayRail(groups) {
+      const nav = document.getElementById('dayRail');
+      const list = groups || [];
+      const show = list.length >= 2;
+      const changed = !!document.body && document.body.classList.contains('has-day-rail') !== show;
+      if (document.body) document.body.classList.toggle('has-day-rail', show);
+      dayRailKeys = list.map((g) => g.day);
+      if (!nav) return changed;
+      if (!show) {
+        nav.hidden = true;
+        nav.innerHTML = '';
+        dayRailActive = '';
+        return changed;
+      }
+      const todayKey = wallTodayKey();
+      let items = list;
+      let tail = null;
+      if (list.length > DAY_RAIL_LIMIT) {
+        items = list.slice(0, DAY_RAIL_LIMIT - 1);
+        tail = list[list.length - 1].day;
+      }
+      nav.innerHTML = items.map((g) => {
+        const label = DayGroups.railLabel(g.day, todayKey);
+        const title = DayGroups.dayDateText(g.day);
+        return `<button type="button" class="day-rail-btn" data-day-jump="${escAttr(g.day)}" title="${escAttr(title)}">${esc(label)}</button>`;
+      }).join('') + (tail ? `<button type="button" class="day-rail-btn" data-day-jump="${escAttr(tail)}" title="更早">更早</button>` : '');
+      nav.hidden = false;
+      // Fresh buttons carry no active class; force a repaint of the active day.
+      dayRailActive = '';
+      nav.querySelectorAll('[data-day-jump]').forEach((b) => {
+        b.addEventListener('click', () => jumpToDay(b.dataset.dayJump));
+      });
+      updateDayRailActive();
+      return changed;
+    }
+
     function rebuildFromData({ preserveScroll = true } = {}) {
       if (wallParked) { parkedPaintDirty = true; return; }
       const t0 = performance.now();
@@ -8700,6 +9221,7 @@ window.ClipViewMasonry = Masonry;
         if (pinRail) pinRail.hidden = true;
         if (pinHost) pinHost.innerHTML = '';
         host.innerHTML = wallEmptyMarkup(inTrash);
+        renderDayRail([]);
         lastColCount = 0;
         nm('wall_paint', { dur_ms: performance.now() - t0, payload: { kind: 'empty', n: 0 } });
         return;
@@ -8716,23 +9238,41 @@ window.ClipViewMasonry = Masonry;
       if (pinRail && pinHost) {
         if (pinnedItems.length) {
           pinRail.hidden = false;
-          layoutMasonry(pinHost, pinnedItems.map((item) => ensureCard(item)), { preserveScroll: false });
+          layoutMasonry(pinHost, pinnedItems.map((item) => ensureCard(item)).filter(Boolean), { preserveScroll: false });
         } else {
           pinRail.hidden = true;
           pinHost.innerHTML = '';
         }
       }
+      const groups = DayGroups.group(restItems);
+      // Rail first: showing it reserves a gutter, and every day must measure at
+      // the final feed width.
+      renderDayRail(groups);
+      const anchor = preserveScroll ? captureWallAnchor() : null;
       if (restItems.length) {
-        layoutMasonry(host, restItems.map((item) => ensureCard(item)), { preserveScroll });
+        reconcileDaySections(host, groups);
+        for (const g of groups) {
+          layoutMasonry(dayHostOf(daySectionEl(host, g.day)), g.items.map((item) => ensureCard(item)).filter(Boolean), { preserveScroll: false });
+        }
       } else {
-        host.innerHTML = '';
-        host.style.height = '';
-        colHeights = [];
-        nm('wall_paint', {
-          dur_ms: performance.now() - t0,
-          payload: { kind: preserveScroll ? 'keep' : 'reset', n: view.length, nodes: 0 },
-        });
+        for (const ch of [...host.children]) {
+          if (!ch.classList.contains('day-group')) ch.remove();
+        }
+        host.querySelectorAll(':scope > .day-group').forEach((sec) => { unobserveDaySection(sec); sec.remove(); });
       }
+      if (anchor) restoreWallAnchor(anchor);
+      observeDaySections();
+      lastColCount = Masonry.columnCountForWidth((host && host.clientWidth) || window.innerWidth);
+      nm('wall_paint', {
+        dur_ms: performance.now() - t0,
+        payload: {
+          kind: preserveScroll ? 'layout' : 'reset',
+          n: view.length,
+          nodes: lastColCount,
+          days: groups.length,
+          phase: preserveScroll ? 'keep' : 'reset',
+        },
+      });
     }
 
     /**
@@ -8747,6 +9287,7 @@ window.ClipViewMasonry = Masonry;
     let cardResizeObs = null;
     let driftTimer = 0;
     let driftAcc = { n: 0, max: 0, kind: '' };
+    let driftDays = new Set();
     function ensureCardResizeObserver() {
       if (cardResizeObs || typeof ResizeObserver === 'undefined') return;
       cardResizeObs = new ResizeObserver((entries) => {
@@ -8762,6 +9303,8 @@ window.ClipViewMasonry = Masonry;
           if (Math.abs(delta) < 2) continue;
           driftAcc.n += 1;
           if (Math.abs(delta) > Math.abs(driftAcc.max)) driftAcc.max = delta;
+          const sec = el.closest ? el.closest('.day-group') : null;
+          if (sec && sec.dataset.day) driftDays.add(sec.dataset.day);
           if (!driftAcc.kind) {
             driftAcc.kind = el.querySelector('.thumb-wrap img, .md-preview img, img') ? 'image'
               : (el.querySelector('table') ? 'table' : 'content');
@@ -8771,15 +9314,17 @@ window.ClipViewMasonry = Masonry;
           driftTimer = window.setTimeout(() => {
             driftTimer = 0;
             const acc = driftAcc;
+            const days = driftDays;
             driftAcc = { n: 0, max: 0, kind: '' };
+            driftDays = new Set();
             nm('wall_layout_drift', {
               value: Math.abs(Math.round(acc.max)),
               ok: false,
               over: true,
-              payload: { n: acc.n, kind: acc.kind },
+              payload: { n: acc.n, kind: acc.kind, days: days.size },
             });
-            const host = document.getElementById('grid');
-            if (host) layoutMasonry(host, wallRestCards(), { preserveScroll: true });
+            // Re-pack only the days that actually drifted, never the whole wall.
+            relayoutDays(days, { preserveScroll: true });
           }, 120);
         }
       });
@@ -8824,7 +9369,7 @@ window.ClipViewMasonry = Masonry;
         }
       }
 
-      host.className = 'masonry';
+      host.classList.add('masonry');
       host.style.position = 'relative';
       if (!cards.length) {
         host.style.height = '';
@@ -8925,13 +9470,6 @@ window.ClipViewMasonry = Masonry;
       layoutMasonry(host, orderedCards, { preserveScroll: false });
     }
 
-    function wallRestCards() {
-      const view = clientFilter(clips);
-      const inTrash = currentView === 'trash';
-      const rest = inTrash ? view : view.filter((it) => !itemIsPinned(it));
-      return rest.map((item) => ensureCard(item));
-    }
-
     function appendCardsIncremental(newItems) {
       if (wallParked) { parkedPaintDirty = true; return; }
       const host = document.getElementById('grid');
@@ -8939,8 +9477,18 @@ window.ClipViewMasonry = Masonry;
       const viewIds = new Set(clientFilter(clips).map((i) => i.id));
       const toAdd = (newItems || []).filter((it) => viewIds.has(it.id) && !itemIsPinned(it));
       if (!toAdd.length && host.querySelector('.m3-card')) return;
-      for (const it of toAdd) ensureCard(it);
-      layoutMasonry(host, wallRestCards(), { preserveScroll: true });
+      const touched = new Set(toAdd.map((it) => DayGroups.keyForItem(it)));
+      // The rail can appear once a second day loads — that reserves a gutter and
+      // changes feed width, so every day must reflow, not just the touched one.
+      if (renderDayRail(DayGroups.group(wallRestItems()))) { rebuildFromData({ preserveScroll: true }); return; }
+      for (const it of toAdd) {
+        const dayHost = dayHostOf(ensureDaySection(host, DayGroups.keyForItem(it)));
+        const card = ensureCard(it);
+        if (card && dayHost) dayHost.appendChild(card);
+      }
+      refreshDayHeadsFor(touched);
+      relayoutDays(touched, { preserveScroll: true });
+      observeDaySections();
     }
 
     function prependCardsIncremental(newItems) {
@@ -8951,9 +9499,27 @@ window.ClipViewMasonry = Masonry;
       const viewIds = new Set(clientFilter(clips).map((i) => i.id));
       const toAdd = (newItems || []).filter((it) => viewIds.has(it.id) && !itemIsPinned(it));
       if (!toAdd.length) return;
-      for (const it of toAdd) ensureCard(it);
       const y0 = window.scrollY || document.documentElement.scrollTop || 0;
-      layoutMasonry(host, wallRestCards(), { preserveScroll: y0 >= 24 });
+      if (renderDayRail(DayGroups.group(wallRestItems()))) { rebuildFromData({ preserveScroll: true }); return; }
+      const anchor = y0 >= 24 ? captureWallAnchor() : null;
+      const touched = new Set();
+      for (const it of toAdd) {
+        const day = DayGroups.keyForItem(it);
+        const dayHost = dayHostOf(ensureDaySection(host, day));
+        const card = ensureCard(it);
+        if (card && dayHost) dayHost.insertBefore(card, dayHost.firstChild);
+        touched.add(day);
+      }
+      // A brand-new newest day must move to the head of the feed.
+      for (const g of DayGroups.group(wallRestItems())) host.appendChild(ensureDaySection(host, g.day));
+      refreshDayHeadsFor(touched);
+      for (const day of touched) {
+        const dayHost = dayHostOf(daySectionEl(host, day));
+        if (!dayHost) continue;
+        layoutMasonry(dayHost, [...dayHost.querySelectorAll(':scope > .m3-card')], { preserveScroll: false });
+      }
+      if (anchor) restoreWallAnchor(anchor);
+      observeDaySections();
     }
 
     function masonryOccupiedCols(host) {
@@ -8967,6 +9533,13 @@ window.ClipViewMasonry = Masonry;
     function masonryIsDegenerate(host) {
       const el = host || document.getElementById('grid');
       if (!el) return false;
+      // Feed container (`.wall-feed`): degenerate when any day canvas collapsed.
+      if (!el.classList.contains('masonry')) {
+        for (const dh of el.querySelectorAll(':scope > .day-group > .day-masonry')) {
+          if (masonryIsDegenerate(dh)) return true;
+        }
+        return false;
+      }
       const nCards = el.querySelectorAll(':scope > .m3-card').length;
       const cols = Masonry.columnCountForWidth(el.clientWidth || window.innerWidth);
       if (cols <= 1 || nCards <= 1) return false;
@@ -8985,8 +9558,12 @@ window.ClipViewMasonry = Masonry;
       if (rebalanceBusy) return;
       rebalanceBusy = true;
       try {
-        const host = document.getElementById('grid');
-        layoutMasonry(host, orderedCards || wallRestCards(), { preserveScroll: true });
+        if (orderedCards && orderedCards.length) {
+          const dayHost = orderedCards[0] && orderedCards[0].closest('.day-masonry');
+          if (dayHost) layoutMasonry(dayHost, orderedCards, { preserveScroll: true });
+        } else {
+          relayoutAllDays({ preserveScroll: true });
+        }
       } finally {
         rebalanceBusy = false;
       }
@@ -9003,7 +9580,7 @@ window.ClipViewMasonry = Masonry;
         if (cols !== lastColCount || !host.querySelector('.m3-card')) {
           rebuildFromData({ preserveScroll: true });
         } else {
-          layoutMasonry(host, wallRestCards(), { preserveScroll: true });
+          relayoutAllDays({ preserveScroll: true });
         }
       }), 48);
     }
@@ -9016,9 +9593,16 @@ window.ClipViewMasonry = Masonry;
      */
     function patchColHeightForCard(card, heightDelta) {
       if (!card || !heightDelta) return;
-      const host = document.getElementById('grid');
-      if (!host) return;
-      layoutMasonry(host, wallRestCards(), { preserveScroll: true });
+      if (wallParked) { parkedPaintDirty = true; return; }
+      const sec = card.closest ? card.closest('.day-group') : null;
+      if (sec && sec.dataset.day) {
+        relayoutDays(new Set([sec.dataset.day]), { preserveScroll: true });
+        return;
+      }
+      const pinHost = document.getElementById('gridPinned');
+      if (pinHost && card.parentNode === pinHost) {
+        layoutMasonry(pinHost, [...pinHost.querySelectorAll(':scope > .m3-card')], { preserveScroll: true });
+      }
     }
 
     function compensateScrollForHeightDelta(card, heightDelta) {
@@ -9385,6 +9969,8 @@ window.ClipViewMasonry = Masonry;
     }
 
     window.addEventListener('resize', () => scheduleRebalance());
+    // Rail active-day tracking follows scroll (rAF-throttled, rail-only).
+    window.addEventListener('scroll', scheduleDayRailActive, { passive: true });
 
     // SSE control stream: native EventSource retry + snapshot resync.
     // Heartbeat `ping` is silent. Overflow/reconnect → mergeHead (not fetchPage reset).
@@ -9877,6 +10463,7 @@ window.ClipViewMasonry = Masonry;
       chrome_shift: { label: '顶栏位移', unit: 'cls', budget: 0.1 },
       wall_layout_drift: { label: '布局漂移(px)', unit: 'count', budget: 0 },
       wall_lifecycle: { label: '停画生命周期', unit: 'ms', budget: null },
+      wall_day_jump: { label: '时间线跳转', unit: 'count', budget: null },
       trae_sessions_switch: { label: '切换会话', unit: 'ms', budget: 300 },
       trae_sessions_tools: { label: '工具索引', unit: 'ms', budget: 200 },
       trae_sessions_load: { label: '加载事件', unit: 'ms', budget: 150 },

@@ -179,7 +179,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 ## 墙
 
-**不变式：** 列表轻、预览重；变更差分；滚动不 `innerHTML` 整墙。活更新按**有序列** shortest-column **绝对定位**（改 left/top，卡身份不变），视口上方用锚点补 `scrollY`。**时间线 = 捕获时钟，不是同步到达时钟。**
+**不变式：** 列表轻、预览重；变更差分；滚动不 `innerHTML` 整墙。活更新按**有序列** shortest-column **绝对定位**（改 left/top，卡身份不变），视口上方用锚点补 `scrollY`。**时间线 = 捕获时钟，不是同步到达时钟。** 渲染按**捕获日**分片：一天一块 `.day-masonry` 独立装箱，增量只重排当天（`relayoutDays`），`#dayRail` 只做锚点跳转。
 
 ```text
   SSE /api/events
@@ -207,6 +207,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
 | 卡片晚到高度（图片/表格/OCR/字体）→ `dataset.packedH` + ResizeObserver 只 repack 该列 | 全量 rebuild；预览 `img` 不限高（`.md-preview img` 必须 max-height） |
 | 拉数据 burst（对端 apply / 连打复制）→ 合并成**一次** head merge（`scheduleUpdateIngest` → `wallFlushPlan`） | 每个 `update` 一次 `/api/clips?id=` + 一次重排（N 项 × N 页 = CPU 风暴） |
+| 按**捕获日**分片：每天一块 `.masonry.day-masonry` 独立装箱；`relayoutDays` 增量只重排当天；header 出当日条数 + 类型统计；`#dayRail` 跳日 | 整墙当一个 canvas 每次全量测高；按同步到达时间分组；跳日走 `fetchPage({reset:true})`（滚到顶） |
 | 无人看（隐藏，或 `WALL_IDLE_MS` 无 pointer/key/wheel/touch 输入）→ `parkWall` 停画停解码，SSE 与模型照留；回输入 `wakeWall` 一次补画 | 无人看仍跟每个事件重排/解码；把无头页当常驻客户端（`visibilityState`/`hasFocus()` 对无头一直说谎，判据是**真输入**） |
 | 745KB 笔记编辑器首屏不加载；打开笔记才拉 `notes-editor.js` | 把编辑器 bundle 塞进 `<head>` 挡墙首屏 |
 
@@ -399,6 +400,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | --- | --- |
 | 墙刷新 | `wall_fetch` `wall_merge` `wall_paint` `wall_resync` |
 | 墙停画生命周期 | `wall_lifecycle` phase=park/wake + reason（hidden/idle/input/visible）；`wall_merge` kind=burst phase=coalesce n |
+| 时间线跳日 | `wall_day_jump` payload day/days（count） |
 | 墙插入 CLS | `wall_cls` kind=m3-card phase=wall；`wall_paint` kind=prepend phase=keep\|top |
 | 墙长任务 | `wall_longtask` phase=loaf\|longtask + kind/reason/host |
 | 开合 sheet | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` |
