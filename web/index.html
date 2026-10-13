@@ -9151,16 +9151,11 @@ window.ClipViewMasonry = Masonry;
       return sec ? sec.querySelector(':scope > .day-masonry') : null;
     }
 
+    /** Header bucket meta. `rich` is the header-only bucket for html/rtf
+     * (DayGroups.stats); everything else is the card's own type source. */
     function dayBucketMeta(bucket) {
-      const map = {
-        rich:  { label: '富文本', icon: 'code', cls: 'type-html' },
-        image: { label: '图片', icon: 'image', cls: 'type-image' },
-        url:   { label: '链接', icon: 'link', cls: 'type-url' },
-        text:  { label: '文本', icon: 'text_fields', cls: 'type-text' },
-        pdf:   { label: 'PDF', icon: 'picture_as_pdf', cls: 'type-pdf' },
-        file:  { label: '文件', icon: 'folder', cls: 'type-file' },
-      };
-      return map[bucket] || { label: bucket === 'other' ? '其他' : String(bucket || ''), icon: 'label', cls: 'type-other' };
+      if (bucket === 'rich') return { label: '富文本', icon: 'code', cls: 'type-html' };
+      return typeMeta(bucket);
     }
 
     /**

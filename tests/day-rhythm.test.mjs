@@ -234,6 +234,13 @@ test('the now marker is today-only, built once (no timer repaint)', () => {
   assert.doesNotMatch(html, /setInterval\([^)]*dayRhythmMarkup/);
 });
 
+test('day pills reuse the card type source (no raw latin bucket in a Chinese header)', () => {
+  // One truth for labels/icons/colours: the header must not keep a second map
+  // that drifts (it used to print `note` instead of 笔记).
+  assert.match(html, /function dayBucketMeta\(bucket\) \{\n      if \(bucket === 'rich'\) return \{ label: '富文本', icon: 'code', cls: 'type-html' \};\n      return typeMeta\(bucket\);/);
+  assert.doesNotMatch(html, /bucket === 'other' \? '其他' : String\(bucket \|\| ''\)/);
+});
+
 test('the strip stays one honey hue (no second colour, no rainbow)', () => {
   assert.match(html, /\.rhythm-bar\.is-peak \{ background: var\(--type-text\); \}/);
   assert.match(html, /\.rhythm-bar \{[\s\S]{0,220}background: rgba\(196, 122, 44, 0\.26\);/);
