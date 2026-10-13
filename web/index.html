@@ -4207,11 +4207,14 @@ window.ClipViewMasonry = Masonry;
       const end = Math.min(text.length, first.end + 42);
       return (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '');
     }
-    function noteTitleOf(item) {
-      const raw = decodeNoteBody(item.textContent || '');
-      const m = raw.match(/^#\s+(.+)$/m);
+    function noteTitleText(raw) {
+      const text = decodeNoteBody(raw || '');
+      const m = text.match(/^#\s+(.+)$/m);
       if (m) return m[1].trim();
-      return noteExcerpt(raw).slice(0, 36) || '';
+      return noteExcerpt(text).slice(0, 36) || '';
+    }
+    function noteTitleOf(item) {
+      return noteTitleText((item && item.textContent) || '');
     }
     function decodeNoteBody(s) {
       let t = String(s || '');
@@ -4303,6 +4306,28 @@ window.ClipViewMasonry = Masonry;
     }
     function trimNoteTrailingBlanks(md) {
       return String(md || '').replace(/(?:\r?\n[ \t]*)+$/, '');
+    }
+    /**
+     * Decide which title owns a saved note, and what the editor should show.
+     *
+     * Storage is "# title\n\nbody" (ComposeNotes.normalizedBody). The title field
+     * is the only thing that names a note: when the user typed a title, a leading
+     * H1 that differs from it is *body content* — keep it in the body and keep the
+     * typed title. Adopting it would swap the user's title for a body heading and
+     * eat the heading out of the body (regression 2026-10-13: title
+     * "sgtt frontier upgrade" became "jiu"). A merge/conflict is server-authoritative.
+     * Keep in sync with Sources/ClipVault/Store/ComposeNotes.swift + tests/notes-title.test.mjs.
+     */
+    function noteSaveResolution(stored, typedTitle, merged, conflict) {
+      const text = String(stored || '');
+      const heading = noteTitleText(text);
+      const typed = String(typedTitle || '').trim();
+      const keepTyped = !merged && !conflict && !!typed && String(heading || '') !== typed;
+      return {
+        title: keepTyped ? typed : heading,
+        body: keepTyped ? text : noteStripTitle(text, heading),
+        adoptTitle: !keepTyped,
+      };
     }
     function applyNotesMode(mode) {
       if (!notesState.editor || !mode) return;
@@ -5027,13 +5052,13 @@ window.ClipViewMasonry = Masonry;
         if (ridx >= 0) notesState.results[ridx] = j.item;
         notesState.saveAttempts = 0;
         notesStatus('saved');
-        const t = noteTitleOf(j.item);
-        const nextBody = noteStripTitle(j.item.textContent || '', t);
-        if (j.merged || j.conflict || nextBody !== body) {
+        const stored = j.item.textContent || '';
+        const resolved = noteSaveResolution(stored, title, j.merged, j.conflict);
+        if (j.merged || j.conflict || resolved.body !== body) {
           const titleEl = document.getElementById('notesTitle');
-          if (titleEl) titleEl.value = t;
+          if (titleEl && resolved.adoptTitle) titleEl.value = resolved.title;
           paintNotesTitleView();
-          await ensureNotesEditor(nextBody);
+          await ensureNotesEditor(resolved.body);
         }
         if (j.conflict || String(j.item.textContent || '').includes('<<<<<<< ')) {
           paintNotesMergeHint('这篇有两处改动已并入，请看源码里的标记');
