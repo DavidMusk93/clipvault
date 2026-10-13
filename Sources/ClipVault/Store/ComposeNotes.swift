@@ -14,16 +14,33 @@ enum ComposeNotes {
     }
 
     /// Title lives as a markdown H1 plus one separator blank line.
+    ///
     /// The editor body is stored as-is (including trailing blank lines) so autosave
     /// does not yank empty lines out from under the caret. Trailing blanks are
     /// trimmed by the client when the notes panel closes.
+    ///
+    /// A body that already starts with *this same* H1 is a client round-trip or a
+    /// merge result, so the title must not be stacked twice. A leading H1 holding
+    /// any other text is **body content**: the explicit title is still stored, or
+    /// the title field silently loses what the user typed and the body heading
+    /// takes its place (regression 2026-10-13: title `sgtt frontier upgrade` became
+    /// `jiu`; see tests/compose_notes_main.swift).
     static func normalizedBody(title: String?, body: String) -> String {
         let t = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let b = body.replacingOccurrences(of: "\r\n", with: "\n")
         if t.isEmpty { return b }
-        if b.hasPrefix("# ") { return b }
+        if leadingHeading(b) == t { return b }
         if b.isEmpty { return "# \(t)" }
         return "# \(t)\n\n\(b)"
+    }
+
+    /// Text of the body's first line when that line is an ATX H1, else nil.
+    /// Compared against the submitted title instead of trusting a "# " prefix:
+    /// `# Tree` is not the heading for title `T`.
+    static func leadingHeading(_ body: String) -> String? {
+        let firstLine = body.prefix(while: { $0 != "\n" })
+        guard firstLine.hasPrefix("# ") else { return nil }
+        return String(firstLine.dropFirst(2)).trimmingCharacters(in: .whitespaces)
     }
 
     static func contentHash(id: UUID, body: String) -> String {

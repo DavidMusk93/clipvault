@@ -227,7 +227,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 ## 笔记
 
-**不变式：** 同一页霜层；源码 \| 预览；保存走 `compose_saved`，禁止 SSE `update` 刷墙。
+**不变式：** 同一页霜层；源码 \| 预览；保存走 `compose_saved`，禁止 SSE `update` 刷墙。**标题只由标题栏命名**：存储是 `# title\n\nbody`，正文首个 H1 只要不等于标题就是正文，禁止把它搬进标题栏、也禁止把它从正文剥掉（`ComposeNotes.leadingHeading` + `noteSaveResolution`）。
 
 ```text
   #notesPanel
