@@ -562,13 +562,20 @@
     .day-group + .day-group { margin-top: 10px; }
     .day-head {
       display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 7px;
+      min-width: 0;
+      margin: 16px 2px 12px;
+      padding: 0 2px;
+    }
+    .day-head-top {
+      display: flex;
       align-items: baseline;
       justify-content: space-between;
       gap: 8px 12px;
       flex-wrap: wrap;
       min-width: 0;
-      margin: 16px 2px 12px;
-      padding: 0 2px;
     }
     .day-group:first-child > .day-head { margin-top: 4px; }
     .day-head-main {
@@ -596,6 +603,76 @@
       white-space: nowrap;
     }
     .day-stats .badge { font-variant-numeric: tabular-nums; }
+
+    /* —— Day rhythm: the capture clock as 48 half-hour marks ——
+       One honey hue; height + alpha carry the count, so the strip never
+       competes with the semantic type badges above it. The facts line reads
+       the same clock the cards do (AGENTS.md · 墙: timeline = capture clock). */
+    .day-rhythm { display: grid; gap: 3px; min-width: 0; }
+    .rhythm-track {
+      position: relative;
+      display: flex;
+      align-items: flex-end;
+      gap: 1px;
+      height: 24px;
+      min-width: 0;
+      padding: 0 1px;
+      border-bottom: 1px solid var(--separator);
+    }
+    .rhythm-nightzone {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-radius: 3px;
+      background: rgba(60, 60, 67, 0.055);
+      pointer-events: none;
+    }
+    .rhythm-bar {
+      position: relative;
+      flex: 1 1 0;
+      min-width: 0;
+      height: var(--h, 2px);
+      border-radius: 2px 2px 0 0;
+      background: rgba(196, 122, 44, 0.26);
+    }
+    .rhythm-bar.is-night { background: rgba(196, 122, 44, 0.15); }
+    .rhythm-bar.is-peak { background: var(--type-text); }
+    .rhythm-now {
+      position: absolute;
+      top: -1px;
+      bottom: -2px;
+      width: 1px;
+      background: var(--accent);
+      opacity: 0.65;
+      pointer-events: none;
+    }
+    .rhythm-ticks {
+      display: flex;
+      justify-content: space-between;
+      padding: 0 1px;
+      font: 500 10px/1 var(--font-ui);
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+    }
+    .rhythm-facts {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 2px 7px;
+      padding: 0 1px;
+      font: 500 11px/1.45 var(--font-ui);
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+    }
+    .rhythm-fact { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
+    .rhythm-fact-label { color: var(--muted); }
+    .rhythm-fact-value { color: var(--ink); font-weight: 600; }
+    .rhythm-fact-sep { color: var(--separator-strong); }
+    @media (max-width: 620px) {
+      .rhythm-facts { gap: 2px 6px; }
+    }
 
     /* —— Timeline rail: jump between capture days —— */
     .day-rail {
@@ -3237,6 +3314,111 @@
       }
     };
     window.ClipViewDayGroups = DayGroups;
+
+    /**
+     * Day rhythm for the wall header (pure; mirrored by tests/day-rhythm.test.mjs).
+     * Reads the **capture clock only**: the server wall string `timeLocal`, else
+     * unix seconds. OCR / sync arrival never moves a mark (AGENTS.md · 墙).
+     */
+    const DayRhythm = {
+      BINS: 48,
+      BIN_MINUTES: 30,
+      NIGHT_START: 22 * 60,
+      NIGHT_END: 6 * 60,
+      /** Minute of day 0..1439 from the capture clock; null when unusable. */
+      minuteOfItem(item) {
+        if (!item) return null;
+        const wall = String(item.timeLocal == null ? '' : item.timeLocal).trim();
+        if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}[ T]/.test(wall)) {
+          const m = wall.match(/(\d{1,2}):(\d{2})(?::\d{2})?/);
+          if (m) {
+            const h = Number(m[1]);
+            const mi = Number(m[2]);
+            if (h >= 0 && h < 24 && mi >= 0 && mi < 60) return h * 60 + mi;
+          }
+        }
+        const ts = Number(item.timestamp != null ? item.timestamp : item.ts);
+        if (Number.isFinite(ts) && ts > 0) {
+          const d = new Date(ts * 1000);
+          if (!Number.isNaN(d.getTime())) return d.getHours() * 60 + d.getMinutes();
+        }
+        return null;
+      },
+      isNight(min) {
+        if (min == null || min === '') return false;
+        const m = Number(min);
+        return Number.isFinite(m) && (m >= DayRhythm.NIGHT_START || m < DayRhythm.NIGHT_END);
+      },
+      /** 48 half-hour buckets over the capture clock; `n` counts usable times. */
+      histogram(items) {
+        const bins = new Array(DayRhythm.BINS).fill(0);
+        let n = 0;
+        for (const it of items || []) {
+          const m = DayRhythm.minuteOfItem(it);
+          if (m == null) continue;
+          bins[Math.min(DayRhythm.BINS - 1, Math.floor(m / DayRhythm.BIN_MINUTES))] += 1;
+          n += 1;
+        }
+        return { bins, n };
+      },
+      /** Everything the header prints: buckets + span + peak + night + gap. */
+      summary(items) {
+        const { bins, n } = DayRhythm.histogram(items);
+        const minutes = [];
+        for (const it of items || []) {
+          const m = DayRhythm.minuteOfItem(it);
+          if (m != null) minutes.push(m);
+        }
+        minutes.sort((a, b) => a - b);
+        let peakBin = 0;
+        let peakCount = 0;
+        for (let i = 0; i < bins.length; i += 1) {
+          if (bins[i] > peakCount) { peakCount = bins[i]; peakBin = i; }
+        }
+        let night = 0;
+        for (const m of minutes) if (DayRhythm.isNight(m)) night += 1;
+        let maxGapMin = 0;
+        for (let i = 1; i < minutes.length; i += 1) {
+          const gap = minutes[i] - minutes[i - 1];
+          if (gap > maxGapMin) maxGapMin = gap;
+        }
+        const firstMin = minutes.length ? minutes[0] : null;
+        const lastMin = minutes.length ? minutes[minutes.length - 1] : null;
+        return {
+          bins,
+          n,
+          total: (items || []).length,
+          firstMin,
+          lastMin,
+          spanMin: firstMin == null ? 0 : lastMin - firstMin,
+          peakBin,
+          peakCount,
+          night,
+          nightShare: n ? night / n : 0,
+          maxGapMin: minutes.length > 1 ? maxGapMin : null,
+        };
+      },
+      hhmm(min) {
+        const v = Number(min);
+        if (!Number.isFinite(v)) return '—';
+        const clamped = Math.max(0, Math.min(24 * 60, Math.round(v)));
+        const p = (x) => String(x).padStart(2, '0');
+        return p(Math.floor(clamped / 60)) + ':' + p(clamped % 60);
+      },
+      duration(min) {
+        const v = Math.max(0, Math.round(Number(min) || 0));
+        const h = Math.floor(v / 60);
+        const m = v % 60;
+        if (!h) return m + ' 分';
+        return m ? h + ' 小时 ' + m + ' 分' : h + ' 小时';
+      },
+      /** Half-hour bucket label, e.g. `14:00–14:30`. */
+      binLabel(i) {
+        const start = (Number(i) || 0) * DayRhythm.BIN_MINUTES;
+        return DayRhythm.hhmm(start) + '–' + DayRhythm.hhmm(start + DayRhythm.BIN_MINUTES);
+      },
+    };
+    window.ClipViewDayRhythm = DayRhythm;
 
         const MASONRY_GAP = 14; /* must match CSS --gap */
 
@@ -8942,6 +9124,21 @@ window.ClipViewMasonry = Masonry;
       return DayGroups.localDayKey(Date.now());
     }
 
+    /** Now as minute of day in the wall display zone (same clock as the cards). */
+    function wallNowMinute() {
+      try {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: displayTimeZone(), hour: '2-digit', minute: '2-digit', hour12: false,
+        }).formatToParts(new Date());
+        const get = (t) => (parts.find((p) => p.type === t) || {}).value || '';
+        const h = Number(get('hour')) % 24;
+        const m = Number(get('minute'));
+        if (Number.isFinite(h) && Number.isFinite(m)) return h * 60 + m;
+      } catch (_) {}
+      const d = new Date();
+      return d.getHours() * 60 + d.getMinutes();
+    }
+
     function daySectionEl(feed, day) {
       if (!feed || !day) return null;
       for (const sec of feed.querySelectorAll(':scope > .day-group')) {
@@ -8966,9 +9163,61 @@ window.ClipViewMasonry = Masonry;
       return map[bucket] || { label: bucket === 'other' ? '其他' : String(bucket || ''), icon: 'label', cls: 'type-other' };
     }
 
+    /**
+     * Activity strip for one capture day: 48 half-hour marks on the capture
+     * clock + a facts line. Height and alpha carry the count, so the strip
+     * stays one honey hue and never competes with the type badges.
+     */
+    function dayRhythmMarkup(rhythm, { today = false, nowMin = null } = {}) {
+      const hist = (rhythm && rhythm.bins) || [];
+      if (!hist.length || !rhythm.n) {
+        return `<div class="day-rhythm" data-day-rhythm>
+            <div class="rhythm-track" role="img" aria-label="当天没有可用捕获时间">
+              <span class="rhythm-nightzone" style="left:0;width:12.5%" aria-hidden="true"></span>
+              <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>
+            </div>
+            <div class="rhythm-ticks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+            <div class="rhythm-facts"><span class="rhythm-fact"><span class="rhythm-fact-label">活跃</span><span class="rhythm-fact-value">无时间</span></span></div>
+          </div>`;
+      }
+      const max = Math.max(1, rhythm.peakCount);
+      const bars = hist.map((count, i) => {
+        const h = count ? Math.round(4 + 18 * Math.sqrt(count / max)) : 2;
+        const cls = 'rhythm-bar'
+          + (count && i === rhythm.peakBin ? ' is-peak' : '')
+          + (DayRhythm.isNight(i * DayRhythm.BIN_MINUTES) ? ' is-night' : '');
+        return `<span class="${cls}" style="--h:${h}px" title="${escAttr(DayRhythm.binLabel(i) + ' · ' + count + ' 条')}"></span>`;
+      }).join('');
+      const nightSharePct = Math.round(rhythm.nightShare * 100);
+      const now = today && nowMin != null
+        ? `<span class="rhythm-now" style="left:${((nowMin / 1440) * 100).toFixed(3)}%" title="现在 ${escAttr(DayRhythm.hhmm(nowMin))}"></span>`
+        : '';
+      const aria = `${DayRhythm.hhmm(rhythm.firstMin)} 到 ${DayRhythm.hhmm(rhythm.lastMin)} 活跃，共 ${rhythm.n} 条；`
+        + `峰值 ${DayRhythm.binLabel(rhythm.peakBin)} ${rhythm.peakCount} 条；夜间占 ${nightSharePct}%`;
+      const facts = [
+        ['活跃', `${DayRhythm.hhmm(rhythm.firstMin)}–${DayRhythm.hhmm(rhythm.lastMin)} · ${DayRhythm.duration(rhythm.spanMin)}`],
+        ['峰值', `${DayRhythm.binLabel(rhythm.peakBin)} · ${rhythm.peakCount} 条`],
+        ['夜间', `${nightSharePct}%`],
+        ['最长空档', rhythm.maxGapMin == null ? '—' : DayRhythm.duration(rhythm.maxGapMin)],
+      ];
+      const factsHtml = facts.map(([label, value]) => `
+            <span class="rhythm-fact"><span class="rhythm-fact-label">${esc(label)}</span><span class="rhythm-fact-value">${esc(value)}</span></span>`)
+        .join('<span class="rhythm-fact-sep" aria-hidden="true">·</span>');
+      return `<div class="day-rhythm" data-day-rhythm>
+          <div class="rhythm-track" role="img" aria-label="${escAttr(aria)}">
+            <span class="rhythm-nightzone" style="left:0;width:12.5%" aria-hidden="true"></span>
+            <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>${bars}${now}
+          </div>
+          <div class="rhythm-ticks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+          <div class="rhythm-facts" data-day-rhythm-facts>${factsHtml}</div>
+        </div>`;
+    }
+
     function dayHeadMarkup(group) {
       const st = DayGroups.stats(group.items);
+      const rhythm = DayRhythm.summary(group.items);
       const todayKey = wallTodayKey();
+      const today = !!todayKey && group.day === todayKey;
       const title = DayGroups.shortLabel(group.day, todayKey);
       const dateText = DayGroups.dayDateText(group.day);
       const pills = Object.keys(st.byType)
@@ -8977,11 +9226,14 @@ window.ClipViewMasonry = Masonry;
           const meta = dayBucketMeta(bucket);
           return `<span class="badge ${meta.cls}"><span class="material-symbols-outlined">${meta.icon}</span>${meta.label} ${st.byType[bucket]}</span>`;
         }).join('');
-      return `<div class="day-head-main">
-          <h2 class="day-title">${esc(title)}</h2>
-          ${dateText && dateText !== title ? `<span class="day-date">${esc(dateText)}</span>` : ''}
+      return `<div class="day-head-top">
+          <div class="day-head-main">
+            <h2 class="day-title">${esc(title)}</h2>
+            ${dateText && dateText !== title ? `<span class="day-date">${esc(dateText)}</span>` : ''}
+          </div>
+          <div class="day-stats"><span class="day-stat is-total">共 ${st.total} 条</span>${pills}</div>
         </div>
-        <div class="day-stats"><span class="day-stat is-total">共 ${st.total} 条</span>${pills}</div>`;
+        ${dayRhythmMarkup(rhythm, { today, nowMin: today ? wallNowMinute() : null })}`;
     }
 
     function ensureDaySection(feed, day) {
