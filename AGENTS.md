@@ -207,7 +207,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
 | 卡片晚到高度（图片/表格/OCR/字体）→ `dataset.packedH` + ResizeObserver 只 repack 该列 | 全量 rebuild；预览 `img` 不限高（`.md-preview img` 必须 max-height） |
 | 拉数据 burst（对端 apply / 连打复制）→ 合并成**一次** head merge（`scheduleUpdateIngest` → `wallFlushPlan`） | 每个 `update` 一次 `/api/clips?id=` + 一次重排（N 项 × N 页 = CPU 风暴） |
-| 节奏条 hover/键盘划读：1px crosshair 1:1 跟指针 + 读数覆在事实行上（都是绝对定位 overlay），事实 hover 只亮它点名的区间 | hover 改几何 / repack / 整墙重绘；每格留原生 `title`（双 tooltip）；48 格各开一个 tab 位 |
+| 节奏条 hover/键盘划读：1px crosshair 1:1 跟指针（只写 transform）+ 读数覆在事实行上（都是绝对定位 overlay），事实 hover 只亮它点名的区间 | hover 改几何 / repack / 整墙重绘；每格留原生 `title`（双 tooltip）；48 格各开一个 tab 位 |
 | 按**捕获日**分片：每天一块 `.masonry.day-masonry` 独立装箱；`relayoutDays` 增量只重排当天；header 出当日条数 + 类型统计 + 48 格节奏条（活跃跨度 / 峰值 / 夜间占比 / 最长空档）；`#dayRail` 跳日 | 整墙当一个 canvas 每次全量测高；按同步到达时间分组或统计；节奏条另起一套色；跳日走 `fetchPage({reset:true})`（滚到顶） |
 | 无人看（隐藏，或 `WALL_IDLE_MS` 无 pointer/key/wheel/touch 输入）→ `parkWall` 停画停解码，SSE 与模型照留；回输入 `wakeWall` 一次补画 | 无人看仍跟每个事件重排/解码；把无头页当常驻客户端（`visibilityState`/`hasFocus()` 对无头一直说谎，判据是**真输入**） |
 | 745KB 笔记编辑器首屏不加载；打开笔记才拉 `notes-editor.js` | 把编辑器 bundle 塞进 `<head>` 挡墙首屏 |

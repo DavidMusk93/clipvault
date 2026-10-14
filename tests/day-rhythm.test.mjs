@@ -346,7 +346,11 @@ test('shipped header renders the rhythm strip and keeps the old anchors', () => 
 
 test('scrub reads one bin and never re-flows the wall', () => {
   // The crosshair / readout / bands are overlays: hover must not move the wall.
-  assert.match(html, /\.rhythm-guide \{[\s\S]{0,200}position: absolute;/);
+  assert.match(html, /\.rhythm-guide \{[\s\S]{0,260}position: absolute;/);
+  // The crosshair must move on the compositor (transform), never on `left`.
+  assert.match(html, /guide\.style\.transform = 'translateX\(' \+ \(frac \* rect\.width\)\.toFixed\(2\) \+ 'px\)'/);
+  assert.match(html, /\.day-rhythm\.is-scrub \.rhythm-guide \{ will-change: transform; \}/);
+  assert.doesNotMatch(html, /guide\.style\.left/);
   assert.match(html, /\.rhythm-readout \{[\s\S]{0,400}position: absolute;/);
   assert.match(html, /\.rhythm-mark \{[\s\S]{0,300}position: absolute;/);
   assert.match(html, /\.day-rhythm\.is-scrub \.rhythm-facts-list \{ opacity: 0; \}/);

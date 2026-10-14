@@ -689,14 +689,17 @@
        material the night zones already use. */
     .rhythm-guide {
       position: absolute;
+      left: 0;
       top: -3px;
       bottom: -3px;
       width: 1px;
       background: rgba(60, 60, 67, 0.42);
       opacity: 0;
       pointer-events: none;
+      /* crosshair moves on the compositor: transform only, never `left` */
       transition: opacity 0.16s ease;
     }
+    .day-rhythm.is-scrub .rhythm-guide { will-change: transform; }
     .rhythm-mark {
       position: absolute;
       top: -1px;
@@ -9596,7 +9599,7 @@ window.ClipViewMasonry = Masonry;
         ? Math.min(last, rhythmWantBin)
         : Math.min(last, Math.floor(frac * bars.length));
       const guide = track.querySelector('.rhythm-guide');
-      if (guide) guide.style.left = (frac * 100).toFixed(4) + '%';
+      if (guide) guide.style.transform = 'translateX(' + (frac * rect.width).toFixed(2) + 'px)';
       if (bin !== rhythmBin) {
         const cur = track.querySelector('.rhythm-bar.is-cursor');
         if (cur) cur.classList.remove('is-cursor');
