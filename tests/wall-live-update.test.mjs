@@ -22,6 +22,18 @@ import { root } from './helpers/src.mjs';
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
 
+// jsdom is a dev-only dependency (`npm ci`). Load it once, defensively: the
+// capture-clock assertions only read web/index.html and must keep running in a
+// bare environment, and the day-scoped DOM test must degrade to a *reported*
+// skip instead of an ERR_MODULE_NOT_FOUND that kills the whole file.
+let JSDOM = null;
+let skipJsdom = false;
+try {
+  ({ JSDOM } = await import('jsdom'));
+} catch {
+  skipJsdom = 'jsdom not installed — run `npm ci`';
+}
+
 /** Brace-matched `function name(...) { ... }` out of the inline app script (keeps `async`). */
 function fnSource(name) {
   let start = html.indexOf(`function ${name}(`);
@@ -243,8 +255,7 @@ test('head drift is measured after the merge, so a real failure is visible', () 
   assert.match(fnSource('noteHeadDrift'), /over: drift > 0/);
 });
 
-test('a moved card leaves its old day, updates both headers, repacks only those days', async () => {
-  const { JSDOM } = await import('jsdom');
+test('a moved card leaves its old day, updates both headers, repacks only those days', { skip: skipJsdom }, async () => {
   const dom = new JSDOM(
     '<div id="grid">'
     + '<section class="day-group" data-day="2026/10/01">'
