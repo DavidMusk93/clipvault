@@ -604,6 +604,7 @@ class WebServer {
     /// minute is the churn signature (the live 2026-10-14 flap), so this gets its own
     /// budget: `value` = opens in the last 5 minutes, red above `sseChurnBudget`.
     private var sseOpenStamps: [Date] = []
+    private var lastSSEChurnValue = 0
     private static let sseChurnWindow: TimeInterval = 300
     private static let sseChurnBudget = 3
 
@@ -758,6 +759,7 @@ class WebServer {
             return
         }
         tickProcLocked()
+        emitSSEChurnLocked(onlyIfCooled: true)
         let ping = ssePingFrameLocked()
         for session in sseSessions.values {
             if session.resyncRequired { continue }
@@ -776,10 +778,20 @@ class WebServer {
 
     /// One-off churn sample: how many sockets this browser edge had to open in 5 minutes.
     private func noteSSEOpenLocked() {
+        sseOpenStamps.append(Date())
+        emitSSEChurnLocked(onlyIfCooled: false)
+    }
+
+    /// Sample the churn window. `onlyIfCooled` emits the single "back to 0" sample after a
+    /// burst cools down, so a reader can tell "0 opens in 5 min" from "never measured".
+    private func emitSSEChurnLocked(onlyIfCooled: Bool) {
         let now = Date()
-        sseOpenStamps.append(now)
         sseOpenStamps.removeAll { now.timeIntervalSince($0) > Self.sseChurnWindow }
         let churn = sseOpenStamps.count
+        if onlyIfCooled {
+            guard churn == 0, lastSSEChurnValue > 0 else { return }
+        }
+        lastSSEChurnValue = churn
         UiMetrics.shared.emit(
             "sse_socket_churn",
             value: Double(churn),

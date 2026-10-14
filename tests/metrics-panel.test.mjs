@@ -6,13 +6,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'path';
 import test from 'node:test';
-import { root } from './helpers/src.mjs';
+import { root, src } from './helpers/src.mjs';
 
 const js = readFileSync(join(root, 'web/assets/metrics-panel.js'), 'utf8');
 const css = readFileSync(join(root, 'web/assets/metrics-panel.css'), 'utf8');
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const sess = readFileSync(join(root, 'trae_hooks/web/sessions-vanilla.html'), 'utf8');
 const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+const web = src('WebServer.swift');
 
 test('popover keeps skip/paint and compile/preview, drops 24h essays', () => {
   assert.match(js, /function diagnose/);
@@ -132,4 +133,18 @@ test('loss-critical names carry a budget, and undeclared names are flagged', () 
   assert.match(html, /is-nobudget/);
   assert.match(html, /无预算/);
   assert.match(html, /个指标未声明（无预算，永不判红）/);
+});
+
+// Two sampling blind spots found while verifying the churn fix live: an idle wall never
+// runs `mergeHead` (so no drift sample existed at all), and a churn rate sampled only at
+// socket-open can never show "0 opens in 5 min" — absence is not evidence.
+test('an idle wall still samples drift, and churn cools to an explicit zero', () => {
+  assert.match(html, /const WALL_DRIFT_ASSURE_MS = 180000;/);
+  assert.match(html, /__cvDriftWatch/);
+  assert.match(html, /__cvDriftWatch = window\.setInterval\(\(\) => \{[\s\S]{0,220}scheduleResync\(\);/);
+  assert.match(html, /if \(document\.visibilityState === 'hidden'\) return;[\s\S]{0,120}if \(searchQuery/);
+  assert.match(web, /emitSSEChurnLocked\(onlyIfCooled: true\)/);
+  assert.match(web, /emitSSEChurnLocked\(onlyIfCooled: false\)/);
+  assert.match(web, /guard churn == 0, lastSSEChurnValue > 0 else \{ return \}/);
+  assert.match(web, /emitSSEChurnLocked\(onlyIfCooled: true\)\n\s+let ping/);
 });
