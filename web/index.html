@@ -16,7 +16,7 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n31" />
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n32" />
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n13"></script>
   <script src="/assets/ui-track.js?v=u1"></script>
@@ -1196,6 +1196,13 @@
     .notes-rich .notes-tok, .snippet-html .notes-tok, .md-preview .notes-tok {
       display: inline-block;
       max-width: 100%;
+    }
+    /* Marker lines: an inline-block's baseline is its LAST line box and `li::marker`
+       rides the line box baseline, so a wrapped guard that opens a list item would
+       drag the bullet onto its second line. `top` keeps the guard's first line on
+       the marker's line box. notes-wrap.mjs sets the class (never for inline code). */
+    .notes-rich .notes-tok-lead, .snippet-html .notes-tok-lead, .md-preview .notes-tok-lead {
+      vertical-align: top;
     }
     .notes-rich p:last-child, .snippet-html p:last-child { margin-bottom: 0; }
     .notes-rich p:empty, .snippet-html p:empty,
@@ -4942,7 +4949,7 @@ window.ClipViewMasonry = Masonry;
       if (notesEditorLoading) return notesEditorLoading;
       notesEditorLoading = new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = '/assets/notes-editor/notes-editor.js?v=n31';
+        s.src = '/assets/notes-editor/notes-editor.js?v=n32';
         s.async = true;
         s.onload = () => resolve(globalThis.ClipNotesEditor);
         s.onerror = () => reject(new Error('notes-editor load failed'));
@@ -8811,7 +8818,7 @@ window.ClipViewMasonry = Masonry;
     function loadTokenWrap() {
       if (tokenWrapMod) return Promise.resolve(tokenWrapMod);
       if (tokenWrapLoading) return tokenWrapLoading;
-      tokenWrapLoading = import('/assets/notes-wrap.mjs?v=w2')
+      tokenWrapLoading = import('/assets/notes-wrap.mjs?v=w3')
         .then((m) => { tokenWrapMod = m; return m; })
         .catch(() => { tokenWrapLoading = null; return null; });
       return tokenWrapLoading;
