@@ -200,6 +200,52 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   );
 });
 
+test('leader election does not churn on a throttled background heartbeat', () => {
+  // 2026-10-14: one socket churn per minute — `sse_state` role leader -> follow with a
+  // server-side `phase:drop`, and `/api/events` reopened ~1x/2min. Root cause: the
+  // leader's claim was judged by a 2.5s timer, but Chrome throttles a background tab's
+  // 1s heartbeat, so a healthy hidden leader looked dead and every tab re-claimed.
+  assert.match(indexHtml, /function sseRoleMsg\(t\)/);
+  assert.match(indexHtml, /vis: document\.visibilityState === 'visible'/);
+  const ttl = Number(/const SSE_LEAD_TTL_MS = (\d+);/.exec(indexHtml)?.[1]);
+  assert.ok(ttl >= 8000, 'the claim TTL must outlast a throttled background heartbeat');
+  assert.match(indexHtml, /function probeThenClaim/);
+  assert.match(indexHtml, /m\.t === 'probe'[\s\S]{0,200}sseBeat\(\)/, 'a probe must be answered event-driven');
+
+  const bc = indexHtml.slice(indexHtml.indexOf('sseBc.onmessage'), indexHtml.indexOf('function onFeedVisible()'));
+  assert.match(bc, /sseYieldToPeer\(/);
+  assert.doesNotMatch(
+    bc,
+    /String\(m\.id\) < sseTabId\) setSseLeader\(false\)/,
+    'an id-only tie-break flapped between a visible and a hidden tab',
+  );
+  assert.match(bc, /m\.t === 'offer'[\s\S]{0,260}setSseLeader\(true\)/, 'a visible tab takes an offered socket');
+
+  const elect = sliceFrom(indexHtml, 'function considerElect()', 2000);
+  assert.doesNotMatch(elect, /postMessage\(\{ t: 'bye'/, 'a hidden tab must not blank the shared claim');
+  assert.match(elect, /postMessage\(sseRoleMsg\('offer'\)\)/);
+  assert.match(elect, /probeThenClaim\(\)/);
+  assert.doesNotMatch(
+    elect,
+    /!stale && !sseLeader\) \{\s+setSseLeader\(false\)/,
+    'a follower must not re-run leadership on every visibility event',
+  );
+  assert.match(elect, /if \(!stale\) return;/, 'a fresh peer claim is respected, not re-contested');
+
+  // The tie-break itself — pure, so assert it directly instead of trusting the grep.
+  const sseYieldToPeer = (mineVisible, peerVisible, peerId, myId) => {
+    if (peerVisible !== mineVisible) return !!peerVisible;
+    return String(peerId) < String(myId);
+  };
+  assert.equal(sseYieldToPeer(false, true, 'z', 'a'), true, 'a visible peer beats a hidden leader');
+  assert.equal(sseYieldToPeer(true, false, 'a', 'z'), false, 'a visible leader keeps its socket');
+  assert.equal(sseYieldToPeer(true, true, 'a', 'z'), true, 'equal roles: the older tab wins');
+  assert.equal(sseYieldToPeer(true, true, 'z', 'a'), false);
+  const body = sliceFrom(indexHtml, 'function sseYieldToPeer', 300);
+  assert.match(body, /if \(peerVisible !== mineVisible\) return !!peerVisible;/);
+  assert.match(body, /return String\(peerId\) < String\(myId\);/);
+});
+
 test('swift CI does not cache .build PCH across repo-path renames', () => {
   const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
   const cache = sliceFrom(ci, 'name: Cache SPM', 900);

@@ -10971,9 +10971,50 @@ window.ClipViewMasonry = Masonry;
       };
     }
 
+    // Leader advertisements are evidence, not liveness guesses. Chrome throttles a
+    // background tab's 1s interval, so a healthy hidden leader used to look dead: the
+    // visible tab re-claimed, opened a *second* EventSource, lost the tie-break and
+    // closed it again — one socket churn per minute (`sse_state` role leader/follow plus
+    // a server-side `phase=drop`). Claims now carry visibility, a follower answers
+    // `probe` event-driven, and a claim only expires after SSE_LEAD_TTL_MS.
+    const SSE_LEAD_TTL_MS = 8000;
+    const SSE_PROBE_MS = 400;
+
+    function sseRoleMsg(t) {
+      return { t, id: sseTabId, vis: document.visibilityState === 'visible' };
+    }
+
+    /** Pure tie-break: should the current leader yield to an incoming claim? */
+    function sseYieldToPeer(mineVisible, peerVisible, peerId, myId) {
+      if (peerVisible !== mineVisible) return !!peerVisible;
+      return String(peerId) < String(myId);
+    }
+
     function sseBeat() {
       if (!sseLeader || !sseBc) return;
-      try { sseBc.postMessage({ t: 'lead', id: sseTabId }); } catch (_) {}
+      sseLeadAt = Date.now();
+      try { sseBc.postMessage(sseRoleMsg('lead')); } catch (_) {}
+    }
+
+    /** Ask who leads; claim only when nobody answers inside the probe window. */
+    function probeThenClaim(opts = {}) {
+      clearTimeout(sseElectTimer);
+      const askedAt = Date.now();
+      try { sseBc && sseBc.postMessage(sseRoleMsg('probe')); } catch (_) {}
+      sseElectTimer = window.setTimeout(() => {
+        sseElectTimer = 0;
+        if (sseLeadAt && sseLeadAt > askedAt) return;   // a live leader answered
+        if (opts.role === 'bg' && document.visibilityState !== 'hidden') return;
+        if (!opts.role && document.visibilityState !== 'visible') return;
+        setSseLeader(true);
+        if (opts.role) sseDebug.wall.role = opts.role;
+      }, SSE_PROBE_MS);
+    }
+
+    /** Give up our socket without the caller having to remember the pair of calls. */
+    function yieldSocket(role) {
+      sseDebug.wall.role = role;
+      setSseLeader(false);
     }
 
     function setSseLeader(on) {
@@ -10996,45 +11037,34 @@ window.ClipViewMasonry = Masonry;
 
     function considerElect() {
       if (document.visibilityState === 'hidden') {
-        // Offer the socket to a visible sibling, but do not drop it until
-        // someone else actually leads. A solo background tab must keep
-        // EventSource or copies never land until the page is focused again.
+        // Offer the socket to a visible sibling, but do not drop it until a peer
+        // actually leads. A solo background tab must keep EventSource or copies never
+        // land until the page is focused again. Never blank the shared claim (`bye`)
+        // just for being hidden — that is what made every tab re-elect once a minute.
         if (sseLeader) {
-          try { sseBc && sseBc.postMessage({ t: 'bye', id: sseTabId }); } catch (_) {}
+          try { sseBc && sseBc.postMessage(sseRoleMsg('offer')); } catch (_) {}
         }
-        const otherLive = !!(sseBc && sseLeadAt && (Date.now() - sseLeadAt) < 2500);
-        if (otherLive) {
-          setSseLeader(false);
-          sseDebug.wall.role = 'hidden';
-          teardownSSE();
+        const otherLive = !!(sseBc && sseLeadAt && (Date.now() - sseLeadAt) < SSE_LEAD_TTL_MS);
+        if (otherLive && !sseLeader) {
+          yieldSocket('hidden');
           return;
         }
-        clearTimeout(sseElectTimer);
-        sseElectTimer = window.setTimeout(() => {
-          if (document.visibilityState !== 'hidden') return;
-          const taken = !!(sseBc && sseLeadAt && (Date.now() - sseLeadAt) < 2500);
-          if (taken) {
-            setSseLeader(false);
-            sseDebug.wall.role = 'hidden';
-            teardownSSE();
-          } else {
-            setSseLeader(true);
-            sseDebug.wall.role = 'bg';
-          }
-        }, 200);
+        if (!sseLeader) {
+          sseDebug.wall.role = 'bg';
+          probeThenClaim({ role: 'bg' });
+        }
         return;
       }
       if (!sseBc) {
         setSseLeader(true);
         return;
       }
-      const stale = !sseLeadAt || (Date.now() - sseLeadAt > 2500);
+      const stale = !sseLeadAt || (Date.now() - sseLeadAt > SSE_LEAD_TTL_MS);
       if (sseLeader && !stale) return;
-      if (!stale && !sseLeader) {
-        setSseLeader(false);
-        return;
-      }
-      setSseLeader(true);
+      // A peer claims to lead: stay a follower. Its heartbeat may be throttled, so
+      // never claim (or tear down) just because the announcement looks slow.
+      if (!stale) return;
+      probeThenClaim();
     }
 
     if (sseBc) {
@@ -11043,7 +11073,19 @@ window.ClipViewMasonry = Masonry;
         if (!m || m.id === sseTabId) return;
         if (m.t === 'lead') {
           sseLeadAt = Date.now();
-          if (sseLeader && String(m.id) < sseTabId) setSseLeader(false);
+          if (sseLeader && sseYieldToPeer(
+            document.visibilityState === 'visible',
+            m.vis === true,
+            m.id,
+            sseTabId,
+          )) setSseLeader(false);
+        } else if (m.t === 'probe') {
+          // Event-driven answer: a throttled background leader still replies here.
+          sseBeat();
+        } else if (m.t === 'offer') {
+          // A hidden leader is offering the socket; a visible tab takes it now instead
+          // of waiting for its claim to time out.
+          if (document.visibilityState === 'visible' && !sseLeader) setSseLeader(true);
         } else if (m.t === 'bye') {
           sseLeadAt = 0;
           if (document.visibilityState !== 'hidden') {
