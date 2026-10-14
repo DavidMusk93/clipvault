@@ -10997,17 +10997,16 @@ window.ClipViewMasonry = Masonry;
     }
 
     /** Ask who leads; claim only when nobody answers inside the probe window. */
-    function probeThenClaim(opts = {}) {
+    function probeThenClaim(onClaim, requireHidden = false) {
       clearTimeout(sseElectTimer);
       const askedAt = Date.now();
       try { sseBc && sseBc.postMessage(sseRoleMsg('probe')); } catch (_) {}
       sseElectTimer = window.setTimeout(() => {
         sseElectTimer = 0;
         if (sseLeadAt && sseLeadAt > askedAt) return;   // a live leader answered
-        if (opts.role === 'bg' && document.visibilityState !== 'hidden') return;
-        if (!opts.role && document.visibilityState !== 'visible') return;
+        if (requireHidden !== (document.visibilityState === 'hidden')) return;
         setSseLeader(true);
-        if (opts.role) sseDebug.wall.role = opts.role;
+        if (onClaim) onClaim();
       }, SSE_PROBE_MS);
     }
 
@@ -11050,8 +11049,8 @@ window.ClipViewMasonry = Masonry;
           return;
         }
         if (!sseLeader) {
-          sseDebug.wall.role = 'bg';
-          probeThenClaim({ role: 'bg' });
+          // Claim as the background holder — label it only once the socket is ours.
+          probeThenClaim(() => { sseDebug.wall.role = 'bg'; }, true);
         }
         return;
       }
