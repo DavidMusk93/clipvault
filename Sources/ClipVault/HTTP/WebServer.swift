@@ -600,21 +600,29 @@ class WebServer {
         }
     }
 
+    /// SSE session opens inside the churn window. A client that re-opens its socket every
+    /// minute is the churn signature (the live 2026-10-14 flap), so this gets its own
+    /// budget: `value` = opens in the last 5 minutes, red above `sseChurnBudget`.
+    private var sseOpenStamps: [Date] = []
+    private static let sseChurnWindow: TimeInterval = 300
+    private static let sseChurnBudget = 3
+
     private func attachSSELocked(_ connection: HTTPByteSink) {
         pruneDeadSSELocked()
         if sseSessions.count >= 64 {
             if let oldest = sseSessions.values.first {
-                dropSSELocked(oldest)
+                dropSSELocked(oldest, reason: "overflow")
             }
         }
         let session = SSESession(connection)
         sseSessions[ObjectIdentifier(connection)] = session
         UiMetrics.shared.emit("sse_state", ok: true, payload: ["kind": "wall", "phase": "open", "n": sseSessions.count])
+        noteSSEOpenLocked()
         let id = ObjectIdentifier(connection)
         connection.watchPeerClose { [weak self] in
             self?.sseQueue.async {
                 guard let session = self?.sseSessions[id] else { return }
-                self?.dropSSELocked(session)
+                self?.dropSSELocked(session, reason: "client_gone")
             }
         }
         let headers: [(String, String)] = [
@@ -662,7 +670,7 @@ class WebServer {
             self.sseQueue.async {
                 session.inflight = false
                 if error != nil {
-                    self.dropSSELocked(session)
+                    self.dropSSELocked(session, reason: "send_failed")
                     return
                 }
                 if session.resyncRequired && session.queue.isEmpty {
@@ -763,15 +771,36 @@ class WebServer {
         let stale = sseSessions.values.filter { session in
             session.dead || session.connection.isClosed
         }
-        stale.forEach { dropSSELocked($0) }
+        stale.forEach { dropSSELocked($0, reason: "client_gone") }
     }
 
-    private func dropSSELocked(_ session: SSESession) {
+    /// One-off churn sample: how many sockets this browser edge had to open in 5 minutes.
+    private func noteSSEOpenLocked() {
+        let now = Date()
+        sseOpenStamps.append(now)
+        sseOpenStamps.removeAll { now.timeIntervalSince($0) > Self.sseChurnWindow }
+        let churn = sseOpenStamps.count
+        UiMetrics.shared.emit(
+            "sse_socket_churn",
+            value: Double(churn),
+            ok: churn <= Self.sseChurnBudget,
+            payload: [
+                "window_s": Int(Self.sseChurnWindow),
+                "budget": Self.sseChurnBudget,
+                "sessions": sseSessions.count,
+            ]
+        )
+    }
+
+    /// `reason` matters for attribution: "client_gone" is a page closing/reloading (normal),
+    /// "overflow" is us evicting, "send_failed" is the socket dying under us. The old single
+    /// label `peer` was read as "an election peer stole it" and mis-attributed this bug.
+    private func dropSSELocked(_ session: SSESession, reason: String) {
         session.dead = true
         session.queue.removeAll()
         sseSessions.removeValue(forKey: ObjectIdentifier(session.connection))
         session.connection.cancel()
-        UiMetrics.shared.emit("sse_state", ok: false, payload: ["kind": "wall", "phase": "drop", "n": sseSessions.count, "reason": "peer"])
+        UiMetrics.shared.emit("sse_state", ok: false, payload: ["kind": "wall", "phase": "close", "n": sseSessions.count, "reason": reason])
         if sseSessions.isEmpty {
             sseHeartbeat?.cancel()
             sseHeartbeat = nil

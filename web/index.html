@@ -2635,6 +2635,8 @@
     }
     .debug-hot th { color: var(--muted); font-weight: 600; font-size: 11px; }
     .debug-hot .is-slow { color: var(--danger); font-weight: 650; }
+    /* A name without a budget can never go red: say so instead of showing a silent dash. */
+    .debug-hot .is-nobudget { color: var(--warn, #B25000); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; font-size: 10px; }
     .debug-verdict {
       margin: 0 0 10px;
       padding: 8px 10px;
@@ -6290,6 +6292,37 @@ window.ClipViewMasonry = Masonry;
       return n;
     }
 
+    /**
+     * Residual divergence between the server head and the live model — the direct,
+     * user-visible measure of "the wall did not refresh". Counted **after** a merge is
+     * applied, so a legitimately new capture reads 0 and only a real failure to apply
+     * (a dropped burst id, a `touch` that was never moved) shows up. Budget 0.
+     */
+    function headDriftCount(serverHead, model) {
+      const byId = new Map((model || []).map((c) => [c.id, c]));
+      let drift = 0;
+      for (const s of serverHead || []) {
+        const m = byId.get(s.id);
+        if (!m) { drift += 1; continue; }
+        if (Math.round(Number(s.timestamp) || 0) !== Math.round(Number(m.timestamp) || 0)) { drift += 1; continue; }
+        const sp = s.pinnedAt == null ? '' : String(s.pinnedAt);
+        const mp = m.pinnedAt == null ? '' : String(m.pinnedAt);
+        if (sp !== mp) drift += 1;
+      }
+      return drift;
+    }
+
+    function noteHeadDrift(serverHead, source) {
+      const drift = headDriftCount(serverHead, clips);
+      nm('wall_head_drift', {
+        value: drift,
+        ok: drift === 0,
+        over: drift > 0,
+        payload: { kind: String(source || 'head'), n: (serverHead || []).length, drift },
+      });
+      return drift;
+    }
+
     function liveGet(url) {
       return fetch(url, { cache: 'no-store' });
     }
@@ -6368,6 +6401,7 @@ window.ClipViewMasonry = Masonry;
           } else if (flagDirty.length) {
             flagDirty.forEach((c) => replaceCardInPlace(c));
           }
+          noteHeadDrift(items, 'head');
           nm('wall_merge', {
             dur_ms: performance.now() - t0,
             ok: true,
@@ -6395,6 +6429,7 @@ window.ClipViewMasonry = Masonry;
           }
         }
         const n = applyFreshItems(got);
+        noteHeadDrift(items, 'head');
         nm('wall_merge', {
           dur_ms: performance.now() - t0,
           ok: true,
@@ -11003,7 +11038,8 @@ window.ClipViewMasonry = Masonry;
       try { sseBc && sseBc.postMessage(sseRoleMsg('probe')); } catch (_) {}
       sseElectTimer = window.setTimeout(() => {
         sseElectTimer = 0;
-        if (sseLeadAt && sseLeadAt > askedAt) return;   // a live leader answered
+        // >= : an answer that lands in the same millisecond as the probe still counts.
+        if (sseLeadAt && sseLeadAt >= askedAt) return;   // a live leader answered
         if (requireHidden !== (document.visibilityState === 'hidden')) return;
         setSseLeader(true);
         if (onClaim) onClaim();
@@ -11012,8 +11048,28 @@ window.ClipViewMasonry = Masonry;
 
     /** Give up our socket without the caller having to remember the pair of calls. */
     function yieldSocket(role) {
+      noteSseYield('offered');
       sseDebug.wall.role = role;
       setSseLeader(false);
+    }
+
+    let lastSseYieldAt = 0;
+    /**
+     * One yielded socket. `over` only when it happens again inside a minute: a single
+     * hand-off is correct behaviour, a per-minute oscillation is the churn bug
+     * (budget 0 for the rapid case).
+     */
+    function noteSseYield(cause) {
+      const now = Date.now();
+      const since = lastSseYieldAt ? now - lastSseYieldAt : -1;
+      lastSseYieldAt = now;
+      const rapid = since >= 0 && since < 60000;
+      nm('sse_churn', {
+        value: 1,
+        ok: !rapid,
+        over: rapid,
+        payload: { cause: String(cause || 'peer'), ms_since_last: since },
+      });
     }
 
     function setSseLeader(on) {
@@ -11077,7 +11133,7 @@ window.ClipViewMasonry = Masonry;
             m.vis === true,
             m.id,
             sseTabId,
-          )) setSseLeader(false);
+          )) { noteSseYield('peer_lead'); setSseLeader(false); }
         } else if (m.t === 'probe') {
           // Event-driven answer: a throttled background leader still replies here.
           sseBeat();
@@ -11239,6 +11295,10 @@ window.ClipViewMasonry = Masonry;
       sheet_cls: { label: '开合偏移', unit: 'cls', budget: 0.1 },
       chrome_shift: { label: '顶栏位移', unit: 'cls', budget: 0.1 },
       wall_layout_drift: { label: '布局漂移(px)', unit: 'count', budget: 0 },
+      wall_head_drift: { label: '墙·头部漂移', unit: 'count', budget: 0 },
+      sse_churn: { label: 'SSE·换主(瞬时)', unit: 'count', budget: 0 },
+      sse_socket_churn: { label: 'SSE·socket 抖动(5min)', unit: 'count', budget: 3 },
+      capture_gap: { label: '捕获·静默窗口丢弃', unit: 'count', budget: 0 },
       wall_lifecycle: { label: '停画生命周期', unit: 'ms', budget: null },
       wall_day_jump: { label: '时间线跳转', unit: 'count', budget: null },
       trae_sessions_switch: { label: '切换会话', unit: 'ms', budget: 300 },
@@ -11258,12 +11318,15 @@ window.ClipViewMasonry = Masonry;
       if (METRIC_SPEC[name]) return METRIC_SPEC[name];
       if (/_cls$/.test(name)) return { label: '布局偏移', unit: 'cls', budget: 0.1 };
       if (/longtask$/.test(name)) return { label: '长任务', unit: 'ms', budget: 50 };
-      if (name.startsWith('trae_sessions_')) return { label: '会话·' + name.slice(14), unit: 'ms', budget: null };
-      if (name.startsWith('notes_')) return { label: '笔记·' + name.slice(6), unit: 'ms', budget: null };
-      if (name.startsWith('wall_')) return { label: '墙·' + name.slice(5), unit: 'ms', budget: null };
-      if (name.startsWith('sse_')) return { label: 'SSE·' + name.slice(4), unit: 'count', budget: null };
-      if (name.startsWith('sync_')) return { label: '同步·' + name.slice(5), unit: 'ms', budget: null };
-      return { label: name, unit: 'ms', budget: null };
+      // Not declared in METRIC_SPEC: no budget, so it can never go red. Flag it — an
+      // undeclared name is a gap to close, not neutral data (a whole class of churn and
+      // drift hid behind exactly this default).
+      if (name.startsWith('trae_sessions_')) return { label: '会话·' + name.slice(14), unit: 'ms', budget: null, nobudget: true };
+      if (name.startsWith('notes_')) return { label: '笔记·' + name.slice(6), unit: 'ms', budget: null, nobudget: true };
+      if (name.startsWith('wall_')) return { label: '墙·' + name.slice(5), unit: 'ms', budget: null, nobudget: true };
+      if (name.startsWith('sse_')) return { label: 'SSE·' + name.slice(4), unit: 'count', budget: null, nobudget: true };
+      if (name.startsWith('sync_')) return { label: '同步·' + name.slice(5), unit: 'ms', budget: null, nobudget: true };
+      return { label: name, unit: 'ms', budget: null, nobudget: true };
     }
     function pctl(values, p) {
       if (!values || !values.length) return null;
@@ -11363,9 +11426,12 @@ window.ClipViewMasonry = Masonry;
           const meta = metricMeta(r.name);
           const over = meta.budget != null && r.p95 != null && r.p95 > meta.budget;
           const budget = meta.budget == null ? '—' : meta.budget + (meta.unit === 'cls' || meta.unit === 'count' ? '' : 'ms');
+          const budgetCell = meta.nobudget
+            ? `<span class="is-nobudget" title="未在 METRIC_SPEC 声明：没有预算，永不判红">无预算</span>`
+            : budget;
           return `<tr class="${over ? 'is-slow' : ''}"><td title="${esc(r.name)}">${esc(meta.label)}</td><td>${r.n}</td>`
             + `<td>${fmtVal(r.avg, meta.unit)}</td><td>${fmtVal(r.p95, meta.unit)}</td><td>${fmtVal(r.max, meta.unit)}</td>`
-            + `<td>${sparkline(r.points, over)}</td>` + deltaCell(r) + `<td>${budget}</td></tr>`;
+            + `<td>${sparkline(r.points, over)}</td>` + deltaCell(r) + `<td>${budgetCell}</td></tr>`;
         }).join('') : `<tr><td colspan="8">${empty}</td></tr>`;
       };
       const serverPred = (n) => /^(wall_|sse_|sheet_|chrome_shift|proc_sample|db_|backup_|sync_queue_depth)/.test(n);
@@ -11401,8 +11467,12 @@ window.ClipViewMasonry = Masonry;
           verdictEl.className = 'debug-verdict is-warn';
           verdictEl.textContent = `△ ${regress} 项较基线变慢（≥10%）`;
         } else {
-          verdictEl.className = 'debug-verdict';
-          verdictEl.textContent = all.length ? `✓ ${all.length} 项关键路径未超预算${base ? '，未劣于基线' : ''}` : '暂无打点';
+          const undeclared = all.filter((r) => metricMeta(r.name).nobudget).map((r) => metricMeta(r.name).label);
+          const clean = all.length ? `✓ ${all.length} 项关键路径未超预算${base ? '，未劣于基线' : ''}` : '暂无打点';
+          verdictEl.className = undeclared.length ? 'debug-verdict is-warn' : 'debug-verdict';
+          verdictEl.textContent = undeclared.length
+            ? `${undeclared.length} 个指标未声明（无预算，永不判红）：` + undeclared.slice(0, 3).join(' · ')
+            : clean;
         }
       }
       const latest = rows.slice(-24).reverse();

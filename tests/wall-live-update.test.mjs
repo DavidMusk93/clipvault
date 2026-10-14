@@ -215,6 +215,34 @@ test('the head signature carries the capture clock', () => {
   assert.equal(mod.clipHeadSig([{ id: 'A', timestamp: 100 }]), before, 'stable when unchanged');
 });
 
+// The metric that was missing on 2026-10-14: nothing measured "the model still disagrees
+// with the server", so a wall that quietly stopped applying updates never turned red.
+test('head drift is measured after the merge, so a real failure is visible', () => {
+  const mod = loadModule({
+    names: ['headDriftCount'],
+    deps: {},
+    exports: '{ headDriftCount }',
+  });
+  const server = [
+    { id: 'A', timestamp: 200, pinnedAt: 5 },
+    { id: 'B', timestamp: 100, pinnedAt: null },
+  ];
+  assert.equal(mod.headDriftCount(server, [
+    { id: 'A', timestamp: 200, pinnedAt: 5 },
+    { id: 'B', timestamp: 100, pinnedAt: null },
+  ]), 0);
+  // A kind=touch re-copy the model never followed.
+  assert.equal(mod.headDriftCount(server, [{ id: 'A', timestamp: 100 }, { id: 'B', timestamp: 100 }]), 1);
+  // A burst id that never landed.
+  assert.equal(mod.headDriftCount(server, [{ id: 'B', timestamp: 100 }]), 1);
+  // A pin the model missed.
+  assert.equal(mod.headDriftCount(server, [{ id: 'A', timestamp: 200, pinnedAt: 9 }, { id: 'B', timestamp: 100 }]), 1);
+  // mergeHead must report residual drift (budget 0) instead of applying silently.
+  assert.match(fnSource('mergeHead'), /noteHeadDrift\(items, 'head'\)/);
+  assert.match(fnSource('noteHeadDrift'), /nm\('wall_head_drift'/);
+  assert.match(fnSource('noteHeadDrift'), /over: drift > 0/);
+});
+
 test('a moved card leaves its old day, updates both headers, repacks only those days', async () => {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM(

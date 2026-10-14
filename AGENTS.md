@@ -402,6 +402,16 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 **指标 UI 三要素：** 单位（ms/cls/count）、预算（什么算好）、对照（基线/趋势）。排序与判红一律用 **p95**，不用 max（离群噪声）。Δ基线只在超预算或绝对变化够大（≥20ms / ≥0.02 CLS）时提示，避免亚预算微抖报警。
 
+**没有预算的 name 等于没有指标（硬约束）。** 2026-10-14 的 socket 抖动（~1/min）和「墙不刷新」能活到 owner 报障，就是因为 `sse_state` 的 `budget: null` + `metricMeta` 对未声明 name 静默 fallback：**永不判红的指标不是指标**。规则：
+
+1. 新 name 必须进 `web/index.html` 的 `METRIC_SPEC` 并写 `budget`（上下文类显式 `null` 才允许）。
+2. 未声明 name 由 `metricMeta` 标 `nobudget: true`，`#debug` 热表显 `无预算`、结论条点名（禁止静默 dash）。
+3. **用户可见回归必须有 name**：模型/服务端漂移 `wall_head_drift`、socket 抖动 `sse_socket_churn`（服务端 5min 开数）+ 换主 `sse_churn`、捕获静默丢弃 `capture_gap`、布局漂移 `wall_layout_drift`。
+4. 归因必须有一等指标：客户端正常断开写 `sse_state phase=close reason=client_gone`，驱逐写 `reason=overflow`；**禁止**用一个含糊的 `reason=peer` 笼统覆盖两种事实。
+5. 换主/socket 抖动这类「交互型」回归用**可执行台架**复现（`tests/helpers/sse-election.mjs` 虚拟时钟 + 假 BroadcastChannel），不靠真浏览器人工观察。
+
+门禁：`tests/metrics-panel.test.mjs`（spec 与 `nobudget` 语义）、`tests/sse-election.test.mjs`、`tests/wall-live-update.test.mjs`。
+
 **字段语义（禁止混用）：** `dur_ms`=延迟；`value`=量（CLS 值、held ms、bytes、lag…）；`ok`=成功/失败；`over`=是否超预算；`trace`=一次加载/面板开合的关联 id。`summary` 另出 p50/p95/p99、`ok_rate`，并按 route/status 拆 `http_req`。**明细保留 7 天**，更早的折成 `ui_rollup`（小时聚合，保留 30 天，无精确分位）；prune 走 `incremental_vacuum`。p50/p95/p99 只在明细窗口内精确。
 
 | 症状 | name |
@@ -414,7 +424,9 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 开合 sheet | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` |
 | 开合笔记顶栏跳 | `chrome_shift` phase=open\|close dy/reason；长周期 `wall_cls` |
 | 墙加载/补体 | `wall_load`（首屏 span）；`wall_hydrate`（?ids= 批量补体 n/bytes） |
-| SSE 生命周期 | `sse_state` phase=open/error/reconnect/role/watch + reason；`sse_wall` 只留逐条吞吐 |
+| SSE 生命周期 | `sse_state` phase=open/error/reconnect/role/watch/**close**(reason=client_gone|overflow|send_failed) + reason；`sse_wall` 只留逐条吞吐 |
+| SSE socket 抖动 | `sse_socket_churn`（5min 内开数，budget 3）+ 前端 `sse_churn`（<60s 内再次换主=over）；`wall_head_drift`（合入后仍与服务端头部不一致=over，budget 0） |
+| 捕获静默丢弃 | `capture_gap`（归档窗口内被吸收的贴板变更数，budget 0） |
 | 笔记输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` |
 | 笔记 Markdown | `notes_md_compile` vs `notes_preview_ms`；payload `compiled`/`reused`/`n`/`ratio` |
 | 会话白屏 | `trae_sessions_skip` vs `trae_sessions_paint` `trae_sessions_layout` |
