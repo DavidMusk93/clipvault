@@ -295,7 +295,7 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         }
 
         func start() {
-            ClipboardMonitor.shared?.suppressCapture(for: WebArchiveService.navigationTimeout + 8)
+            ClipboardMonitor.shared?.suppressCapture(for: WebArchiveService.navigationTimeout + 8, reason: "archive")
             // System HTTP/SOCKS proxy is often off; the browser still uses v2raya :2080.
             // Prefer that SOCKS when it is listening so Medium is not a 45s direct timeout.
             let socks = ArchiveProxy.localhostPortOpen(2080)
@@ -377,6 +377,9 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             window?.close()
             window = nil
             ClipboardMonitor.shared?.absorbPasteboardNow()
+            // The archive is over: release the suppression window now instead of leaving
+            // it open for the rest of the timeout (it swallowed user copies in that gap).
+            ClipboardMonitor.shared?.endSuppressCapture()
         }
 
         private func fail(_ message: String) {

@@ -54,7 +54,13 @@
   塌列   pack 0/NaN 锁 col0；活更新不按有序列重算位置 → 墙/更新变成一条
   团块   对端 206ms 内 440 张图是 440 张卡            → 禁止合成一张
   会话   工具 LIMIT 200 砍尾                         → 历史只剩 Stop 结论
+  折头   活更新 burst 折成一次 head merge（只装 30 条）→ 一次丢几千条卡片
+  不动   touch 抬起 timestamp 但卡片不动 + sig 已推进  → 复制的条看着没了
+  静吞   归档 suppression 窗口整段吸收（无计数）      → 窗口内复制的条目丢且查不到
+  折叠   重复行硬删不写 operation_logs                → 行没了但没有任何删除记录
 ```
+
+禁止：把 burst 折成 head merge（`PAGE_SIZE` 只有 30）；已知 id 报 `'have'` 早退而不跟 `timestamp` 移动；用「先吸收再等超时」的固定窗口静默吞剪贴板；硬删行不落 `operation_logs`；把 note / 有 `compose_ops` 的行当作重复折叠的输家。回归：`tests/wall-live-update.test.mjs`。
 
 5. **墙序 = 捕获时间。** `clipboard_items.timestamp` 只表示复制发生的时刻（本机捕获或对端捕获 `wall_ts`）。OCR、副本 upsert、hydrate **不得**改这条序。只有 `kind=touch` 才 bump。策略真源 `WallClockPolicy.swift`。事故：2026-09-11 OCR 回放 `wall_ts=Date()` + `MAX(timestamp)`。
 
@@ -205,6 +211,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | html/rtf 墙卡 `notes-rich`（表/标题/引言）；>48KB 按 id hydrate（one-shot，空体禁止循环重拉） | 当浏览器（信任 `style` / 可点 `<a>` / 远程 `<img>` / `on*` / SVG / 表单） |
 | 有序列 shortest-col 绝对定位；prepend 重算坐标 | 新卡堆某一列 / flex 空列一条线 |
 | 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
+| 活更新 burst 按 id 分批拉全（tail 回队列）；已知 id 的 `timestamp` 变大就移动同一张卡，重排受影响的两天 | 折成一次 head merge（只装 `PAGE_SIZE` 30）/ 报 `'have'` 早退 / 推进 `lastHeadSig` 却不应用变化 |
 | 卡片晚到高度（图片/表格/OCR/字体）→ `dataset.packedH` + ResizeObserver 只 repack 该列 | 全量 rebuild；预览 `img` 不限高（`.md-preview img` 必须 max-height） |
 | 拉数据 burst（对端 apply / 连打复制）→ 合并成**一次** head merge（`scheduleUpdateIngest` → `wallFlushPlan`） | 每个 `update` 一次 `/api/clips?id=` + 一次重排（N 项 × N 页 = CPU 风暴） |
 | 节奏条 hover/键盘划读：1px crosshair 1:1 跟指针（只写 transform）+ 读数覆在事实行上（都是绝对定位 overlay），事实 hover 只亮它点名的区间 | hover 改几何 / repack / 整墙重绘；每格留原生 `title`（双 tooltip）；48 格各开一个 tab 位 |
@@ -537,7 +544,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | Compose | nmem `c2c20497-bc52-4204-99fc-34191bb98a99` |
 | 评论 header | nmem `clipvault_reader_comment_header_strut_20260814` |
 | 错 home | `docs/incident-20260811-wrong-data-home.md` |
-| 墙记忆丢失（拨钟/砍尾/滤错/图404/塌列） | 本文硬约束 4–5；`tests/wall-integrity.test.mjs` |
+| 墙记忆丢失（拨钟/砍尾/滤错/图404/塌列/折头/不动） | 本文硬约束 4–5；`tests/wall-integrity.test.mjs` + `tests/wall-live-update.test.mjs` |
 | GDrive EDEADLK | nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813` |
 | URL/HTML 安全 | nmem `clipvault_gate_url_html_safety_20260813` |
 | SQLite 运维 | `.trae/skills/sqlite-runtime-tricks/` |
