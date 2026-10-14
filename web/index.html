@@ -626,6 +626,7 @@
       border-radius: 3px;
       background: rgba(60, 60, 67, 0.055);
       pointer-events: none;
+      transition: background 0.16s ease;
     }
     .rhythm-bar {
       position: relative;
@@ -634,9 +635,14 @@
       height: var(--h, 2px);
       border-radius: 2px 2px 0 0;
       background: rgba(196, 122, 44, 0.26);
+      /* the track owns hit-testing: the strip reads bins, bars never take a
+         pointer (and never show a native title tooltip). */
+      pointer-events: none;
     }
     .rhythm-bar.is-night { background: rgba(196, 122, 44, 0.15); }
     .rhythm-bar.is-peak { background: var(--type-text); }
+    /* Scrubbed bin: same single honey hue, at full colour. */
+    .rhythm-bar.is-cursor { background: var(--type-text); }
     .rhythm-now {
       position: absolute;
       top: -1px;
@@ -656,20 +662,90 @@
       letter-spacing: -0.01em;
     }
     .rhythm-facts {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 2px 7px;
+      position: relative;
       padding: 0 1px;
       font: 500 11px/1.45 var(--font-ui);
       color: var(--muted);
       font-variant-numeric: tabular-nums;
       letter-spacing: -0.01em;
     }
+    .rhythm-facts-list {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 2px 7px;
+      transition: opacity 0.16s ease;
+    }
     .rhythm-fact { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
-    .rhythm-fact-label { color: var(--muted); }
-    .rhythm-fact-value { color: var(--ink); font-weight: 600; }
-    .rhythm-fact-sep { color: var(--separator-strong); }
+    .rhythm-fact-label { color: var(--muted); pointer-events: none; }
+    .rhythm-fact-value { color: var(--ink); font-weight: 600; pointer-events: none; }
+    .rhythm-fact[data-rhythm-mark] { cursor: default; }
+    .rhythm-fact-sep { color: var(--separator-strong); pointer-events: none; }
+
+    /* —— Rhythm scrub: hover reads one half-hour bin ——
+       The crosshair tracks the pointer 1:1 and the readout overlays the facts
+       line, so scrubbing never re-flows the wall (AGENTS.md · 墙: hover must not
+       change geometry). One honey hue; the gap band is the neutral 「empty」
+       material the night zones already use. */
+    .rhythm-guide {
+      position: absolute;
+      top: -3px;
+      bottom: -3px;
+      width: 1px;
+      background: rgba(60, 60, 67, 0.42);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.16s ease;
+    }
+    .rhythm-mark {
+      position: absolute;
+      top: -1px;
+      bottom: 0;
+      min-width: 3px;
+      border-radius: 2px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.16s ease;
+    }
+    .rhythm-mark-span { background: rgba(196, 122, 44, 0.16); }
+    .rhythm-mark-gap { background: rgba(60, 60, 67, 0.16); }
+    .rhythm-readout {
+      position: absolute;
+      left: 0;
+      top: -1px;
+      max-width: 100%;
+      padding: 1px 6px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+      color: var(--ink);
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.16s ease;
+    }
+    .day-rhythm.is-scrub .rhythm-guide,
+    .day-rhythm.is-scrub .rhythm-readout,
+    .day-rhythm.is-mark-span .rhythm-mark-span,
+    .day-rhythm.is-mark-gap .rhythm-mark-gap { opacity: 1; }
+    .day-rhythm.is-scrub .rhythm-facts-list { opacity: 0; }
+    .day-rhythm.is-mark-peak .rhythm-bar:not(.is-peak) { opacity: 0.45; }
+    .day-rhythm.is-mark-span .rhythm-bar:not(.is-in-span) { opacity: 0.45; }
+    .day-rhythm.is-mark-night .rhythm-nightzone { background: rgba(196, 122, 44, 0.16); }
+    .day-rhythm.is-mark-night .rhythm-bar:not(.is-night) { opacity: 0.4; }
+    .day-rhythm.is-mark-night .rhythm-bar.is-night { background: rgba(196, 122, 44, 0.55); }
+    .rhythm-track[data-rhythm-track]:focus { outline: none; }
+    .rhythm-track[data-rhythm-track]:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .rhythm-facts-list, .rhythm-guide, .rhythm-mark, .rhythm-readout { transition: none; }
+    }
     @media (max-width: 620px) {
       .rhythm-facts { gap: 2px 6px; }
     }
@@ -3356,6 +3432,13 @@
         const m = Number(min);
         return Number.isFinite(m) && (m >= DayRhythm.NIGHT_START || m < DayRhythm.NIGHT_END);
       },
+      /** Half-hour bucket index 0..47 for a minute of day; null when unusable. */
+      binOf(min) {
+        if (min == null || min === '') return null;
+        const v = Number(min);
+        if (!Number.isFinite(v)) return null;
+        return Math.max(0, Math.min(DayRhythm.BINS - 1, Math.floor(Math.max(0, v) / DayRhythm.BIN_MINUTES)));
+      },
       /** 48 half-hour buckets over the capture clock; `n` counts usable times. */
       histogram(items) {
         const bins = new Array(DayRhythm.BINS).fill(0);
@@ -3385,9 +3468,11 @@
         let night = 0;
         for (const m of minutes) if (DayRhythm.isNight(m)) night += 1;
         let maxGapMin = 0;
+        let gapFrom = null;
+        let gapTo = null;
         for (let i = 1; i < minutes.length; i += 1) {
           const gap = minutes[i] - minutes[i - 1];
-          if (gap > maxGapMin) maxGapMin = gap;
+          if (gap > maxGapMin) { maxGapMin = gap; gapFrom = minutes[i - 1]; gapTo = minutes[i]; }
         }
         const firstMin = minutes.length ? minutes[0] : null;
         const lastMin = minutes.length ? minutes[minutes.length - 1] : null;
@@ -3403,7 +3488,42 @@
           night,
           nightShare: n ? night / n : 0,
           maxGapMin: minutes.length > 1 ? maxGapMin : null,
+          gapFromMin: minutes.length > 1 ? gapFrom : null,
+          gapToMin: minutes.length > 1 ? gapTo : null,
         };
+      },
+      /**
+       * Bin band a fact points at, as a half-open range [from, to) in 48ths.
+       * Used by the header highlight, so it must stay honest about resolution:
+       * the gap band only covers bins with **no** clip (a gap shorter than one
+       * bin collapses to a zero-width tick, never onto a bar that has clips).
+       */
+      markBins(s, kind) {
+        if (!s || !s.n) return null;
+        if (kind === 'peak') {
+          return s.peakCount ? { from: s.peakBin, to: s.peakBin + 1 } : null;
+        }
+        if (kind === 'span') {
+          if (s.firstMin == null) return null;
+          return { from: DayRhythm.binOf(s.firstMin), to: DayRhythm.binOf(s.lastMin) + 1 };
+        }
+        if (kind === 'gap') {
+          if (s.gapFromMin == null) return null;
+          const from = DayRhythm.binOf(s.gapFromMin) + 1;
+          const to = DayRhythm.binOf(s.gapToMin);
+          // No bin is empty between the two clips → mark the boundary itself.
+          return to <= from ? { from, to: from } : { from, to };
+        }
+        return null;
+      },
+      /** The scrub readout: one line, same facts vocabulary as the row above. */
+      binReadout({ bin = 0, count = 0, total = 0, peak = false } = {}) {
+        const i = Math.max(0, Math.min(DayRhythm.BINS - 1, Math.floor(Number(bin) || 0)));
+        const n = Math.max(0, Number(count) || 0);
+        const parts = [DayRhythm.binLabel(i), n + ' 条'];
+        if (Number(total) > 0) parts.push('占 ' + Math.round((n / Number(total)) * 100) + '%');
+        if (peak) parts.push('峰值');
+        return parts.join(' · ');
       },
       hhmm(min) {
         const v = Number(min);
@@ -9194,6 +9314,10 @@ window.ClipViewMasonry = Masonry;
      * Activity strip for one capture day: 48 half-hour marks on the capture
      * clock + a facts line. Height and alpha carry the count, so the strip
      * stays one honey hue and never competes with the type badges.
+     *
+     * The track is a discrete scrubber: hover / arrow keys read one bin into the
+     * overlay readout and `aria-valuetext`; the facts row highlights the band it
+     * names. Nothing here may change layout (AGENTS.md · 墙).
      */
     function dayRhythmMarkup(rhythm, { today = false, nowMin = null } = {}) {
       const hist = (rhythm && rhythm.bins) || [];
@@ -9204,16 +9328,26 @@ window.ClipViewMasonry = Masonry;
               <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>
             </div>
             <div class="rhythm-ticks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
-            <div class="rhythm-facts"><span class="rhythm-fact"><span class="rhythm-fact-label">活跃</span><span class="rhythm-fact-value">无时间</span></span></div>
+            <div class="rhythm-facts" data-day-rhythm-facts><span class="rhythm-facts-list"><span class="rhythm-fact"><span class="rhythm-fact-label">活跃</span><span class="rhythm-fact-value">无时间</span></span></span></div>
           </div>`;
       }
       const max = Math.max(1, rhythm.peakCount);
+      const binPct = (bin) => ((bin * 100) / DayRhythm.BINS).toFixed(4) + '%';
+      const bandPct = (a, b) => (((b - a) * 100) / DayRhythm.BINS).toFixed(4) + '%';
+      const span = DayRhythm.markBins(rhythm, 'span');
+      const mark = (kind) => {
+        const band = dayRhythmBand(rhythm, kind);
+        if (!band) return '';
+        return `<span class="rhythm-mark rhythm-mark-${kind}" style="left:${binPct(band.from)};width:${bandPct(band.from, band.to)}" aria-hidden="true"></span>`;
+      };
       const bars = hist.map((count, i) => {
         const h = count ? Math.round(4 + 18 * Math.sqrt(count / max)) : 2;
+        const inSpan = !!span && i >= span.from && i < span.to;
         const cls = 'rhythm-bar'
           + (count && i === rhythm.peakBin ? ' is-peak' : '')
+          + (inSpan ? ' is-in-span' : '')
           + (DayRhythm.isNight(i * DayRhythm.BIN_MINUTES) ? ' is-night' : '');
-        return `<span class="${cls}" style="--h:${h}px" title="${escAttr(DayRhythm.binLabel(i) + ' · ' + count + ' 条')}"></span>`;
+        return `<span class="${cls}" data-bin="${i}" data-n="${count}" style="--h:${h}px" aria-hidden="true"></span>`;
       }).join('');
       const nightSharePct = Math.round(rhythm.nightShare * 100);
       const now = today && nowMin != null
@@ -9221,23 +9355,43 @@ window.ClipViewMasonry = Masonry;
         : '';
       const aria = `${DayRhythm.hhmm(rhythm.firstMin)} 到 ${DayRhythm.hhmm(rhythm.lastMin)} 活跃，共 ${rhythm.n} 条；`
         + `峰值 ${DayRhythm.binLabel(rhythm.peakBin)} ${rhythm.peakCount} 条；夜间占 ${nightSharePct}%`;
+      const readout = DayRhythm.binReadout({
+        bin: rhythm.peakBin, count: rhythm.peakCount, total: rhythm.n, peak: true,
+      });
       const facts = [
-        ['活跃', `${DayRhythm.hhmm(rhythm.firstMin)}–${DayRhythm.hhmm(rhythm.lastMin)} · ${DayRhythm.duration(rhythm.spanMin)}`],
-        ['峰值', `${DayRhythm.binLabel(rhythm.peakBin)} · ${rhythm.peakCount} 条`],
-        ['夜间', `${nightSharePct}%`],
-        ['最长空档', rhythm.maxGapMin == null ? '—' : DayRhythm.duration(rhythm.maxGapMin)],
+        ['活跃', `${DayRhythm.hhmm(rhythm.firstMin)}–${DayRhythm.hhmm(rhythm.lastMin)} · ${DayRhythm.duration(rhythm.spanMin)}`, 'span'],
+        ['峰值', `${DayRhythm.binLabel(rhythm.peakBin)} · ${rhythm.peakCount} 条`, 'peak'],
+        ['夜间', `${nightSharePct}%`, 'night'],
+        ['最长空档', rhythm.maxGapMin == null ? '—' : DayRhythm.duration(rhythm.maxGapMin), 'gap'],
       ];
-      const factsHtml = facts.map(([label, value]) => `
-            <span class="rhythm-fact"><span class="rhythm-fact-label">${esc(label)}</span><span class="rhythm-fact-value">${esc(value)}</span></span>`)
-        .join('<span class="rhythm-fact-sep" aria-hidden="true">·</span>');
+      const factsHtml = facts.map(([label, value, kind]) => {
+        const band = kind === 'night' || dayRhythmBand(rhythm, kind);
+        const attr = band ? ` data-rhythm-mark="${kind}"` : '';
+        return `
+            <span class="rhythm-fact"${attr} data-ui="rhythm-fact"><span class="rhythm-fact-label">${esc(label)}</span><span class="rhythm-fact-value">${esc(value)}</span></span>`;
+      }).join('<span class="rhythm-fact-sep" aria-hidden="true">·</span>');
       return `<div class="day-rhythm" data-day-rhythm>
-          <div class="rhythm-track" role="img" aria-label="${escAttr(aria)}">
+          <div class="rhythm-track" role="slider" tabindex="0" data-rhythm-track
+               aria-label="${escAttr(aria)}"
+               aria-valuemin="0" aria-valuemax="${DayRhythm.BINS - 1}"
+               aria-valuenow="${rhythm.peakBin}" aria-valuetext="${escAttr(readout)}"
+               data-rhythm-total="${rhythm.n}" data-peak-bin="${rhythm.peakBin}"
+               data-ui="rhythm-track">
             <span class="rhythm-nightzone" style="left:0;width:12.5%" aria-hidden="true"></span>
-            <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>${bars}${now}
+            <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>${mark('span')}${mark('gap')}${bars}
+            <span class="rhythm-guide" aria-hidden="true"></span>${now}
           </div>
           <div class="rhythm-ticks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
-          <div class="rhythm-facts" data-day-rhythm-facts>${factsHtml}</div>
+          <div class="rhythm-facts" data-day-rhythm-facts>
+            <span class="rhythm-facts-list">${factsHtml}</span>
+            <span class="rhythm-readout" data-rhythm-readout aria-hidden="true">${esc(readout)}</span>
+          </div>
         </div>`;
+    }
+
+    /** Band for one header fact; `night` has no geometry (the zones are static). */
+    function dayRhythmBand(rhythm, kind) {
+      return kind === 'night' ? null : DayRhythm.markBins(rhythm, kind);
     }
 
     function dayHeadMarkup(group) {
@@ -9277,7 +9431,15 @@ window.ClipViewMasonry = Masonry;
 
     function updateDayHead(sec, group) {
       const head = sec && sec.querySelector(':scope > .day-head');
-      if (head) head.innerHTML = dayHeadMarkup(group);
+      if (!head) return;
+      // Rebuilding the head would throw away a live scrub: re-acquire the same
+      // day's freshly built track instead of dropping the readout mid-hover.
+      const wasScrubbing = !!rhythmTrack && head.contains(rhythmTrack);
+      head.innerHTML = dayHeadMarkup(group);
+      if (wasScrubbing) {
+        rhythmTrack = head.querySelector('.rhythm-track[data-rhythm-track]');
+        rhythmScrubSchedule();
+      }
     }
 
     /** Create/remove/reorder day sections to match the ordered groups (newest first). */
@@ -9366,6 +9528,177 @@ window.ClipViewMasonry = Masonry;
       }
       if (anchor) restoreWallAnchor(anchor);
     }
+
+    // ---- Day rhythm scrub ----------------------------------------------------
+    // Hover / arrow keys read one half-hour bin of the capture clock. The
+    // crosshair tracks the pointer 1:1 and the readout overlays the facts line,
+    // so scrubbing never re-flows the wall (AGENTS.md · 墙: hover must not change
+    // geometry). All listeners are delegated: day heads are rebuilt on every
+    // update, and the pointer/keyboard split is explicit — `rhythmWantBin >= 0`
+    // means the keyboard owns the readout, `-1` means the pointer does.
+    const RHYTHM_MARKS = ['span', 'peak', 'night', 'gap'];
+    const RHYTHM_STEP = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 };
+    let rhythmRaf = 0;
+    let rhythmTrack = null;      // strip currently being read
+    let rhythmBin = -1;          // bin the readout shows
+    let rhythmWantBin = -1;      // keyboard target bin; -1 = derive from pointer x
+    let rhythmX = 0;             // last pointer clientX (guide tracks it 1:1)
+    let rhythmY = 0;             // last pointer clientY (re-hit-tested on scroll)
+    let rhythmActive = false;    // ui_interact fires once per scrub
+
+    function rhythmTrackOf(el) {
+      return el && el.classList && el.classList.contains('rhythm-track') ? el : null;
+    }
+    function rhythmBarsOf(track) {
+      return track ? [...track.querySelectorAll('.rhythm-bar')] : [];
+    }
+    function rhythmRootOf(el) {
+      return el && el.closest ? el.closest('[data-day-rhythm]') : null;
+    }
+    function rhythmUnpaint() {
+      if (rhythmRaf) { cancelAnimationFrame(rhythmRaf); rhythmRaf = 0; }
+      const root = rhythmRootOf(rhythmTrack);
+      if (!root) return;
+      root.classList.remove('is-scrub');
+      const cur = root.querySelector('.rhythm-bar.is-cursor');
+      if (cur) cur.classList.remove('is-cursor');
+    }
+    function rhythmReset() {
+      rhythmUnpaint();
+      rhythmTrack = null;
+      rhythmBin = -1;
+      rhythmWantBin = -1;
+      rhythmActive = false;
+    }
+    function rhythmNote(via) {
+      if (rhythmActive) return;
+      rhythmActive = true;
+      globalThis.ClipUiTrack?.track('wall', 'scrub', 'rhythm-track', { via });
+    }
+    function rhythmScrubSchedule() {
+      if (rhythmRaf) return;
+      rhythmRaf = requestAnimationFrame(rhythmPaint);
+    }
+    /** One frame of scrub: read geometry, then write classes / the readout. */
+    function rhythmPaint() {
+      rhythmRaf = 0;
+      const track = rhythmTrack;
+      if (!track || !track.isConnected) { rhythmReset(); return; }
+      const root = rhythmRootOf(track);
+      const bars = rhythmBarsOf(track);
+      if (!root || !bars.length) { rhythmReset(); return; }
+      const last = bars.length - 1;
+      const rect = track.getBoundingClientRect();
+      const frac = rhythmWantBin >= 0
+        ? Math.min(1, (rhythmWantBin + 0.5) / bars.length)
+        : (rect.width > 0 ? Math.min(1, Math.max(0, (rhythmX - rect.left) / rect.width)) : 0);
+      const bin = rhythmWantBin >= 0
+        ? Math.min(last, rhythmWantBin)
+        : Math.min(last, Math.floor(frac * bars.length));
+      const guide = track.querySelector('.rhythm-guide');
+      if (guide) guide.style.left = (frac * 100).toFixed(4) + '%';
+      if (bin !== rhythmBin) {
+        const cur = track.querySelector('.rhythm-bar.is-cursor');
+        if (cur) cur.classList.remove('is-cursor');
+        const bar = bars[bin];
+        bar.classList.add('is-cursor');
+        rhythmBin = bin;
+        const text = DayRhythm.binReadout({
+          bin,
+          count: Number(bar.dataset.n) || 0,
+          total: Number(track.dataset.rhythmTotal) || 0,
+          peak: Number(track.dataset.peakBin) === bin,
+        });
+        const out = root.querySelector('[data-rhythm-readout]');
+        if (out) out.textContent = text;
+        // role=slider: screen readers announce this value on the focused track.
+        track.setAttribute('aria-valuenow', String(bin));
+        track.setAttribute('aria-valuetext', text);
+      }
+      root.classList.add('is-scrub');
+    }
+    /** Enter (or keep) a pointer-owned scrub on `track` at clientX/clientY. */
+    function rhythmScrubAt(track, x, y) {
+      if (!track) return;
+      if (rhythmTrack && rhythmTrack !== track) rhythmUnpaint();
+      rhythmTrack = track;
+      rhythmWantBin = -1;
+      if (Number.isFinite(x)) rhythmX = x;
+      if (Number.isFinite(y)) rhythmY = y;
+      rhythmNote('hover');
+      rhythmScrubSchedule();
+    }
+    function rhythmClearMarks(root) {
+      if (!root) return;
+      for (const kind of RHYTHM_MARKS) root.classList.remove('is-mark-' + kind);
+    }
+
+    document.addEventListener('pointermove', (ev) => {
+      const track = rhythmTrackOf(ev.target);
+      if (track) rhythmScrubAt(track, ev.clientX, ev.clientY);
+    }, { passive: true });
+    document.addEventListener('pointerover', (ev) => {
+      const track = rhythmTrackOf(ev.target);
+      if (track) { rhythmScrubAt(track, ev.clientX, ev.clientY); return; }
+      const fact = ev.target && ev.target.closest ? ev.target.closest('.rhythm-fact[data-rhythm-mark]') : null;
+      if (!fact) return;
+      if (rhythmTrack) rhythmReset();   // the readout yields to the fact highlight
+      const root = rhythmRootOf(fact);
+      if (!root) return;
+      rhythmClearMarks(root);
+      root.classList.add('is-mark-' + fact.dataset.rhythmMark);
+    }, { passive: true });
+    document.addEventListener('pointerout', (ev) => {
+      const root = rhythmRootOf(ev.target);
+      if (!root) return;
+      const to = ev.relatedTarget;
+      if (to && to.nodeType === 1 && root.contains(to)) return;  // still in this day
+      rhythmClearMarks(root);
+      // A keyboard-owned readout survives a pointer leaving the day.
+      if (rhythmWantBin < 0 && rhythmRootOf(rhythmTrack) === root) rhythmReset();
+    }, { passive: true });
+    document.addEventListener('keydown', (ev) => {
+      const track = rhythmTrackOf(ev.target);
+      if (!track || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const bars = rhythmBarsOf(track);
+      if (!bars.length) return;
+      if (ev.key === 'Escape') { rhythmReset(); return; }
+      const fresh = rhythmTrack !== track || rhythmBin < 0;
+      const base = fresh ? (Number(track.dataset.peakBin) || 0) : rhythmBin;
+      let bin = null;
+      if (ev.key in RHYTHM_STEP) bin = base + RHYTHM_STEP[ev.key];
+      else if (ev.key === 'Home') bin = 0;
+      else if (ev.key === 'End') bin = bars.length - 1;
+      else return;
+      ev.preventDefault();       // arrows scrub, they must not scroll the wall
+      if (rhythmTrack !== track) rhythmUnpaint();
+      rhythmTrack = track;
+      rhythmWantBin = Math.max(0, Math.min(bars.length - 1, bin));
+      rhythmNote('key');
+      rhythmScrubSchedule();
+    }, true);
+    document.addEventListener('focusin', (ev) => {
+      const track = rhythmTrackOf(ev.target);
+      if (!track || rhythmTrack === track) return;
+      if (rhythmTrack) rhythmUnpaint();
+      rhythmTrack = track;
+      rhythmWantBin = Number(track.dataset.peakBin) || 0;  // start at the peak
+      rhythmNote('key');
+      rhythmScrubSchedule();
+    }, true);
+    document.addEventListener('focusout', (ev) => {
+      if (rhythmTrackOf(ev.target) === rhythmTrack) rhythmReset();
+    }, true);
+    // The strip moves under a parked pointer (wheel scroll fires no pointermove):
+    // re-hit-test instead of leaving a stale crosshair behind.
+    document.addEventListener('scroll', () => {
+      if (!rhythmTrack || rhythmWantBin >= 0) return;   // keyboard owns the readout
+      if (rhythmTrackOf(document.elementFromPoint(rhythmX, rhythmY)) === rhythmTrack) rhythmScrubSchedule();
+      else rhythmReset();
+    }, { passive: true, capture: true });
+    window.addEventListener('resize', () => {
+      if (rhythmTrack) rhythmScrubSchedule();
+    }, { passive: true });
 
     // ---- Timeline rail -------------------------------------------------------
     const DAY_RAIL_LIMIT = 48;
