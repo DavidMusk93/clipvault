@@ -21,6 +21,13 @@
  * with no whitespace between them offer no wrap opportunity, so a run that
  * highlight.js split across spans (`--` + `ip`) stays glued.
  *
+ * A guard that *opens* a marker line (`li` / `summary`) is different: an
+ * inline-block's baseline is its LAST line box, and `::marker` is placed on the
+ * line box's baseline — so a wrapped lead guard would drag the bullet onto its own
+ * second line (`- <long url>` renders as a bare `-` line plus `ref_type=heads`
+ * carrying the bullet). Those guards also get LEAD_CLASS, which pins them to the
+ * top of the line while the marker keeps the line's own baseline.
+ *
  * Nothing here mutates text: textContent — and therefore every copy button — is
  * byte-identical. Pure DOM, no dependencies; `notes-render.mjs` stays the only
  * innerHTML door.
@@ -28,6 +35,13 @@
 
 /** Class applied to each guarded run. Styled in notes-editor.css / index.html. */
 export const TOKEN_CLASS = 'notes-tok';
+
+/** Extra class for a guard that opens a marker line (see `opensMarkerLine`). */
+export const LEAD_CLASS = 'notes-tok-lead';
+
+/** Elements whose first line box carries a `::marker` on the line box baseline. */
+const MARKER_LINE_SEL = 'li, summary';
+const MARKER_LINE_TAGS = new Set(['LI', 'SUMMARY']);
 
 /**
  * Characters Chrome can break *inside* a non-whitespace run.
@@ -95,6 +109,38 @@ export function guardRanges(text) {
 }
 
 /**
+ * True when the run starting at `offset` inside `node` opens the first line box of
+ * a marker line (`li`, `summary`): only whitespace precedes it inside that element,
+ * so its line box is the one `::marker` is drawn in.
+ *
+ * Guards owned by `code` never qualify: a `0.84em` chip would sit ~1px high under
+ * `vertical-align: top`, and a wrapped guard inside backticks is not worth that
+ * shift on every list item that starts with inline code.
+ *
+ * @param {Node} node text node the guard comes from
+ * @param {number} [offset] guard start inside `node`
+ * @returns {boolean}
+ */
+export function opensMarkerLine(node, offset = 0) {
+  let el = node && node.parentElement;
+  if (!el || (typeof el.closest === 'function' && el.closest('code'))) return false;
+  let cur = node;
+  let at = Math.max(0, offset | 0);
+  for (;;) {
+    if (at > 0 && /\S/.test(String((cur && cur.nodeValue) || '').slice(0, at))) return false;
+    for (let sib = cur.previousSibling; sib; sib = sib.previousSibling) {
+      if (sib.nodeType === 1) return false; // <br>, <span>, … — something is already on the line
+      if (sib.nodeType === 3 && /\S/.test(sib.nodeValue || '')) return false;
+    }
+    if (MARKER_LINE_TAGS.has(el.tagName)) return true;
+    cur = el;
+    at = 0;
+    el = el.parentElement;
+    if (!el) return false;
+  }
+}
+
+/**
  * Wrap every guarded run inside `root` in a `notes-tok` span.
  *
  * Runs are computed over the concatenated text of `root`, then each text node is
@@ -110,6 +156,9 @@ export function wrapAtomicTokens(root, opts = {}) {
   if (!root || typeof root.ownerDocument?.createTreeWalker !== 'function') return 0;
   const skip = opts.skip ? String(opts.skip) : '';
   const doc = root.ownerDocument;
+  // Most roots (a code fence, a card body without lists) hold no marker line, and
+  // then no guard can open one — skip the walk per guard entirely.
+  const markerLines = typeof root.querySelector === 'function' && !!root.querySelector(MARKER_LINE_SEL);
   const walker = doc.createTreeWalker(root, SHOW_TEXT, null);
 
   const nodes = [];
@@ -151,7 +200,9 @@ export function wrapAtomicTokens(root, opts = {}) {
     for (const [a, b] of pieces) {
       if (a > cur) frag.appendChild(doc.createTextNode(v.slice(cur, a)));
       const span = doc.createElement('span');
-      span.className = TOKEN_CLASS;
+      span.className = (markerLines && opensMarkerLine(node, a))
+        ? `${TOKEN_CLASS} ${LEAD_CLASS}`
+        : TOKEN_CLASS;
       span.textContent = v.slice(a, b);
       frag.appendChild(span);
       wrapped += 1;

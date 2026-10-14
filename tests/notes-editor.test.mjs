@@ -147,6 +147,49 @@ test('wrap mode is token-atomic: `--ip` never splits across lines', { skip: skip
   assert.equal(again, 0, 're-running with .notes-tok skipped is a no-op');
 });
 
+test('a guard that opens a list item keeps the bullet on its first line', { skip: skipJsdom }, async () => {
+  const { wrapAtomicTokens, opensMarkerLine, TOKEN_CLASS, LEAD_CLASS } = await import('../web/assets/notes-wrap.mjs');
+  assert.equal(LEAD_CLASS, 'notes-tok-lead');
+  const { JSDOM } = await import('jsdom');
+
+  // `- <long url>` first line is the guard itself: an inline-block's baseline is its
+  // LAST line box and `li::marker` rides the line box baseline, so the bullet would
+  // land on the guard's second line. The lead class pins the guard to the top.
+  const lead = new JSDOM('<!doctype html><body><div><ul><li><a href="https://x/y?z=1">https://code.byted.org/tide/arrow/blob/8.1.7-gcc8/BUILD?ref_type=heads</a><br>llvm 版本</li></ul></div></body>');
+  const ldoc = lead.window.document;
+  wrapAtomicTokens(ldoc.body, { skip: 'pre, .notes-tok, .notes-tag' });
+  const guard = ldoc.querySelector('li .notes-tok');
+  assert.equal(guard.classList.contains(TOKEN_CLASS), true);
+  assert.equal(guard.classList.contains(LEAD_CLASS), true, 'lead guard of the marker line');
+  assert.equal(ldoc.querySelector('li').textContent.startsWith(guard.textContent), true);
+
+  // Everything else keeps `baseline`: nothing is drawn in front of the marker unless
+  // the guard really opens the line, and inline `code` would sit ~1px high.
+  const other = new JSDOM('<!doctype html><body><div>'
+    + '<ul><li>见 <a href="https://x/y?z=1">https://x/y?z=1</a></li>'
+    + '<li><br>a-b-c 接在换行之后</li>'
+    + '<li>这是一个很长的 token：a-very-long-token-here</li>'
+    + '<li><code>--ip</code> 只守</li>'
+    + '<summary>a-b-c 摘要</summary>'
+    + '</ul></div><p>段首 a-b-c 不在列表里</p></body>');
+  const odoc = other.window.document;
+  wrapAtomicTokens(odoc.body, { skip: 'pre, .notes-tok, .notes-tag' });
+  const leads = [...odoc.querySelectorAll('.notes-tok-lead')].map((s) => s.textContent);
+  assert.deepEqual(leads, ['a-b-c'], 'only the guard that opens the `<summary>` line');
+  // A root without a marker line never pays for the walk.
+  assert.equal(opensMarkerLine(odoc.querySelector('p .notes-tok'), 0), false);
+  // Marker-line detection walks the text node the guard came from, not the DOM after.
+  const sdoc2 = new JSDOM('<!doctype html><body><ul><li>--ip 只守</li></ul></body>').window.document;
+  const li = sdoc2.querySelector('li');
+  assert.equal(opensMarkerLine(li.firstChild, 0), true);
+  assert.equal(opensMarkerLine(li.firstChild, 5), false, 'text before the run means it is not the lead');
+
+  // CSS contract, both wrapping surfaces.
+  assert.match(css, /\.notes-preview-inner \.notes-tok-lead \{\n  vertical-align: top;/);
+  assert.match(entry, /wrapAtomicTokens\(root, \{ skip: 'pre, \.notes-tok, \.notes-tag' \}\)/);
+  assert.match(vendor, /web\/assets\/notes-wrap\.mjs/);
+});
+
 test('notes remember the open note and support Apple tags', () => {
   assert.match(html, /clipvault\.notes\.id/);
   assert.match(html, /notes\/\$\{|notes\/' \+|notes\//);
@@ -390,8 +433,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n31/);
-  assert.match(html, /notes-editor\.css\?v=n31/);
+  assert.match(html, /notes-editor\.js\?v=n32/);
+  assert.match(html, /notes-editor\.css\?v=n32/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {

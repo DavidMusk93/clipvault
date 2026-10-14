@@ -295,6 +295,14 @@
   display: inline;
   max-width: none;
 }
+/* Marker lines: an inline-block's baseline is its LAST line box and `li::marker`
+   rides the line box baseline, so a wrapped guard that opens a list item would
+   drag the bullet onto its second line. `top` keeps the guard's first line on the
+   marker's line box; a one-line guard in the same font lands identically.
+   web/assets/notes-wrap.mjs sets the class, and never for inline `code`. */
+.notes-preview-inner .notes-tok-lead {
+  vertical-align: top;
+}
 
 /* Xcode Light, scoped so wall hljs github theme does not leak in. */
 .notes-preview .hljs { background: transparent; color: #1d1d1f; }

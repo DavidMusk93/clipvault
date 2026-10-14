@@ -161,12 +161,12 @@ test('highlight.js loads on demand, not on wall boot', () => {
 test('notes editor bundle is loaded lazily, not on wall boot', () => {
   assert.doesNotMatch(html, /<script src="\/assets\/notes-editor\/notes-editor\.js/);
   assert.match(html, /function loadNotesEditorBundle\(\)/);
-  assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n31'/);
+  assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n32'/);
 });
 
 test('wall card prose wraps token-atomically, pan surfaces untouched', () => {
   // Same module as the notes editor (served .mjs), fetched on the first card only.
-  assert.match(html, /import\('\/assets\/notes-wrap\.mjs\?v=w2'\)/);
+  assert.match(html, /import\('\/assets\/notes-wrap\.mjs\?v=w3'\)/);
   assert.match(html, /function loadTokenWrap\(\)/);
   assert.match(html, /function guardCardTokens\(card\)/);
   // Wrapping surfaces only: `pre` / `.is-mono` are white-space:pre pan surfaces.
@@ -178,6 +178,8 @@ test('wall card prose wraps token-atomically, pan surfaces untouched', () => {
   assert.match(html, /if \(!tokenWrapMod\) \{[\s\S]{0,160}loadTokenWrap\(\)/);
   // `.md-preview` prose was `overflow-wrap: normal`: a guarded run could only overflow.
   assert.match(html, /\.notes-rich \.notes-tok, \.snippet-html \.notes-tok, \.md-preview \.notes-tok \{[\s\S]{0,60}display: inline-block/);
+  // A guard that opens a list item must not drag its `::marker` to the second line.
+  assert.match(html, /\.notes-rich \.notes-tok-lead, \.snippet-html \.notes-tok-lead, \.md-preview \.notes-tok-lead \{[\s\S]{0,60}vertical-align: top/);
   assert.match(html, /\.md-preview \{[\s\S]{0,560}overflow-wrap: break-word/);
 });
 
