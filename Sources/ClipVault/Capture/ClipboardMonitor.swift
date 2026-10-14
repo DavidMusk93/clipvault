@@ -16,6 +16,10 @@ class ClipboardMonitor: ObservableObject {
     private var lastChangeCount: Int = 0
     /// While WKWebView archives, sites/WebKit may dirty NSPasteboard — absorb, don't spawn cards.
     private var suppressCaptureUntil: Date?
+    private var suppressReason = "suppress"
+    /// Pasteboard changes swallowed inside the suppression window. Never silent:
+    /// flushed to `capture_gap` so a copy that disappeared there is accountable.
+    private var suppressSwallowed = 0
     private let pasteboard = NSPasteboard.general
     private let database: DatabaseManager?
 
@@ -31,14 +35,41 @@ class ClipboardMonitor: ObservableObject {
     }
 
     /// Swallow pasteboard mutations (archive WebView, programmatic writes).
-    func suppressCapture(for seconds: TimeInterval) {
+    ///
+    /// `seconds` is a **safety cap**, not the intended duration: the owner must call
+    /// `endSuppressCapture()` when its job is done, so the window tracks the archive
+    /// instead of a fixed 56s timeout. Every change swallowed inside the window is
+    /// counted and reported as `capture_gap` — a copy the user makes while a page is
+    /// being archived must not vanish without evidence.
+    func suppressCapture(for seconds: TimeInterval, reason: String = "suppress") {
         let until = Date().addingTimeInterval(seconds)
         if let cur = suppressCaptureUntil, cur > until {
             lastChangeCount = pasteboard.changeCount
             return
         }
         suppressCaptureUntil = until
+        suppressReason = reason
         lastChangeCount = pasteboard.changeCount
+    }
+
+    /// Owner-side release: the job that suppressed capture is finished.
+    func endSuppressCapture() {
+        finishSuppression()
+    }
+
+    private func finishSuppression() {
+        guard suppressCaptureUntil != nil else { return }
+        suppressCaptureUntil = nil
+        let n = suppressSwallowed
+        suppressSwallowed = 0
+        guard n > 0 else { return }
+        UiMetrics.shared.emit(
+            "capture_gap",
+            value: Double(n),
+            ok: false,
+            payload: ["reason": suppressReason, "n": n]
+        )
+        print("[capture] suppression swallowed \(n) pasteboard change(s) reason=\(suppressReason)")
     }
 
     func absorbPasteboardNow() {
@@ -65,10 +96,11 @@ class ClipboardMonitor: ObservableObject {
         let currentChangeCount = pasteboard.changeCount
         if let until = suppressCaptureUntil {
             if Date() < until {
+                if currentChangeCount != lastChangeCount { suppressSwallowed += 1 }
                 lastChangeCount = currentChangeCount
                 return
             }
-            suppressCaptureUntil = nil
+            finishSuppression()
         }
 
         guard currentChangeCount != lastChangeCount else { return }

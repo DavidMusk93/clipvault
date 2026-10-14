@@ -1143,54 +1143,86 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Keep only the newest row per content_hash; delete up to `limit` losers this tick.
+    ///
+    /// Hard deletes are auditable: every removal writes `dedupe_delete` into
+    /// `operation_logs`. Candidates exclude notes and anything carrying compose history,
+    /// and excluded rows never serve as the keeper either — a capture that merely looks
+    /// like a duplicate must not be able to take a note down. Trash rows are left to the
+    /// TTL purge, which logs too.
     @discardableResult
     private func dedupeStaleBatch(limit: Int) -> Int {
         guard let db = db, limit > 0 else { return 0 }
-        // Loser = exists another row with same hash that is strictly newer, or same ts with larger id.
-        let sql = """
-        DELETE FROM clipboard_items
-        WHERE id IN (
-            SELECT c.id
-            FROM clipboard_items c
-            WHERE c.pinned_at IS NULL
-              AND c.archive_html_sha IS NULL
-              AND c.reader_state IS NULL
-              AND NOT EXISTS (SELECT 1 FROM reader_ops r WHERE r.item_id = c.id)
-              AND NOT EXISTS (SELECT 1 FROM clip_links L
-                              WHERE L.from_item_id = c.id OR L.to_item_id = c.id)
-              AND NOT EXISTS (SELECT 1 FROM clip_link_ops O
-                              WHERE O.from_item_id = c.id OR O.to_item_id = c.id)
-              AND EXISTS (
-                SELECT 1 FROM clipboard_items k
-                WHERE k.id != c.id
-                  AND (
-                    k.content_hash = c.content_hash
-                    OR (
-                        c.text_hash IS NOT NULL AND k.text_hash IS NOT NULL
-                        AND k.text_hash = c.text_hash
-                    )
-                  )
-                  AND (
-                    k.pinned_at IS NOT NULL
-                    OR k.archive_html_sha IS NOT NULL
-                    OR k.reader_state IS NOT NULL
-                    OR EXISTS (SELECT 1 FROM reader_ops r WHERE r.item_id = k.id)
-                    OR k.timestamp > c.timestamp
-                    OR (k.timestamp = c.timestamp AND k.id > c.id)
-                  )
-            )
-            LIMIT \(limit)
-        );
+        // Loser = exists another live capture row with same hash that is strictly newer,
+        // or same ts with larger id.
+        let selectSQL = """
+        SELECT c.id, c.content_hash
+        FROM clipboard_items c
+        WHERE c.pinned_at IS NULL
+          AND c.archive_html_sha IS NULL
+          AND c.reader_state IS NULL
+          AND c.deleted_at IS NULL
+          AND c.type != 'note'
+          AND NOT EXISTS (SELECT 1 FROM compose_ops o WHERE o.item_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM reader_ops r WHERE r.item_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM clip_links L
+                          WHERE L.from_item_id = c.id OR L.to_item_id = c.id)
+          AND NOT EXISTS (SELECT 1 FROM clip_link_ops O
+                          WHERE O.from_item_id = c.id OR O.to_item_id = c.id)
+          AND EXISTS (
+            SELECT 1 FROM clipboard_items k
+            WHERE k.id != c.id
+              AND k.type != 'note'
+              AND (
+                k.content_hash = c.content_hash
+                OR (
+                    c.text_hash IS NOT NULL AND k.text_hash IS NOT NULL
+                    AND k.text_hash = c.text_hash
+                )
+              )
+              AND (
+                k.pinned_at IS NOT NULL
+                OR k.archive_html_sha IS NOT NULL
+                OR k.reader_state IS NOT NULL
+                OR EXISTS (SELECT 1 FROM reader_ops r WHERE r.item_id = k.id)
+                OR k.timestamp > c.timestamp
+                OR (k.timestamp = c.timestamp AND k.id > c.id)
+              )
+          )
+        LIMIT \(limit);
         """
-        var err: UnsafeMutablePointer<CChar>?
-        let rc = sqlite3_exec(db, sql, nil, nil, &err)
-        if rc != SQLITE_OK {
-            let msg = err.map { String(cString: $0) } ?? "rc=\(rc)"
-            if let err { sqlite3_free(err) }
-            print("[DatabaseManager] dedupe batch error: \(msg)")
-            return 0
+        var victims: [(String, String)] = []
+        var sel: OpaquePointer?
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &sel, nil) == SQLITE_OK else { return 0 }
+        while sqlite3_step(sel) == SQLITE_ROW {
+            if let id = sqlite3_column_text(sel, 0).map({ String(cString: $0) }),
+               let hash = sqlite3_column_text(sel, 1).map({ String(cString: $0) }) {
+                victims.append((id, hash))
+            }
         }
-        return Int(sqlite3_changes(db))
+        sqlite3_finalize(sel)
+        guard !victims.isEmpty else { return 0 }
+
+        var removed = 0
+        for (id, hash) in victims {
+            var del: OpaquePointer?
+            if sqlite3_prepare_v2(db, "DELETE FROM clipboard_items WHERE id = ?;", -1, &del, nil) == SQLITE_OK {
+                bindText(del, 1, id)
+                if sqlite3_step(del) == SQLITE_DONE {
+                    removed += 1
+                    deleteFTS(id: id)
+                    gcBlobIfUnreferenced(hash: hash)
+                    appendOperationLogSync(
+                        action: "dedupe_delete",
+                        itemId: id,
+                        contentHash: hash,
+                        detail: "duplicate_of_live_capture",
+                        source: "maintenance"
+                    )
+                }
+            }
+            sqlite3_finalize(del)
+        }
+        return removed
     }
 
     @discardableResult

@@ -219,6 +219,37 @@ test('maintenance is bounded and instrumented', () => {
   assert.match(db, /guard let self, self\.db != nil else \{ return \}\n            _ = self\.peelArchiveHtmlOutOfRow\(\)/);
 });
 
+// 2026-10-14: a note (peer `FB5BC7AC`, compose_ops + capture_insert present) was gone
+// from the live DB with no `soft_delete` / `purge_trash` row. Duplicate collapse was the
+// only hard-delete path that left no trace, and it could pick a note as the loser.
+test('duplicate collapse is auditable and never takes a note down', () => {
+  const body = functionBody(db, 'dedupeStaleBatch');
+  assert.match(body, /appendOperationLogSync\(/, 'a hard delete without a log row is unaccountable');
+  assert.match(body, /action: "dedupe_delete"/);
+  assert.match(body, /source: "maintenance"/);
+  assert.match(body, /c\.type != 'note'/, 'capture rows may collapse; notes may not');
+  assert.match(body, /k\.type != 'note'/, 'a note must not be able to take a capture down either');
+  assert.match(body, /NOT EXISTS \(SELECT 1 FROM compose_ops o WHERE o\.item_id = c\.id\)/);
+  assert.match(body, /AND c\.deleted_at IS NULL/, 'trash rows belong to the TTL purge, which logs');
+});
+
+// 2026-10-14: `suppressCapture(for: navigationTimeout + 8)` held the pasteboard window
+// open for 56s while a page archived; every copy made in that window was absorbed and
+// dropped with no counter. The window now ends with the job and the drops are reported.
+test('the archive suppression window is bounded by the job and never silent', () => {
+  const mon = src('ClipboardMonitor.swift');
+  const archive = src('WebArchiveService.swift');
+  assert.match(mon, /func endSuppressCapture\(\)/);
+  assert.match(mon, /suppressSwallowed \+= 1/);
+  assert.match(mon, /UiMetrics\.shared\.emit\(\n\s+"capture_gap"/);
+  assert.match(mon, /func suppressCapture\(for seconds: TimeInterval, reason: String/);
+  assert.match(archive, /reason: "archive"/);
+  // teardown() runs on success, failure and timeout: that is where the window closes.
+  const teardown = archive.slice(archive.indexOf('func teardown()'));
+  assert.match(teardown.slice(0, 900), /endSuppressCapture\(\)/);
+  assert.match(archive, /suppressCapture\(for: WebArchiveService\.navigationTimeout \+ 8, reason: "archive"\)/);
+});
+
 test('440-image peer clump stays 440 cards on a capture-time keyset', () => {
   const rows = [];
   for (let i = 0; i < 20; i++) rows.push({ id: `T1-${String(i).padStart(3, '0')}`, ts: 3000 - i * 0.01, type: 'text' });
