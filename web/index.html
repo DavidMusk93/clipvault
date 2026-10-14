@@ -11196,6 +11196,17 @@ window.ClipViewMasonry = Masonry;
         scheduleResync();
       }, 8000);
     }
+    // Drift assurance. SSE first, verify anyway: if a client is idle it never runs
+    // `mergeHead`, and a wall that silently stopped applying updates would then have no
+    // `wall_head_drift` sample at all — the metric has to exist on a quiet wall too.
+    const WALL_DRIFT_ASSURE_MS = 180000;
+    if (!window.__cvDriftWatch) {
+      window.__cvDriftWatch = window.setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        if (searchQuery || currentView === 'trash') return;
+        scheduleResync();
+      }, WALL_DRIFT_ASSURE_MS);
+    }
     window.addEventListener('beforeunload', () => {
       if (sseLeader) {
         try { sseBc && sseBc.postMessage({ t: 'bye', id: sseTabId }); } catch (_) {}
