@@ -246,6 +246,25 @@ test('leader election does not churn on a throttled background heartbeat', () =>
   assert.match(body, /return String\(peerId\) < String\(myId\);/);
 });
 
+test('socket churn and its cause are named, not guessed', () => {
+  // The frontend knows why it gave up the socket; a repeated yield inside a minute is the
+  // churn signature (budget 0). A single hand-off is fine and stays green.
+  assert.match(indexHtml, /function noteSseYield\(cause\)/);
+  assert.match(indexHtml, /nm\('sse_churn'/);
+  assert.match(indexHtml, /const rapid = since >= 0 && since < 60000;/);
+  assert.match(indexHtml, /over: rapid/);
+  assert.match(indexHtml, /noteSseYield\('peer_lead'\)/);
+  assert.match(indexHtml, /noteSseYield\('offered'\)/);
+  // Server side: a rate with a real budget, and a close reason that does not lie.
+  assert.match(web, /"sse_socket_churn"/);
+  assert.match(web, /sseChurnBudget = 3/);
+  assert.match(web, /sseChurnWindow: TimeInterval = 300/);
+  assert.match(web, /phase": "close", "n": sseSessions\.count, "reason": reason/, 'close must carry a real reason');
+  assert.match(web, /reason: "client_gone"/);
+  assert.match(web, /reason: "overflow"/);
+  assert.doesNotMatch(web, /"reason": "peer"/, 'the single `peer` label mis-attributed the bug');
+});
+
 test('swift CI does not cache .build PCH across repo-path renames', () => {
   const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
   const cache = sliceFrom(ci, 'name: Cache SPM', 900);

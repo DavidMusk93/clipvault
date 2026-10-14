@@ -167,7 +167,10 @@ test('server side DB and SSE SLIs exist', () => {
   assert.match(web, /emit\("db_write"/);
   assert.match(web, /func enqueueSSELocked/);
   assert.match(web, /phase": "coalesce/);
-  assert.match(web, /phase": "drop/);
+  // `close` carries a real reason (client_gone | overflow | send_failed) instead of the
+  // single misleading `drop reason=peer` that hid the 2026-10-14 election churn.
+  assert.match(web, /phase": "close", "n": sseSessions\.count, "reason": reason/);
+  assert.match(web, /"sse_socket_churn"/);
   const backup = src('CloudDocsBackupService.swift');
   assert.match(backup, /backup_cycle/);
   assert.match(html, /DB 写等待/);
