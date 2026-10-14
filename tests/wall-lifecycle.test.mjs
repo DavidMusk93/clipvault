@@ -114,23 +114,30 @@ test('real user input wakes the wall; visibility hidden parks it', () => {
   assert.doesNotMatch(vis, /teardownSSE\(\)/);
 });
 
-test('update burst coalesces to one head merge, not N fetches', () => {
+test('update burst coalesces to bounded by-id batches, never to a 30-card head merge', () => {
   const plan = htmlFn('wallFlushPlan');
   const wallFlushPlan = (ids, max) => {
     if (!ids || !ids.length) return 'none';
-    return ids.length > max ? 'head' : 'ids';
+    return ids.length > max ? 'drain' : 'ids';
   };
   assert.match(plan, /return 'none'/);
-  assert.match(plan, /return ids\.length > max \? 'head' : 'ids'/);
-  assert.equal(wallFlushPlan([], 4), 'none');
-  assert.equal(wallFlushPlan(['a'], 4), 'ids');
-  assert.equal(wallFlushPlan(['a', 'b', 'c', 'd'], 4), 'ids');
-  assert.equal(wallFlushPlan(['a', 'b', 'c', 'd', 'e'], 4), 'head');
+  assert.match(plan, /return ids\.length > max \? 'drain' : 'ids'/);
+  assert.equal(wallFlushPlan([], 2048), 'none');
+  assert.equal(wallFlushPlan(['a'], 2048), 'ids');
+  assert.equal(wallFlushPlan(new Array(2049).fill('a'), 2048), 'drain');
 
   const flush = htmlFn('flushPendingUpdates');
-  assert.match(flush, /plan === 'head'/);
-  assert.match(flush, /scheduleResync\(\)/);
-  assert.match(flush, /for \(const id of ids\) ingestClipById\(id\)/);
+  // A burst is drained in full: the tail goes back on the queue and the next tick
+  // applies it. `scheduleResync()` here would mean a head merge, which only ever
+  // pulls PAGE_SIZE cards and silently drops every id past the first page.
+  assert.match(flush, /UPDATE_IDS_MAX/);
+  assert.match(flush, /for \(const id of rest\) pendingUpdateIds\.add\(id\)/);
+  assert.match(flush, /ingestClipIds\(pass\)/);
+  assert.doesNotMatch(flush, /scheduleResync\(\)/);
+
+  const batch = htmlFn('ingestClipIds');
+  assert.match(batch, /fetchClipsByIds\(list\.slice/);
+  assert.match(batch, /applyFreshItems\(got\)/);
 
   const sched = htmlFn('scheduleUpdateIngest');
   assert.match(sched, /pendingUpdateIds\.add\(sid\)/);
@@ -142,8 +149,7 @@ test('update burst coalesces to one head merge, not N fetches', () => {
   assert.doesNotMatch(sched, /wallParked \?/, 'parked must not schedule any flush timer');
 
   const parkedFlush = htmlFn('flushParkedUpdates');
-  assert.match(parkedFlush, /fetchClipsByIds\(ids\.slice/);
-  assert.match(parkedFlush, /applyFreshItems\(got\)/);
+  assert.match(parkedFlush, /ingestClipIds\(ids\)/);
 
   // The SSE update branch must coalesce, never fetch one-by-one inline.
   const branch = html.slice(html.indexOf("if (d.type === 'update')"), html.indexOf("if (d.type === 'update')") + 260);

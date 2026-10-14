@@ -3253,9 +3253,13 @@
 
     const PAGE_SIZE = 30;
     let lastHeadSig = '';
+    // `timestamp` belongs in the head signature: a `kind=touch` re-copy moves the row
+    // in the capture timeline (WallClockPolicy). Without it the wall could advance
+    // `lastHeadSig` past a change it never applied, and every later merge would be a
+    // no-op — the card stays in its old day until a full reload.
     function clipHeadSig(items) {
       return (items || []).slice(0, PAGE_SIZE).map((i) =>
-        `${i.id}:${i.pinnedAt || ''}:${i.archived ? 1 : 0}:${i.linkCount || 0}`
+        `${i.id}:${Math.round(Number(i.timestamp) || 0)}:${i.pinnedAt || ''}:${i.archived ? 1 : 0}:${i.linkCount || 0}`
       ).join('|');
     }
 
@@ -3727,10 +3731,15 @@ window.ClipViewMasonry = Masonry;
       return (now - lastInputAt) >= idleMs;
     }
 
-    /** Pure flush plan: an empty batch is a no-op, a burst is one head merge. */
+    /**
+     * Pure drain plan. An empty batch is a no-op; a burst that exceeds one pass is
+     * still drained in full — the remainder goes back on the queue and the next tick
+     * picks it up. Never `'head'`: a head merge only ever pulls `PAGE_SIZE` cards, so
+     * folding a burst into it silently drops every id past the first page.
+     */
     function wallFlushPlan(ids, max) {
       if (!ids || !ids.length) return 'none';
-      return ids.length > max ? 'head' : 'ids';
+      return ids.length > max ? 'drain' : 'ids';
     }
 
     function parkWall(reason) {
@@ -3752,9 +3761,11 @@ window.ClipViewMasonry = Masonry;
       const hadIds = pendingUpdateIds.size > 0;
       if (updateFlushTimer) { clearTimeout(updateFlushTimer); updateFlushTimer = 0; }
       if (parkedHeadStale) {
-        // Buffer overflowed while away — one head merge instead of a huge id list.
+        // Buffer overflowed while away. Keep the ids (they are still the only record
+        // of those captures) and resync as well, instead of replacing them with a
+        // 30-card head merge.
         parkedHeadStale = false;
-        pendingUpdateIds.clear();
+        void flushParkedUpdates();
         scheduleResync();
       } else if (hadIds) {
         flushParkedUpdates();
@@ -6181,23 +6192,102 @@ window.ClipViewMasonry = Masonry;
       return out;
     }
 
+    /**
+     * Apply server truth to the live model. New ids are inserted; a **known** id whose
+     * `timestamp` moved (kind=touch re-copy, local or from a peer) is moved in the feed
+     * too — otherwise the wall quietly disagrees with the DB and the clip looks lost.
+     * Returns how many rows the model acted on.
+     */
     function applyFreshItems(newItems) {
       const incoming = (newItems || []).filter((i) => i && i.id && i.type !== 'note' && !i.isCompose && !i.inTrash);
       if (!incoming.length) return 0;
-      const seen = new Set(clips.map((c) => c.id));
-      const fresh = incoming.filter((i) => !seen.has(i.id));
-      if (!fresh.length) return 0;
-      clips = sortClipsForFeed(dedupeClipsById([...fresh, ...clips]));
+      const known = new Map(clips.map((c) => [c.id, c]));
+      const fresh = [];
+      const moved = [];
+      for (const it of incoming) {
+        const cur = known.get(it.id);
+        if (!cur) { fresh.push(it); continue; }
+        if (Number(it.timestamp) > Number(cur.timestamp || 0)) moved.push(it);
+      }
+      if (!fresh.length && !moved.length) return 0;
+      if (fresh.length) clips = sortClipsForFeed(dedupeClipsById([...fresh, ...clips]));
+      let applied = fresh.length;
+      if (moved.length) {
+        const byId = new Map(moved.map((i) => [i.id, i]));
+        clips = clips.map((c) => {
+          const it = byId.get(c.id);
+          if (!it) return c;
+          return { ...c, timestamp: Number(it.timestamp) || c.timestamp };
+        });
+        clips = sortClipsForFeed(clips);
+        applied += moved.length;
+      }
       lastHeadSig = clipHeadSig(clips);
       const pinnedNew = fresh.filter((it) => itemIsPinned(it));
       const restNew = fresh.filter((it) => !itemIsPinned(it));
       if (pinnedNew.length || restNew.length > 2) {
         colHeights = null;
         rebuildFromData({ preserveScroll: true });
-      } else {
-        prependCardsIncremental(restNew);
+        return applied;
       }
-      return fresh.length;
+      if (restNew.length) prependCardsIncremental(restNew);
+      if (moved.length) moveTouchedCards(moved);
+      return applied;
+    }
+
+    /**
+     * A re-copy moves the row into a newer capture day; the card follows. Day-scoped:
+     * only the days involved are re-packed, and the day heads keep their counts honest.
+     * A moved row the current chip/search does not show forces a rebuild instead — the
+     * model changed under a filtered view, so the whole slice must be re-derived.
+     */
+    function moveTouchedCards(movedItems) {
+      const items = (movedItems || []).filter((it) => it && it.id);
+      if (!items.length) return 0;
+      const viewIds = new Set(clientFilter(clips).map((i) => i.id));
+      if (items.some((it) => !viewIds.has(it.id))) {
+        colHeights = null;
+        rebuildFromData({ preserveScroll: true });
+        return items.length;
+      }
+      const feed = wallFeedEl();
+      if (!feed) {
+        colHeights = null;
+        rebuildFromData({ preserveScroll: true });
+        return items.length;
+      }
+      const y0 = window.scrollY || document.documentElement.scrollTop || 0;
+      if (renderDayRail(DayGroups.group(wallRestItems()))) {
+        colHeights = null;
+        rebuildFromData({ preserveScroll: true });
+        return items.length;
+      }
+      const anchor = y0 >= 24 ? captureWallAnchor() : null;
+      const days = new Set();
+      let n = 0;
+      for (const it of items) {
+        const day = DayGroups.keyForItem(it);
+        days.add(day);
+        const card = cardCache.get(it.id);
+        const oldSec = card && card.closest ? card.closest('.day-group') : null;
+        if (oldSec && oldSec.dataset) days.add(oldSec.dataset.day);
+        if (!card) continue;
+        const dayHost = dayHostOf(ensureDaySection(feed, day));
+        if (!dayHost) continue;
+        dayHost.insertBefore(card, dayHost.firstChild);
+        n += 1;
+      }
+      // A moved row can be the first row of a day that did not exist yet.
+      for (const g of DayGroups.group(wallRestItems())) feed.appendChild(ensureDaySection(feed, g.day));
+      refreshDayHeadsFor(days);
+      for (const day of days) {
+        const host = dayHostOf(daySectionEl(feed, day));
+        if (!host) continue;
+        layoutMasonry(host, [...host.querySelectorAll(':scope > .m3-card')], { preserveScroll: false });
+      }
+      if (anchor) restoreWallAnchor(anchor);
+      observeDaySections();
+      return n;
     }
 
     function liveGet(url) {
@@ -6333,7 +6423,17 @@ window.ClipViewMasonry = Masonry;
         return;
       }
       nm('wall_merge', { payload: { kind: 'one', phase: 'start' } });
-      if (clips.some((c) => c.id === sid)) {
+      const known = clips.find((c) => c.id === sid);
+      if (known) {
+        // Known card, but the server may have moved it: kind=touch bumps `timestamp`.
+        // Refetch and follow, instead of reporting 'have' on a stale position.
+        let one = null;
+        try { one = await fetchClipById(sid); } catch (_) {}
+        if (one && Number(one.timestamp) > Number(known.timestamp || 0)) {
+          const n = applyFreshItems([one]);
+          nm('wall_merge', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'one', phase: 'end', n, reason: 'moved' } });
+          return;
+        }
         nm('wall_merge', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'one', phase: 'end', n: 0, reason: 'have' } });
         return;
       }
@@ -10600,10 +10700,16 @@ window.ClipViewMasonry = Masonry;
     // ---- Live update coalescing ---------------------------------------------
     // A sync apply / capture burst posts one `update` per item. Ingesting each
     // separately costs one `/api/clips?id=` fetch + one masonry repaint per
-    // item, on every tab — an N-item pull became N paints × tabs. Coalesce a
-    // burst into a single head merge: one fetch, one repaint.
+    // item, on every tab — an N-item pull became N paints × tabs. So coalesce:
+    // one bounded by-id batch, one repaint. **Every id must still be applied.**
+    // An earlier version folded a burst into a single head merge, which only ever
+    // pulls `PAGE_SIZE` cards — the recorded 3000-id pull burst of 2026-10-09 lost
+    // ~2970 cards from the wall until a manual reload.
     const UPDATE_FLUSH_MS = 60;
-    const UPDATE_BURST_MAX = 4;
+    /** Ids applied per drain pass; the rest go back on the queue (never dropped). */
+    const UPDATE_IDS_MAX = 2048;
+    /** `/api/clips?ids=` chunk, same bound the parked flush uses. */
+    const UPDATE_CHUNK = 64;
     const UPDATE_PARKED_MAX = 512;
     let pendingUpdateIds = new Set();
     let updateFlushTimer = 0;
@@ -10623,30 +10729,45 @@ window.ClipViewMasonry = Masonry;
       updateFlushTimer = window.setTimeout(flushPendingUpdates, UPDATE_FLUSH_MS);
     }
 
-    /** One batched fetch + one repaint for everything buffered while parked. */
+    /** One batched fetch (chunked) + one repaint for a whole set of ids. */
+    async function ingestClipIds(ids) {
+      const list = (ids || []).filter(Boolean);
+      if (!list.length) return 0;
+      const got = [];
+      for (let i = 0; i < list.length; i += UPDATE_CHUNK) {
+        try { got.push(...await fetchClipsByIds(list.slice(i, i + UPDATE_CHUNK))); } catch (_) {}
+      }
+      const n = applyFreshItems(got);
+      nm('wall_merge', { payload: { kind: 'batch', phase: 'end', n: list.length, got: got.length, applied: n } });
+      return n;
+    }
+
+    /** Parked and live flushes share one ingest truth. */
     async function flushParkedUpdates() {
       const ids = [...pendingUpdateIds];
       pendingUpdateIds.clear();
       if (!ids.length) return;
-      const got = [];
-      for (let i = 0; i < ids.length; i += 64) {
-        try { got.push(...await fetchClipsByIds(ids.slice(i, i + 64))); } catch (_) {}
-      }
-      applyFreshItems(got);
+      await ingestClipIds(ids);
     }
 
     function flushPendingUpdates() {
       updateFlushTimer = 0;
       const ids = [...pendingUpdateIds];
       pendingUpdateIds.clear();
-      const plan = wallFlushPlan(ids, UPDATE_BURST_MAX);
+      const plan = wallFlushPlan(ids, UPDATE_IDS_MAX);
       if (plan === 'none') return;
-      if (plan === 'head') {
-        nm('wall_merge', { payload: { kind: 'burst', phase: 'coalesce', n: ids.length } });
-        scheduleResync();
-        return;
+      const pass = ids.slice(0, UPDATE_IDS_MAX);
+      const rest = ids.slice(UPDATE_IDS_MAX);
+      if (rest.length) {
+        // Drain, do not drop: the tail waits one tick and is applied next pass.
+        for (const id of rest) pendingUpdateIds.add(id);
+        updateFlushTimer = window.setTimeout(flushPendingUpdates, UPDATE_FLUSH_MS);
       }
-      for (const id of ids) ingestClipById(id);
+      nm('wall_merge', { payload: { kind: 'burst', phase: 'coalesce', n: ids.length, pass: pass.length, queued: rest.length } });
+      // A single capture (the common case) keeps its own one-card metric; a burst
+      // becomes one bounded batch instead of one fetch + one repaint per item.
+      if (pass.length === 1) { void ingestClipById(pass[0]); return; }
+      void ingestClipIds(pass);
     }
 
     function noteSSEEvent() { sseLastEventAt = Date.now(); }

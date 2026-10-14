@@ -296,3 +296,39 @@ test('OCR / replica must not rewrite capture timestamp', () => {
   const ocr = functionBody(sync, 'enqueueOCROp');
   assert.doesNotMatch(ocr, /makeOp\([\s\S]{0,200}item: nil[\s\S]{0,80}Date\(\)/);
 });
+
+// 2026-10-14: a pull burst of 3000 ids was folded into ONE head merge (`wall_merge
+// {"kind":"burst","n":3000}`), and a head merge only ever pulls PAGE_SIZE cards.
+// ~2970 captured clips existed in SQLite but never reached the wall until a reload.
+test('a pull burst must not fold into a 30-card head merge', () => {
+  const flush = htmlFn('flushPendingUpdates');
+  assert.doesNotMatch(flush, /scheduleResync\(\)/, 'resync merges only PAGE_SIZE cards: a burst must be applied by id');
+  assert.match(flush, /UPDATE_IDS_MAX/);
+  assert.match(flush, /for \(const id of rest\) pendingUpdateIds\.add\(id\)/);
+  const batch = htmlFn('ingestClipIds');
+  assert.match(batch, /fetchClipsByIds/);
+  assert.match(batch, /applyFreshItems\(got\)/);
+  // The parked-overflow path used to clear the buffer and resync; those ids are the
+  // only record of the captures that arrived while nobody was looking.
+  const wake = htmlFn('wakeWall');
+  assert.doesNotMatch(wake, /pendingUpdateIds\.clear\(\)/);
+  assert.match(wake, /void flushParkedUpdates\(\)/);
+  assert.match(html, /const UPDATE_IDS_MAX = 2048/);
+});
+
+// Wall order is the capture clock, so a `kind=touch` re-copy moves the row. The wall
+// must follow the move; reporting 'have' on the stale position made the copy look lost.
+test('a re-copy moves its card on the capture clock', () => {
+  const sig = htmlFn('clipHeadSig');
+  assert.match(sig, /Number\(i\.timestamp\)/, 'head signature must carry the capture clock');
+  const apply = htmlFn('applyFreshItems');
+  assert.match(apply, /Number\(it\.timestamp\) > Number\(cur\.timestamp \|\| 0\)/);
+  assert.match(apply, /sortClipsForFeed\(clips\)/);
+  assert.match(apply, /moveTouchedCards\(moved\)/);
+  const move = htmlFn('moveTouchedCards');
+  assert.match(move, /refreshDayHeadsFor\(days\)/, 'day heads must keep honest counts after a move');
+  assert.match(move, /observeDaySections\(\)/);
+  const one = htmlFn('ingestClipByIdNow');
+  assert.doesNotMatch(one, /if \(clips\.some\(\(c\) => c\.id === sid\)\)/, "a known id must not short-circuit on 'have'");
+  assert.match(one, /reason: 'moved'/);
+});
