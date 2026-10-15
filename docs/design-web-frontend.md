@@ -157,7 +157,7 @@ the one server change this design depends on.
    ECharts. The old vanilla markup is **not** the spec — the taste is (see
    docs/design-taste.md 「分析」/「布局与节奏」). Charts come from `MineChart`
    (`lib/echarts.ts` `buildMineOption`); the palette/formatters are shared with the
-   vanilla rollback via `web/mine-charts.mjs` (aliased `@charts`).
+   vanilla rollback via `web/assets/mine-charts.mjs` (aliased `@charts`).
 2. **Tokens are code**: `theme/tokens.css` is generated from `docs/design-taste.md`;
    no component hardcodes a hex.
 3. **Every API response is Zod-parsed**; the Rust struct and the TS schema are
