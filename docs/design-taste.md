@@ -44,9 +44,9 @@ Web 与 Android 可有平台壳差异，**语义色必须一致**。
 3. 禁止所有类型共用一个灰色 badge。  
 4. 新类型：先补本表，再改 Android / Web。
 
-## 操作日志来源色（Ops source）
+## 操作日志（Ops）来源色
 
-Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
+Web `.ops-src-*` 与 Android `opsSourceStyle()` 共用同一张表（hex 未变）：
 
 | source | rail / ink 方向 |
 | --- | --- |
@@ -59,6 +59,8 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 | `system` / 其它 | 灰 `#8E8E93` |
 
 布局：左侧 3px 色轨 + 来源 pill + 字段区 **不 soft-wrap、可 XY pan**。
+
+阅读面不是卡片流（`web/assets/oplog-panel.mjs`）：**信号（预算 vs 现状）→ 时间序列 → 类型排行 → 耗时 p95 → 来源构成 → 明细**。每一条都带数字；图表用共享皮肤 `web/assets/mine-charts.css`，选型走 `chartPlan`——< 3 个桶不画趋势，没有 `dur_ms` 就写边界而不是画空轴。颜色是第二通道，不是唯一通道。
 
 ## 墙 · 每日节奏（Day rhythm）
 
@@ -108,7 +110,7 @@ Web `.ops-item.src-*` 与 Android `opsSourceStyle()` 共用：
 
 **聊天 chrome**：左栏 `#F2F2F7` 会话行（标题=最近 prompt，不是整段 uuid）；列卡还要最后一条本地 `YYYY-MM-DD HH:mm:ss`、实例 `instance_id`、agent 来源 `source`、工作目录 `cwd`。右栏 IM 气泡。工具默认折叠。用户/助手气泡不套第二层 max-height 滚动。会话「分析」= 损耗账本 sheet，结构固定为 **① 损耗判定**（score + 分量 KPI + 时间/钱构成条 + 缓存环形）→ **② 损耗排行**（按 $ 与按秒两张横向柱 + 每卡：影响数字 / 指标 now→target / 证据 chips / 原因·动作·闸门 / ack）→ **③ 回合时间轴**（阶段色，柱=墙钟，红点=有失败，点回合就地展开）→ **④ 账本**（工具/文件/阶段/成本，**始终展开**）。owner 规则：**不允许折叠细节**，`<details>` 不得隐藏方向与账本。色彩是信息通道且必须带数字：时间=Accent 蓝 `#0071E3`、钱/缓存=青 `#2F8F83`、损耗=暖红 `#C2410C`、注意=Honey、用户轴=Honey、Agent 轴=Accent、良好=绿 `#2E7D32`；阶段色 `review #6E56CF` / `debug #C62828` / `ship #2E7D32` / `taste #1565C0`。禁止灰底灰字一锅炖，禁止彩虹装饰，禁止用色块代替数字。分析 sheet 铺满线程时用**不透明底**（禁止 `backdrop-filter`，否则每次 hook 都在背后重算 = 整页重绘），自动刷新保留滚动与已展开的回合明细。
 
-**图表选型（视觉真源补充）**：比例分段条必须**段间留 3px 空隙 + 每段 0.5px 内描边**（相邻比例不得融成一团）；一张图只允许一种单位（秒与 $ 不混轴）；环形用于 part-to-whole 与单值比率（中心出数），折线只用于 ≥3 点趋势，柱用于有序多点，横向柱用于排序比较，>6 片不用饼图；每个色块都必须可读出数值。实现 `web/mine-charts.mjs`，后端在 `_table(..., chart={kind,label,value,unit})` 处声明。
+**图表选型（视觉真源补充）**：比例分段条必须**段间留 3px 空隙 + 每段 0.5px 内描边**（相邻比例不得融成一团）；一张图只允许一种单位（秒与 $ 不混轴）；环形用于 part-to-whole 与单值比率（中心出数），折线只用于 ≥3 点趋势，柱用于有序多点，横向柱用于排序比较，>6 片不用饼图；每个色块都必须可读出数值。实现 `web/assets/mine-charts.mjs`，后端在 `_table(..., chart={kind,label,value,unit})` 处声明。
 
 **形状随数据，不随后端声明**：后端的 `kind` 是建议，前端 `pickKind()` 可推翻——
 - **柱状不适合就别硬画**：parts ≤ 4 或单值占比 ≥ 70% 时，柱只剩几根细条 + 大片空白，改**环形**（part-to-whole，中心出数，图例带值+%）。

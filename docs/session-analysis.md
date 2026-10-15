@@ -200,7 +200,7 @@ Agent 面是**契约**，字段稳定、可解析、带复测指令。额外返�
    （回合明细打开）时只标 `is-pending`，不重绘。
 6. 禁止 `setInterval` 刷 DOM（沿用 SSE `hook_event` 去抖）。
 7. `?mine=1` 是分析深链（浏览器验收、直接打当前会话分析用）；不改变默认不打开的行为。
-8. **图表按数据形状选，不由口味选**（实现 `web/mine-charts.mjs`，后端在 `_table(..., chart=)` 处声明 kind）：
+8. **图表按数据形状选，不由口味选**（实现 `web/assets/mine-charts.mjs`，后端在 `_table(..., chart=)` 处声明 kind）：
 
 | 数据形状 | 图 | 例 |
 | --- | --- | --- |

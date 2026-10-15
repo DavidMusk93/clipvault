@@ -382,6 +382,41 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 ---
 
+## 操作日志（审计）
+
+**不变式：** `operation_logs` 只追加；`dur_ms` 是**实测墙钟**，NULL = 没计时（不是 0）。抽屉是**读数**，明细是下钻。
+
+```text
+  appendOperationLog(action, item, hash, detail, source, durMs: nil?)
+        |
+        v
+  operation_logs (id, ts, action, item_id, content_hash, detail, source, dur_ms)
+        |  只追加；不 UPDATE；不写正文
+        +-- GET /api/oplogs        过滤明细 (action/source/window/limit)   点开才拉
+        +-- GET /api/oplogs/stats  窗口聚合 -> OpsAnalytics (一次查询)
+                                      |
+              +-----------------------+---------------------+----------------+
+              v                       v                     v                v
+          类型排行                频次 / 空档           耗时 p50/p95/max   时间序列 (civil 桶)
+              +-----------------------+---------------------+----------------+
+                                      v
+                     预算化信号 firehose / repeat / burst / silent / slow / gap
+                                      v
+              信号 -> 时间序列 -> 类型排行 -> 耗时 p95 -> 来源构成 -> 明细
+```
+
+- 一次一个卡片是普查，不是读数：10831 张 `compose_edit` 卡和 11 张 `reader.comment` 卡长得一样，不滚到底看不出问题。默认只读聚合，明细按 `action` 在 SQL 里过滤。
+- 图表按数据形状选（`chartPlan`）：< 3 个桶不画趋势；窗口没有 `dur_ms` 就写「没有任何耗时采样」，不画空轴。
+- 预算写在 `OpsAnalytics.Budget`（同 Metrics：没有预算的信号不算信号），信号必带 `now -> target` 与单位。
+- 桶是 **civil 桶**（`ClipTimeFormat.displayTimeZone`，DST 正确），与明细 `timeLocal` 同一时区；空桶必须 materialize 成 0（沉默是事实，也是尖峰的基线）。
+- 打开抽屉才 `import` 图表模块并取数；每窗口一次聚合请求，30s 内复用缓存，明细不在刷新时拉。
+
+禁止：把 `dur_ms` NULL 当 0ms；用前端已渲染的行统计总数/耗时（一律用 `/api/oplogs/stats`）；未打开抽屉就 import 图表或取数；把 `oplog_no_duration` 这类边界信号静默丢掉。
+
+去哪改：`Store/OpsAnalytics.swift`（聚合 + 预算）· `DatabaseManager.fetchOpLogRows` / `fetchOperationLogs`（SQL）· `web/assets/oplog-panel.mjs`（读数 + 下钻）· `web/assets/mine-charts.mjs` / `.css`（图表皮肤）。回归：`tests/oplog_analytics_main.swift` + `tests/oplog-panel.test.mjs`。
+
+---
+
 ## Metrics
 
 本机 `ui-metrics.db`（**不同步、不含正文**）是 UI 优化输入。
@@ -563,6 +598,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 错 home | `docs/incident-20260811-wrong-data-home.md` |
 | 墙记忆丢失（拨钟/砍尾/滤错/图404/塌列/折头/不动） | 本文硬约束 4–5；`tests/wall-integrity.test.mjs` + `tests/wall-live-update.test.mjs` |
 | GDrive EDEADLK | nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813` |
+| 操作日志读数 | 本文 · 操作日志（审计）；`tests/oplog_analytics_main.swift` + `tests/oplog-panel.test.mjs` |
 | URL/HTML 安全 | nmem `clipvault_gate_url_html_safety_20260813` |
 | SQLite 运维 | `.trae/skills/sqlite-runtime-tricks/` |
 | clip-link | `docs/feature-clip-link.md` |
