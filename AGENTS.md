@@ -437,7 +437,11 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   浮层卡只留越阈值 attention + 关键 name 的 n/avg/max + 最近 payload
 ```
 
-**指标 UI 三要素：** 单位（ms/cls/count）、预算（什么算好）、对照（基线/趋势）。排序与判红一律用 **p95**，不用 max（离群噪声）。Δ基线只在超预算或绝对变化够大（≥20ms / ≥0.02 CLS）时提示，避免亚预算微抖报警。
+**指标 UI 三要素：** 单位（ms/cls/count/px）、预算（什么算好）、对照（基线/趋势）。排序与判红一律用 **p95**，不用 max（离群噪声）。Δ基线只在超预算或绝对变化够大（≥20ms / ≥0.02 CLS）时提示，避免亚预算微抖报警。
+
+**p95 只有一个定义：nearest-rank，`rank = ceil(p * n)`（服务端 SQL 整数形式 `(n * p + 99) / 100`）。** 调试读本页环缓冲、备份读服务端 summary，两边必须同定义；2026-10-15 修的就是「前端插值 vs 服务端 `CAST(cnt*p)`」两个口径：2 个样本时服务端把**最小值**当 p95、3 个样本时把最小值当 p50，而排序/判红全用 p95 —— 低报的 p95 正好藏住回归。数值一律经 `fmtVal` 按量级缩放并带单位（禁止裸 `3954105ms` / `p95v 4827425.000`）。
+
+**耗时与"停留时长"分家：** `dur_ms` 是延迟（`wall_fetch`、`sheet_morph`…）；`notes_close.value`、`wall_lifecycle.dur_ms` 是**开着/停画了多久**（session 长度），必须 `budget: null` 声明并给可读标签，禁止当延迟报，也禁止静默 dash。计数类（`notes_open`、`note_switch`）同理：声明显式 null + `unit: 'count'`。
 
 **没有预算的 name 等于没有指标（硬约束）。** 2026-10-14 的 socket 抖动（~1/min）和「墙不刷新」能活到 owner 报障，就是因为 `sse_state` 的 `budget: null` + `metricMeta` 对未声明 name 静默 fallback：**永不判红的指标不是指标**。规则：
 
