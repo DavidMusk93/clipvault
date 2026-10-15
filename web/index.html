@@ -691,7 +691,11 @@
     .day-stats .badge.is-pending {
       color: var(--muted);
       background: var(--fill);
-      border: 0.5px dashed var(--separator-strong);
+      /* `outline`, not `border`: the pending badge must occupy exactly the same
+         box as the type pill it is replaced by, or the late index patch would
+         shift the wall by a pixel. */
+      outline: 0.5px dashed var(--separator-strong);
+      outline-offset: -0.5px;
     }
     .day-rhythm.is-partial .rhythm-track,
     .day-rhythm.is-partial .rhythm-facts { opacity: 0.6; }
