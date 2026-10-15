@@ -267,7 +267,7 @@ test('head drift is measured after the merge, so a real failure is visible', () 
 // ---------------------------------------------------------------------------
 
 function loadMergeHead(headItems, fullItems = {}) {
-  const calls = { urls: [], merges: [], drift: [], moves: [] };
+  const calls = { urls: [], merges: [], drift: [], moves: [], ghosts: [] };
   const mod = loadModule({
     prologue: [
       'let clips = [];',
@@ -276,12 +276,13 @@ function loadMergeHead(headItems, fullItems = {}) {
       "const currentView = 'all';",
       "const currentFilter = 'all';",
       `const PAGE_SIZE = ${constNumber('PAGE_SIZE')};`,
+      `const GHOST_MAX = ${constNumber('GHOST_MAX')};`,
       "const API = '';",
     ].join('\n'),
     names: [
       'applyWallQueryParams', 'clipHeadSig', 'headDriftBreakdown', 'headDriftCount',
       'noteHeadDrift', 'pinFieldsFrom', 'sortClipsForFeed', 'dedupeClipsById',
-      'applyFreshItems', 'fetchClipById', 'mergeHead',
+      'applyFreshItems', 'fetchClipById', 'ghostCandidateIds', 'reapGhostCards', 'mergeHead',
     ],
     deps: {
       nm: (name, payload) => {
@@ -307,6 +308,7 @@ function loadMergeHead(headItems, fullItems = {}) {
       clientFilter: (list) => list,
       moveTouchedCards: (items) => { calls.moves.push(items.map((i) => i.id)); return items.length; },
       scheduleDayStats: () => {},
+      applyRemoteClipRemoval: (d) => { calls.ghosts.push(d.id); },
     },
     exports: `{
       mergeHead,
@@ -376,6 +378,107 @@ test('mergeHead still inserts unknown ids and never rewinds the capture clock', 
   const backDrift = back.calls.drift.at(-1).payload;
   assert.equal(backDrift.stale_ts, 1, 'and the disagreement is still reported, not hidden');
   assert.equal(backDrift.id0, 'A', 'the metric names the row so the failure can be looked up');
+});
+
+// ---------------------------------------------------------------------------
+// 4. A delete missed while the socket was blind left a phantom card on the wall.
+//    Reproduced live 2026-10-15: tear the EventSource down, DELETE a clip, resync —
+//    the card stayed in the model at its old index. `?ids=` decides, never a guess.
+// ---------------------------------------------------------------------------
+
+test('ghost candidates are only rows the head can disprove', () => {
+  const mod = loadModule({
+    prologue: `const GHOST_MAX = ${constNumber('GHOST_MAX')};`,
+    names: ['ghostCandidateIds'],
+    deps: { itemIsPinned: (i) => !!(i && i.pinnedAt) },
+    exports: '{ ghostCandidateIds }',
+  });
+  const head = [
+    { id: 'h1', timestamp: 500, type: 'text' },
+    { id: 'h2', timestamp: 400, type: 'text' },
+    { id: 'h3', timestamp: 300, type: 'text' },
+  ];
+  const model = [
+    { id: 'h1', timestamp: 500, type: 'text' },
+    { id: 'deleted', timestamp: 450, type: 'text' },
+    { id: 'h2', timestamp: 400, type: 'text' },
+    { id: 'older-not-asked', timestamp: 200, type: 'text' },
+    { id: 'note', timestamp: 480, type: 'note' },
+    { id: 'pinned', timestamp: 10, type: 'text', pinnedAt: 9 },
+  ];
+  assert.deepEqual(mod.ghostCandidateIds(head, model), ['deleted', 'pinned'],
+    'never ask the server about rows older than the head, notes, or rows already listed');
+  assert.deepEqual(mod.ghostCandidateIds([], model), [], 'no head → no question');
+});
+
+function loadReaper({ batch, one }) {
+  const removed = [];
+  const metrics = [];
+  let live = batch;
+  const mod = loadModule({
+    prologue: "const API = '';",
+    names: ['confirmClipGone', 'reapGhostCards'],
+    deps: {
+      fetchClipsByIds: async () => {
+        if (typeof live === 'function') return live();
+        return live;
+      },
+      liveGet: one,
+      applyRemoteClipRemoval: (d) => removed.push(d.id),
+      nm: (name, extra) => metrics.push([name, extra && extra.payload]),
+    },
+    exports: '{ reapGhostCards }',
+  });
+  return { mod, removed, metrics };
+}
+
+const okBody = (items) => async () => ({ ok: true, json: async () => ({ items }) });
+
+test('reapGhostCards removes only what the server disowns', async () => {
+  const { mod, removed, metrics } = loadReaper({
+    batch: [{ id: 'alive', timestamp: 450, type: 'text' }],
+    one: okBody([]),
+  });
+  assert.equal(await mod.reapGhostCards(['alive', 'gone']), 1, 'one phantom');
+  assert.deepEqual(removed, ['gone'], 'only the disowned row is dropped');
+  assert.deepEqual(metrics, [['wall_merge', { kind: 'ghost', phase: 'end', n: 1 }]]);
+  assert.equal(await mod.reapGhostCards([]), 0, 'nothing to ask is not a request');
+});
+
+test('a trashed or empty answer is a removal; an unanswered one is not', async () => {
+  const trashed = loadReaper({
+    batch: [{ id: 'alive', timestamp: 450, type: 'text' }, { id: 'gone', timestamp: 460, type: 'text', inTrash: true }],
+    one: okBody([{ id: 'gone', inTrash: true }]),
+  });
+  assert.equal(await trashed.mod.reapGhostCards(['alive', 'gone']), 1, 'inTrash is a removal');
+  assert.deepEqual(trashed.removed, ['gone']);
+
+  // Never remove on a failure: a transient read error is "unknown", not "deleted".
+  for (const one of [
+    async () => ({ ok: false, json: async () => ({}) }),
+    async () => { throw new Error('offline'); },
+  ]) {
+    const r = loadReaper({ batch: () => { throw new Error('offline'); }, one });
+    assert.equal(await r.mod.reapGhostCards(['a']), 0, 'an unanswered question removes nothing');
+    assert.deepEqual(r.removed, [], 'the card stays on the wall');
+  }
+
+  // The batch lookup alone never decides: a suspect is confirmed one by one.
+  const revived = loadReaper({
+    batch: () => { throw new Error('batch offline'); },
+    one: okBody([{ id: 'a', inTrash: false }]),
+  });
+  assert.equal(await revived.mod.reapGhostCards(['a']), 0, 'a confirmed live row is kept');
+  assert.deepEqual(revived.removed, []);
+});
+
+test('mergeHead asks on both exits, and never in search or trash views', () => {
+  const src = fnSource('mergeHead');
+  const calls = src.match(/await reapGhostCards\(ghosts\)/g) || [];
+  assert.equal(calls.length, 2, 'the noop exit and the insert/move exit both converge');
+  assert.match(fnSource('mergeHead'),
+    /const ghosts = \(searchQuery \|\| currentView === 'trash'\) \? \[\] : ghostCandidateIds\(items, clips\)/,
+    'a filtered view must not reap: the head is not the model there');
 });
 
 test('the drift metric names what disagrees, not just how many', () => {
