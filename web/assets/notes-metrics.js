@@ -8,6 +8,13 @@
     'route', 'proto', 'status',
     'compiled', 'reused',
     'zone', 'action', 'target', 'via',
+    // Declared by the wall already: an allow-list that silently drops a key the
+    // product emits makes the metric undiagnosable (2026-10-15: wall_head_drift
+    // could say "2" but never *which* two, and sse_churn lost its `cause`).
+    'miss', 'stale_ts', 'stale_pin', 'id0', 'moved',
+    'cause', 'ms_since_last',
+    'applied', 'got', 'pass', 'queued',
+    'day', 'days', 'cols',
   ]);
   const NAME = /^[a-z][a-z0-9_]{1,63}$/;
   const SESSION_KEY = 'clipvault.metrics.session';

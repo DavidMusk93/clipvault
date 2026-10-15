@@ -26,6 +26,12 @@ final class UiMetrics {
         "compiled", "reused",
         "zone", "action", "target", "via",
         "trace", "cols", "vp", "vis",
+        // Mirrors web/assets/notes-metrics.js ALLOW: a key the product declares but
+        // the plane drops leaves the metric undiagnosable (2026-10-15 drift/churn).
+        "miss", "stale_ts", "stale_pin", "id0", "moved",
+        "cause", "ms_since_last",
+        "applied", "got", "pass", "queued",
+        "day", "days",
     ])
 
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")

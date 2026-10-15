@@ -62,6 +62,38 @@ test('payload forbids note content keys', () => {
   assert.doesNotMatch(metricsJs, /textContent|getMarkdown\(\)/);
 });
 
+// 2026-10-15: `wall_head_drift` could report a count but never the reason, because
+// `miss`/`stale_ts` were dropped by the allow-list; `sse_churn` had silently lost its
+// `cause` the same way. A declared payload key the plane discards is a blind metric.
+test('every payload key the product declares survives the allow-list', () => {
+  const allow = new Set(
+    /const ALLOW = new Set\(\[([\s\S]*?)\]\)/.exec(metricsJs)[1]
+      .match(/'[^']+'/g)
+      .map((s) => s.slice(1, -1)),
+  );
+  const swiftAllow = new Set(
+    /private static let allowedPayload = Set\(\[([\s\S]*?)\]\)/.exec(swift)[1]
+      .match(/"[^"]+"/g)
+      .map((s) => s.slice(1, -1)),
+  );
+  const declared = new Set();
+  for (const m of html.matchAll(/payload:\s*\{([\s\S]*?)\}/g)) {
+    for (const k of m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:/g)) declared.add(k[1]);
+  }
+  const dropped = [...declared].filter((k) => !allow.has(k));
+  assert.deepEqual(dropped, [], `declared payload keys the client drops: ${dropped.join(', ')}`);
+  // The two planes must agree, or a key survives the browser and dies on ingest.
+  assert.deepEqual(
+    [...allow].filter((k) => !swiftAllow.has(k)).sort(),
+    [],
+    'client-allowed keys must exist server-side too',
+  );
+  // And the facts a regression needs must actually be on the list.
+  for (const k of ['miss', 'stale_ts', 'stale_pin', 'id0', 'moved', 'cause']) {
+    assert.ok(allow.has(k) && swiftAllow.has(k), `${k} must be allow-listed on both planes`);
+  }
+});
+
 test('metrics separate latency (dur_ms) from values and budgets', () => {
   // Store columns + additive migration.
   assert.match(swift, /value REAL/);
