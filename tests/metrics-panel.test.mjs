@@ -135,6 +135,68 @@ test('loss-critical names carry a budget, and undeclared names are flagged', () 
   assert.match(html, /个指标未声明（无预算，永不判红）/);
 });
 
+// 2026-10-15: 调试 aggregated the ring buffer in JS (interpolated) while 备份 showed the
+// server summary (SQL `CAST(cnt*p)`), and the floor form reported the *minimum* as a p95
+// for two samples — the panel understated exactly the tail it sorts and reddens by. One
+// definition, pinned in tests/metrics-sql.test.mjs on both sides.
+test('quantities are readable and carry their unit', () => {
+  const fmtVal = new Function(`${fnSource('fmtVal')}\nreturn fmtVal;`)();
+  const budgetLabel = new Function(`${fnSource('budgetLabel')}\nreturn budgetLabel;`)();
+
+  // The magnitudes that were on screen: 1425663ms (parked), 2272259.714 (drawer open),
+  // p95v 4827425.000. A number nobody can read is a number nobody checks.
+  assert.equal(fmtVal(1425663, 'ms'), '23.8min');
+  assert.equal(fmtVal(2272259.714, 'ms'), '37.9min');
+  assert.equal(fmtVal(3954105, 'ms'), '1.1h');
+  assert.equal(fmtVal(3 * 3600000, 'ms'), '3.0h');
+  assert.equal(fmtVal(682.4, 'ms'), '682ms');
+  assert.equal(fmtVal(2740, 'ms'), '2.74s');
+  assert.equal(fmtVal(0.043, 'cls'), '0.043');
+  assert.equal(fmtVal(730, 'px'), '730px');
+  assert.equal(fmtVal(1862, 'count'), '1862');
+  assert.equal(fmtVal(null, 'ms'), '—');
+  assert.equal(fmtVal(NaN, 'ms'), '—');
+
+  assert.equal(budgetLabel({ budget: 300, unit: 'ms' }), '300ms');
+  assert.equal(budgetLabel({ budget: 0, unit: 'px' }), '0px');
+  assert.equal(budgetLabel({ budget: 0.1, unit: 'cls' }), '0.1');
+  assert.equal(budgetLabel({ budget: 3, unit: 'count' }), '3');
+  assert.equal(budgetLabel({ budget: null, unit: 'ms' }), '—');
+
+  // Both panels format through the same helper (no `avg v 2272259.714` readout left).
+  assert.match(html, /fmtVal\(row\.avg_ms, unit\)/);
+  assert.match(html, /fmtVal\(row\.value_p95, unit\)/);
+  assert.doesNotMatch(html, /avg v \$/);
+  assert.doesNotMatch(html, /p95v \$/);
+});
+
+test('declared names carry an honest unit, and no budget is a no-op', () => {
+  const spec = metricSpec();
+  const units = new Set(['ms', 'cls', 'px', 'count']);
+  for (const [name, meta] of Object.entries(spec)) {
+    if (meta.unit == null) continue;
+    assert.ok(units.has(meta.unit), `${name}: unknown unit ${meta.unit}`);
+    if (meta.budget == null) continue;
+    // ms budgets exist to be exceeded; 60s on a status read never was.
+    const ceiling = meta.unit === 'ms' ? 60000 : 1e9;
+    assert.ok(meta.budget <= ceiling, `${name}: budget ${meta.budget} is a no-op`);
+  }
+  // The two that were lying on screen: a px metric shown as a bare `0`, and a budget 200x
+  // its measured p95 (wall_backup p95 529ms over 549 samples, server avg 77ms).
+  assert.equal(spec.wall_layout_drift.unit, 'px');
+  assert.equal(spec.wall_layout_drift.budget, 0);
+  assert.equal(spec.wall_backup.budget, 300);
+  // Duration-of-stay / usage counters are context: declared, unit-carrying, never red —
+  // but never presented as a response time either.
+  for (const name of ['notes_open', 'notes_close', 'notes_mode', 'note_switch', 'note_new']) {
+    assert.equal(spec[name].budget, null, `${name} is context, not latency`);
+    assert.match(spec[name].label, /时长|打开|切换|新建/, `${name} label must say what it measures`);
+  }
+  // The button label must match the data it pulls (`/recent?limit=200`, not a 24h window).
+  assert.match(html, /id="debugPull">服务器 recent</);
+  assert.doesNotMatch(html, /id="debugPull">[^<]*24h/);
+});
+
 // Two sampling blind spots found while verifying the churn fix live: an idle wall never
 // runs `mergeHead` (so no drift sample existed at all), and a churn rate sampled only at
 // socket-open can never show "0 opens in 5 min" — absence is not evidence.
