@@ -215,6 +215,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | 卡片晚到高度（图片/表格/OCR/字体）→ `dataset.packedH` + ResizeObserver 只 repack 该列 | 全量 rebuild；预览 `img` 不限高（`.md-preview img` 必须 max-height） |
 | 拉数据 burst（对端 apply / 连打复制）→ 合并成**一次** head merge（`scheduleUpdateIngest` → `wallFlushPlan`） | 每个 `update` 一次 `/api/clips?id=` + 一次重排（N 项 × N 页 = CPU 风暴） |
 | 节奏条 hover/键盘划读：1px crosshair 1:1 跟指针（只写 transform）+ 读数覆在事实行上（都是绝对定位 overlay），事实 hover 只亮它点名的区间 | hover 改几何 / repack / 整墙重绘；每格留原生 `title`（双 tooltip）；288 格各开一个 tab 位 |
+| 「现在」线随之前进：今天那条线由 `nowMarkerTick` 每 60s 写 `transform`（+wake/resize），parked/hidden 不跑；夜间底带几何由 `NIGHT_START/NIGHT_END` 算出 | 让「现在」停在旧时刻（头部不重绘就永不动）；夜间带写死百分比（12.5% = 只盖到 03:00，与「夜间」事实到 06:00 矛盾）；用 `left` 移动它（会触发 layout） |
 | **header 数字来自 store**：`GET /api/clips/days` 按捕获日返回全量聚合（total / byType / 288 个五分钟格 / 精确 first-last-night-gap），与 `/api/clips` 同过滤；懒加载只决定画多少张卡，不决定头写什么数 | 用已渲染卡片统计当日条数/类型/节奏（一页 30 张会把 4103 条的日子写成「共 30 条」）；为统计去整日加载卡片 |
 | 按**捕获日**分片：每天一块 `.masonry.day-masonry` 独立装箱；`relayoutDays` 增量只重排当天；header 出当日条数 + 类型统计 + 288 格五分钟节奏条（活跃跨度 / 峰值半小时 / 夜间占比 / 最长空档）；`#dayRail` 跳日 | 整墙当一个 canvas 每次全量测高；按同步到达时间分组或统计；节奏条另起一套色；跳日走 `fetchPage({reset:true})`（滚到顶） |
 | 无人看（隐藏，或 `WALL_IDLE_MS` 无 pointer/key/wheel/touch 输入）→ `parkWall` 停画停解码，SSE 与模型照留；回输入 `wakeWall` 一次补画 | 无人看仍跟每个事件重排/解码；把无头页当常驻客户端（`visibilityState`/`hasFocus()` 对无头一直说谎，判据是**真输入**） |
@@ -520,7 +521,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 ./scripts/check-frontend.sh
 ```
 
-门禁是 `scripts/check-frontend.sh`：`node --test tests/*.test.mjs`，文件名**硬编码**在脚本 gates 注释里。新测试必须追加进该注释。墙记忆丢失：`tests/wall-integrity.test.mjs` + `tests/wall_clock_main.swift` + `tests/wall-clock.test.mjs`。`node --check` 不过禁止上线。
+门禁是 `scripts/check-frontend.sh`：`node --test tests/*.test.mjs`，文件名**硬编码**在脚本 gates 注释里。新测试必须追加进该注释。墙记忆丢失：`tests/wall-integrity.test.mjs` + `tests/wall_clock_main.swift` + `tests/wall-clock.test.mjs`。**内联脚本必须在 jsdom 里能启动到底**：`tests/wall-boot.test.mjs`（顶层 TDZ 会把整段脚本打死但所有源码扫描仍绿）。`node --check` 不过禁止上线。
 
 ### commit / push
 
