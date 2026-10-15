@@ -487,6 +487,8 @@ class WebServer {
             sendSyncStatus(connection: connection)
         } else if pathOnly == "/api/oplogs" {
             sendOpLogs(path: path, connection: connection)
+        } else if pathOnly == "/api/oplogs/stats" {
+            sendOpLogsStats(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/events") {
             sendItemEvents(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/items/") && pathOnly.hasSuffix("/frequency") {
@@ -980,12 +982,48 @@ class WebServer {
         }
     }
 
+    /// `GET /api/oplogs` — filtered audit rows for the drill-down. Every filter the
+    /// drawer offers is a SQL predicate over the aggregate's window, so "300 newest
+    /// rows" is never mistaken for "the rows that matter".
     private func sendOpLogs(path: String, connection: HTTPByteSink) {
         let comps = URLComponents(string: "http://localhost" + path)
-        let limit = comps?.queryItems?.first(where: { $0.name == "limit" }).flatMap { Int($0.value ?? "") } ?? 100
-        database.fetchOperationLogs(limit: limit) { [weak self] rows in
+        let q = { (name: String) in comps?.queryItems?.first(where: { $0.name == name })?.value }
+        let limit = q("limit").flatMap { Int($0) } ?? 100
+        let windowKey = q("window")
+        let since: Double? = windowKey.flatMap { OpsAnalytics.windowSeconds($0) }
+            .map { Date().timeIntervalSince1970 - $0 }
+        database.fetchOperationLogs(
+            limit: limit,
+            action: q("action"),
+            source: q("source"),
+            since: since
+        ) { [weak self] rows in
             guard let self = self else { return }
             self.sendJSON(["items": rows, "count": rows.count], connection: connection)
+        }
+    }
+
+    /// `GET /api/oplogs/stats` — the drawer's whole reading surface: type, frequency,
+    /// duration and time series, plus budgeted signals. One query for the window;
+    /// the aggregate is computed in `OpsAnalytics` and shipped as a few KB of JSON.
+    private func sendOpLogsStats(path: String, connection: HTTPByteSink) {
+        let comps = URLComponents(string: "http://localhost" + path)
+        let windowKey = comps?.queryItems?.first(where: { $0.name == "window" })?.value
+        // `all` has no known start, so it is read as the retention window.
+        let window = OpsAnalytics.windowSeconds(windowKey) ?? 90 * 86400
+        let now = Date().timeIntervalSince1970
+        let since = now - window
+        let kind = OpsAnalytics.kind(forWindow: window)
+        database.fetchOpLogRows(since: since) { [weak self] rows in
+            guard let self = self else { return }
+            let report = OpsAnalytics.build(
+                rows: rows,
+                since: since,
+                now: now,
+                kind: kind,
+                zone: ClipTimeFormat.displayTimeZone
+            )
+            self.sendJSON(OpsAnalytics.json(report), connection: connection)
         }
     }
 

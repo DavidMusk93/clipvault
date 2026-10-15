@@ -605,7 +605,8 @@ final class DatabaseManager: ObservableObject {
             item_id TEXT,
             content_hash TEXT,
             detail TEXT,
-            source TEXT NOT NULL DEFAULT 'system'
+            source TEXT NOT NULL DEFAULT 'system',
+            dur_ms REAL
         );
         CREATE INDEX IF NOT EXISTS idx_timestamp ON clipboard_items(timestamp);
         CREATE INDEX IF NOT EXISTS idx_ts_id ON clipboard_items(timestamp DESC, id DESC);
@@ -774,6 +775,14 @@ final class DatabaseManager: ObservableObject {
         if !columnExists("clipboard_items", "link_count") {
             execQuiet("ALTER TABLE clipboard_items ADD COLUMN link_count INTEGER NOT NULL DEFAULT 0;")
         }
+        // Operation cost. Only operations that time themselves carry it; NULL means
+        // "not instrumented", never "0ms", so the ops drawer can say so honestly.
+        if !columnExists("operation_logs", "dur_ms") {
+            execQuiet("ALTER TABLE operation_logs ADD COLUMN dur_ms REAL;")
+        }
+        // The drawer aggregates by action over a time window; an index on ts alone
+        // would scan the whole table for every per-action rollup.
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_oplogs_action_ts ON operation_logs(action, ts DESC);")
         // Ensure aux tables exist on upgraded DBs.
         execQuiet("""
         CREATE TABLE IF NOT EXISTS clipboard_events (
@@ -793,7 +802,8 @@ final class DatabaseManager: ObservableObject {
             item_id TEXT,
             content_hash TEXT,
             detail TEXT,
-            source TEXT NOT NULL DEFAULT 'system'
+            source TEXT NOT NULL DEFAULT 'system',
+            dur_ms REAL
         );
         CREATE INDEX IF NOT EXISTS idx_events_hash_ts ON clipboard_events(content_hash, event_ts DESC);
         CREATE INDEX IF NOT EXISTS idx_events_item_ts ON clipboard_events(item_id, event_ts DESC);
@@ -2039,6 +2049,9 @@ final class DatabaseManager: ObservableObject {
     }
 
     private func insertNewItem(_ item: ClipboardItem, db: OpaquePointer) -> Bool {
+        // Ingest cost = blob write + SQLite upsert + FTS + event row. Timed here so
+        // the ops drawer can separate "clipboard is slow" from "there is a lot".
+        let ingestT0 = DispatchTime.now().uptimeNanoseconds
         let sql = """
         INSERT INTO clipboard_items
         (id, timestamp, type, content_hash, text_content, image_data, file_urls, url, rtf_data, pdf_data, html_content, raw_data, source_app, ocr_text, copy_count)
@@ -2118,7 +2131,8 @@ final class DatabaseManager: ObservableObject {
             itemId: idStr,
             contentHash: item.contentHash,
             detail: "type=\(item.type.rawValue)",
-            source: "clipboard"
+            source: "clipboard",
+            durMs: Double(DispatchTime.now().uptimeNanoseconds - ingestT0) / 1_000_000
         )
         touchLinkCountsForItem(id: idStr, hash: item.contentHash)
         return true
@@ -3813,6 +3827,7 @@ final class DatabaseManager: ObservableObject {
                 return
             }
             let idStr = id.uuidString
+            let archiveT0 = DispatchTime.now().uptimeNanoseconds
             let htmlData = Data(html.utf8)
             let sha = SHA256.hash(data: htmlData).map { String(format: "%02x", $0) }.joined()
             _ = self.writeBlobFile(hash: sha, data: htmlData)
@@ -3861,7 +3876,8 @@ final class DatabaseManager: ObservableObject {
                 itemId: idStr,
                 contentHash: nil,
                 detail: "mode=readable title=\(title.prefix(80)) bytes=\(html.utf8.count)",
-                source: "web"
+                source: "web",
+                durMs: Double(DispatchTime.now().uptimeNanoseconds - archiveT0) / 1_000_000
             )
             _ = textSnippet
             DispatchQueue.main.async { completion?(true) }
@@ -5487,12 +5503,15 @@ final class DatabaseManager: ObservableObject {
     // MARK: - Operation logs (audit)
 
     /// Public async append (UI / backup / web).
+    /// `durMs` is the measured wall time of the operation; leave it nil when the
+    /// operation is not timed (a 0 would read as "instant", which is a lie).
     func appendOperationLog(
         action: String,
         itemId: String?,
         contentHash: String?,
         detail: String?,
         source: String = "system",
+        durMs: Double? = nil,
         completion: (() -> Void)? = nil
     ) {
         dbQueue.async { [weak self] in
@@ -5501,7 +5520,8 @@ final class DatabaseManager: ObservableObject {
                 itemId: itemId,
                 contentHash: contentHash,
                 detail: detail,
-                source: source
+                source: source,
+                durMs: durMs
             )
             DispatchQueue.main.async { completion?() }
         }
@@ -5513,12 +5533,13 @@ final class DatabaseManager: ObservableObject {
         itemId: String?,
         contentHash: String?,
         detail: String?,
-        source: String
+        source: String,
+        durMs: Double? = nil
     ) -> Bool {
         guard let db = db else { return false }
         let sql = """
-        INSERT INTO operation_logs (id, ts, action, item_id, content_hash, detail, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO operation_logs (id, ts, action, item_id, content_hash, detail, source, dur_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
@@ -5529,26 +5550,82 @@ final class DatabaseManager: ObservableObject {
         bindText(stmt, 5, contentHash)
         bindText(stmt, 6, detail)
         bindText(stmt, 7, source)
+        if let durMs, durMs.isFinite, durMs >= 0 {
+            sqlite3_bind_double(stmt, 8, durMs)
+        } else {
+            sqlite3_bind_null(stmt, 8)
+        }
         let rc = sqlite3_step(stmt)
         sqlite3_finalize(stmt)
         return rc == SQLITE_DONE
     }
 
-    func fetchOperationLogs(limit: Int = 100, completion: @escaping ([[String: Any]]) -> Void) {
-        dbQueue.async { [weak self] in
-            guard let self = self, let db = self.db else {
+    /// Raw rows for the ops drawer aggregate (`GET /api/oplogs/stats`). One read for
+    /// the whole window; the analytics module turns it into buckets and signals.
+    func fetchOpLogRows(since: Double, completion: @escaping ([OpsAnalytics.Row]) -> Void) {
+        let run: () -> Void = { [weak self] in
+            guard let self = self, let db = self.readDB ?? self.db else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            let sql = """
+            SELECT ts, action, source, item_id, dur_ms FROM operation_logs
+            WHERE ts >= ? ORDER BY ts ASC;
+            """
+            var stmt: OpaquePointer?
+            var rows: [OpsAnalytics.Row] = []
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                sqlite3_bind_double(stmt, 1, since)
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    rows.append(OpsAnalytics.Row(
+                        ts: sqlite3_column_double(stmt, 0),
+                        action: sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "",
+                        source: sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "system",
+                        itemId: sqlite3_column_text(stmt, 3).map { String(cString: $0) },
+                        durMs: sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 4)
+                    ))
+                }
+            }
+            sqlite3_finalize(stmt)
+            let out = rows
+            DispatchQueue.main.async { completion(out) }
+        }
+        if readDB != nil { readQueue.async(execute: run) } else { dbQueue.async(execute: run) }
+    }
+
+    /// Filtered audit rows for the drawer's drill-down. Reading the 500 newest rows
+    /// out of an unfiltered log is a census, not a lookup — every filter the drawer
+    /// offers is applied in SQL against the same window as the aggregate.
+    func fetchOperationLogs(
+        limit: Int = 100,
+        action: String? = nil,
+        source: String? = nil,
+        since: Double? = nil,
+        completion: @escaping ([[String: Any]]) -> Void
+    ) {
+        let run: () -> Void = { [weak self] in
+            guard let self = self, let db = self.readDB ?? self.db else {
                 DispatchQueue.main.async { completion([]) }
                 return
             }
             let lim = max(1, min(limit, 500))
+            var clauses: [String] = []
+            if since != nil { clauses.append("ts >= ?") }
+            if action?.isEmpty == false { clauses.append("action = ?") }
+            if source?.isEmpty == false { clauses.append("source = ?") }
+            let whereSQL = clauses.isEmpty ? "" : "WHERE " + clauses.joined(separator: " AND ")
             let sql = """
-            SELECT id, ts, action, item_id, content_hash, detail, source
-            FROM operation_logs ORDER BY ts DESC LIMIT ?;
+            SELECT id, ts, action, item_id, content_hash, detail, source, dur_ms
+            FROM operation_logs \(whereSQL) ORDER BY ts DESC LIMIT ?;
             """
             var stmt: OpaquePointer?
             var rows: [[String: Any]] = []
             if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_int(stmt, 1, Int32(lim))
+                var idx: Int32 = 1
+                if let since { sqlite3_bind_double(stmt, idx, since); idx += 1 }
+                if let action, !action.isEmpty { self.bindText(stmt, idx, action); idx += 1 }
+                if let source, !source.isEmpty { self.bindText(stmt, idx, source); idx += 1 }
+                sqlite3_bind_int(stmt, idx, Int32(lim))
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     var row: [String: Any] = [:]
                     row["id"] = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
@@ -5560,12 +5637,17 @@ final class DatabaseManager: ObservableObject {
                     row["contentHash"] = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? NSNull()
                     row["detail"] = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? NSNull()
                     row["source"] = sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? ""
+                    row["durMs"] = sqlite3_column_type(stmt, 7) == SQLITE_NULL
+                        ? NSNull()
+                        : sqlite3_column_double(stmt, 7)
                     rows.append(row)
                 }
             }
             sqlite3_finalize(stmt)
-            DispatchQueue.main.async { completion(rows) }
+            let out = rows
+            DispatchQueue.main.async { completion(out) }
         }
+        if readDB != nil { readQueue.async(execute: run) } else { dbQueue.async(execute: run) }
     }
 
     @discardableResult
@@ -5692,7 +5774,8 @@ final class DatabaseManager: ObservableObject {
                 itemId: nil,
                 contentHash: nil,
                 detail: "dest=\(destURL.lastPathComponent)",
-                source: "backup"
+                source: "backup",
+                durMs: ms
             )
         }
         completion(.success(()))
@@ -5723,6 +5806,9 @@ final class DatabaseManager: ObservableObject {
                 completion(.failure(DBFileError.notOpen))
                 return
             }
+            // Whole-file swap + reopen + FTS/migration: the one operation whose cost
+            // really matters here, so it is timed end to end.
+            let restoreT0 = DispatchTime.now().uptimeNanoseconds
             guard FileManager.default.fileExists(atPath: sourceURL.path) else {
                 completion(.failure(DBFileError.replaceFailed("source missing")))
                 return
@@ -5772,7 +5858,8 @@ final class DatabaseManager: ObservableObject {
                 itemId: nil,
                 contentHash: nil,
                 detail: "from=\(sourceURL.lastPathComponent)",
-                source: "backup"
+                source: "backup",
+                durMs: Double(DispatchTime.now().uptimeNanoseconds - restoreT0) / 1_000_000
             )
             completion(.success(()))
         }
