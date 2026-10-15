@@ -172,6 +172,7 @@ function loadApply() {
   const moves = [];
   const rebuilds = [];
   const prepends = [];
+  const dayStats = [];
   const mod = loadModule({
     prologue: [
       'let clips = [];',
@@ -186,6 +187,8 @@ function loadApply() {
       prependCardsIncremental: (items) => { prepends.push([...items]); },
       clientFilter: (list) => list,
       moveTouchedCards: (items) => { moves.push([...items]); return items.length; },
+      // Day headers are refetched from the store, never recounted from the model.
+      scheduleDayStats: (reason) => { dayStats.push(reason); },
     },
     exports: `{
       sortClipsForFeed, dedupeClipsById, clipHeadSig, applyFreshItems,
@@ -193,11 +196,11 @@ function loadApply() {
       getClips() { return clips; },
     }`,
   });
-  return { mod, moves, rebuilds, prepends };
+  return { mod, moves, rebuilds, prepends, dayStats };
 }
 
 test('a re-copy (newer capture timestamp) moves the row instead of being ignored', () => {
-  const { mod, moves } = loadApply();
+  const { mod, moves, dayStats } = loadApply();
   mod.setClips([
     { id: 'A', timestamp: 100, type: 'text', day: 'D-old' },
     { id: 'B', timestamp: 90, type: 'text', day: 'D-old' },
@@ -207,6 +210,7 @@ test('a re-copy (newer capture timestamp) moves the row instead of being ignored
   assert.deepEqual(mod.getClips().map((c) => c.id), ['A', 'B'], 'A is now the newest row');
   assert.equal(mod.getClips()[0].timestamp, 200, 'the model carries the capture clock');
   assert.deepEqual(moves.map((m) => m.map((i) => i.id)), [['A']], 'the card follows in the feed');
+  assert.deepEqual(dayStats, ['live'], 'the day header is re-aggregated from the store, not from the moved card');
 });
 
 test('an unchanged or older timestamp is a no-op (no churn, no repaint)', () => {

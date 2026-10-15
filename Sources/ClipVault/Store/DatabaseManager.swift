@@ -2225,6 +2225,110 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Rows backing the wall's day header: `(timestamp, type)` for **every** item
+    /// the current wall filter set matches. The client builds each day head from
+    /// this aggregate, never from painted cards (AGENTS.md · 墙): lazy rendering
+    /// must not decide what a header claims.
+    ///
+    /// The predicate mirrors `/api/clips` (`type` / `exclude` / `view=trash` /
+    /// `q`, pinned excluded from the wall view) so a day head and the cards it
+    /// labels can never disagree.
+    func fetchDayIndexRows(
+        typeFilter: String? = nil,
+        excludeType: String? = nil,
+        trashOnly: Bool = false,
+        query: String? = nil,
+        completion: @escaping (_ rows: [(timestamp: Double, type: String)]) -> Void
+    ) {
+        let run: () -> Void = { [weak self] in
+            guard let self = self, let db = self.readDB ?? self.db else {
+                completion([])
+                return
+            }
+            let q = query?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasQuery = !(q ?? "").isEmpty
+            let match = hasQuery ? self.ftsMatchQuery(from: q!) : nil
+            var rows: [(Double, String)] = []
+            if hasQuery, !trashOnly, let match = match {
+                rows = self.runDayIndexSQL(db: db, match: match, trashOnly: false, typeFilter: typeFilter, excludeType: excludeType, like: nil, likeSlots: 0)
+                if rows.isEmpty {
+                    // Same rule as the page path: FTS empty → LIKE over non-html fields.
+                    let narrow = self.ftsTokenizer == "trigram" && (q?.count ?? 0) >= 3
+                    rows = self.runDayIndexSQL(db: db, match: nil, trashOnly: false, typeFilter: typeFilter, excludeType: excludeType, like: "%\(q!)%", likeSlots: narrow ? 3 : 7)
+                }
+            } else if hasQuery {
+                rows = self.runDayIndexSQL(db: db, match: nil, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType, like: "%\(q!)%", likeSlots: 7)
+            } else {
+                rows = self.runDayIndexSQL(db: db, match: nil, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType, like: nil, likeSlots: 0)
+            }
+            DispatchQueue.main.async { completion(rows) }
+        }
+        if readDB != nil {
+            readQueue.async(execute: run)
+        } else {
+            dbQueue.async(execute: run)
+        }
+    }
+
+    /// One `(timestamp, type)` scan for the day index. `match` joins the FTS
+    /// table; `like` (when present) reproduces `runSearchLike`'s field set.
+    private func runDayIndexSQL(
+        db: OpaquePointer,
+        match: String?,
+        trashOnly: Bool,
+        typeFilter: String?,
+        excludeType: String?,
+        like: String?,
+        likeSlots: Int
+    ) -> [(Double, String)] {
+        var sql: String
+        if match != nil {
+            sql = "SELECT c.timestamp, c.type FROM clipboard_fts f JOIN clipboard_items c ON c.id = f.id WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL"
+            sql += Self.typePredicateSQL(alias: "c", typeFilter: typeFilter, excludeType: excludeType)
+        } else {
+            sql = "SELECT timestamp, type FROM clipboard_items WHERE "
+            if trashOnly {
+                sql += "deleted_at IS NOT NULL"
+            } else {
+                // Wall view = the day sections: pinned rows live in the pin rail.
+                sql += "deleted_at IS NULL AND pinned_at IS NULL"
+            }
+            sql += Self.typePredicateSQL(typeFilter: typeFilter, excludeType: excludeType)
+            if like != nil {
+                if likeSlots <= 3 {
+                    sql += " AND (IFNULL(judgment_text,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
+                } else {
+                    sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ? OR IFNULL(judgment_text,'') LIKE ?)"
+                }
+            }
+        }
+        sql += ";"
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            print("[DatabaseManager] day index prepare failed: \(String(cString: sqlite3_errmsg(db)))")
+            return []
+        }
+        var bind = 1
+        if let match = match {
+            bindText(stmt, Int32(bind), match); bind += 1
+        }
+        bindTypePredicate(stmt, bind: &bind, typeFilter: typeFilter, excludeType: excludeType)
+        if match == nil, let like = like {
+            for _ in 0..<likeSlots {
+                bindText(stmt, Int32(bind), like); bind += 1
+            }
+        }
+        var rows: [(Double, String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts = sqlite3_column_double(stmt, 0)
+            let type = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "other"
+            rows.append((ts, type))
+        }
+        sqlite3_finalize(stmt)
+        return rows
+    }
+
     private static func pinThenRecency(_ a: ClipboardItem, _ b: ClipboardItem) -> Bool {
         let ap = a.pinnedAt != nil
         let bp = b.pinnedAt != nil
