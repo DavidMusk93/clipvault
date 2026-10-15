@@ -6550,6 +6550,71 @@ window.ClipViewMasonry = Masonry;
       return drift;
     }
 
+    /** Existence checks per merge are bounded; a healthy wall produces no candidates. */
+    const GHOST_MAX = 40;
+
+    /**
+     * Pure ghost candidates: model rows **at least as new as the oldest row the server
+     * still lists** (or pinned — pinned sorts to the head on both sides) that the server
+     * head no longer contains. Such a row must be in the head if it still exists, so the
+     * only explanations left are delete / trash. Existence itself is confirmed by
+     * `?ids=`, never inferred: this list is a question, not a verdict.
+     */
+    function ghostCandidateIds(headItems, model) {
+      const rows = (headItems || []).filter((i) => i && i.id && i.type !== 'note' && !i.isCompose);
+      if (!rows.length) return [];
+      const headIds = new Set(rows.map((i) => i.id));
+      const oldestTs = Number(rows[rows.length - 1].timestamp) || 0;
+      const out = [];
+      for (const c of model || []) {
+        if (!c || !c.id || headIds.has(c.id)) continue;
+        if (c.type === 'note' || c.isCompose) continue;
+        if (itemIsPinned(c) || (Number(c.timestamp) || 0) >= oldestTs) out.push(c.id);
+        if (out.length >= GHOST_MAX) break;
+      }
+      return out;
+    }
+
+    /**
+     * True only when the store **definitively** answers "this row is gone or trashed".
+     * A failed read is "unknown": a transient error must never delete a live card, and
+     * removing a row the store still has is the 记忆不可丢 failure, not a fix.
+     */
+    async function confirmClipGone(id) {
+      try {
+        const res = await liveGet(`${API}/api/clips?id=${encodeURIComponent(id)}`);
+        if (!res.ok) return false;
+        const data = await res.json();
+        const one = Array.isArray(data) ? data[0] : (data.items || [])[0];
+        if (!one) return true;
+        return !!one.inTrash;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    /**
+     * A delete the tab never got a `clip_deleted` for (frozen EventSource, parked page)
+     * left a phantom card on the wall until a reload. The batch lookup finds suspects;
+     * each one is then confirmed on its own before anything leaves the wall.
+     */
+    async function reapGhostCards(ids) {
+      const list = (ids || []).filter(Boolean);
+      if (!list.length) return 0;
+      let live = [];
+      try { live = await fetchClipsByIds(list); } catch (_) {}
+      const alive = new Set((live || []).filter((i) => i && i.id && !i.inTrash).map((i) => i.id));
+      const gone = [];
+      for (const id of list) {
+        if (alive.has(id)) continue;
+        if (await confirmClipGone(id)) gone.push(id);
+      }
+      if (!gone.length) return 0;
+      for (const id of gone) applyRemoteClipRemoval({ id, type: 'clip_deleted' });
+      nm('wall_merge', { payload: { kind: 'ghost', phase: 'end', n: gone.length } });
+      return gone.length;
+    }
+
     function liveGet(url) {
       return fetch(url, { cache: 'no-store' });
     }
@@ -6609,6 +6674,8 @@ window.ClipViewMasonry = Masonry;
           if (i.type === 'note' || i.isCompose || i.inTrash) return false;
           return Number(i.timestamp) > (knownTs.get(i.id) || 0);
         });
+        // Rows the server head is about to disprove, resolved after the merge lands.
+        const ghosts = (searchQuery || currentView === 'trash') ? [] : ghostCandidateIds(items, clips);
         const byId = new Map(items.map((i) => [i.id, i]));
         const flagDirty = [];
         let pinChanged = false;
@@ -6645,6 +6712,7 @@ window.ClipViewMasonry = Masonry;
             ok: true,
             payload: { kind: 'head', phase: 'end', n: 0, reason: pinChanged ? 'pin' : 'noop', bytes },
           });
+          await reapGhostCards(ghosts);
           return;
         }
         let got = [];
@@ -6681,6 +6749,7 @@ window.ClipViewMasonry = Masonry;
             bytes,
           },
         });
+        await reapGhostCards(ghosts);
       } catch (_) {
         nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'head', phase: 'error' } });
       }
