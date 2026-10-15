@@ -604,16 +604,18 @@
     }
     .day-stats .badge { font-variant-numeric: tabular-nums; }
 
-    /* —— Day rhythm: the capture clock as 48 half-hour marks ——
+    /* —— Day rhythm: the capture clock as 288 five-minute marks ——
        One honey hue; height + alpha carry the count, so the strip never
        competes with the semantic type badges above it. The facts line reads
-       the same clock the cards do (AGENTS.md · 墙: timeline = capture clock). */
+       the same clock the cards do (AGENTS.md · 墙: timeline = capture clock).
+       Five minutes per mark is the resolution of the day index behind it, so
+       the marks are hairlines and the numbers stay the store's. */
     .day-rhythm { display: grid; gap: 3px; min-width: 0; }
     .rhythm-track {
       position: relative;
       display: flex;
       align-items: flex-end;
-      gap: 1px;
+      gap: 0;
       height: 24px;
       min-width: 0;
       padding: 0 1px;
@@ -633,7 +635,7 @@
       flex: 1 1 0;
       min-width: 0;
       height: var(--h, 2px);
-      border-radius: 2px 2px 0 0;
+      border-radius: 1px 1px 0 0;
       background: rgba(196, 122, 44, 0.26);
       /* the track owns hit-testing: the strip reads bins, bars never take a
          pointer (and never show a native title tooltip). */
@@ -681,6 +683,18 @@
     .rhythm-fact-value { color: var(--ink); font-weight: 600; pointer-events: none; }
     .rhythm-fact[data-rhythm-mark] { cursor: default; }
     .rhythm-fact-sep { color: var(--separator-strong); pointer-events: none; }
+
+    /* Fallback head (`/api/clips/days` not in yet): the total is the painted
+       cards' lower bound and the strip is drawn from the same slice. It says
+       `≥`, dims, and never passes a lazy census off as the day's total. */
+    .day-stat.is-partial { color: var(--muted); }
+    .day-stats .badge.is-pending {
+      color: var(--muted);
+      background: var(--fill);
+      border: 0.5px dashed var(--separator-strong);
+    }
+    .day-rhythm.is-partial .rhythm-track,
+    .day-rhythm.is-partial .rhythm-facts { opacity: 0.6; }
 
     /* —— Rhythm scrub: hover reads one half-hour bin ——
        The crosshair tracks the pointer 1:1 and the readout overlays the facts
@@ -3354,10 +3368,24 @@
           if (!it) continue;
           total += 1;
           const t = String(it.type || 'other').toLowerCase();
-          const bucket = (t === 'html' || t === 'rtf') ? 'rich' : t;
-          byType[bucket] = (byType[bucket] || 0) + 1;
+          byType[t] = (byType[t] || 0) + 1;
         }
-        return { total, byType };
+        return { total, byType: DayGroups.collapseTypes(byType) };
+      },
+      /**
+       * Presentation bucket rule for the header: html/rtf collapse into `rich`.
+       * The store ships raw types (`/api/clips/days`); the collapsing is the
+       * client's and stays in one place for both the server aggregate and the
+       * loaded-slice fallback.
+       */
+      collapseTypes(byType) {
+        const out = Object.create(null);
+        for (const key of Object.keys(byType || {})) {
+          const t = String(key || 'other').toLowerCase();
+          const bucket = (t === 'html' || t === 'rtf') ? 'rich' : t;
+          out[bucket] = (out[bucket] || 0) + (Number(byType[key]) || 0);
+        }
+        return out;
       },
       parts(day) {
         const m = String(day || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -3411,10 +3439,15 @@
      * Day rhythm for the wall header (pure; mirrored by tests/day-rhythm.test.mjs).
      * Reads the **capture clock only**: the server wall string `timeLocal`, else
      * unix seconds. OCR / sync arrival never moves a mark (AGENTS.md · 墙).
+     *
+     * One mark is five minutes (`BINS` = 288): the header numbers come from the
+     * store's day aggregate, so the strip only has to *show* them.
      */
     const DayRhythm = {
-      BINS: 48,
-      BIN_MINUTES: 30,
+      BINS: 288,
+      BIN_MINUTES: 5,
+      /** 「峰值」 names the busiest half hour: a clock-aligned 30-minute window. */
+      PEAK_BINS: 6,
       NIGHT_START: 22 * 60,
       NIGHT_END: 6 * 60,
       /** Minute of day 0..1439 from the capture clock; null when unusable. */
@@ -3441,14 +3474,14 @@
         const m = Number(min);
         return Number.isFinite(m) && (m >= DayRhythm.NIGHT_START || m < DayRhythm.NIGHT_END);
       },
-      /** Half-hour bucket index 0..47 for a minute of day; null when unusable. */
+      /** Half-hour bucket index 0..287 for a minute of day; null when unusable. */
       binOf(min) {
         if (min == null || min === '') return null;
         const v = Number(min);
         if (!Number.isFinite(v)) return null;
         return Math.max(0, Math.min(DayRhythm.BINS - 1, Math.floor(Math.max(0, v) / DayRhythm.BIN_MINUTES)));
       },
-      /** 48 half-hour buckets over the capture clock; `n` counts usable times. */
+      /** 288 five-minute buckets over the capture clock; `n` counts usable times. */
       histogram(items) {
         const bins = new Array(DayRhythm.BINS).fill(0);
         let n = 0;
@@ -3460,58 +3493,106 @@
         }
         return { bins, n };
       },
-      /** Everything the header prints: buckets + span + peak + night + gap. */
+      /**
+       * Normalize a day's numbers into the shape the header prints. `raw` is the
+       * store aggregate (`/api/clips/days`: bins/total/timed/firstMin/lastMin/
+       * night/maxGapMin) or the same shape derived locally by `summary`.
+       * The peak is read back from the bins, so both sources agree by construction.
+       */
+      normalize(raw) {
+        const src = raw || {};
+        const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+        const bins = new Array(DayRhythm.BINS).fill(0);
+        const given = Array.isArray(src.bins) ? src.bins : [];
+        for (let i = 0; i < Math.min(bins.length, given.length); i += 1) {
+          bins[i] = Math.max(0, Number(given[i]) || 0);
+        }
+        let counted = 0;
+        let peakBin = 0;
+        let peakCount = 0;
+        for (let i = 0; i < bins.length; i += 1) counted += bins[i];
+        // Peak = the busiest of the 48 wall-clock half hours, not the busiest 5
+        // minutes: one capture per mark is the norm, so a single-mark peak would
+        // just name the day's first mark. Windows stay aligned to :00 / :30, so
+        // the fact reads like a clock slot (14:00–14:30), never an off-grid span.
+        for (let i = 0; i + DayRhythm.PEAK_BINS <= bins.length; i += DayRhythm.PEAK_BINS) {
+          let window = 0;
+          for (let j = i; j < i + DayRhythm.PEAK_BINS; j += 1) window += bins[j];
+          if (window > peakCount) { peakCount = window; peakBin = i; }
+        }
+        const timed = num(src.timed) == null ? counted : Math.max(0, num(src.timed));
+        const total = num(src.total) == null ? timed : Math.max(0, num(src.total));
+        const firstMin = num(src.firstMin);
+        const lastMin = num(src.lastMin);
+        const night = num(src.night) == null ? 0 : Math.max(0, num(src.night));
+        let maxBin = 0;
+        for (let i = 0; i < bins.length; i += 1) if (bins[i] > maxBin) maxBin = bins[i];
+        return {
+          bins,
+          n: timed,
+          total,
+          firstMin,
+          lastMin,
+          spanMin: firstMin == null || lastMin == null ? 0 : Math.max(0, lastMin - firstMin),
+          peakBin,
+          peakCount,
+          maxBin,
+          night,
+          nightShare: timed ? night / timed : 0,
+          maxGapMin: num(src.maxGapMin),
+          gapFromMin: num(src.gapFromMin),
+          gapToMin: num(src.gapToMin),
+        };
+      },
+      /**
+       * Fallback path only: derive the same numbers from the cards this client
+       * happens to have loaded. The header prefers the store aggregate — a lazy
+       * wall must never let painted cards define a day's total (AGENTS.md · 墙).
+       */
       summary(items) {
-        const { bins, n } = DayRhythm.histogram(items);
+        const list = items || [];
+        const { bins } = DayRhythm.histogram(list);
         const minutes = [];
-        for (const it of items || []) {
+        for (const it of list) {
           const m = DayRhythm.minuteOfItem(it);
           if (m != null) minutes.push(m);
         }
         minutes.sort((a, b) => a - b);
-        let peakBin = 0;
-        let peakCount = 0;
-        for (let i = 0; i < bins.length; i += 1) {
-          if (bins[i] > peakCount) { peakCount = bins[i]; peakBin = i; }
-        }
         let night = 0;
         for (const m of minutes) if (DayRhythm.isNight(m)) night += 1;
-        let maxGapMin = 0;
-        let gapFrom = null;
-        let gapTo = null;
+        let maxGapMin = null;
+        let gapFromMin = null;
+        let gapToMin = null;
         for (let i = 1; i < minutes.length; i += 1) {
           const gap = minutes[i] - minutes[i - 1];
-          if (gap > maxGapMin) { maxGapMin = gap; gapFrom = minutes[i - 1]; gapTo = minutes[i]; }
+          if (maxGapMin == null || gap > maxGapMin) {
+            maxGapMin = gap;
+            gapFromMin = minutes[i - 1];
+            gapToMin = minutes[i];
+          }
         }
-        const firstMin = minutes.length ? minutes[0] : null;
-        const lastMin = minutes.length ? minutes[minutes.length - 1] : null;
-        return {
+        return DayRhythm.normalize({
           bins,
-          n,
-          total: (items || []).length,
-          firstMin,
-          lastMin,
-          spanMin: firstMin == null ? 0 : lastMin - firstMin,
-          peakBin,
-          peakCount,
+          total: list.length,
+          timed: minutes.length,
+          firstMin: minutes.length ? minutes[0] : null,
+          lastMin: minutes.length ? minutes[minutes.length - 1] : null,
           night,
-          nightShare: n ? night / n : 0,
-          maxGapMin: minutes.length > 1 ? maxGapMin : null,
-          gapFromMin: minutes.length > 1 ? gapFrom : null,
-          gapToMin: minutes.length > 1 ? gapTo : null,
-        };
+          maxGapMin,
+          gapFromMin,
+          gapToMin,
+        });
       },
       /**
-       * Bin band a fact points at, as a half-open range [from, to) in 48ths.
+       * Bin band a fact points at, as a half-open range [from, to) in 288ths.
        * Used by the header highlight, so it must stay honest about resolution:
-       * the gap band only covers bins with **no** clip (a gap shorter than one
-       * bin collapses to a zero-width tick, never onto a bar that has clips).
+       * the peak band is the whole busiest half hour, and the gap band only
+       * covers bins with **no** clip (a gap shorter than one mark collapses to a
+       * zero-width tick, never onto a bar that has clips).
        */
       markBins(s, kind) {
         if (!s || !s.n) return null;
-        if (kind === 'peak') {
-          return s.peakCount ? { from: s.peakBin, to: s.peakBin + 1 } : null;
-        }
+        if (kind === 'peak') return DayRhythm.peakRange(s);
         if (kind === 'span') {
           if (s.firstMin == null) return null;
           return { from: DayRhythm.binOf(s.firstMin), to: DayRhythm.binOf(s.lastMin) + 1 };
@@ -3525,11 +3606,29 @@
         }
         return null;
       },
-      /** The scrub readout: one line, same facts vocabulary as the row above. */
-      binReadout({ bin = 0, count = 0, total = 0, peak = false } = {}) {
+      /** The busiest half hour, as a half-open range of five-minute marks. */
+      peakRange(s) {
+        if (!s || !s.peakCount) return null;
+        const from = Math.max(0, Math.min(DayRhythm.BINS - 1, Number(s.peakBin) || 0));
+        return { from, to: Math.min(DayRhythm.BINS, from + DayRhythm.PEAK_BINS) };
+      },
+      /** The peak fact's value: `14:00–14:30 · 3 条` (the busiest half hour). */
+      peakLabel(s) {
+        const band = DayRhythm.peakRange(s);
+        if (!band) return '—';
+        return DayRhythm.hhmm(band.from * DayRhythm.BIN_MINUTES) + '–' + DayRhythm.hhmm(band.to * DayRhythm.BIN_MINUTES)
+          + ' · ' + (Number(s.peakCount) || 0) + ' 条';
+      },
+      /** The scrub readout: one line, same facts vocabulary as the row above.
+       * `window` > 1 reads a span of marks (the peak fact); the scrub reads one. */
+      binReadout({ bin = 0, count = 0, total = 0, peak = false, window = 1 } = {}) {
         const i = Math.max(0, Math.min(DayRhythm.BINS - 1, Math.floor(Number(bin) || 0)));
+        const span = Math.max(1, Math.min(DayRhythm.BINS - i, Math.floor(Number(window) || 1)));
+        const label = span > 1
+          ? DayRhythm.hhmm(i * DayRhythm.BIN_MINUTES) + '–' + DayRhythm.hhmm((i + span) * DayRhythm.BIN_MINUTES)
+          : DayRhythm.binLabel(i);
         const n = Math.max(0, Number(count) || 0);
-        const parts = [DayRhythm.binLabel(i), n + ' 条'];
+        const parts = [label, n + ' 条'];
         if (Number(total) > 0) parts.push('占 ' + Math.round((n / Number(total)) * 100) + '%');
         if (peak) parts.push('峰值');
         return parts.join(' · ');
@@ -3548,7 +3647,7 @@
         if (!h) return m + ' 分';
         return m ? h + ' 小时 ' + m + ' 分' : h + ' 小时';
       },
-      /** Half-hour bucket label, e.g. `14:00–14:30`. */
+      /** Mark label, e.g. `14:00–14:05`. */
       binLabel(i) {
         const start = (Number(i) || 0) * DayRhythm.BIN_MINUTES;
         return DayRhythm.hhmm(start) + '–' + DayRhythm.hhmm(start + DayRhythm.BIN_MINUTES);
@@ -3777,6 +3876,10 @@ window.ClipViewMasonry = Masonry;
         rebuildFromData({ preserveScroll: true });
       }
       parkedPaintDirty = false;
+      if (dayStatsParkedDirty) {
+        dayStatsParkedDirty = false;
+        scheduleDayStats('wake');
+      }
       scheduleWallIdleCheck();
     }
 
@@ -5994,6 +6097,103 @@ window.ClipViewMasonry = Masonry;
       }
     });
 
+    // ---- Day index: the header's own truth -----------------------------------
+    // The wall paints lazily (a keyset page at a time), so a day head must never
+    // count the cards that happen to be painted. One aggregate request per wall
+    // filter set (`/api/clips/days`) backs every header; the cards only fill the
+    // masonry (AGENTS.md · 墙: fix the statistic source, keep rendering lazy).
+    const DAY_STATS_DEBOUNCE_MS = 400;
+    const DAY_STATS_WAIT_MS = 1200;
+    const DayStats = {
+      sig: null,        // wall filter signature this index answers
+      days: new Map(),  // day -> server aggregate
+      inflight: null,
+      failed: false,
+      timer: 0,
+    };
+    let dayStatsParkedDirty = false;
+
+    /** Filter signature the wall is painting with (mirrors applyWallQueryParams). */
+    function wallStatsSig() {
+      const typed = (searchQuery || !currentFilter || currentFilter === 'all') ? '' : currentFilter;
+      return [currentView, typed, searchQuery || ''].join('\u0000');
+    }
+
+    /** The index for `day`, or null when it does not answer the current filters. */
+    function dayStatsFor(day) {
+      if (DayStats.sig !== wallStatsSig()) return null;
+      return DayStats.days.get(day) || null;
+    }
+
+    function dayStatsApply(data) {
+      const map = new Map();
+      for (const d of (data && data.days) || []) {
+        if (d && d.day) map.set(String(d.day), d);
+      }
+      DayStats.days = map;
+      DayStats.failed = false;
+    }
+
+    /** One aggregate request for the current wall filters (never per painted card). */
+    function fetchDayIndex({ reason = 'reset' } = {}) {
+      const sig = wallStatsSig();
+      if (DayStats.inflight && DayStats.sig === sig) return DayStats.inflight;
+      const params = new URLSearchParams();
+      if (searchQuery) params.set('q', searchQuery);
+      if (currentView === 'trash') params.set('view', 'trash');
+      // `clientFilter` never hides FTS hits, so a search is type-agnostic here too.
+      if (!searchQuery) {
+        if (currentFilter && currentFilter !== 'all') params.set('type', currentFilter);
+        else params.set('exclude', 'note');
+      }
+      if (DayStats.sig !== sig) {
+        // Another filter set: the old days would silently answer for the new one.
+        DayStats.sig = sig;
+        DayStats.days = new Map();
+      }
+      const t0 = performance.now();
+      const run = (async () => {
+        try {
+          const res = await liveGet(`${API}/api/clips/days?${params.toString().replace(/\+/g, '%20')}`);
+          if (!res.ok) throw new Error('API ' + res.status);
+          const data = await res.json();
+          if (DayStats.sig !== sig) return false;
+          dayStatsApply(data);
+          nm('wall_dayindex', {
+            dur_ms: performance.now() - t0,
+            ok: true,
+            payload: { n: DayStats.days.size, reason },
+          });
+          return true;
+        } catch (_) {
+          if (DayStats.sig === sig) DayStats.failed = true;
+          nm('wall_dayindex', { dur_ms: performance.now() - t0, ok: false, payload: { reason } });
+          return false;
+        }
+      })();
+      DayStats.inflight = run;
+      run.finally(() => { if (DayStats.inflight === run) DayStats.inflight = null; });
+      return run;
+    }
+
+    /** A slow index must not hold the wall: paint with `≥` and patch when it lands. */
+    function withStatsTimeout(p) {
+      return Promise.race([
+        p,
+        new Promise((resolve) => { window.setTimeout(() => resolve(false), DAY_STATS_WAIT_MS); }),
+      ]);
+    }
+
+    /** Coalesced re-fetch after a mutation that changes a day's numbers. */
+    function scheduleDayStats(reason = 'event') {
+      if (wallParked) { dayStatsParkedDirty = true; return; }
+      if (DayStats.timer) return;
+      DayStats.timer = window.setTimeout(() => {
+        DayStats.timer = 0;
+        void fetchDayIndex({ reason }).then((ok) => { if (ok) refreshDayHeads(); });
+      }, DAY_STATS_DEBOUNCE_MS);
+    }
+
     function clientFilter(items) {
       // Search is type-agnostic — a type chip must not hide FTS hits.
       if (searchQuery) return items;
@@ -6024,6 +6224,9 @@ window.ClipViewMasonry = Masonry;
       }
       const gen = fetchGen;
       const cursorForRequest = reset ? null : nextCursor;
+      // The store's day aggregate rides along with page 1: a header is a fact
+      // about the whole day, not about the cards this page brought.
+      const statsP = reset ? fetchDayIndex({ reason: 'reset' }) : null;
 
       loading = true;
       if (!reset) {
@@ -6066,7 +6269,9 @@ window.ClipViewMasonry = Masonry;
           // A fresh page may carry bodies the previous page omitted; allow one retry.
           htmlHydrateTried.clear();
           htmlHydratePending.clear();
+          const statsLanded = statsP ? await withStatsTimeout(statsP) : true;
           rebuildFromData({ preserveScroll: false });
+          if (!statsLanded) void statsP.then((ok) => { if (ok) refreshDayHeads(); });
           if (!wallLoadSent) {
             wallLoadSent = true;
             nm('wall_load', { dur_ms: performance.now() - wallBootAt, ok: true, payload: { n: clips.length, cols: lastColCount, bytes } });
@@ -6171,6 +6376,8 @@ window.ClipViewMasonry = Masonry;
       cardCache.delete(id);
       colHeights = null;
       rebuildFromData({ preserveScroll: true });
+      // A pinned clip leaves its day section for the pin rail: the day total moves.
+      scheduleDayStats('pin');
     }
 
     function sortClipsForFeed(list) {
@@ -6230,10 +6437,12 @@ window.ClipViewMasonry = Masonry;
       if (pinnedNew.length || restNew.length > 2) {
         colHeights = null;
         rebuildFromData({ preserveScroll: true });
+        scheduleDayStats('live');
         return applied;
       }
       if (restNew.length) prependCardsIncremental(restNew);
       if (moved.length) moveTouchedCards(moved);
+      scheduleDayStats('live');
       return applied;
     }
 
@@ -9449,18 +9658,20 @@ window.ClipViewMasonry = Masonry;
     }
 
     /**
-     * Activity strip for one capture day: 48 half-hour marks on the capture
+     * Activity strip for one capture day: 288 five-minute marks on the capture
      * clock + a facts line. Height and alpha carry the count, so the strip
-     * stays one honey hue and never competes with the type badges.
+     * stays one honey hue and never competes with the type badges. The numbers
+     * are the store's day aggregate, never a census of painted cards.
      *
-     * The track is a discrete scrubber: hover / arrow keys read one bin into the
-     * overlay readout and `aria-valuetext`; the facts row highlights the band it
-     * names. Nothing here may change layout (AGENTS.md · 墙).
+     * The track is a discrete scrubber: hover / arrow keys read one five-minute
+     * mark into the overlay readout and `aria-valuetext`; the facts row
+     * highlights the band it names. Nothing here may change layout (AGENTS.md · 墙).
      */
-    function dayRhythmMarkup(rhythm, { today = false, nowMin = null } = {}) {
+    function dayRhythmMarkup(rhythm, { today = false, nowMin = null, partial = false } = {}) {
       const hist = (rhythm && rhythm.bins) || [];
+      const partialCls = partial ? ' is-partial' : '';
       if (!hist.length || !rhythm.n) {
-        return `<div class="day-rhythm" data-day-rhythm>
+        return `<div class="day-rhythm${partialCls}" data-day-rhythm>
             <div class="rhythm-track" role="img" aria-label="当天没有可用捕获时间">
               <span class="rhythm-nightzone" style="left:0;width:12.5%" aria-hidden="true"></span>
               <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>
@@ -9469,7 +9680,8 @@ window.ClipViewMasonry = Masonry;
             <div class="rhythm-facts" data-day-rhythm-facts><span class="rhythm-facts-list"><span class="rhythm-fact"><span class="rhythm-fact-label">活跃</span><span class="rhythm-fact-value">无时间</span></span></span></div>
           </div>`;
       }
-      const max = Math.max(1, rhythm.peakCount);
+      const max = Math.max(1, rhythm.maxBin || rhythm.peakCount);
+      const peakBand = DayRhythm.peakRange(rhythm);
       const binPct = (bin) => ((bin * 100) / DayRhythm.BINS).toFixed(4) + '%';
       const bandPct = (a, b) => (((b - a) * 100) / DayRhythm.BINS).toFixed(4) + '%';
       const span = DayRhythm.markBins(rhythm, 'span');
@@ -9481,8 +9693,9 @@ window.ClipViewMasonry = Masonry;
       const bars = hist.map((count, i) => {
         const h = count ? Math.round(4 + 18 * Math.sqrt(count / max)) : 2;
         const inSpan = !!span && i >= span.from && i < span.to;
+        const inPeak = !!count && !!peakBand && i >= peakBand.from && i < peakBand.to;
         const cls = 'rhythm-bar'
-          + (count && i === rhythm.peakBin ? ' is-peak' : '')
+          + (inPeak ? ' is-peak' : '')
           + (inSpan ? ' is-in-span' : '')
           + (DayRhythm.isNight(i * DayRhythm.BIN_MINUTES) ? ' is-night' : '');
         return `<span class="${cls}" data-bin="${i}" data-n="${count}" style="--h:${h}px" aria-hidden="true"></span>`;
@@ -9492,13 +9705,13 @@ window.ClipViewMasonry = Masonry;
         ? `<span class="rhythm-now" style="left:${((nowMin / 1440) * 100).toFixed(3)}%" title="现在 ${escAttr(DayRhythm.hhmm(nowMin))}"></span>`
         : '';
       const aria = `${DayRhythm.hhmm(rhythm.firstMin)} 到 ${DayRhythm.hhmm(rhythm.lastMin)} 活跃，共 ${rhythm.n} 条；`
-        + `峰值 ${DayRhythm.binLabel(rhythm.peakBin)} ${rhythm.peakCount} 条；夜间占 ${nightSharePct}%`;
+        + `峰值 ${DayRhythm.peakLabel(rhythm)}；夜间占 ${nightSharePct}%`;
       const readout = DayRhythm.binReadout({
-        bin: rhythm.peakBin, count: rhythm.peakCount, total: rhythm.n, peak: true,
+        bin: rhythm.peakBin, count: rhythm.peakCount, total: rhythm.n, peak: true, window: DayRhythm.PEAK_BINS,
       });
       const facts = [
         ['活跃', `${DayRhythm.hhmm(rhythm.firstMin)}–${DayRhythm.hhmm(rhythm.lastMin)} · ${DayRhythm.duration(rhythm.spanMin)}`, 'span'],
-        ['峰值', `${DayRhythm.binLabel(rhythm.peakBin)} · ${rhythm.peakCount} 条`, 'peak'],
+        ['峰值', DayRhythm.peakLabel(rhythm), 'peak'],
         ['夜间', `${nightSharePct}%`, 'night'],
         ['最长空档', rhythm.maxGapMin == null ? '—' : DayRhythm.duration(rhythm.maxGapMin), 'gap'],
       ];
@@ -9508,12 +9721,13 @@ window.ClipViewMasonry = Masonry;
         return `
             <span class="rhythm-fact"${attr} data-ui="rhythm-fact"><span class="rhythm-fact-label">${esc(label)}</span><span class="rhythm-fact-value">${esc(value)}</span></span>`;
       }).join('<span class="rhythm-fact-sep" aria-hidden="true">·</span>');
-      return `<div class="day-rhythm" data-day-rhythm>
+      return `<div class="day-rhythm${partialCls}" data-day-rhythm>
           <div class="rhythm-track" role="slider" tabindex="0" data-rhythm-track
                aria-label="${escAttr(aria)}"
                aria-valuemin="0" aria-valuemax="${DayRhythm.BINS - 1}"
                aria-valuenow="${rhythm.peakBin}" aria-valuetext="${escAttr(readout)}"
                data-rhythm-total="${rhythm.n}" data-peak-bin="${rhythm.peakBin}"
+               data-peak-to="${peakBand ? peakBand.to : rhythm.peakBin}"
                data-ui="rhythm-track">
             <span class="rhythm-nightzone" style="left:0;width:12.5%" aria-hidden="true"></span>
             <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>${mark('span')}${mark('gap')}${bars}
@@ -9532,27 +9746,41 @@ window.ClipViewMasonry = Masonry;
       return kind === 'night' ? null : DayRhythm.markBins(rhythm, kind);
     }
 
-    function dayHeadMarkup(group) {
-      const st = DayGroups.stats(group.items);
-      const rhythm = DayRhythm.summary(group.items);
+    /**
+     * One day head. `serverStats` is the store's day aggregate
+     * (`/api/clips/days`); without it the head falls back to the loaded slice and
+     * says so (`≥ N 条`, no type pills) instead of pretending a lazy wall census
+     * is a day total (AGENTS.md · 墙).
+     */
+    function dayHeadMarkup(group, serverStats = null) {
+      const partial = !serverStats;
+      const local = partial ? DayGroups.stats(group.items) : null;
+      const total = partial ? local.total : Math.max(0, Number(serverStats.total) || 0);
+      const byType = partial ? local.byType : DayGroups.collapseTypes(serverStats.byType);
+      const rhythm = partial ? DayRhythm.summary(group.items) : DayRhythm.normalize(serverStats);
       const todayKey = wallTodayKey();
       const today = !!todayKey && group.day === todayKey;
       const title = DayGroups.shortLabel(group.day, todayKey);
       const dateText = DayGroups.dayDateText(group.day);
-      const pills = Object.keys(st.byType)
-        .sort((a, b) => st.byType[b] - st.byType[a])
+      const pills = partial ? '' : Object.keys(byType)
+        .sort((a, b) => byType[b] - byType[a])
         .map((bucket) => {
           const meta = dayBucketMeta(bucket);
-          return `<span class="badge ${meta.cls}"><span class="material-symbols-outlined">${meta.icon}</span>${meta.label} ${st.byType[bucket]}</span>`;
+          return `<span class="badge ${meta.cls}"><span class="material-symbols-outlined">${meta.icon}</span>${meta.label} ${byType[bucket]}</span>`;
         }).join('');
+      const totalText = `共 ${total} 条`;
+      const partialTitle = ' title="当日统计仍在同步：这条是已加载卡片的下界"';
+      // The fallback keeps one badge in the row so swapping in the store payload
+      // (the late-index path) does not change the head's height: no layout shift.
+      const pending = '<span class="badge is-pending">统计同步中</span>';
       return `<div class="day-head-top">
           <div class="day-head-main">
             <h2 class="day-title">${esc(title)}</h2>
             ${dateText && dateText !== title ? `<span class="day-date">${esc(dateText)}</span>` : ''}
           </div>
-          <div class="day-stats"><span class="day-stat is-total">共 ${st.total} 条</span>${pills}</div>
+          <div class="day-stats"><span class="day-stat is-total${partial ? ' is-partial' : ''}"${partial ? partialTitle : ''}>${partial ? '&#8805; ' : ''}${esc(totalText)}</span>${partial ? pending : pills}</div>
         </div>
-        ${dayRhythmMarkup(rhythm, { today, nowMin: today ? wallNowMinute() : null })}`;
+        ${dayRhythmMarkup(rhythm, { today, nowMin: today ? wallNowMinute() : null, partial })}`;
     }
 
     function ensureDaySection(feed, day) {
@@ -9567,13 +9795,13 @@ window.ClipViewMasonry = Masonry;
       return sec;
     }
 
-    function updateDayHead(sec, group) {
+    function updateDayHead(sec, group, serverStats = null) {
       const head = sec && sec.querySelector(':scope > .day-head');
       if (!head) return;
       // Rebuilding the head would throw away a live scrub: re-acquire the same
       // day's freshly built track instead of dropping the readout mid-hover.
       const wasScrubbing = !!rhythmTrack && head.contains(rhythmTrack);
-      head.innerHTML = dayHeadMarkup(group);
+      head.innerHTML = dayHeadMarkup(group, serverStats);
       if (wasScrubbing) {
         rhythmTrack = head.querySelector('.rhythm-track[data-rhythm-track]');
         rhythmScrubSchedule();
@@ -9594,7 +9822,7 @@ window.ClipViewMasonry = Masonry;
       }
       for (const g of groups) {
         const sec = ensureDaySection(feed, g.day);
-        updateDayHead(sec, g);
+        updateDayHead(sec, g, dayStatsFor(g.day));
         feed.appendChild(sec);
       }
     }
@@ -9612,7 +9840,18 @@ window.ClipViewMasonry = Masonry;
       }
       for (const d of days) {
         const sec = daySectionEl(feed, d);
-        if (sec) updateDayHead(sec, { day: d, items: byDay.get(d) || [] });
+        if (sec) updateDayHead(sec, { day: d, items: byDay.get(d) || [] }, dayStatsFor(d));
+      }
+    }
+
+    /** Re-render every painted day head from the current day index. */
+    function refreshDayHeads() {
+      const feed = wallFeedEl();
+      if (!feed) return;
+      for (const sec of feed.querySelectorAll(':scope > .day-group')) {
+        const day = sec.dataset.day;
+        if (!day) continue;
+        updateDayHead(sec, { day, items: [] }, dayStatsFor(day));
       }
     }
 
@@ -9745,7 +9984,12 @@ window.ClipViewMasonry = Masonry;
           bin,
           count: Number(bar.dataset.n) || 0,
           total: Number(track.dataset.rhythmTotal) || 0,
-          peak: Number(track.dataset.peakBin) === bin,
+          // 「峰值」 tags a mark that belongs to the busiest half hour only when
+          // that mark actually holds a capture: an empty mark inside the window
+          // must not read as a peak.
+          peak: (Number(bar.dataset.n) || 0) > 0
+            && bin >= (Number(track.dataset.peakBin) || 0)
+            && bin < (Number(track.dataset.peakTo) || 0),
         });
         const out = root.querySelector('[data-rhythm-readout]');
         if (out) out.textContent = text;
@@ -11228,6 +11472,7 @@ window.ClipViewMasonry = Masonry;
         if (!clips.some(c => c.id === id) && !cardCache.has(id)) return;
         clips = clips.filter(c => c.id !== id);
         removeCardFromMasonry(id, { animate: false });
+        scheduleDayStats('remove');
         if (!clientFilter(clips).length) {
           colHeights = null;
           rebuildFromData({ preserveScroll: true });
@@ -11283,6 +11528,7 @@ window.ClipViewMasonry = Masonry;
       wall_load: { label: '首屏加载', unit: 'ms', budget: 150 },
       wall_ttfp: { label: '首屏响应', unit: 'ms', budget: 150 },
       wall_fetch: { label: '拉取', unit: 'ms', budget: 100 },
+      wall_dayindex: { label: '日统计', unit: 'ms', budget: 120 },
       wall_merge: { label: '合入', unit: 'ms', budget: 100 },
       wall_paint: { label: '重排绘制', unit: 'ms', budget: 50 },
       wall_resync: { label: 'SSE 重同步', unit: 'ms', budget: 120 },

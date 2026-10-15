@@ -17,99 +17,18 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { root } from './helpers/src.mjs';
 
-// --- keep in sync with web/index.html DayGroups object ---
-const DayGroups = {
-  localDayKey(ms) {
-    const n = Number(ms);
-    const d = new Date(n);
-    if (!Number.isFinite(n) || Number.isNaN(d.getTime())) return 'unknown';
-    const p = (v) => String(v).padStart(2, '0');
-    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
-  },
-  normDayKey(raw) {
-    const s = String(raw == null ? '' : raw).trim();
-    const m = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
-    if (!m) return 'unknown';
-    const p = (v) => String(v).padStart(2, '0');
-    return m[1] + '-' + p(Number(m[2])) + '-' + p(Number(m[3]));
-  },
-  keyForItem(item) {
-    if (!item) return 'unknown';
-    const byWall = DayGroups.normDayKey(item.timeLocal);
-    if (byWall !== 'unknown') return byWall;
-    const ts = Number(item.timestamp != null ? item.timestamp : item.ts);
-    if (Number.isFinite(ts)) return DayGroups.localDayKey(ts * 1000);
-    return 'unknown';
-  },
-  group(items) {
-    const out = [];
-    const index = new Map();
-    for (const it of items || []) {
-      if (!it || it.id == null) continue;
-      const day = DayGroups.keyForItem(it);
-      let g = index.get(day);
-      if (!g) { g = { day, items: [] }; index.set(day, g); out.push(g); }
-      g.items.push(it);
-    }
-    return out;
-  },
-  stats(items) {
-    const byType = Object.create(null);
-    let total = 0;
-    for (const it of items || []) {
-      if (!it) continue;
-      total += 1;
-      const t = String(it.type || 'other').toLowerCase();
-      const bucket = (t === 'html' || t === 'rtf') ? 'rich' : t;
-      byType[bucket] = (byType[bucket] || 0) + 1;
-    }
-    return { total, byType };
-  },
-  parts(day) {
-    const m = String(day || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return null;
-    return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
-  },
-  addDays(day, delta) {
-    const p = DayGroups.parts(day);
-    if (!p) return '';
-    const dt = new Date(p.y, p.m - 1, p.d + (Number(delta) || 0));
-    const pad = (n) => String(n).padStart(2, '0');
-    return dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate());
-  },
-  weekday(day) {
-    const p = DayGroups.parts(day);
-    if (!p) return '';
-    return '周' + ['日', '一', '二', '三', '四', '五', '六'][new Date(p.y, p.m - 1, p.d).getDay()];
-  },
-  shortLabel(day, todayKey) {
-    if (!day || day === 'unknown') return '更早';
-    if (todayKey && day === todayKey) return '今天';
-    if (todayKey && day === DayGroups.addDays(todayKey, -1)) return '昨天';
-    const p = DayGroups.parts(day);
-    if (!p) return day;
-    const sameYear = !todayKey || todayKey.slice(0, 4) === day.slice(0, 4);
-    return (sameYear ? '' : p.y + '年') + p.m + '月' + p.d + '日';
-  },
-  railLabel(day, todayKey) {
-    if (!day || day === 'unknown') return '更早';
-    if (todayKey && day === todayKey) return '今天';
-    if (todayKey && day === DayGroups.addDays(todayKey, -1)) return '昨天';
-    const p = DayGroups.parts(day);
-    if (!p) return day;
-    if (todayKey && todayKey.slice(0, 4) !== day.slice(0, 4)) return p.y + '/' + p.m + '/' + p.d;
-    return p.m + '/' + p.d;
-  },
-  dayDateText(day) {
-    const p = DayGroups.parts(day);
-    if (!p) return '';
-    const pad = (n) => String(n).padStart(2, '0');
-    const wd = DayGroups.weekday(day);
-    return p.y + '/' + pad(p.m) + '/' + pad(p.d) + (wd ? ' ' + wd : '');
-  },
-};
-
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
+
+/**
+ * The shipped pure object, evaluated out of the page: a hand-kept copy of the
+ * header/day math is exactly how a lazy wall ends up printing numbers nobody
+ * can reproduce. The oracle lives in the assertions below.
+ */
+const DayGroups = new Function(
+  `${html.slice(html.indexOf('const DayGroups = {'), html.indexOf('window.ClipViewDayGroups = DayGroups;'))}\nreturn DayGroups;`,
+)();
+
+assert.ok(typeof DayGroups?.keyForItem === 'function', 'DayGroups must stay exported on window');
 
 test('keyForItem prefers the server wall clock over client TZ math', () => {
   assert.equal(DayGroups.keyForItem({ timeLocal: '2026/10/10 23:59:01' }), '2026-10-10');
@@ -149,6 +68,20 @@ test('stats totals and collapses html/rtf into one rich bucket', () => {
   assert.equal(st.byType.rich, 2);
 });
 
+test('collapseTypes buckets the store aggregate the same way as a loaded slice', () => {
+  // The server ships raw types; the header bucket rule lives here, once.
+  const collapsed = DayGroups.collapseTypes({ html: 3, rtf: 2, image: 1, IMAGE: 4, note: 1 });
+  assert.equal(collapsed.rich, 5);
+  assert.equal(collapsed.image, 5);
+  assert.equal(collapsed.note, 1);
+  assert.deepEqual(DayGroups.collapseTypes({}), Object.create(null));
+  assert.deepEqual(DayGroups.collapseTypes(undefined), Object.create(null));
+  // Both paths must agree, or a header would change when the index lands.
+  const items = [{ type: 'html' }, { type: 'rtf' }, { type: 'image' }];
+  const raw = { html: 1, rtf: 1, image: 1 };
+  assert.deepEqual(DayGroups.stats(items).byType, DayGroups.collapseTypes(raw));
+});
+
 test('today / yesterday / older labels', () => {
   const today = '2026-10-10';
   assert.equal(DayGroups.shortLabel('2026-10-10', today), '今天');
@@ -177,9 +110,9 @@ test('shipped wall groups by day and exposes a timeline rail', () => {
   assert.match(html, /window\.ClipViewDayGroups = DayGroups;/);
   assert.match(html, /<div id="grid" class="wall-feed"/);
   assert.match(html, /<nav id="dayRail" class="day-rail"/);
-  assert.match(html, /function dayHeadMarkup\(group\)/);
+  assert.match(html, /function dayHeadMarkup\(group, serverStats = null\)/);
   assert.match(html, /class="day-title"/);
-  assert.match(html, /class="day-stat is-total"/);
+  assert.match(html, /class="day-stat is-total\$\{partial \? ' is-partial' : ''\}"/);
   assert.match(html, /function ensureDaySection\(feed, day\)/);
   assert.match(html, /function reconcileDaySections\(feed, groups\)/);
   assert.match(html, /function renderDayRail\(groups\)/);

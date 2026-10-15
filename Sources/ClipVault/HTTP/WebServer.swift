@@ -467,6 +467,8 @@ class WebServer {
             sendWebFile("notes.html", connection: connection)
         } else if pathOnly == "/api/items" || pathOnly == "/api/clips" {
             sendItemsJSON(path: path, connection: connection)
+        } else if pathOnly == "/api/clips/days" {
+            sendDayIndexJSON(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/image") {
             sendImage(path: path, connection: connection)
         } else if pathOnly == "/api/events" {
@@ -2455,6 +2457,56 @@ class WebServer {
             // Also expose count for debugging
             payload["count"] = jsonItems.count
 
+            self.sendJSON(payload, connection: connection)
+        }
+    }
+
+    /// `GET /api/clips/days` — per capture-day aggregate for the wall header.
+    ///
+    /// Same filter set as `/api/clips` (`type` / `exclude` / `view=trash` / `q`),
+    /// but aggregated over the **whole** matching set: the wall paints lazily and
+    /// a header must not count the cards that happen to be painted (AGENTS.md · 墙).
+    /// Honest boundary: the aggregate scans every matching row, so its cost grows
+    /// with the table (measured ~10 ms at 4.7k rows).
+    private func sendDayIndexJSON(path: String, connection: HTTPByteSink) {
+        let comps = URLComponents(string: "http://localhost\(path)")
+        let items = comps?.queryItems ?? []
+        let q = Self.formQueryValue(path: path, name: "q")
+            ?? items.first(where: { $0.name == "q" })?.value
+        let trashOnly = (items.first(where: { $0.name == "view" })?.value == "trash")
+        let typeFilter = items.first(where: { $0.name == "type" })?.value
+        let excludeType = items.first(where: { $0.name == "exclude" })?.value
+        database.fetchDayIndexRows(
+            typeFilter: typeFilter,
+            excludeType: excludeType,
+            trashOnly: trashOnly,
+            query: q
+        ) { [weak self] rows in
+            guard let self else { return }
+            let days = DayIndexBuilder.build(rows: rows, zone: ClipTimeFormat.displayTimeZone)
+            let payload: [String: Any] = [
+                "tz": ClipTimeFormat.timeZoneId,
+                "binMinutes": DayIndexBuilder.binMinutes,
+                "bins": DayIndexBuilder.binCount,
+                "count": days.count,
+                "trash": trashOnly,
+                "days": days.map { day -> [String: Any] in
+                    var out: [String: Any] = [
+                        "day": day.day,
+                        "total": day.total,
+                        "byType": day.byType,
+                        "bins": day.bins,
+                        "timed": day.timed,
+                        "night": day.night,
+                    ]
+                    out["firstMin"] = day.firstMin.map { $0 as Any } ?? NSNull()
+                    out["lastMin"] = day.lastMin.map { $0 as Any } ?? NSNull()
+                    out["maxGapMin"] = day.maxGapMin.map { $0 as Any } ?? NSNull()
+                    out["gapFromMin"] = day.gapFromMin.map { $0 as Any } ?? NSNull()
+                    out["gapToMin"] = day.gapToMin.map { $0 as Any } ?? NSNull()
+                    return out
+                },
+            ]
             self.sendJSON(payload, connection: connection)
         }
     }
