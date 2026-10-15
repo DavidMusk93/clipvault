@@ -529,6 +529,9 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 粒度：一步一提交；message = subject + 空行 + why。不混装。回复带 HEAD、是否已 push、远程范围。
 
+临时文件（截图、探针、日志、下载的制品、一次性 fixture）**一律写 `.tmp/`**（已 gitignore），
+禁止落在仓库根或 `web/`、`Sources/`、`tests/` 等受维护路径。仓库根只留受维护文件。
+
 ### nmem
 
 写：机制、约束、误判根因、拓扑。不写：逐步操作、聊天压缩、一次性 PID。
