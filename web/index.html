@@ -3884,6 +3884,8 @@ window.ClipViewMasonry = Masonry;
         dayStatsParkedDirty = false;
         scheduleDayStats('wake');
       }
+      // The 「现在」 line has been standing still since the park started.
+      nowMarkerTick();
       scheduleWallIdleCheck();
     }
 
@@ -9674,11 +9676,18 @@ window.ClipViewMasonry = Masonry;
     function dayRhythmMarkup(rhythm, { today = false, nowMin = null, partial = false } = {}) {
       const hist = (rhythm && rhythm.bins) || [];
       const partialCls = partial ? ' is-partial' : '';
+      // Night band = the same 22:00–06:00 window the facts and the `is-night`
+      // marks use. Derived from the constants: a hard-coded percentage is how
+      // the band ended up covering 00:00–03:00 while 「夜间」 counted to 06:00.
+      const dayMinutes = DayRhythm.BINS * DayRhythm.BIN_MINUTES;
+      const atPct = (min) => ((min / dayMinutes) * 100).toFixed(4) + '%';
+      const nightZones = [[0, DayRhythm.NIGHT_END], [DayRhythm.NIGHT_START, dayMinutes]].map(([from, to]) =>
+        `<span class="rhythm-nightzone" style="left:${atPct(from)};width:${atPct(to - from)}" aria-hidden="true"></span>`,
+      ).join('');
       if (!hist.length || !rhythm.n) {
         return `<div class="day-rhythm${partialCls}" data-day-rhythm>
             <div class="rhythm-track" role="img" aria-label="当天没有可用捕获时间">
-              <span class="rhythm-nightzone" style="left:0;width:12.5%" aria-hidden="true"></span>
-              <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>
+              ${nightZones}
             </div>
             <div class="rhythm-ticks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
             <div class="rhythm-facts" data-day-rhythm-facts><span class="rhythm-facts-list"><span class="rhythm-fact"><span class="rhythm-fact-label">活跃</span><span class="rhythm-fact-value">无时间</span></span></span></div>
@@ -9733,8 +9742,7 @@ window.ClipViewMasonry = Masonry;
                data-rhythm-total="${rhythm.n}" data-peak-bin="${rhythm.peakBin}"
                data-peak-to="${peakBand ? peakBand.to : rhythm.peakBin}"
                data-ui="rhythm-track">
-            <span class="rhythm-nightzone" style="left:0;width:12.5%" aria-hidden="true"></span>
-            <span class="rhythm-nightzone" style="left:91.6667%;width:8.3333%" aria-hidden="true"></span>${mark('span')}${mark('gap')}${bars}
+            ${nightZones}${mark('span')}${mark('gap')}${bars}
             <span class="rhythm-guide" aria-hidden="true"></span>${now}
           </div>
           <div class="rhythm-ticks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
@@ -10084,7 +10092,37 @@ window.ClipViewMasonry = Masonry;
     }, { passive: true, capture: true });
     window.addEventListener('resize', () => {
       if (rhythmTrack) rhythmScrubSchedule();
+      nowMarkerTick();
     }, { passive: true });
+
+    // The 「现在」 line is built with today's head, then **moved** on the
+    // compositor as the clock advances: no markup rebuild, no reflow, no layout
+    // shift, and nothing runs while the wall is parked (AGENTS.md · 墙).
+    // 60s: a minute is ~1px on a 1440px track. The interval is registered here,
+    // after the const it reads — registering it earlier threw a TDZ error and
+    // killed the whole inline script, so the wall never booted.
+    const NOW_MARKER_MS = 60000;
+    function dayNowMarkers() {
+      const feed = wallFeedEl();
+      if (!feed) return [];
+      return [...feed.querySelectorAll('.rhythm-now')];
+    }
+    function nowMarkerTick() {
+      if (wallParked || document.hidden) return;
+      const markers = dayNowMarkers();
+      if (!markers.length) return;
+      const min = wallNowMinute();
+      for (const marker of markers) {
+        const track = marker.parentElement;
+        if (!track) continue;
+        // transform only (the crosshair rule): a `left` write would be a layout.
+        const width = track.clientWidth || track.getBoundingClientRect().width;
+        marker.style.left = '0px';
+        marker.style.transform = 'translateX(' + (((min / 1440) * width).toFixed(2)) + 'px)';
+        marker.title = '现在 ' + DayRhythm.hhmm(min);
+      }
+    }
+    window.setInterval(nowMarkerTick, NOW_MARKER_MS);
 
     // ---- Timeline rail -------------------------------------------------------
     const DAY_RAIL_LIMIT = 48;
