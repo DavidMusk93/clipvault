@@ -18,7 +18,7 @@ export default defineConfig({
     alias: {
       "@render": fileURLToPath(new URL("../session-render.mjs", import.meta.url)),
       // Shared chart palette + formatters (also used by the vanilla rollback).
-      "@charts": fileURLToPath(new URL("../mine-charts.mjs", import.meta.url)),
+      "@charts": fileURLToPath(new URL("../assets/mine-charts.mjs", import.meta.url)),
     },
   },
   server: { fs: { allow: [".."] } },

@@ -1,0 +1,74 @@
+/* ClipVault · chart skin (web/assets/mine-charts.mjs)
+ *
+ * The canonical look for the pure chart builders that both the session analysis
+ * sheet and the operations drawer render. Rules live in docs/design-taste.md ·
+ * 「图表选型」: adjacent ratio segments keep a real gap + hairline stroke, one unit
+ * per chart, bars are square-ended, and every colour block carries its number.
+ *
+ * Scoped by nothing on purpose: this file is only loaded by pages that own the
+ * `mc-` namespace (the wall page loads it lazily when the ops drawer opens). The
+ * React session sheet has its own scoped copy for its own root.
+ */
+
+.mc-wrap { margin: 6px 0 10px; }
+
+/* part-to-whole: real 3px gaps so neighbouring ratios never merge into one blob */
+.mc-stack-track {
+  display: flex;
+  gap: 3px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--fill, rgba(120, 120, 128, 0.12));
+  overflow: hidden;
+}
+.mc-stack-track .mc-seg {
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.75);
+  border-radius: 3px;
+  min-width: 3px;
+}
+.mc-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+.mc-legend-col { flex-direction: column; gap: 3px; }
+.mc-lg { display: inline-flex; align-items: center; gap: 4px; }
+.mc-lg i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+.mc-lg b { color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; }
+.mc-lg em { font-style: normal; color: var(--muted); }
+
+/* ranked horizontal bars: the number is never optional */
+.mc-bars { display: flex; flex-direction: column; gap: 3px; }
+.mc-bar-row {
+  display: grid;
+  grid-template-columns: minmax(84px, 32%) minmax(36px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: default;
+}
+button.mc-bar-row { cursor: pointer; }
+button.mc-bar-row:hover { background: rgba(120, 120, 128, 0.09); }
+button.mc-bar-row[aria-pressed="true"] { background: rgba(0, 113, 227, 0.10); }
+.mc-bar-lab { font-size: 11.5px; color: var(--ink); overflow-wrap: anywhere; }
+.mc-bar-track { height: 8px; border-radius: 4px; background: var(--fill, rgba(120, 120, 128, 0.12)); overflow: hidden; }
+.mc-bar-track i { display: block; height: 100%; min-width: 2px; border-radius: 4px; }
+.mc-bar-val { font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.mc-bar-sub { font-size: 10.5px; color: var(--muted); }
+
+.mc-donut { display: flex; align-items: center; gap: 14px; }
+.mc-donut svg { flex: 0 0 auto; }
+.mc-donut-v { font: 700 19px var(--font-ui, sans-serif); fill: var(--ink); }
+.mc-donut-s { font: 500 10px var(--font-ui, sans-serif); fill: var(--muted); }
+
+.mc-line, .mc-cols { margin: 4px 0 8px; }
+.mc-line-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; font-size: 11.5px; color: var(--muted); }
+.mc-line-head b { font-size: 14px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mc-line-head em { font-style: normal; }
+.mc-axis { font: 500 9.5px var(--font-ui, sans-serif); fill: var(--muted); }
+.mc-axis-row { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+svg .mc-col { cursor: default; }
+.mc-empty { font-size: 11.5px; color: var(--muted); }

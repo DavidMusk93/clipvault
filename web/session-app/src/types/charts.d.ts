@@ -1,4 +1,4 @@
-// Types for the shared chart palette / formatters (web/mine-charts.mjs),
+// Types for the shared chart palette / formatters (web/assets/mine-charts.mjs),
 // aliased as `@charts`.
 declare module "@charts" {
   export const CHART_PALETTE: string[];

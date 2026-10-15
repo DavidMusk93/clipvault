@@ -8,7 +8,7 @@ import test from 'node:test';
 import {
   CHART_PALETTE, PHASE_COLORS, SEV_COLORS, chartFor, colorAt, columns, donut,
   fmtCompact, fmtValue, lineChart, rankBars, stackBar,
-} from '../web/mine-charts.mjs';
+} from '../web/assets/mine-charts.mjs';
 
 test('stackBar keeps adjacent ratios visually separate', () => {
   const html = stackBar([
@@ -105,6 +105,10 @@ test('formatting is shared and unit-aware', () => {
   assert.equal(fmtValue(618, 's'), '618s');
   assert.equal(fmtValue(6439, 's'), '1.8h');
   assert.equal(fmtValue(54566528, 'tok'), '54.6Mtok');
+  // Wall time of one operation: milliseconds below a second, seconds above.
+  assert.equal(fmtValue(19, 'ms'), '19ms');
+  assert.equal(fmtValue(999, 'ms'), '999ms');
+  assert.equal(fmtValue(5000, 'ms'), '5.00s');
   assert.equal(fmtValue(3, ''), '3');
   assert.equal(fmtCompact(12345), '12.3k');
   assert.equal(fmtCompact(999), '999');

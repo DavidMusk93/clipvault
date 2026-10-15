@@ -297,102 +297,92 @@
       box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.28);
     }
     .badge-count .material-symbols-outlined { font-size: 13px; }
-    .ops-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-    .ops-item {
-      border: 0.5px solid var(--separator);
-      border-radius: 12px; padding: 0;
-      background: rgba(255,255,255,0.72);
-      overflow: hidden;
-      border-left: 3px solid var(--ops-src, #8e8e93);
+    /* —— Operation logs: budgeted reading, not a card census ——
+       Charts use the shared skin (web/assets/mine-charts.css, loaded lazily with
+       the panel). One colour per source comes from docs/design-taste.md · 操作日志来源色. */
+    .ops-windows { display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--fill); }
+    .ops-window {
+      height: 24px; padding: 0 10px; border: 0; border-radius: 7px;
+      background: transparent; color: var(--muted);
+      font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
     }
-    .ops-item .ops-top {
-      display: flex; justify-content: space-between; gap: 8px;
-      font-weight: 600; font-size: 13px; align-items: center;
-      padding: 10px 12px 8px;
-      flex-wrap: nowrap;
-      min-width: 0;
+    .ops-window[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: var(--elev-1); }
+    .ops-kpis { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 2px 0 12px; }
+    .ops-kpi { display: flex; flex-direction: column; min-width: 62px; }
+    .ops-kpi b {
+      font-size: 16px; font-weight: 650; line-height: 1.2;
+      font-variant-numeric: tabular-nums; color: var(--ink);
     }
-    .ops-item .ops-top-left {
-      display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;
+    .ops-kpi b.t-accent { color: var(--accent); }
+    .ops-kpi span { font-size: 11px; color: var(--muted); }
+    .ops-kpi em { font-style: normal; font-size: 10.5px; color: var(--muted); }
+    .ops-h3 {
+      display: flex; align-items: baseline; gap: 8px;
+      font-size: 13px; font-weight: 650; letter-spacing: -0.01em;
+      margin: 14px 0 6px; color: var(--ink);
     }
-    .ops-item .ops-action {
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+    .ops-h3-sub { font-size: 11px; font-weight: 400; color: var(--muted); }
+    .ops-signals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .ops-signal {
+      border-radius: 12px; padding: 8px 10px;
+      background: var(--card); border: 0.5px solid var(--separator);
+      border-left: 3px solid rgba(60, 60, 67, 0.22);
     }
-    .ops-item .ops-source-pill {
-      flex-shrink: 0;
-      height: 20px; padding: 0 8px; border-radius: 999px;
-      font-size: 11px; font-weight: 600; letter-spacing: -0.01em;
-      line-height: 20px;
-      color: var(--ops-src-ink, #3a3a3c);
-      background: var(--ops-src-soft, rgba(142,142,147,0.16));
+    .ops-signal.sev-high { border-left-color: var(--danger); background: linear-gradient(180deg, var(--danger-soft), var(--card) 46%); }
+    .ops-signal.sev-med { border-left-color: var(--type-text); background: linear-gradient(180deg, rgba(196,122,44,0.10), var(--card) 46%); }
+    .ops-signal.sev-good { border-left-color: var(--ok); background: linear-gradient(180deg, var(--ok-soft), var(--card) 46%); }
+    .ops-signal-h { display: flex; align-items: baseline; gap: 6px; }
+    .ops-signal-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--muted); }
+    .ops-signal.sev-high .ops-signal-dot { background: var(--danger); }
+    .ops-signal.sev-med .ops-signal-dot { background: var(--type-text); }
+    .ops-signal.sev-good .ops-signal-dot { background: var(--ok); }
+    .ops-signal-txt { flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: var(--ink); }
+    .ops-signal-budget {
+      flex: 0 0 auto; font-size: 11px; font-weight: 650;
+      font-variant-numeric: tabular-nums; color: var(--muted);
     }
-    .ops-item .ops-top .time { flex-shrink: 0; white-space: nowrap; }
-    /* Source color themes */
-    .ops-item.src-web {
-      --ops-src: #007aff; --ops-src-ink: #0056b3; --ops-src-soft: rgba(0,122,255,0.14);
+    .ops-signal-a { margin: 3px 0 0 13px; font-size: 11.5px; color: var(--muted); }
+    .ops-extra { margin: 6px 0 0; font-size: 11px; color: var(--muted); }
+    .ops-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 8px; }
+    .ops-link {
+      height: 24px; padding: 0 10px; border-radius: 7px;
+      border: 0.5px solid var(--separator); background: var(--card);
+      color: var(--muted); font: 600 11.5px/23px inherit; cursor: pointer;
     }
-    .ops-item.src-clipboard {
-      --ops-src: #34c759; --ops-src-ink: #1b7a34; --ops-src-soft: rgba(52,199,89,0.16);
+    .ops-link:hover { color: var(--ink); border-color: var(--accent); }
+    .ops-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .ops-row {
+      border: 0.5px solid var(--separator); border-radius: 10px; padding: 7px 10px;
+      background: rgba(255,255,255,0.72); border-left: 3px solid var(--ops-src, #8e8e93);
     }
-    .ops-item.src-backup {
-      --ops-src: #af52de; --ops-src-ink: #7a2fa8; --ops-src-soft: rgba(175,82,222,0.14);
+    .ops-row-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .ops-row-top .ops-action {
+      font-weight: 600; font-size: 12.5px; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .ops-item.src-maintenance {
-      --ops-src: #ff9500; --ops-src-ink: #b56a00; --ops-src-soft: rgba(255,149,0,0.16);
+    .ops-source-pill {
+      flex-shrink: 0; height: 19px; padding: 0 8px; border-radius: 999px;
+      font-size: 10.5px; font-weight: 600; line-height: 19px;
+      color: var(--ops-src-ink, #3a3a3c); background: var(--ops-src-soft, rgba(142,142,147,0.16));
     }
-    .ops-item.src-app {
-      --ops-src: #5856d6; --ops-src-ink: #3b3a9a; --ops-src-soft: rgba(88,86,214,0.14);
+    .ops-dur, .ops-id {
+      flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums;
+      color: var(--muted); font-family: var(--font-mono);
     }
-    .ops-item.src-sync {
-      --ops-src: #32ade6; --ops-src-ink: #1a6f99; --ops-src-soft: rgba(50,173,230,0.16);
+    .ops-row-top .time { margin-left: auto; flex-shrink: 0; white-space: nowrap; font-size: 11px; color: var(--muted); }
+    .ops-detail {
+      margin-top: 4px; font-size: 11.5px; color: var(--muted);
+      white-space: pre; overflow-x: auto; overscroll-behavior-x: contain;
     }
-    .ops-item.src-system {
-      --ops-src: #8e8e93; --ops-src-ink: #3a3a3c; --ops-src-soft: rgba(142,142,147,0.16);
-    }
-    .ops-item .ops-scroll {
-      margin: 0 0 10px 12px;
-      padding: 0 10px 8px 0;
-      max-height: 160px;
-      overflow: auto;
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-gutter: stable;
-    }
-    .ops-item .ops-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
-    .ops-item .ops-scroll::-webkit-scrollbar-thumb {
-      background: rgba(0,0,0,0.18); border-radius: 8px; border: 2px solid transparent; background-clip: content-box;
-    }
-    .ops-item .ops-scroll::-webkit-scrollbar-track,
-    .ops-item .ops-scroll::-webkit-scrollbar-corner { background: transparent; }
-    .ops-item .ops-grid {
-      display: grid;
-      grid-template-columns: max-content max-content;
-      column-gap: 14px;
-      row-gap: 6px;
-      align-items: start;
-      width: max-content;
-      min-width: 100%;
-      font-size: 12px;
-      line-height: 1.4;
-    }
-    .ops-item .ops-k {
-      color: var(--muted); font-weight: 500;
-      white-space: nowrap;
-      padding-top: 1px;
-    }
-    .ops-item .ops-v {
-      color: var(--ink);
-      white-space: pre; /* no wrap — pan to read */
-      word-break: normal;
-      overflow-wrap: normal;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11.5px;
-    }
-    .ops-item .ops-v.is-plain {
-      font-family: inherit;
-      font-size: 12.5px;
-      white-space: pre;
-    }
+    /* Source palette — one table shared with Android opsSourceStyle() */
+    .ops-src-web { --ops-src: #007aff; --ops-src-ink: #0056b3; --ops-src-soft: rgba(0,122,255,0.14); }
+    .ops-src-clipboard { --ops-src: #34c759; --ops-src-ink: #1b7a34; --ops-src-soft: rgba(52,199,89,0.16); }
+    .ops-src-backup { --ops-src: #af52de; --ops-src-ink: #7a2fa8; --ops-src-soft: rgba(175,82,222,0.14); }
+    .ops-src-maintenance { --ops-src: #ff9500; --ops-src-ink: #b56a00; --ops-src-soft: rgba(255,149,0,0.16); }
+    .ops-src-app { --ops-src: #5856d6; --ops-src-ink: #3b3a9a; --ops-src-soft: rgba(88,86,214,0.14); }
+    .ops-src-sync { --ops-src: #32ade6; --ops-src-ink: #1a6f99; --ops-src-soft: rgba(50,173,230,0.16); }
+    .ops-src-system { --ops-src: #8e8e93; --ops-src-ink: #3a3a3c; --ops-src-soft: rgba(142,142,147,0.16); }
+
     /* Popover timeline — anchored to ×N trigger (apple-design spatial consistency) */
     .event-toast {
       position: fixed; inset: 0; z-index: 3600;
@@ -2879,19 +2869,20 @@
   </aside>
 
   <div class="backup-scrim" id="opsScrim"></div>
-  <aside class="backup-drawer" id="opsDrawer" aria-label="操作日志">
+  <aside class="backup-drawer ops-drawer" id="opsDrawer" aria-label="操作日志" data-ui-zone="ops">
     <header>
       <h2>操作日志</h2>
       <button type="button" class="btn-icon" id="opsCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <p style="margin-bottom:12px;color:var(--md-outline)">
-        审计用户操作、捕获、删除/恢复与备份。默认保留约 90 天。
-      </p>
-      <div class="backup-actions" style="margin-bottom:12px">
-        <button type="button" id="opsRefresh">刷新</button>
+      <div class="ops-toolbar-row">
+        <span class="ops-windows" id="opsToolbar"></span>
+        <button type="button" class="ops-link" id="opsRefresh" data-ui="ops-refresh">刷新</button>
       </div>
-      <ul class="ops-list" id="opsList"><li class="backup-label">加载中…</li></ul>
+      <p class="backup-label" style="margin:0 0 10px" id="opsMeta">
+        类型 / 频次 / 耗时 / 时间序列；预算写在信号里。默认保留约 90 天，明细点开才拉。
+      </p>
+      <div id="opsView"><p class="backup-label">加载中…</p></div>
     </div>
   </aside>
 
@@ -11530,22 +11521,65 @@ window.ClipViewMasonry = Masonry;
 
 
     // ===== Operation logs panel =====
+    // Charts and panel logic are lazy ES modules: the wall's first paint does not
+    // pay for them, and nothing is fetched until the drawer is actually opened.
+    // The aggregate (`/api/oplogs/stats`) is one request per window; raw rows are
+    // only fetched when a type is picked.
     const opsOpen = document.getElementById('opsOpenBtn');
     const opsDrawer = document.getElementById('opsDrawer');
     const opsScrim = document.getElementById('opsScrim');
+    let opsPanel = null;
+    let opsLoad = null;
+
     function openOps() {
       opsDrawer?.classList.add('open');
       opsScrim?.classList.add('open');
-      refreshOpLogs();
+      loadOpsPanel().then((p) => p && p.open());
     }
     function closeOps() {
       opsDrawer?.classList.remove('open');
       opsScrim?.classList.remove('open');
     }
+    function loadOpsPanel() {
+      if (opsPanel) return Promise.resolve(opsPanel);
+      if (opsLoad) return opsLoad;
+      opsLoad = (async () => {
+        if (!document.getElementById('opsChartsCss')) {
+          const link = document.createElement('link');
+          link.id = 'opsChartsCss';
+          link.rel = 'stylesheet';
+          link.href = '/assets/mine-charts.css?v=c2';
+          document.head.appendChild(link);
+        }
+        const mod = await import('/assets/oplog-panel.mjs?v=o2');
+        opsPanel = mod.mountOpsPanel({
+          root: document.getElementById('opsView'),
+          toolbar: document.getElementById('opsToolbar'),
+          fetchStats: async (windowKey) => {
+            const res = await fetch(API + '/api/oplogs/stats?window=' + encodeURIComponent(windowKey));
+            if (!res.ok) throw new Error('oplog stats ' + res.status);
+            return res.json();
+          },
+          fetchRows: async ({ action, window: winKey, limit }) => {
+            const p = new URLSearchParams({ limit: String(limit), window: winKey });
+            if (action) p.set('action', action);
+            const res = await fetch(API + '/api/oplogs?' + p.toString());
+            if (!res.ok) throw new Error('oplogs ' + res.status);
+            return res.json();
+          },
+          onError: () => toast('操作日志加载失败'),
+        });
+        return opsPanel;
+      })();
+      return opsLoad;
+    }
     opsOpen?.addEventListener('click', openOps);
     document.getElementById('opsCloseBtn')?.addEventListener('click', closeOps);
     opsScrim?.addEventListener('click', closeOps);
-    document.getElementById('opsRefresh')?.addEventListener('click', refreshOpLogs);
+    document.getElementById('opsRefresh')?.addEventListener('click', async () => {
+      const p = await loadOpsPanel();
+      if (p) p.refresh();
+    });
 
     const debugOpen = document.getElementById('debugOpenBtn');
     const debugDrawer = document.getElementById('debugDrawer');
@@ -11853,74 +11887,6 @@ window.ClipViewMasonry = Masonry;
       }
       if (e.key === 'Escape' && debugDrawer?.classList.contains('open')) closeDebug();
     });
-
-    function opsSourceKey(source) {
-      const s = String(source || 'system').toLowerCase().trim();
-      if (s === 'web' || s === 'clipboard' || s === 'backup' || s === 'maintenance' || s === 'app' || s === 'sync' || s === 'system') {
-        return s;
-      }
-      // map common aliases
-      if (s.includes('web') || s.includes('ui')) return 'web';
-      if (s.includes('clip')) return 'clipboard';
-      if (s.includes('back')) return 'backup';
-      if (s.includes('maint') || s.includes('purge') || s.includes('cron')) return 'maintenance';
-      if (s.includes('sync')) return 'sync';
-      if (s.includes('app')) return 'app';
-      return 'system';
-    }
-
-    async function refreshOpLogs() {
-      const host = document.getElementById('opsList');
-      if (!host) return;
-      host.innerHTML = '<li class="backup-label">加载中…</li>';
-      try {
-        const res = await fetch(API + '/api/oplogs?limit=300');
-        if (!res.ok) throw new Error('oplogs ' + res.status);
-        const data = await res.json();
-        const items = data.items || [];
-        if (!items.length) {
-          host.innerHTML = '<li class="backup-label">暂无操作记录</li>';
-          return;
-        }
-        host.innerHTML = '';
-        items.forEach(row => {
-          const li = document.createElement('li');
-          const detail = (row.detail != null && row.detail !== '') ? String(row.detail) : '';
-          const itemId = (row.itemId != null && row.itemId !== '') ? String(row.itemId) : '';
-          const contentHash = (row.contentHash != null && row.contentHash !== '') ? String(row.contentHash) : '';
-          const source = row.source != null ? String(row.source) : 'system';
-          const action = row.action != null ? String(row.action) : '';
-          const id = row.id != null ? String(row.id) : '';
-          const srcKey = opsSourceKey(source);
-          li.className = 'ops-item src-' + srcKey;
-          const rows = [];
-          rows.push(['时间', row.timeLocal ? formatLocalTime(row.timeLocal) : formatLocalTime(row.ts), true]);
-          rows.push(['动作', action, true]);
-          rows.push(['来源', source, true]);
-          if (itemId) rows.push(['条目 ID', itemId, false]);
-          if (contentHash) rows.push(['contentHash', contentHash, false]);
-          if (id) rows.push(['日志 ID', id, false]);
-          if (detail) rows.push(['详情', detail, true]);
-          const body = rows.map(([k, v, plain]) =>
-            `<span class="ops-k">${esc(k)}</span><span class="ops-v${plain ? ' is-plain' : ''}">${esc(v)}</span>`
-          ).join('');
-          li.innerHTML = `
-            <div class="ops-top">
-              <div class="ops-top-left">
-                <span class="ops-action">${esc(action)}</span>
-                <span class="ops-source-pill">${esc(source || 'system')}</span>
-              </div>
-              <span class="time">${row.timeLocal ? formatLocalTime(row.timeLocal) : formatLocalTime(row.ts)}</span>
-            </div>
-            <div class="ops-scroll">
-              <div class="ops-grid">${body}</div>
-            </div>`;
-          host.appendChild(li);
-        });
-      } catch (e) {
-        host.innerHTML = '<li class="backup-label">加载失败</li>';
-      }
-    }
 
     // ===== CloudDocs backup panel =====
     const bkOpen = document.getElementById('backupOpenBtn');

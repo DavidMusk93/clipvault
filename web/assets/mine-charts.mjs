@@ -72,6 +72,9 @@ export const fmtValue = (v, unit = "", digits = 0) => {
     return `${txt}s`;
   }
   if (unit === "tok") return `${fmtCompact(n)}tok`;
+  // Wall time of one operation. Milliseconds below a second, seconds above —
+  // never `5.00kms`.
+  if (unit === "ms") return n >= 1000 ? `${(n / 1000).toFixed(2)}s` : `${Math.round(n)}ms`;
   const txt = Number.isInteger(n) ? String(n) : fmtCompact(n, digits);
   return unit ? `${txt}${unit}` : txt;
 };
