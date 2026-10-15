@@ -379,6 +379,13 @@ final class UiMetrics {
     }
 
     /// Exact p50/p95/p99 for one numeric column, per name, via window functions.
+    ///
+    /// Nearest-rank percentile: `rank = ceil(cnt * p)`, 1-based, which for an integer
+    /// percentage `p` is `(cnt * p + 99) / 100` in integer arithmetic. The previous
+    /// floor form (`CAST(cnt * p AS INTEGER)`) reported the **minimum** as p95 for two
+    /// samples and the minimum as p50 for three, so the panel understated exactly the
+    /// tail it sorts and reddens by. `web/index.html`'s ring-buffer `pctl` implements
+    /// the same definition, and `tests/metrics-sql.test.mjs` pins both to agree.
     private func percentileLocked(column: String, from: Int64, to: Int64) -> [String: (Double, Double, Double)] {
         var out: [String: (Double, Double, Double)] = [:]
         let sql = """
@@ -390,9 +397,9 @@ final class UiMetrics {
           WHERE ts >= ? AND ts <= ? AND \(column) IS NOT NULL
         )
         SELECT name,
-               MAX(CASE WHEN rn = MAX(1, CAST(cnt * 0.50 AS INTEGER)) THEN v END),
-               MAX(CASE WHEN rn = MAX(1, CAST(cnt * 0.95 AS INTEGER)) THEN v END),
-               MAX(CASE WHEN rn = MAX(1, CAST(cnt * 0.99 AS INTEGER)) THEN v END)
+               MAX(CASE WHEN rn = MAX(1, (cnt * 50 + 99) / 100) THEN v END),
+               MAX(CASE WHEN rn = MAX(1, (cnt * 95 + 99) / 100) THEN v END),
+               MAX(CASE WHEN rn = MAX(1, (cnt * 99 + 99) / 100) THEN v END)
         FROM o GROUP BY name;
         """
         var stmt: OpaquePointer?
