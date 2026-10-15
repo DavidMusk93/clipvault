@@ -24,6 +24,7 @@ const src = fs.readFileSync(
   path.join(__dirname, '../Sources/ClipVault/Metrics/UiMetrics.swift'),
   'utf8',
 );
+const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
 
 /** Extract `let sql = """..."""` from a Swift function. */
 function fnSql(name) {
@@ -60,7 +61,7 @@ function makeDb() {
   return db;
 }
 
-test('percentile SQL returns exact p50/p95/p99 per name', { skip }, () => {
+test('percentile SQL returns exact p50/p95/p99 per name (nearest-rank)', { skip }, () => {
   const db = makeDb();
   const rows = db.prepare(percentileSql).all(0, 9999);
   // SELECT name, p50, p95, p99 — read the anonymous percentile expressions by position.
@@ -68,9 +69,67 @@ test('percentile SQL returns exact p50/p95/p99 per name', { skip }, () => {
     rows.map((r) => [r.name, Object.values(r).slice(1)]),
   );
   assert.deepEqual(byName.a, [50, 95, 99]);
-  // 4 values → CAST(4*0.95)=3 → [2,3,3]
-  assert.deepEqual(byName.b, [2, 3, 3]);
+  // 4 values → rank = ceil(4 * 0.95) = 4 → p95 is the max. The old floor form gave
+  // [2, 3, 3], i.e. a p95 that sat below the max of four samples.
+  assert.deepEqual(byName.b, [2, 4, 4]);
   db.close();
+});
+
+/** The shipped ring-buffer percentile, evaluated out of web/index.html (no copy). */
+function shippedPctl() {
+  const at = page.indexOf('function pctl(values, p) {');
+  assert.ok(at > 0, 'pctl missing from web/index.html');
+  let depth = 0;
+  let end = at;
+  for (let i = page.indexOf('{', at); i < page.length; i++) {
+    if (page[i] === '{') depth += 1;
+    else if (page[i] === '}') {
+      depth -= 1;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  assert.ok(end > at, 'pctl braces not balanced');
+  return new Function(`${page.slice(at, end)}\nreturn pctl;`)();
+}
+
+test('the ring buffer and the server report the same percentile', { skip }, () => {
+  // 调试 aggregates the ring buffer in JS while 备份 shows the server summary. Two
+  // definitions of "p95" means the same metric reads differently in two panels —
+  // and the floor form understated the tail this product sorts and reddens by.
+  const pctl = shippedPctl();
+  const fixtures = {
+    one: [7],
+    two: [10, 20],
+    three: [1, 2, 3],
+    four: [1, 2, 3, 4],
+    seven: [267.8, 271, 272.2, 272.4, 272.9, 279.8, 281],
+    hundred: Array.from({ length: 100 }, (_, i) => i + 1),
+    ties: [5, 5, 5, 9],
+  };
+  for (const [label, values] of Object.entries(fixtures)) {
+    const db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE ui_events (id INTEGER PRIMARY KEY, ts INTEGER, name TEXT, dur_ms REAL, value REAL, ok INTEGER, payload TEXT)');
+    db.exec("CREATE TABLE ui_rollup (hour INTEGER, name TEXT, n INTEGER)");
+    const ins = db.prepare('INSERT INTO ui_events (ts, name, dur_ms) VALUES (?,?,?)');
+    for (const v of values) ins.run(1000, label, v);
+    const row = db.prepare(percentileSql).all(0, 9999).find((r) => r.name === label);
+    db.close();
+    const fromSql = Object.values(row).slice(1);
+    const fromJs = [pctl(values, 0.5), pctl(values, 0.95), pctl(values, 0.99)];
+    assert.deepEqual(fromJs, fromSql, `${label}: ring buffer ${fromJs} vs server ${fromSql}`);
+  }
+});
+
+test('a p95 is never below the median or above the max', { skip }, () => {
+  const pctl = shippedPctl();
+  for (const values of [[7], [10, 20], [1, 2, 3], [1, 2, 3, 4], [0.9, 2, 4], [5, 5, 5, 9]]) {
+    const sorted = values.slice().sort((a, b) => a - b);
+    const p50 = pctl(values, 0.5);
+    const p95 = pctl(values, 0.95);
+    assert.ok(p50 <= p95, `${values}: p50 ${p50} > p95 ${p95}`);
+    assert.ok(p95 <= sorted[sorted.length - 1], `${values}: p95 above max`);
+    assert.ok(sorted.includes(p50) && sorted.includes(p95), `${values}: not an observed sample`);
+  }
 });
 
 function makeRollupDb() {
