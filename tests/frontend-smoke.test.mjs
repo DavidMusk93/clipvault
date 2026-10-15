@@ -497,9 +497,9 @@ test('clip link popover is the only associate UI; mergeHead overlays linkCount',
   assert.match(indexHtml, /function openLinkToast/, 'openLinkToast');
   assert.match(indexHtml, /function patchCardLinkState/, 'patchCardLinkState');
   assert.match(indexHtml, /function positionAnchoredCard/, 'shared anchor');
-  const mh = indexHtml.indexOf('async function mergeHead');
-  assert.ok(mh > 0, 'mergeHead');
-  const mhChunk = indexHtml.slice(mh, mh + 2500);
+  // Scan the whole function: a fixed-size window made this gate fail on comment growth
+  // instead of on behaviour (2026-10-15).
+  const mhChunk = extractFunctionSource(indexHtml, 'mergeHead');
   assert.match(mhChunk, /linkCount/, 'mergeHead must overlay linkCount');
   assert.match(mhChunk, /patchCardLinkState/, 'mergeHead patches link button');
   const bodyIdx = indexHtml.indexOf('<div class="card-body">${body}</div>');

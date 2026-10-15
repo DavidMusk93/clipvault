@@ -6508,27 +6508,44 @@ window.ClipViewMasonry = Masonry;
      * applied, so a legitimately new capture reads 0 and only a real failure to apply
      * (a dropped burst id, a `touch` that was never moved) shows up. Budget 0.
      */
-    function headDriftCount(serverHead, model) {
+    /** Which ids disagree and how — a bare count cannot be diagnosed after the fact. */
+    function headDriftBreakdown(serverHead, model) {
       const byId = new Map((model || []).map((c) => [c.id, c]));
-      let drift = 0;
+      const missing = [];
+      const staleTs = [];
+      const stalePin = [];
       for (const s of serverHead || []) {
         const m = byId.get(s.id);
-        if (!m) { drift += 1; continue; }
-        if (Math.round(Number(s.timestamp) || 0) !== Math.round(Number(m.timestamp) || 0)) { drift += 1; continue; }
+        if (!m) { missing.push(s.id); continue; }
+        if (Math.round(Number(s.timestamp) || 0) !== Math.round(Number(m.timestamp) || 0)) { staleTs.push(s.id); continue; }
         const sp = s.pinnedAt == null ? '' : String(s.pinnedAt);
         const mp = m.pinnedAt == null ? '' : String(m.pinnedAt);
-        if (sp !== mp) drift += 1;
+        if (sp !== mp) stalePin.push(s.id);
       }
-      return drift;
+      return { missing, staleTs, stalePin };
+    }
+
+    function headDriftCount(serverHead, model) {
+      const b = headDriftBreakdown(serverHead, model);
+      return b.missing.length + b.staleTs.length + b.stalePin.length;
     }
 
     function noteHeadDrift(serverHead, source) {
-      const drift = headDriftCount(serverHead, clips);
+      const b = headDriftBreakdown(serverHead, clips);
+      const drift = b.missing.length + b.staleTs.length + b.stalePin.length;
       nm('wall_head_drift', {
         value: drift,
         ok: drift === 0,
         over: drift > 0,
-        payload: { kind: String(source || 'head'), n: (serverHead || []).length, drift },
+        payload: {
+          kind: String(source || 'head'),
+          n: (serverHead || []).length,
+          miss: b.missing.length,
+          stale_ts: b.staleTs.length,
+          stale_pin: b.stalePin.length,
+          // One opaque row handle (8 chars): enough to look the offender up, no content.
+          id0: String(b.missing[0] || b.staleTs[0] || b.stalePin[0] || '').slice(0, 8),
+        },
       });
       return drift;
     }
@@ -6580,7 +6597,18 @@ window.ClipViewMasonry = Masonry;
           return;
         }
         const seen = new Set(clips.map(c => c.id));
+        const knownTs = new Map(clips.map(c => [c.id, Number(c.timestamp) || 0]));
         const fresh = items.filter(i => i && i.id && !seen.has(i.id) && i.type !== 'note' && !i.isCompose);
+        // A `kind=touch` re-copy bumps the capture clock (WallClockPolicy). A tab that
+        // missed that `update` — frozen EventSource, parked page, peer apply — must still
+        // follow the move **here**: `fresh` only ever holds *unknown* ids, so a known id
+        // kept its stale position and `lastHeadSig` was advanced over the disagreement.
+        // The head payload already carries `timestamp`, so the move needs no extra fetch.
+        const moved = items.filter(i => {
+          if (!i || !i.id || !seen.has(i.id)) return false;
+          if (i.type === 'note' || i.isCompose || i.inTrash) return false;
+          return Number(i.timestamp) > (knownTs.get(i.id) || 0);
+        });
         const byId = new Map(items.map((i) => [i.id, i]));
         const flagDirty = [];
         let pinChanged = false;
@@ -6603,7 +6631,7 @@ window.ClipViewMasonry = Masonry;
           return next;
         });
         lastHeadSig = sig;
-        if (!fresh.length) {
+        if (!fresh.length && !moved.length) {
           if (pinChanged) {
             clips = sortClipsForFeed(dedupeClipsById(clips));
             colHeights = null;
@@ -6627,7 +6655,7 @@ window.ClipViewMasonry = Masonry;
               if (one) got.push(one);
             } catch (_) {}
           }
-        } else {
+        } else if (fresh.length) {
           const fat = new URLSearchParams({ limit: String(PAGE_SIZE) });
           applyWallQueryParams(fat);
           const fatRes = await liveGet(`${API}/api/clips?${fat.toString().replace(/\+/g, '%20')}`);
@@ -6638,12 +6666,20 @@ window.ClipViewMasonry = Masonry;
             got = fatItems.filter((i) => i && want.has(i.id));
           }
         }
-        const n = applyFreshItems(got);
+        // One pass, one repaint: the moved rows (head payload) and the fresh bodies.
+        const n = applyFreshItems([...moved, ...got]);
         noteHeadDrift(items, 'head');
         nm('wall_merge', {
           dur_ms: performance.now() - t0,
           ok: true,
-          payload: { kind: 'head', phase: 'end', n, reason: 'insert', bytes },
+          payload: {
+            kind: 'head',
+            phase: 'end',
+            n,
+            reason: fresh.length ? 'insert' : 'move',
+            moved: moved.length,
+            bytes,
+          },
         });
       } catch (_) {
         nm('wall_merge', { dur_ms: performance.now() - t0, ok: false, payload: { kind: 'head', phase: 'error' } });
