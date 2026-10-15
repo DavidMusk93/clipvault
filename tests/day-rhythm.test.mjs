@@ -424,12 +424,54 @@ test('the scrub is keyboard reachable and announces the mark it reads', () => {
   assert.match(html, /\.rhythm-track\[data-rhythm-track\]:focus-visible/);
 });
 
-test('the now marker is today-only, built once (no timer repaint)', () => {
+test('the night band spans the same window as the 夜间 fact and the night marks', () => {
+  // The band used to hard-code 12.5% (00:00–03:00) while 「夜间」 counted to 06:00:
+  // the strip disagreed with its own number. Both must come from NIGHT_*.
+  const pct = (min) => (min / (DayRhythm.BINS * DayRhythm.BIN_MINUTES)) * 100;
+  assert.equal(pct(DayRhythm.NIGHT_END).toFixed(4), '25.0000');
+  assert.equal(pct(DayRhythm.NIGHT_START).toFixed(4), '91.6667');
+  assert.equal((100 - pct(DayRhythm.NIGHT_START)).toFixed(4), '8.3333');
+  assert.match(html, /const nightZones = \[\[0, DayRhythm\.NIGHT_END\], \[DayRhythm\.NIGHT_START, dayMinutes\]\]/);
+  assert.match(html, /style="left:\$\{atPct\(from\)\};width:\$\{atPct\(to - from\)\}"/);
+  assert.doesNotMatch(html, /rhythm-nightzone" style="left:0;width:12\.5%"/);
+
+  // The night window is 8h = 96 five-minute marks (22:00–06:00).
+  const nightBins = [];
+  for (let bin = 0; bin < DayRhythm.BINS; bin += 1) {
+    if (DayRhythm.isNight(bin * DayRhythm.BIN_MINUTES)) nightBins.push(bin);
+  }
+  assert.equal(nightBins.length, 96);
+  assert.equal(nightBins[0], 0);
+  assert.equal(nightBins[71], 71);        // 05:55–06:00 is the last before 06:00
+  assert.equal(nightBins[72], 264);       // 06:00–06:05 is not night
+  assert.equal(nightBins[nightBins.length - 1], 287);
+  const items = [0, 5, 5 * 60 + 59, 6 * 60, 12 * 60, 21 * 60 + 59, 22 * 60, 23 * 60 + 55]
+    .map((m) => day(Math.floor(m / 60), m % 60));
+  const s = DayRhythm.summary(items);
+  assert.equal(s.n, 8);
+  assert.equal(s.night, 5, '00:00, 00:05, 05:59, 22:00 and 23:55 are night; 06:00/12:00/21:59 are not');
+});
+
+test('the now marker is today-only and advances without rebuilding the head', () => {
   assert.match(html, /const now = today && nowMin != null/);
   assert.match(html, /\{ today, nowMin: today \? wallNowMinute\(\) : null, partial \}/);
   assert.match(html, /function wallNowMinute\(\)/);
-  assert.doesNotMatch(html, /setInterval\([^)]*wallNowMinute/);
+  // A stale 「现在」 line is a wrong current time: it is moved on a slow tick…
+  assert.match(html, /window\.setInterval\(nowMarkerTick, NOW_MARKER_MS\)/);
+  assert.match(html, /const NOW_MARKER_MS = 60000;/);
+  // …on the compositor only (transform, never `left`), with the title kept true.
+  const tick = fnBody('nowMarkerTick');
+  assert.match(tick, /marker\.style\.transform = 'translateX\('/);
+  assert.match(tick, /marker\.style\.left = '0px'/);
+  assert.match(tick, /marker\.title = '现在 ' \+ DayRhythm\.hhmm\(min\)/);
+  assert.doesNotMatch(tick, /innerHTML|updateDayHead|rebuildFromData|layoutMasonry/);
+  // Nobody watching (parked/hidden) → nothing runs; wake and resize refresh once.
+  assert.match(tick, /if \(wallParked \|\| document\.hidden\) return;/);
+  assert.match(fnBody('wakeWall'), /nowMarkerTick\(\);/);
+  assert.match(html, /window\.addEventListener\('resize', \(\) => \{\n      if \(rhythmTrack\) rhythmScrubSchedule\(\);\n      nowMarkerTick\(\);/);
+  // Still no head rebuild on a timer.
   assert.doesNotMatch(html, /setInterval\([^)]*dayRhythmMarkup/);
+  assert.doesNotMatch(html, /setInterval\([^)]*updateDayHead/);
 });
 
 test('day pills reuse the card type source (no raw latin bucket in a Chinese header)', () => {
