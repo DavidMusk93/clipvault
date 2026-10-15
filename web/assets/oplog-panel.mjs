@@ -165,7 +165,9 @@ export function chartPlan(report) {
       .map((a) => ({
         label: a.action,
         value: Number(a.p95),
-        sub: `n=${a.durN} · max ${fmtMs(a.max)}`,
+        sub:
+          `n=${a.durN}` +
+          (Number(a.max) >= 2 * Number(a.p95) ? ` · max ${fmtMs(a.max)}` : ''),
       })),
     10,
     '动作',
@@ -185,9 +187,12 @@ export function chartPlan(report) {
           label: a.action,
           value: a.n,
           jump: a.action,
-          // Global operations (backup, purge) legitimately have no target; "0 个目标"
-          // reads like a bug instead of a fact.
-          sub: Number(a.items) > 0 ? `${fmtCount(a.items)} 个目标 · ${pct(a.share)}` : pct(a.share),
+          // One derived number, and only when it is not already visible: the count is
+          // in the row and the bar, the share is in the signals, and "583 个目标"
+          // next to "583" is the same number twice. What a count cannot show is
+          // repetition against the same target — that earns the second column
+          // (`oplog_repeat` is the same reading, budgeted).
+          sub: repeatHint(a.n, a.items),
         })),
         12,
         '动作',
@@ -208,6 +213,19 @@ export function chartPlan(report) {
 }
 
 export const SEV_CLASS = { high: 'sev-high', med: 'sev-med', note: 'sev-note', good: 'sev-good' };
+
+/** Below this, operations are 1:1 with their target and the hint says nothing. */
+export const REPEAT_HINT_MIN = 2;
+
+/** `每个目标 N 次`, or nothing — see the note in `chartPlan.actions`. */
+export function repeatHint(n, items) {
+  const count = Number(n);
+  const targets = Number(items);
+  if (!Number.isFinite(count) || !Number.isFinite(targets) || targets <= 0) return '';
+  const rate = count / targets;
+  if (rate < REPEAT_HINT_MIN) return '';
+  return `每个目标 ${Math.round(rate)} 次`;
+}
 
 function kpi(value, label, hint = '', tone = '') {
   return (

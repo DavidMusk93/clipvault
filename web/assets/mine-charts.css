@@ -35,11 +35,17 @@
 
 /* ranked horizontal bars: the number is never optional */
 .mc-bars { display: flex; flex-direction: column; gap: 3px; }
+/*
+ * Every row is its own grid, so the two right-hand columns MUST be fixed: with
+ * `auto` they size to each row's own text and the tracks end at a different x on
+ * every line (the bars stop being comparable). Fixed widths + `1fr` track makes
+ * the left/right edges of every track identical, and the numbers line up.
+ */
 .mc-bar-row {
   display: grid;
-  grid-template-columns: minmax(84px, 32%) minmax(36px, 1fr) auto auto;
+  grid-template-columns: minmax(84px, 34%) minmax(28px, 1fr) 3.4em 5.2em;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
   padding: 2px 4px;
   border: 0;
@@ -53,11 +59,22 @@
 button.mc-bar-row { cursor: pointer; }
 button.mc-bar-row:hover { background: rgba(120, 120, 128, 0.09); }
 button.mc-bar-row[aria-pressed="true"] { background: rgba(0, 113, 227, 0.10); }
-.mc-bar-lab { font-size: 11.5px; color: var(--ink); overflow-wrap: anywhere; }
+.mc-bar-lab {
+  font-size: 11.5px; color: var(--ink);
+  min-width: 0; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .mc-bar-track { height: 8px; border-radius: 4px; background: var(--fill, rgba(120, 120, 128, 0.12)); overflow: hidden; }
 .mc-bar-track i { display: block; height: 100%; min-width: 2px; border-radius: 4px; }
-.mc-bar-val { font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
-.mc-bar-sub { font-size: 10.5px; color: var(--muted); }
+.mc-bar-val {
+  font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums;
+  justify-self: end;
+}
+.mc-bar-sub {
+  font-size: 10.5px; color: var(--muted);
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  justify-self: start;
+}
 
 .mc-donut { display: flex; align-items: center; gap: 14px; }
 .mc-donut svg { flex: 0 0 auto; }

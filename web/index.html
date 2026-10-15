@@ -11548,10 +11548,10 @@ window.ClipViewMasonry = Masonry;
           const link = document.createElement('link');
           link.id = 'opsChartsCss';
           link.rel = 'stylesheet';
-          link.href = '/assets/mine-charts.css?v=c2';
+          link.href = '/assets/mine-charts.css?v=c3';
           document.head.appendChild(link);
         }
-        const mod = await import('/assets/oplog-panel.mjs?v=o2');
+        const mod = await import('/assets/oplog-panel.mjs?v=o3');
         opsPanel = mod.mountOpsPanel({
           root: document.getElementById('opsView'),
           toolbar: document.getElementById('opsToolbar'),

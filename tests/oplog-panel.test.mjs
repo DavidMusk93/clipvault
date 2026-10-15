@@ -21,9 +21,12 @@ import { join } from 'node:path';
 import { root } from './helpers/src.mjs';
 
 import {
-  BURST_RATIO, DEFAULT_WINDOW, ROW_LIMIT, STALE_MS, WINDOWS, aggregateTail, chartPlan, fmtGap,
-  fmtMs, mountOpsPanel, pct, renderReport, renderRows, sourceKey, sourceLabel, windowSeconds,
+  BURST_RATIO, DEFAULT_WINDOW, REPEAT_HINT_MIN, ROW_LIMIT, STALE_MS, WINDOWS, aggregateTail,
+  chartPlan, fmtGap, fmtMs, mountOpsPanel, pct, renderReport, renderRows, repeatHint, sourceKey,
+  sourceLabel, windowSeconds,
 } from '../web/assets/oplog-panel.mjs';
+
+const chartsCss = readFileSync(join(root, 'web/assets/mine-charts.css'), 'utf8');
 
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const swift = readFileSync(join(root, 'Sources/ClipVault/Store/OpsAnalytics.swift'), 'utf8');
@@ -104,6 +107,20 @@ test('source aliases share the design-taste palette', () => {
   assert.equal(sourceLabel('sync:abc'), '同步');
 });
 
+test('ranking rows share one column geometry, so the bars line up', () => {
+  // Each `.mc-bar-row` is its own grid: `auto` columns would size to that row's
+  // own text and every track would end at a different x. Pin the fixed columns
+  // (and the aligns) here, because jsdom has no layout to measure.
+  const row = chartsCss.slice(chartsCss.indexOf('.mc-bar-row {'));
+  const cols = row.match(/grid-template-columns:\s*([^;]+);/)[1].trim();
+  assert.equal(cols, 'minmax(84px, 34%) minmax(28px, 1fr) 3.4em 5.2em');
+  assert.equal(/grid-template-columns:[^;]*auto/.test(chartsCss), false, 'no per-row auto columns');
+  assert.match(chartsCss, /\.mc-bar-val \{[^}]*justify-self: end;/);
+  assert.match(chartsCss, /\.mc-bar-sub \{[^}]*justify-self: start;/);
+  // A wrapped action name would break the row rhythm: ellipsis instead.
+  assert.match(chartsCss, /\.mc-bar-lab \{[^}]*text-overflow: ellipsis;/);
+});
+
 // --- shape follows the data -------------------------------------------------
 
 test('a short series is refused instead of drawn as a trend', () => {
@@ -143,13 +160,31 @@ test('duration ranking is sorted by p95 and carries n/max', () => {
   const rows = chartPlan(report()).durations.rows;
   assert.deepEqual(rows.map((r) => r.label), ['backup', 'compose_edit']);
   assert.equal(rows[0].value, 5000);
-  assert.match(rows[0].sub, /n=11 · max 5\.20s/);
+  assert.equal(rows[0].sub, 'n=11');
 });
 
-test('global operations do not claim "0 个目标"', () => {
+test('max only rides along when the tail is separated from the p95', () => {
+  const tail = report({
+    actions: [
+      { action: 'backup', n: 11, items: 0, share: 1, firstTs: 1, lastTs: 2, durN: 11, p50: 120, p95: 120, max: 9000, avg: 900 },
+    ],
+  });
+  assert.equal(chartPlan(tail).durations.rows[0].sub, 'n=11 · max 9.00s');
+});
+
+test('the second column is one derived number, not the count twice', () => {
   const out = renderReport(report());
+  // compose_edit: 120 ops over 3 targets = repetition worth stating
+  assert.match(out, /每个目标 40 次/);
+  // backup is global (no targets) and 1:1 types say nothing: no "0 个目标",
+  // no "583 个目标" next to "583", and no bare share column
+  assert.equal(out.includes('个目标'), true); // only the derived hint may mention targets
   assert.equal(out.includes('0 个目标'), false);
-  assert.match(out, /8\.4%/); // the share still rides along with the bar
+  assert.equal(repeatHint(583, 583), '');
+  assert.equal(repeatHint(410, 0), '');
+  assert.equal(repeatHint(161, 101), '');
+  assert.equal(repeatHint(2103, 26), '每个目标 81 次');
+  assert.equal(REPEAT_HINT_MIN, 2);
 });
 
 test('long rankings fold the tail instead of truncating silently', () => {
