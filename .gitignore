@@ -71,3 +71,7 @@ android/.externalNativeBuild/
 *.ap_
 *.aab
 !android/keystore/*.jks
+
+## Scratch / temp outputs (agents, probes, builds)
+# Keep the repo root to maintained files only; see AGENTS.md "commit / push".
+.tmp/
