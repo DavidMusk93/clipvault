@@ -235,9 +235,9 @@ test('the head signature carries the capture clock', () => {
 // with the server", so a wall that quietly stopped applying updates never turned red.
 test('head drift is measured after the merge, so a real failure is visible', () => {
   const mod = loadModule({
-    names: ['headDriftCount'],
+    names: ['headDriftBreakdown', 'headDriftCount'],
     deps: {},
-    exports: '{ headDriftCount }',
+    exports: '{ headDriftBreakdown, headDriftCount }',
   });
   const server = [
     { id: 'A', timestamp: 200, pinnedAt: 5 },
@@ -257,6 +257,142 @@ test('head drift is measured after the merge, so a real failure is visible', () 
   assert.match(fnSource('mergeHead'), /noteHeadDrift\(items, 'head'\)/);
   assert.match(fnSource('noteHeadDrift'), /nm\('wall_head_drift'/);
   assert.match(fnSource('noteHeadDrift'), /over: drift > 0/);
+});
+
+// ---------------------------------------------------------------------------
+// 3. A move the tab never got an `update` for must still land on the resync.
+//    Reproduced live 2026-10-15: freeze the page, re-copy a clip (kind=touch
+//    bumps `timestamp`), come back → `visibilitychange` → `mergeHead` reported
+//    `noop` and the card kept its old position forever (wall_head_drift 2-4).
+// ---------------------------------------------------------------------------
+
+function loadMergeHead(headItems, fullItems = {}) {
+  const calls = { urls: [], merges: [], drift: [], moves: [] };
+  const mod = loadModule({
+    prologue: [
+      'let clips = [];',
+      "let lastHeadSig = '';",
+      "const searchQuery = '';",
+      "const currentView = 'all';",
+      "const currentFilter = 'all';",
+      `const PAGE_SIZE = ${constNumber('PAGE_SIZE')};`,
+      "const API = '';",
+    ].join('\n'),
+    names: [
+      'applyWallQueryParams', 'clipHeadSig', 'headDriftBreakdown', 'headDriftCount',
+      'noteHeadDrift', 'pinFieldsFrom', 'sortClipsForFeed', 'dedupeClipsById',
+      'applyFreshItems', 'fetchClipById', 'mergeHead',
+    ],
+    deps: {
+      nm: (name, payload) => {
+        if (name === 'wall_merge') calls.merges.push(payload);
+        if (name === 'wall_head_drift') calls.drift.push(payload);
+      },
+      liveGet: async (url) => {
+        calls.urls.push(url);
+        const items = /ids=|id=/.test(url)
+          ? Object.values(fullItems)
+          : headItems;
+        return {
+          ok: true,
+          headers: { get: () => null },
+          json: async () => ({ items }),
+        };
+      },
+      itemIsPinned: (i) => !!(i && i.pinnedAt),
+      patchCardLinkState: () => {},
+      rebuildFromData: () => {},
+      replaceCardInPlace: () => {},
+      prependCardsIncremental: () => {},
+      clientFilter: (list) => list,
+      moveTouchedCards: (items) => { calls.moves.push(items.map((i) => i.id)); return items.length; },
+      scheduleDayStats: () => {},
+    },
+    exports: `{
+      mergeHead,
+      setClips(list) { clips = list; },
+      getClips() { return clips; },
+      setSig(s) { lastHeadSig = s; },
+    }`,
+  });
+  return { mod, calls };
+}
+
+const headRow = (id, timestamp, extra = {}) => ({
+  id, timestamp, type: 'text', pinned: false, pinnedAt: null,
+  archived: false, inTrash: false, linkCount: 0, ...extra,
+});
+
+test('mergeHead follows a kind=touch move the SSE update never delivered', async () => {
+  const { mod, calls } = loadMergeHead([headRow('A', 200), headRow('B', 90)]);
+  mod.setClips([
+    { id: 'A', timestamp: 100, type: 'text' },
+    { id: 'B', timestamp: 90, type: 'text' },
+  ]);
+
+  await mod.mergeHead();
+
+  assert.deepEqual(mod.getClips().map((c) => c.id), ['A', 'B'], 'A moved to the top of the capture order');
+  assert.equal(mod.getClips()[0].timestamp, 200, 'the model carries the bumped capture clock');
+  assert.deepEqual(calls.moves, [['A']], 'the card follows, day-scoped, not a full rebuild');
+  assert.deepEqual(calls.urls.filter((u) => /ids=|id=/.test(u)), [],
+    'the head payload already carries the clock — a move needs no extra fetch');
+  const end = calls.merges.find((m) => m.payload && m.payload.kind === 'head' && m.payload.phase === 'end');
+  assert.ok(end, 'the merge reports its end state');
+  assert.equal(end.payload.reason, 'move', 'the metric names the move instead of reporting noop');
+  assert.equal(end.payload.moved, 1);
+  const drift = calls.drift.at(-1).payload;
+  assert.equal(drift.miss, 0, 'the post-merge drift check is honest: the model now agrees');
+  assert.equal(drift.stale_ts, 0);
+});
+
+test('mergeHead still inserts unknown ids and never rewinds the capture clock', async () => {
+  const { mod, calls } = loadMergeHead([
+    headRow('C', 300),
+    headRow('A', 100),
+    headRow('B', 90),
+  ], { C: { id: 'C', timestamp: 300, type: 'text' } });
+  mod.setClips([
+    { id: 'A', timestamp: 100, type: 'text' },
+    { id: 'B', timestamp: 90, type: 'text' },
+  ]);
+
+  await mod.mergeHead();
+
+  assert.deepEqual(mod.getClips().map((c) => c.id), ['C', 'A', 'B'], 'the new row is inserted, A stays put');
+  assert.deepEqual(calls.moves, [], 'only a *newer* clock moves a card');
+  const end = calls.merges.find((m) => m.payload && m.payload.kind === 'head' && m.payload.phase === 'end');
+  assert.equal(end.payload.reason, 'insert');
+  assert.equal(calls.drift.at(-1).payload.miss, 0);
+  assert.equal(calls.drift.at(-1).payload.stale_ts, 0);
+
+  // A server clock *older* than the model is a disagreement we deliberately refuse to
+  // follow — rewriting the capture order backwards is the 拨钟 failure, not a fix.
+  const back = loadMergeHead([headRow('A', 50)]);
+  back.mod.setClips([{ id: 'A', timestamp: 100, type: 'text' }]);
+  await back.mod.mergeHead();
+  assert.equal(back.mod.getClips()[0].timestamp, 100, 'the model keeps the newer capture clock');
+  assert.deepEqual(back.calls.moves, []);
+  const backDrift = back.calls.drift.at(-1).payload;
+  assert.equal(backDrift.stale_ts, 1, 'and the disagreement is still reported, not hidden');
+  assert.equal(backDrift.id0, 'A', 'the metric names the row so the failure can be looked up');
+});
+
+test('the drift metric names what disagrees, not just how many', () => {
+  const mod = loadModule({
+    names: ['headDriftBreakdown', 'headDriftCount', 'noteHeadDrift'],
+    deps: { nm: () => {}, clips: [] },
+    exports: '{ headDriftBreakdown, headDriftCount }',
+  });
+  const b = mod.headDriftBreakdown([
+    { id: 'gone', timestamp: 1 },
+    { id: 'moved', timestamp: 200 },
+    { id: 'pinned', timestamp: 5, pinnedAt: 9 },
+  ], [{ id: 'moved', timestamp: 100 }, { id: 'pinned', timestamp: 5, pinnedAt: 1 }]);
+  assert.deepEqual(b.missing, ['gone']);
+  assert.deepEqual(b.staleTs, ['moved']);
+  assert.deepEqual(b.stalePin, ['pinned']);
+  assert.equal(mod.headDriftCount([], []), 0);
 });
 
 test('a moved card leaves its old day, updates both headers, repacks only those days', { skip: skipJsdom }, async () => {
