@@ -2133,12 +2133,24 @@
 
     @media (max-width: 720px) {
       :root { --chrome-pad-x: 14px; }
-      .top-bar { padding: 10px var(--chrome-pad-x); flex-wrap: wrap; }
+      .top-bar { padding: 10px var(--chrome-pad-x); flex-wrap: wrap; row-gap: 8px; }
       .chips { top: auto; position: relative; }
       main { padding: 6px var(--chrome-pad-x) 88px; }
-      .top-actions .backup-btn:not(#notesOpenBtn):not(#traeSessionsBtn) { display: none; }
-      #notesOpenBtn { display: none; }
-      .notes-fab { display: inline-flex; }
+      /* Mobile chrome keeps every action reachable: a full-width swipeable
+         strip on its own row instead of display:none'ing buttons off-screen. */
+      .top-actions {
+        flex: 1 1 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x proximity;
+      }
+      .top-actions::-webkit-scrollbar { display: none; }
+      .top-actions .backup-btn { scroll-snap-align: start; }
+      .notes-fab { display: none; }
     }
 
     .notes-fab {
