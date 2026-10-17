@@ -262,8 +262,12 @@ class WebServer {
         }
 
         if pathOnly == "/trae" || pathOnly.hasPrefix("/trae/") {
-            if !loopback {
-                sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            // Same gate as the wall: loopback is free, remote must present a
+            // TOTP session cookie / CF Access JWT / origin token. Previously
+            // this 404'd every non-loopback request, so the session panel
+            // (iframe src /trae/) was blank through the public tunnel.
+            if !loopback, !Self.publicRequestAuthorized(headers) {
+                sendUnauthorized(connection: connection, path: pathOnly)
                 return
             }
             handleTraeProxy(
@@ -346,7 +350,7 @@ class WebServer {
     }
     
     private func sendUnauthorized(connection: HTTPByteSink, path: String) {
-        if path.hasPrefix("/api/") {
+        if path.hasPrefix("/api/") || path.hasPrefix("/trae/api/") {
             let body = Data(#"{"error":"unauthorized"}"#.utf8)
             sendBinary(
                 status: 401,
