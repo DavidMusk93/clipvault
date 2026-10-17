@@ -2512,10 +2512,32 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .notes-close:active { transform: scale(0.94); }
+    /* Mobile master/detail only: these two never render on wide screens. */
+    .notes-rail-close, .notes-back { display: none; }
     @media (max-width: 820px) {
       .notes-shell { grid-template-columns: 1fr; padding: 8px; }
       .notes-panel.is-writing .notes-rail { display: none; }
       .notes-panel:not(.is-writing) .notes-paper { display: none; }
+      .notes-rail-close {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 32px; height: 32px; flex: none; padding: 0;
+        border: 0; border-radius: 10px; background: transparent;
+        color: var(--ink); cursor: pointer;
+      }
+      .notes-rail-close .material-symbols-outlined { font-size: 20px; }
+      .notes-rail-close:active { transform: scale(0.94); }
+      .notes-back {
+        position: absolute; top: 14px; left: 16px; z-index: 2;
+        width: 32px; height: 32px; padding: 0; border: 0; border-radius: 980px;
+        background: var(--fill); color: var(--ink); cursor: pointer;
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .notes-back:active { transform: scale(0.94); }
+      /* Title clears the back chevron on the left (close already claims the right). */
+      .notes-paper .notes-title-view,
+      .notes-paper .notes-title { padding-left: 56px; }
+      /* 分栏 (source|preview side-by-side) has no room on a phone. */
+      .notes-modes [data-mode="split"] { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
       .notes-shell, .sessions-shell {
@@ -3071,10 +3093,16 @@
         <button type="button" class="notes-new" id="notesNew" title="新一篇" aria-label="新一篇">
           <span class="notes-new-plus" aria-hidden="true"></span>
         </button>
+        <button type="button" class="notes-rail-close" id="notesRailClose" title="关闭" aria-label="关闭">
+          <span class="material-symbols-outlined">close</span>
+        </button>
       </div>
       <div class="notes-list" id="notesList"></div>
     </aside>
     <section class="notes-paper">
+      <button type="button" class="notes-back" id="notesBack" title="返回列表" aria-label="返回列表">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </button>
       <button type="button" class="notes-close" id="notesClose" title="关闭" aria-label="关闭">
         <span class="material-symbols-outlined">close</span>
       </button>
@@ -4589,6 +4617,7 @@ window.ClipViewMasonry = Masonry;
       };
     }
     function applyNotesMode(mode) {
+      if (mode === 'split' && notesNarrow()) mode = 'source';
       if (!notesState.editor || !mode) return;
       notesState.editor.setMode(mode);
       paintNotesModes();
@@ -5217,6 +5246,7 @@ window.ClipViewMasonry = Masonry;
         try { await loadNotesEditorBundle(); } catch (_) { return; }
       }
       if (typeof ClipNotesEditor === 'undefined') return;
+      if (mode === 'split' && notesNarrow()) mode = 'source';
       const text = decodeNoteBody(markdown);
       notesState.gen += 1;
       const g = notesState.gen;
@@ -5892,6 +5922,13 @@ window.ClipViewMasonry = Masonry;
       else openSessionsPanel();
     }
 
+    /** Narrow screens turn the notes panel into master/detail (list ⇄ note). */
+    function notesNarrow() {
+      try { return window.matchMedia('(max-width: 820px)').matches; } catch (_) { return false; }
+    }
+    function notesToRail() {
+      document.getElementById('notesPanel')?.classList.remove('is-writing');
+    }
     async function openNotesPanel(preferredId) {
       await closeSessionsPanel();
       const panel = document.getElementById('notesPanel');
@@ -5918,15 +5955,19 @@ window.ClipViewMasonry = Masonry;
       try { await loadNotesList(); } catch (e) {
         if (!notesState.loaded) notesState.items = notesState.items || [];
       }
-      const want = preferredId || lastNotesId() || alreadyId;
+      const narrow = notesNarrow();
+      const want = preferredId || (narrow ? '' : (lastNotesId() || alreadyId));
       if (want && !notesState.items.some(n => n.id === want)) {
         const item = await fetchClipById(want).catch(() => null);
         if (item) { notesState.items.unshift(item); paintNotesList(); }
       }
       if (want && notesState.items.some(n => n.id === want)) {
         if (want !== alreadyId) await openNoteInPanel(want);
-        else applyNotesMode('preview');
-      } else if (notesState.items[0]) {
+        else {
+          applyNotesMode('preview');
+          if (narrow) document.getElementById('notesPanel')?.classList.add('is-writing');
+        }
+      } else if (!narrow && notesState.items[0]) {
         if (notesState.items[0].id !== alreadyId) await openNoteInPanel(notesState.items[0].id);
         else applyNotesMode('preview');
       } else if (notesState.loaded && !notesState.items.length) await newNoteInPanel();
@@ -5979,6 +6020,8 @@ window.ClipViewMasonry = Masonry;
     document.getElementById('sessionsClose')?.addEventListener('click', closeSessionsPanel);
     document.getElementById('notesFab')?.addEventListener('click', toggleNotesPanel);
     document.getElementById('notesClose')?.addEventListener('click', closeNotesPanel);
+    document.getElementById('notesRailClose')?.addEventListener('click', closeNotesPanel);
+    document.getElementById('notesBack')?.addEventListener('click', notesToRail);
     document.getElementById('notesShare')?.addEventListener('click', () => {
       if (notesState.id) toggleShareLink(notesState.id);
     });
