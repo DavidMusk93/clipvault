@@ -701,12 +701,45 @@
       align-items: flex-end;
       gap: 8px;
     }
+    /* Phones: master/detail. Rail lists sessions; picking one swaps to the
+       thread; the head's back chevron returns to the list. The embed rule above
+       hard-codes the two-column grid with !important, so this block has to
+       restate html.embed .app to win. */
+    .session-back {
+      display: none;
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 0;
+      border-radius: 980px;
+      background: rgba(120, 120, 128, 0.12);
+      color: var(--ink);
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      line-height: 1;
+    }
+    .session-back:active { transform: scale(0.94); }
     @media (max-width: 800px) {
+      html.embed .app,
       .app {
-        grid-template-columns: 1fr;
-        grid-template-rows: minmax(132px, 30vh) minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) !important;
+        grid-template-rows: minmax(0, 1fr) !important;
       }
-      .rail { border-right: 0; border-bottom: 0.5px solid var(--separator); }
+      .app:not(.is-detail) .stage { display: none; }
+      .app.is-detail .rail { display: none; }
+      .rail { border-right: 0; }
+      .session-back { display: inline-flex; }
+      /* Reserve the top-right corner: the panel's own close button floats over
+         the iframe there. */
+      .rail-search { padding-right: 50px; }
+      .session-head { padding: 8px 48px 8px 12px; gap: 6px; }
+      /* Keep the back chevron beside the meta line instead of on its own row. */
+      .session-head .idline { flex: 1 1 auto; }
+      .thread { padding: 14px 12px 64px; }
+      .bubble { max-width: 86%; }
     }
     @media (prefers-reduced-motion: reduce) {
       .card:active, .copy-id:active, .pin-btn:active, .follow:active { transform: none; }

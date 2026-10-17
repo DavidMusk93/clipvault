@@ -23,7 +23,7 @@ function sessionTitle(s: SessionT): string {
   return id ? `${id.slice(0, 10)}…` : "无会话";
 }
 
-function SessionHead({ s }: { s: SessionT | null }) {
+function SessionHead({ s, onBack }: { s: SessionT | null; onBack: () => void }) {
   const raw = String(s?.source || "")
     .trim()
     .toLowerCase();
@@ -31,6 +31,15 @@ function SessionHead({ s }: { s: SessionT | null }) {
   const host = String(s?.instance_id || "").trim();
   return (
     <div className={`session-head${s ? "" : " is-empty"}`} id="sessionHead">
+      <button
+        type="button"
+        className="session-back"
+        onClick={onBack}
+        aria-label="返回会话列表"
+        title="返回列表"
+      >
+        ←
+      </button>
       <span className="sid" id="sessionSid" title={s?.session_id}>
         {s ? sessionTitle(s) : ""}
       </span>
@@ -100,6 +109,8 @@ function Sessions({
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  // Phones are master/detail: list first, then the thread. Wide screens ignore it.
+  const [detail, setDetail] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refire on every successful refresh.
   useEffect(() => {
@@ -143,7 +154,7 @@ function Sessions({
   };
 
   return (
-    <div className="app">
+    <div className={`app${detail ? " is-detail" : ""}`}>
       <aside className="rail">
         <div className="rail-search">
           <input
@@ -162,7 +173,10 @@ function Sessions({
               key={s.session_id}
               s={s}
               active={s.session_id === selected}
-              onSelect={setSelected}
+              onSelect={(id) => {
+                setSelected(id);
+                setDetail(true);
+              }}
               onPin={pin}
               onCopy={copy}
             />
@@ -171,7 +185,7 @@ function Sessions({
       </aside>
 
       <section className="stage">
-        <SessionHead s={current} />
+        <SessionHead s={current} onBack={() => setDetail(false)} />
         {selected ? (
           <SessionView sessionId={selected} paused={paused} />
         ) : (
