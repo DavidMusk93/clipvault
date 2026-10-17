@@ -738,8 +738,18 @@
       .session-head { padding: 8px 48px 8px 12px; gap: 6px; }
       /* Keep the back chevron beside the meta line instead of on its own row. */
       .session-head .idline { flex: 1 1 auto; }
-      .thread { padding: 14px 12px 64px; }
+      .thread { padding: 14px 12px 104px; }
       .bubble { max-width: 86%; }
+      /* Stack the two secondary actions side by side instead of a tall column
+         over the last message; the extra bottom padding clears them. */
+      .cv-corner-stack {
+        right: 12px;
+        bottom: 58px;
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+      }
+      .cv-mine-float { flex-direction: row; }
     }
     @media (prefers-reduced-motion: reduce) {
       .card:active, .copy-id:active, .pin-btn:active, .follow:active { transform: none; }

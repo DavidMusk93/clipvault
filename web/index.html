@@ -2538,6 +2538,15 @@
       .notes-paper .notes-title { padding-left: 56px; }
       /* 分栏 (source|preview side-by-side) has no room on a phone. */
       .notes-modes [data-mode="split"] { display: none; }
+      /* Keep the editor chrome to one swipeable row instead of wrapping to three. */
+      .notes-chrome { flex-wrap: nowrap; overflow: hidden; padding: 4px 10px; }
+      .notes-modes { flex: none; }
+      .notes-tools {
+        flex: 1 1 auto; flex-wrap: nowrap; overflow-x: auto;
+        scrollbar-width: none; -webkit-overflow-scrolling: touch;
+      }
+      .notes-tools::-webkit-scrollbar { display: none; }
+      .notes-status, .notes-share, .notes-link { flex: none; }
     }
     @media (prefers-reduced-motion: reduce) {
       .notes-shell, .sessions-shell {
@@ -2696,6 +2705,12 @@
     .debug-verdict.is-warn { background: rgba(196, 122, 44, 0.14); color: #C47A2C; }
     .debug-hot .spark { color: var(--muted); vertical-align: middle; }
     .debug-hot .spark.is-slow { color: var(--danger); }
+    @media (max-width: 640px) {
+      /* Eight columns cannot fit a phone; give the label column room and let the
+         drawer scroll sideways instead of squeezing it to one glyph per line. */
+      .debug-hot { min-width: 520px; }
+      .debug-hot td:first-child, .debug-hot th:first-child { min-width: 76px; }
+    }
     .debug-log {
       list-style: none; margin: 0; padding: 0;
       font-family: ui-monospace, "SF Mono", Menlo, monospace;
