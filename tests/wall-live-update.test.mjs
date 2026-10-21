@@ -173,6 +173,7 @@ function loadApply() {
   const rebuilds = [];
   const prepends = [];
   const dayStats = [];
+  const replaced = [];
   const mod = loadModule({
     prologue: [
       'let clips = [];',
@@ -180,10 +181,11 @@ function loadApply() {
       "let lastHeadSig = '';",
       `const PAGE_SIZE = ${constNumber('PAGE_SIZE')};`,
     ].join('\n'),
-    names: ['sortClipsForFeed', 'dedupeClipsById', 'clipHeadSig', 'applyFreshItems'],
+    names: ['sortClipsForFeed', 'dedupeClipsById', 'clipHeadSig', 'touchedRow', 'applyFreshItems'],
     deps: {
       itemIsPinned: (i) => !!(i && i.pinnedAt),
       rebuildFromData: (o) => { rebuilds.push(o || null); },
+      replaceCardInPlace: (row) => { replaced.push(row); },
       prependCardsIncremental: (items) => { prepends.push([...items]); },
       clientFilter: (list) => list,
       moveTouchedCards: (items) => { moves.push([...items]); return items.length; },
@@ -196,7 +198,7 @@ function loadApply() {
       getClips() { return clips; },
     }`,
   });
-  return { mod, moves, rebuilds, prepends, dayStats };
+  return { mod, moves, rebuilds, prepends, dayStats, replaced };
 }
 
 test('a re-copy (newer capture timestamp) moves the row instead of being ignored', () => {
@@ -267,7 +269,7 @@ test('head drift is measured after the merge, so a real failure is visible', () 
 // ---------------------------------------------------------------------------
 
 function loadMergeHead(headItems, fullItems = {}) {
-  const calls = { urls: [], merges: [], drift: [], moves: [], ghosts: [] };
+  const calls = { urls: [], merges: [], drift: [], moves: [], ghosts: [], rebuilds: 0 };
   const mod = loadModule({
     prologue: [
       'let clips = [];',
@@ -282,7 +284,7 @@ function loadMergeHead(headItems, fullItems = {}) {
     names: [
       'applyWallQueryParams', 'clipHeadSig', 'headDriftBreakdown', 'headDriftCount',
       'noteHeadDrift', 'pinFieldsFrom', 'sortClipsForFeed', 'dedupeClipsById',
-      'applyFreshItems', 'fetchClipById', 'ghostCandidateIds', 'reapGhostCards', 'mergeHead',
+      'touchedRow', 'applyFreshItems', 'fetchClipById', 'ghostCandidateIds', 'reapGhostCards', 'mergeHead',
     ],
     deps: {
       nm: (name, payload) => {
@@ -302,7 +304,8 @@ function loadMergeHead(headItems, fullItems = {}) {
       },
       itemIsPinned: (i) => !!(i && i.pinnedAt),
       patchCardLinkState: () => {},
-      rebuildFromData: () => {},
+      notePinPlacement: () => 0,
+      rebuildFromData: () => { calls.rebuilds += 1; },
       replaceCardInPlace: () => {},
       prependCardsIncremental: () => {},
       clientFilter: (list) => list,
@@ -532,7 +535,7 @@ test('a moved card leaves its old day, updates both headers, repacks only those 
         group: () => [{ day: '2026/10/14' }],
       },
       renderDayRail: () => false,
-      wallRestItems: () => [],
+      wallRestItems: () => [{ id: 'A', type: 'text', day: '2026/10/14' }],
       captureWallAnchor: () => null,
       cardCache: new Map([['A', card]]),
       ensureDaySection: (f, day) => {
@@ -577,4 +580,126 @@ test('a moved card leaves its old day, updates both headers, repacks only those 
   assert.equal(oldHost.querySelector('.m3-card'), null, 'the card left its old day');
   assert.deepEqual(refreshed, [['2026/10/01', '2026/10/14']], 'both day headers keep honest counts');
   assert.deepEqual(packed.slice().sort(), ['2026/10/01', '2026/10/14'], 'only the affected days repack');
+});
+
+// ---------------------------------------------------------------------------
+// 5. A pinned card must never leave the pin rail on a capture-clock move.
+//    Reproduced live 2026-10-21: `96B04EE5` pinned 10/20, copied from its card on
+//    10/21 (`capture_bump`, kind=touch) -> `wall_merge reason=move moved=1` ->
+//    `moveTouchedCards` inserted the rail card into today's day section. The rail
+//    showed one pin instead of two; `wall_head_drift` read 0 (the model was right).
+// ---------------------------------------------------------------------------
+
+test('a re-copied pinned row is refreshed in the rail, never moved into a day', () => {
+  const { mod, moves, rebuilds, replaced } = loadApply();
+  mod.setClips([
+    { id: 'P', timestamp: 100, type: 'image', pinned: true, pinnedAt: 50, timeLocal: '2026/10/20 17:07:44' },
+    { id: 'A', timestamp: 90, type: 'text' },
+  ]);
+  const applied = mod.applyFreshItems([{ id: 'P', timestamp: 200, type: 'image', pinned: true, pinnedAt: 50 }]);
+  assert.equal(applied, 1);
+  assert.deepEqual(moves, [], 'a pinned row is not a day move');
+  assert.deepEqual(rebuilds, [], 'and needs no full rebuild');
+  assert.deepEqual(replaced.map((r) => r.id), ['P'], 'the rail card re-renders with the bumped clock');
+  const p = mod.getClips().find((c) => c.id === 'P');
+  assert.equal(p.timestamp, 200);
+  assert.equal(p.timeLocal, undefined, 'a head row drops the stale wall string instead of keeping the old day');
+});
+
+test('a mixed move hands only the unpinned rows to the day move', () => {
+  const { mod, moves } = loadApply();
+  mod.setClips([
+    { id: 'P', timestamp: 100, type: 'image', pinnedAt: 50 },
+    { id: 'A', timestamp: 90, type: 'text', timeLocal: '2026/10/20 10:00:00' },
+  ]);
+  mod.applyFreshItems([
+    { id: 'P', timestamp: 300, type: 'image', pinnedAt: 50 },
+    { id: 'A', timestamp: 200, type: 'text', timeLocal: '2026/10/21 15:00:00' },
+  ]);
+  assert.deepEqual(moves.map((m) => m.map((i) => i.id)), [['A']]);
+  assert.equal(moves[0][0].timeLocal, '2026/10/21 15:00:00', 'a full row carries its new wall string');
+});
+
+test('a pin flip riding a move in one head merge re-places the cards', async () => {
+  const { mod, calls } = loadMergeHead([
+    headRow('A', 200),
+    headRow('B', 90, { pinned: true, pinnedAt: 77 }),
+  ]);
+  mod.setClips([
+    { id: 'A', timestamp: 100, type: 'text' },
+    { id: 'B', timestamp: 90, type: 'text' },
+  ]);
+  await mod.mergeHead();
+  assert.ok(calls.rebuilds >= 1, 'the incremental move path cannot carry B into the rail; rebuild');
+  assert.deepEqual(mod.getClips().map((c) => c.id), ['B', 'A'], 'the new pin sorts to the head');
+});
+
+test('moveTouchedCards leaves a pinned rail card where it is', { skip: skipJsdom }, () => {
+  const dom = new JSDOM(
+    '<div id="gridPinned"></div><div id="grid">'
+    + '<section class="day-group" data-day="2026/10/20"><div class="masonry day-masonry"></div></section>'
+    + '</div>',
+  );
+  const { document } = dom.window;
+  const rail = document.getElementById('gridPinned');
+  const feed = document.getElementById('grid');
+  const card = document.createElement('div');
+  card.className = 'm3-card';
+  card.dataset.id = 'P';
+  rail.appendChild(card);
+  const pinned = { id: 'P', type: 'image', pinnedAt: 5 };
+  const mod = loadModule({
+    prologue: `let colHeights = 1; let clips = [${JSON.stringify(pinned)}];`,
+    names: ['moveTouchedCards'],
+    deps: {
+      clientFilter: (list) => list,
+      rebuildFromData: () => { throw new Error('no rebuild for a rail-only move'); },
+      wallFeedEl: () => feed,
+      wallRestItems: () => [],
+      DayGroups: { keyForItem: () => '2026/10/21', group: () => [] },
+      renderDayRail: () => false,
+      captureWallAnchor: () => null,
+      cardCache: new Map([['P', card]]),
+      ensureDaySection: () => { throw new Error('a pinned card must not open a day section'); },
+      dayHostOf: () => null,
+      daySectionEl: () => null,
+      refreshDayHeadsFor: () => {},
+      layoutMasonry: () => {},
+      restoreWallAnchor: () => {},
+      observeDaySections: () => {},
+      window: { scrollY: 0 },
+      document,
+    },
+    exports: '{ moveTouchedCards }',
+  });
+  assert.equal(mod.moveTouchedCards([{ ...pinned, timestamp: 999 }]), 0);
+  assert.equal(card.parentNode, rail, 'the card stays in the pin rail');
+});
+
+test('pin placement is measured on the DOM, both directions', { skip: skipJsdom }, () => {
+  const dom = new JSDOM('<div id="gridPinned"></div><div id="grid"></div>');
+  const { document } = dom.window;
+  const rail = document.getElementById('gridPinned');
+  const feed = document.getElementById('grid');
+  const mk = (id, host) => { const el = document.createElement('div'); el.dataset.id = id; host.appendChild(el); return el; };
+  const cache = new Map([
+    ['ok-pin', mk('ok-pin', rail)],
+    ['lost-pin', mk('lost-pin', feed)],
+    ['ok-rest', mk('ok-rest', feed)],
+    ['stray', mk('stray', rail)],
+  ]);
+  const mod = loadModule({
+    names: ['pinPlacementBreakdown'],
+    deps: { itemIsPinned: (i) => !!(i && i.pinnedAt) },
+    exports: '{ pinPlacementBreakdown }',
+  });
+  const b = mod.pinPlacementBreakdown([
+    { id: 'ok-pin', pinnedAt: 1 }, { id: 'lost-pin', pinnedAt: 2 },
+    { id: 'ok-rest' }, { id: 'stray' }, { id: 'unpainted', pinnedAt: 3 },
+  ], rail, cache);
+  assert.deepEqual(b.rail, ['lost-pin'], 'a pinned card painted into the feed');
+  assert.deepEqual(b.feed, ['stray'], 'an unpinned card left in the rail');
+  assert.match(fnSource('notePinPlacement'), /nm\('wall_pin_misplaced'/);
+  assert.match(fnSource('mergeHead'), /notePinPlacement\('head'\)/);
+  assert.match(html, /wall_pin_misplaced: \{ label: '[^']+', unit: 'count', budget: 0 \}/);
 });

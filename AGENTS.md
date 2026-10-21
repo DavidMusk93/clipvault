@@ -219,6 +219,9 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | **header 数字来自 store**：`GET /api/clips/days` 按捕获日返回全量聚合（total / byType / 288 个五分钟格 / 精确 first-last-night-gap），与 `/api/clips` 同过滤；懒加载只决定画多少张卡，不决定头写什么数 | 用已渲染卡片统计当日条数/类型/节奏（一页 30 张会把 4103 条的日子写成「共 30 条」）；为统计去整日加载卡片 |
 | 按**捕获日**分片：每天一块 `.masonry.day-masonry` 独立装箱；`relayoutDays` 增量只重排当天；header 出当日条数 + 类型统计 + 288 格五分钟节奏条（活跃跨度 / 峰值半小时 / 夜间占比 / 最长空档）；`#dayRail` 跳日 | 整墙当一个 canvas 每次全量测高；按同步到达时间分组或统计；节奏条另起一套色；跳日走 `fetchPage({reset:true})`（滚到顶） |
 | 无人看（隐藏，或 `WALL_IDLE_MS` 无 pointer/key/wheel/touch 输入）→ `parkWall` 停画停解码，SSE 与模型照留；回输入 `wakeWall` 一次补画 | 无人看仍跟每个事件重排/解码；把无头页当常驻客户端（`visibilityState`/`hasFocus()` 对无头一直说谎，判据是**真输入**） |
+| 置顶卡被再次复制（kind=touch 拨捕获钟）→ 只 `replaceCardInPlace` 刷新卡面，仍留在 `#gridPinned`；钉栏序是 `pinnedAt` 不是捕获钟 | 把 pinned 行交给 `moveTouchedCards` / 插进当天 `.day-masonry`（钉栏少一张，且没有任何指标会红） |
+| 每次 merge 后核对钉卡归属（`pinPlacementBreakdown` → `wall_pin_misplaced`，budget 0） | 模型对、DOM 错却只看 `wall_head_drift`（它对这种错位读 0） |
+| 无预算的 name 等于没有指标：新 name 先进 `METRIC_SPEC` 并写 budget（上下文类显式 `null` 才允许） | 未声明 name 由 `metricMeta` 静默 fallback |
 | 745KB 笔记编辑器首屏不加载；打开笔记才拉 `notes-editor.js` | 把编辑器 bundle 塞进 `<head>` 挡墙首屏 |
 
 | 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
@@ -467,6 +470,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 墙加载/补体 | `wall_load`（首屏 span）；`wall_hydrate`（?ids= 批量补体 n/bytes） |
 | SSE 生命周期 | `sse_state` phase=open/error/reconnect/role/watch/**close**(reason=client_gone|overflow|send_failed) + reason；`sse_wall` 只留逐条吞吐 |
 | SSE socket 抖动 | `sse_socket_churn`（5min 内开数，budget 3）+ 前端 `sse_churn`（<60s 内再次换主=over）；`wall_head_drift`（合入后仍与服务端头部不一致=over，budget 0） |
+| 墙一头漂移 | `wall_head_drift`（模型 vs 服务端）；`wall_pin_misplaced`（置顶卡落在错的一侧） |
 | 捕获静默丢弃 | `capture_gap`（归档窗口内被吸收的贴板变更数，budget 0） |
 | 笔记输入卡 | `notes_longtask` `notes_inp` `notes_preview_ms` |
 | 笔记 Markdown | `notes_md_compile` vs `notes_preview_ms`；payload `compiled`/`reused`/`n`/`ratio` |
@@ -560,7 +564,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 ./scripts/check-frontend.sh
 ```
 
-门禁是 `scripts/check-frontend.sh`：`node --test tests/*.test.mjs`，文件名**硬编码**在脚本 gates 注释里。新测试必须追加进该注释。墙记忆丢失：`tests/wall-integrity.test.mjs` + `tests/wall_clock_main.swift` + `tests/wall-clock.test.mjs`。**内联脚本必须在 jsdom 里能启动到底**：`tests/wall-boot.test.mjs`（顶层 TDZ 会把整段脚本打死但所有源码扫描仍绿）。`node --check` 不过禁止上线。
+门禁是 `scripts/check-frontend.sh`：`node --test tests/*.test.mjs`，文件名**硬编码**在脚本 gates 注释里。新测试必须追加进该注释。墙记忆丢失：`tests/wall-integrity.test.mjs` + `tests/wall_clock_main.swift` + `tests/wall-clock.test.mjs`。**内联脚本必须在 jsdom 里能启动到底**：`tests/wall-boot.test.mjs`（顶层 TDZ 会把整段脚本打死但所有源码扫描仍绿）。`node --check` 不过禁止上线。jsdom 门禁的两条卫生规则：fixture 日期必须用**当前**捕获日算（写死 `2026-10-15` 的「现在」线断言会在日历走过去后永久失败），且每个用例 `t.after(() => dom.window.close())` —— 断言先抛就跳过 close，开着的事件循环会让 `node --test` 看起来卡死好几分钟而不是几秒内失败。
 
 ### commit / push
 
