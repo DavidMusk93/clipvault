@@ -6478,7 +6478,20 @@ window.ClipViewMasonry = Masonry;
      * too — otherwise the wall quietly disagrees with the DB and the clip looks lost.
      * Returns how many rows the model acted on.
      */
-    function applyFreshItems(newItems) {
+    /**
+     * A moved (kind=touch) row takes the server's fields. A `fields=head` row carries no
+     * `timeLocal`: keeping the old wall string would show the stale capture time on the
+     * card and regroup the row into its **old** day on the next rebuild, so it is dropped
+     * and the day/time fall back to the bumped `timestamp`.
+     */
+    function touchedRow(cur, it) {
+      const next = { ...cur, ...it, timestamp: Number(it.timestamp) || cur.timestamp };
+      if (!it.timeLocal) delete next.timeLocal;
+      return next;
+    }
+
+    function applyFreshItems(newItems, opts) {
+      const relayout = !!(opts && opts.relayout);
       const incoming = (newItems || []).filter((i) => i && i.id && i.type !== 'note' && !i.isCompose && !i.inTrash);
       if (!incoming.length) return 0;
       const known = new Map(clips.map((c) => [c.id, c]));
@@ -6492,12 +6505,15 @@ window.ClipViewMasonry = Masonry;
       if (!fresh.length && !moved.length) return 0;
       if (fresh.length) clips = sortClipsForFeed(dedupeClipsById([...fresh, ...clips]));
       let applied = fresh.length;
+      let movedRows = [];
       if (moved.length) {
         const byId = new Map(moved.map((i) => [i.id, i]));
         clips = clips.map((c) => {
           const it = byId.get(c.id);
           if (!it) return c;
-          return { ...c, timestamp: Number(it.timestamp) || c.timestamp };
+          const next = touchedRow(c, it);
+          movedRows.push(next);
+          return next;
         });
         clips = sortClipsForFeed(clips);
         applied += moved.length;
@@ -6505,14 +6521,21 @@ window.ClipViewMasonry = Masonry;
       lastHeadSig = clipHeadSig(clips);
       const pinnedNew = fresh.filter((it) => itemIsPinned(it));
       const restNew = fresh.filter((it) => !itemIsPinned(it));
-      if (pinnedNew.length || restNew.length > 2) {
+      if (relayout || pinnedNew.length || restNew.length > 2) {
         colHeights = null;
         rebuildFromData({ preserveScroll: true });
         scheduleDayStats('live');
         return applied;
       }
       if (restNew.length) prependCardsIncremental(restNew);
-      if (moved.length) moveTouchedCards(moved);
+      if (movedRows.length) {
+        // Re-render the moved cards so time / copy count match the bumped capture.
+        // A pinned row stays in the pin rail — rail order is `pinnedAt`, not the
+        // capture clock — so it is refreshed in place and never handed to the day move.
+        movedRows.forEach((row) => replaceCardInPlace(row));
+        const dayMoves = movedRows.filter((row) => !itemIsPinned(row));
+        if (dayMoves.length) moveTouchedCards(dayMoves);
+      }
       scheduleDayStats('live');
       return applied;
     }
@@ -6524,14 +6547,21 @@ window.ClipViewMasonry = Masonry;
      * model changed under a filtered view, so the whole slice must be re-derived.
      */
     function moveTouchedCards(movedItems) {
-      const items = (movedItems || []).filter((it) => it && it.id);
-      if (!items.length) return 0;
+      const all = (movedItems || []).filter((it) => it && it.id);
+      if (!all.length) return 0;
       const viewIds = new Set(clientFilter(clips).map((i) => i.id));
-      if (items.some((it) => !viewIds.has(it.id))) {
+      if (all.some((it) => !viewIds.has(it.id))) {
         colHeights = null;
         rebuildFromData({ preserveScroll: true });
-        return items.length;
+        return all.length;
       }
+      // Only day-feed rows move between days. A pinned card lives in #gridPinned;
+      // inserting it into a day section silently empties the pin rail
+      // (2026-10-21: copying a pinned image bumped its clock and the rail lost it).
+      const rest = wallRestItems();
+      const restIds = new Set(rest.map((i) => i.id));
+      const items = all.filter((it) => restIds.has(it.id));
+      if (!items.length) return 0;
       const feed = wallFeedEl();
       if (!feed) {
         colHeights = null;
@@ -6539,7 +6569,7 @@ window.ClipViewMasonry = Masonry;
         return items.length;
       }
       const y0 = window.scrollY || document.documentElement.scrollTop || 0;
-      if (renderDayRail(DayGroups.group(wallRestItems()))) {
+      if (renderDayRail(DayGroups.group(rest))) {
         colHeights = null;
         rebuildFromData({ preserveScroll: true });
         return items.length;
@@ -6560,7 +6590,7 @@ window.ClipViewMasonry = Masonry;
         n += 1;
       }
       // A moved row can be the first row of a day that did not exist yet.
-      for (const g of DayGroups.group(wallRestItems())) feed.appendChild(ensureDaySection(feed, g.day));
+      for (const g of DayGroups.group(rest)) feed.appendChild(ensureDaySection(feed, g.day));
       refreshDayHeadsFor(days);
       for (const day of days) {
         const host = dayHostOf(daySectionEl(feed, day));
@@ -6618,6 +6648,48 @@ window.ClipViewMasonry = Masonry;
         },
       });
       return drift;
+    }
+
+    /**
+     * DOM-side twin of head drift. `wall_head_drift` compares the **model** with the
+     * server; a pinned card painted into a day section (or an unpinned one left in the
+     * rail) has a correct model and reads 0 there. Count cards on the wrong side of
+     * #gridPinned; any hit is a placement bug, so it is reported and healed in one
+     * rebuild. Budget 0.
+     */
+    function pinPlacementBreakdown(model, pinHost, cache) {
+      const out = { rail: [], feed: [] };
+      if (!pinHost || !cache) return out;
+      for (const c of model || []) {
+        const card = cache.get(c.id);
+        if (!card || !card.isConnected) continue;
+        const inRail = pinHost.contains(card);
+        const pinned = itemIsPinned(c);
+        if (pinned && !inRail) out.rail.push(c.id);
+        else if (!pinned && inRail) out.feed.push(c.id);
+      }
+      return out;
+    }
+
+    function notePinPlacement(source) {
+      if (wallParked || currentView === 'trash') return 0;
+      const b = pinPlacementBreakdown(clientFilter(clips), document.getElementById('gridPinned'), cardCache);
+      const n = b.rail.length + b.feed.length;
+      if (!n) return 0;
+      nm('wall_pin_misplaced', {
+        value: n,
+        ok: false,
+        over: true,
+        payload: {
+          kind: String(source || 'head'),
+          n,
+          reason: b.rail.length ? 'pinned_in_feed' : 'unpinned_in_rail',
+          id0: String(b.rail[0] || b.feed[0] || '').slice(0, 8),
+        },
+      });
+      colHeights = null;
+      rebuildFromData({ preserveScroll: true });
+      return n;
     }
 
     /** Existence checks per merge are bounded; a healthy wall produces no candidates. */
@@ -6777,6 +6849,7 @@ window.ClipViewMasonry = Masonry;
             flagDirty.forEach((c) => replaceCardInPlace(c));
           }
           noteHeadDrift(items, 'head');
+          notePinPlacement('head');
           nm('wall_merge', {
             dur_ms: performance.now() - t0,
             ok: true,
@@ -6805,8 +6878,16 @@ window.ClipViewMasonry = Masonry;
           }
         }
         // One pass, one repaint: the moved rows (head payload) and the fresh bodies.
-        const n = applyFreshItems([...moved, ...got]);
+        // A pin flip riding the same merge must re-place cards (rail <-> day): the
+        // incremental prepend/move paths never relocate an existing card's section.
+        if (pinChanged) clips = sortClipsForFeed(dedupeClipsById(clips));
+        const n = applyFreshItems([...moved, ...got], { relayout: pinChanged });
+        if (pinChanged && !n) {
+          colHeights = null;
+          rebuildFromData({ preserveScroll: true });
+        }
         noteHeadDrift(items, 'head');
+        notePinPlacement('head');
         nm('wall_merge', {
           dur_ms: performance.now() - t0,
           ok: true,
@@ -6851,6 +6932,7 @@ window.ClipViewMasonry = Masonry;
         try { one = await fetchClipById(sid); } catch (_) {}
         if (one && Number(one.timestamp) > Number(known.timestamp || 0)) {
           const n = applyFreshItems([one]);
+          notePinPlacement('one');
           nm('wall_merge', { dur_ms: performance.now() - t0, ok: true, payload: { kind: 'one', phase: 'end', n, reason: 'moved' } });
           return;
         }
@@ -11821,6 +11903,7 @@ window.ClipViewMasonry = Masonry;
       chrome_shift: { label: '顶栏位移', unit: 'cls', budget: 0.1 },
       wall_layout_drift: { label: '布局漂移', unit: 'px', budget: 0 },
       wall_head_drift: { label: '墙·头部漂移', unit: 'count', budget: 0 },
+      wall_pin_misplaced: { label: '墙·置顶错位', unit: 'count', budget: 0 },
       sse_churn: { label: 'SSE·换主(瞬时)', unit: 'count', budget: 0 },
       sse_socket_churn: { label: 'SSE·socket 抖动(5min)', unit: 'count', budget: 3 },
       capture_gap: { label: '捕获·静默窗口丢弃', unit: 'count', budget: 0 },

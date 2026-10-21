@@ -355,8 +355,14 @@ test('a re-copy moves its card on the capture clock', () => {
   const apply = htmlFn('applyFreshItems');
   assert.match(apply, /Number\(it\.timestamp\) > Number\(cur\.timestamp \|\| 0\)/);
   assert.match(apply, /sortClipsForFeed\(clips\)/);
-  assert.match(apply, /moveTouchedCards\(moved\)/);
+  assert.match(apply, /moveTouchedCards\(dayMoves\)/);
+  // A pinned row keeps its rail slot: rail order is `pinnedAt`, not the capture clock.
+  const dayMoves = /const dayMoves = movedRows\.filter\(\(row\) => !itemIsPinned\(row\)\)/.exec(apply);
+  assert.ok(dayMoves, 'only unpinned rows may leave their day');
+  assert.match(apply, /movedRows\.forEach\(\(row\) => replaceCardInPlace\(row\)\)/);
   const move = htmlFn('moveTouchedCards');
+  assert.match(move, /const restIds = new Set\(rest\.map\(\(i\) => i\.id\)\)/,
+    'a pinned card must never be inserted into a day section (pin rail would empty)');
   assert.match(move, /refreshDayHeadsFor\(days\)/, 'day heads must keep honest counts after a move');
   assert.match(move, /observeDaySections\(\)/);
   const one = htmlFn('ingestClipByIdNow');
