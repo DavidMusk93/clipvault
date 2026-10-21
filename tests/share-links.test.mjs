@@ -27,7 +27,14 @@ test('share table and token helpers exist', () => {
 });
 
 test('public share routes are served before TOTP gate', () => {
-  const gate = swift.indexOf('if !loopback, !Self.publicRequestAuthorized');
+  // `publicRequestAuthorized` is used by more than one gate now (`/trae` has its own,
+  // and it sits earlier in the file), so anchor on the **global** gate — the last one —
+  // instead of whichever `indexOf` finds first. That ordering is the contract: a share
+  // token is the authorization, so /s/ and its assets must answer before the global
+  // unauthorized return.
+  const gates = [...swift.matchAll(/if !loopback, !Self\.publicRequestAuthorized/g)].map((m) => m.index);
+  assert.ok(gates.length >= 1, 'the global gate must exist');
+  const gate = gates.at(-1);
   const sharePage = swift.indexOf('pathOnly.hasPrefix("/s/")');
   const shareAsset = swift.indexOf('pathOnly == "/api/share/asset"');
   assert.ok(gate > 0 && sharePage > 0 && shareAsset > 0);
