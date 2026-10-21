@@ -29,11 +29,23 @@ try {
   skipJsdom = 'jsdom not installed — run `npm ci`';
 }
 
+/**
+ * The fixture day must be **today in the wall display zone**. The 现在 line and the
+ * day-head aggregate only render on the current capture day, so a pinned date
+ * (`2026-10-15`) made this gate pass until the calendar moved past it and then fail
+ * forever — a time bomb, not a probe.
+ */
+const TZ = 'Asia/Shanghai';
+const TODAY_KEY = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date());
+const TODAY_WALL = TODAY_KEY.replace(/-/g, '/');
+
 /** A page of cards that the stubbed fetch serves, plus a day-aggregate payload. */
 const CLIPS = {
   items: [
-    { id: '11111111-1111-4111-8111-111111111111', timestamp: Date.now() / 1000 - 60, type: 'text', text: 'hello', timeLocal: '2026/10/15 11:20:00' },
-    { id: '22222222-2222-4222-8222-222222222222', timestamp: Date.now() / 1000 - 120, type: 'image', timeLocal: '2026/10/15 11:10:00' },
+    { id: '11111111-1111-4111-8111-111111111111', timestamp: Date.now() / 1000 - 60, type: 'text', text: 'hello', timeLocal: `${TODAY_WALL} 11:20:00` },
+    { id: '22222222-2222-4222-8222-222222222222', timestamp: Date.now() / 1000 - 120, type: 'image', timeLocal: `${TODAY_WALL} 11:10:00` },
   ],
   nextCursor: null,
   count: 2,
@@ -44,7 +56,7 @@ const DAYS = {
   bins: 288,
   count: 1,
   days: [{
-    day: '2026-10-15', total: 2, timed: 2, night: 0, firstMin: 670, lastMin: 685,
+    day: TODAY_KEY, total: 2, timed: 2, night: 0, firstMin: 670, lastMin: 685,
     maxGapMin: 5, gapFromMin: 670, gapToMin: 675, byType: { text: 1, image: 1 },
     bins: Array.from({ length: 288 }, (_, i) => (i === 134 || i === 137 ? 1 : 0)),
   }],
@@ -63,7 +75,7 @@ function boot() {
       // Server-injected wall clock (sendHTMLResponse) — same shape the live page gets.
       window.TextDecoder = TextDecoder;
       window.TextEncoder = TextEncoder;
-      window.__CLIP_TZ = 'Asia/Shanghai';
+      window.__CLIP_TZ = TZ;
       window.__CLIP_TZ_OFFSET_MIN = 480;
       window.fetch = async (url) => {
         const u = String(url);
@@ -92,8 +104,9 @@ test('wall-boot gate is registered in check-frontend.sh', () => {
   assert.match(check, /wall-boot\.test\.mjs/);
 });
 
-test('the inline app script evaluates to the end (no TDZ / early throw)', { skip: skipJsdom }, async () => {
+test('the inline app script evaluates to the end (no TDZ / early throw)', { skip: skipJsdom }, async (t) => {
   const { dom, errors } = boot();
+  t.after(() => dom.window.close());
   await settle(dom);
   // A late-bound global proves evaluation ran past every earlier top-level block:
   // the boot call is the last statement of the inline script.
@@ -103,11 +116,11 @@ test('the inline app script evaluates to the end (no TDZ / early throw)', { skip
   assert.equal(typeof w.wallNowMinute, 'function');
   // The marker tick must actually be armed (the TDZ bug killed it silently).
   assert.equal(typeof w.nowMarkerTick, 'function');
-  dom.window.close();
 });
 
-test('the wall paints its first page from the stubbed API', { skip: skipJsdom }, async () => {
+test('the wall paints its first page from the stubbed API', { skip: skipJsdom }, async (t) => {
   const { dom, errors } = boot();
+  t.after(() => dom.window.close());
   await settle(dom, 400);
   const w = dom.window;
   const feed = w.document.getElementById('grid');
@@ -120,11 +133,11 @@ test('the wall paints its first page from the stubbed API', { skip: skipJsdom },
   assert.match(head.textContent, /共 2 条/, 'the head must print the store aggregate');
   assert.equal(head.querySelectorAll('.rhythm-bar').length, 288);
   assert.equal(w.document.querySelectorAll('.rhythm-nightzone').length, 2, 'night band is part of the strip');
-  dom.window.close();
 });
 
-test('the 现在 line is armed and moves on the compositor', { skip: skipJsdom }, async () => {
+test('the 现在 line is armed and moves on the compositor', { skip: skipJsdom }, async (t) => {
   const { dom } = boot();
+  t.after(() => dom.window.close());
   await settle(dom, 400);
   const w = dom.window;
   const marker = w.document.querySelector('.rhythm-now');
@@ -137,5 +150,4 @@ test('the 现在 line is armed and moves on the compositor', { skip: skipJsdom }
   assert.match(marker.style.transform, /^translateX\(\d+(\.\d+)?px\)$/);
   assert.match(marker.title, /^现在 20:00$/);
   assert.equal(marker.parentElement.querySelectorAll('.rhythm-now').length, 1, 'no duplicate markers');
-  dom.window.close();
 });
