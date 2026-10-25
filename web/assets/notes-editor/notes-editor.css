@@ -39,6 +39,7 @@
 }
 
 .notes-source {
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -386,4 +387,136 @@
   text-decoration: underline;
   text-decoration-color: #0071e3;
   text-decoration-thickness: 1.5px;
+}
+
+/* Find & replace bar — VS Code semantics on the Apple Notes surface.
+   Solid #F6F6F8 like .notes-chrome; 26px controls; hairline rows. */
+.notes-findbar {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 8;
+  width: min(364px, calc(100% - 20px));
+  padding: 6px;
+  border-radius: 12px;
+  background: #f6f6f8;
+  box-shadow:
+    0 0 0 0.5px rgba(60, 60, 67, 0.18),
+    0 10px 28px rgba(0, 0, 0, 0.14),
+    0 2px 6px rgba(0, 0, 0, 0.06);
+  animation: notes-findbar-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.notes-findbar[hidden] { display: none; }
+.notes-findbar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+}
+.notes-findbar-row + .notes-findbar-row {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 0.5px solid rgba(60, 60, 67, 0.12);
+}
+.notes-findbar-row[hidden] { display: none; }
+.notes-findbar-glyph {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  font-size: 15px;
+  color: rgba(60, 60, 67, 0.45);
+  user-select: none;
+}
+.notes-findbar-input {
+  flex: 1 1 60px;
+  min-width: 42px;
+  height: 26px;
+  padding: 0 7px;
+  border: 0.5px solid rgba(60, 60, 67, 0.16);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: 500 12.5px/24px var(--font-ui);
+  letter-spacing: -0.01em;
+  outline: none;
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.02);
+}
+.notes-findbar-input::placeholder { color: rgba(60, 60, 67, 0.34); }
+.notes-findbar-input:focus {
+  border-color: rgba(0, 113, 227, 0.72);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
+}
+.notes-findbar-count {
+  flex: none;
+  min-width: 40px;
+  text-align: right;
+  font: 600 11px/1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+}
+.notes-findbar-count.is-empty { color: #c47a2c; }
+.notes-findbar-opt,
+.notes-findbar-btn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 650 11.5px/1 var(--font-ui);
+  letter-spacing: -0.02em;
+}
+.notes-findbar-opt.is-on {
+  background: rgba(0, 113, 227, 0.12);
+  color: #0071e3;
+}
+.notes-findbar-opt-word { width: 26px; }
+.notes-findbar-btn:hover {
+  background: rgba(60, 60, 67, 0.08);
+  color: var(--ink);
+}
+.notes-findbar-btn:active { transform: scale(0.94); }
+.notes-findbar-btn .material-symbols-outlined { font-size: 16px; }
+.notes-findbar-opt:focus-visible,
+.notes-findbar-btn:focus-visible,
+.notes-findbar-action:focus-visible {
+  outline: 2px solid rgba(0, 113, 227, 0.5);
+  outline-offset: 1px;
+}
+.notes-findbar-expand .material-symbols-outlined {
+  transition: transform 0.16s var(--spring);
+}
+.notes-findbar-expand.is-on .material-symbols-outlined { transform: rotate(90deg); }
+.notes-findbar-close { margin-left: 1px; }
+.notes-findbar-action {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 0 0 0.5px rgba(60, 60, 67, 0.16);
+  color: var(--ink);
+  font: 600 11.5px/26px var(--font-ui);
+  letter-spacing: -0.01em;
+  cursor: pointer;
+}
+.notes-findbar-action:hover { color: #0071e3; }
+.notes-findbar-action:active { transform: scale(0.97); }
+
+@keyframes notes-findbar-in {
+  from { opacity: 0; transform: translateY(-3px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notes-findbar { animation: none; }
+  .notes-findbar-expand .material-symbols-outlined { transition: none; }
 }

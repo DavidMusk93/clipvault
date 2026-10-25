@@ -10,29 +10,17 @@ import { compileMarkdownBlocks, mapSourceToPreviewScroll, mapPreviewToSourceLine
 import { mountNotesPreview } from '../../notes-preview.mjs'
 import { extractCalcExpr, formatCheckpoint, hrStampBlock, inFence, isHrLine, isStampLine, tryEval } from '../../notes-calc.mjs'
 import { wrapAtomicTokens, guardRanges } from '../notes-wrap.mjs'
+import { findRanges } from '../../notes-find.mjs'
 
 const MODE_KEY = 'clipvault.notes.mode'
 const SPLIT_KEY = 'clipvault.notes.split'
 const WRAP_KEY = 'clipvault.notes.codeWrap'
+const FIND_CASE_KEY = 'clipvault.notes.find.case'
+const FIND_WORD_KEY = 'clipvault.notes.find.word'
 const MODES = ['source', 'split', 'preview']
 
-function escapeRegExp(s) {
-  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/** All [from,to) token ranges in a plain string. Same tokens as the sidebar. */
-function findRanges(text, tokens) {
-  const out = []
-  const list = (tokens || []).filter(Boolean)
-  const s = String(text || '')
-  if (!s || !list.length) return out
-  const re = new RegExp('(' + list.map(escapeRegExp).join('|') + ')', 'gi')
-  let m
-  while ((m = re.exec(s)) !== null) {
-    if (m[0].length === 0) { re.lastIndex += 1; continue }
-    out.push({ from: m.index, to: m.index + m[0].length })
-  }
-  return out
+function emptyFindSpec() {
+  return { tokens: [], query: '', caseSensitive: false, wholeWord: false }
 }
 
 const setFindQuery = StateEffect.define()
@@ -40,21 +28,22 @@ const clearFindQuery = StateEffect.define()
 
 /** Source-pane find: decorate every hit; the active one gets an accent underline. */
 const findField = StateField.define({
-  create() { return { tokens: [], active: 0, ranges: [] } },
+  create() { return { spec: emptyFindSpec(), active: 0, ranges: [] } },
   update(value, tr) {
     for (const e of tr.effects) {
-      if (e.is(clearFindQuery)) return { tokens: [], active: 0, ranges: [] }
+      if (e.is(clearFindQuery)) return { spec: emptyFindSpec(), active: 0, ranges: [] }
       if (e.is(setFindQuery)) {
-        const ranges = findRanges(tr.state.doc.toString(), e.value.tokens)
+        const spec = e.value.spec || emptyFindSpec()
+        const ranges = findRanges(tr.state.doc.toString(), spec)
         const active = ranges.length ? Math.min(Math.max(0, e.value.active || 0), ranges.length - 1) : 0
-        return { tokens: e.value.tokens, active, ranges }
+        return { spec, active, ranges }
       }
     }
-    if (!value.tokens.length) return value
+    if (!value.spec.tokens.length && !value.spec.query) return value
     if (tr.docChanged) {
-      const ranges = findRanges(tr.state.doc.toString(), value.tokens)
+      const ranges = findRanges(tr.state.doc.toString(), value.spec)
       const active = ranges.length ? Math.min(value.active, ranges.length - 1) : 0
-      return { tokens: value.tokens, active, ranges }
+      return { spec: value.spec, active, ranges }
     }
     return value
   },
@@ -98,6 +87,10 @@ const atomicWrapField = ViewPlugin.fromClass(class {
 
 function loadCodeWrap() {
   try { return localStorage.getItem(WRAP_KEY) === '1' } catch (_) { return false }
+}
+
+function loadFindOption(key) {
+  try { return localStorage.getItem(key) === '1' } catch (_) { return false }
 }
 
 function copyNotesCode(text, btn) {
@@ -586,9 +579,14 @@ async function mount(root, opts) {
   let syncing = false
   let paintingPreview = false
   let firstPaintDone = false
-  let findTokens = []
+  let findSpec = emptyFindSpec()
+  let findBarVisible = false
+  let findBarHeight = 0
+  let findOrigin = ''
   let findActive = 0
   let findChangeCb = null
+  let findCase = loadFindOption(FIND_CASE_KEY)
+  let findWord = loadFindOption(FIND_WORD_KEY)
   let previewRanges = []
   let previewPainted = false
   let findWantScroll = false
@@ -717,7 +715,7 @@ async function mount(root, opts) {
       else previewEl.scrollTop = keepTop
       paintingPreview = false
       previewPainted = true
-      if (findTokens.length && mode === 'preview') applyPreviewFindNow()
+      if ((findSpec.query || findSpec.tokens.length) && mode === 'preview') applyPreviewFindNow()
     }
     let compiled = 0
     let reused = 0
@@ -808,6 +806,9 @@ async function mount(root, opts) {
       markdown(),
       syntaxHighlighting(appleLight, { fallback: true }),
       EditorView.lineWrapping,
+      // Reserve the floating find bar's height so a hit on the first line is
+      // never hidden underneath it (CodeMirror uses this for scrollIntoView).
+      EditorView.scrollMargins.of(() => (findBarVisible ? { top: findBarHeight + 18 } : null)),
       notesTheme,
       pasteDrop,
       calcField,
@@ -834,8 +835,10 @@ async function mount(root, opts) {
         lastMd = md
         schedulePreview(md)
         if (!applying && onUpdate) onUpdate(md)
-        if (findTokens.length && findChangeCb) {
-          findChangeCb({ total: update.state.field(findField).ranges.length, index: findActive })
+        if (findSpec.query || findSpec.tokens.length) {
+          const found = update.state.field(findField).ranges
+          findActive = found.length ? Math.min(findActive, found.length - 1) : 0
+          notifyFind(found.length, findActive)
         }
       }),
     ],
@@ -849,11 +852,287 @@ async function mount(root, opts) {
     unlockTimer = setTimeout(() => { syncing = false }, 80)
   }
 
-  function computePreviewRanges(tokens) {
+  /* Find & replace — one floating bar in the source pane. VS Code semantics
+     (⌘F / ⌥⌘F, ↵ next, ⇧↵ previous, ⌥⌘↵ replace all) on the Apple Notes
+     surface: solid #F6F6F8, 26px controls, hairline rules, SF type. */
+  let replaceOpen = false
+  const barEl = document.createElement('div')
+  barEl.className = 'notes-findbar'
+  barEl.hidden = true
+  barEl.setAttribute('role', 'search')
+  barEl.innerHTML = `
+    <div class="notes-findbar-row">
+      <button type="button" class="notes-findbar-btn notes-findbar-expand" data-act="replace-toggle" title="替换（⌥⌘F）" aria-label="替换" aria-expanded="false"><span class="material-symbols-outlined">chevron_right</span></button>
+      <span class="notes-findbar-glyph material-symbols-outlined" aria-hidden="true">search</span>
+      <input class="notes-findbar-input" type="text" placeholder="查找" aria-label="查找" autocomplete="off" spellcheck="false" />
+      <span class="notes-findbar-count" aria-live="polite"></span>
+      <button type="button" class="notes-findbar-opt" data-opt="case" title="区分大小写" aria-label="区分大小写" aria-pressed="false">Aa</button>
+      <button type="button" class="notes-findbar-opt notes-findbar-opt-word" data-opt="word" title="全词匹配" aria-label="全词匹配" aria-pressed="false">词</button>
+      <button type="button" class="notes-findbar-btn" data-act="prev" title="上一个（⇧↵）" aria-label="上一个"><span class="material-symbols-outlined">expand_less</span></button>
+      <button type="button" class="notes-findbar-btn" data-act="next" title="下一个（↵）" aria-label="下一个"><span class="material-symbols-outlined">expand_more</span></button>
+      <button type="button" class="notes-findbar-btn notes-findbar-close" data-act="close" title="关闭（Esc）" aria-label="关闭"><span class="material-symbols-outlined">close</span></button>
+    </div>
+    <div class="notes-findbar-row notes-findbar-replace" hidden>
+      <span class="notes-findbar-glyph material-symbols-outlined" aria-hidden="true">find_replace</span>
+      <input class="notes-findbar-input" type="text" placeholder="替换为" aria-label="替换为" autocomplete="off" spellcheck="false" />
+      <button type="button" class="notes-findbar-action" data-act="replace-one" title="替换当前（↵）">替换</button>
+      <button type="button" class="notes-findbar-action" data-act="replace-all" title="全部替换（⌥⌘↵）">全部</button>
+    </div>`
+  sourceEl.appendChild(barEl)
+  const barInput = barEl.querySelector('.notes-findbar-row:not(.notes-findbar-replace) .notes-findbar-input')
+  const barReplace = barEl.querySelector('.notes-findbar-replace .notes-findbar-input')
+  const barCount = barEl.querySelector('.notes-findbar-count')
+  const barReplaceRow = barEl.querySelector('.notes-findbar-replace')
+  const barCase = barEl.querySelector('[data-opt="case"]')
+  const barWord = barEl.querySelector('[data-opt="word"]')
+  const barExpand = barEl.querySelector('[data-act="replace-toggle"]')
+
+  function saveFindOption(key, on) {
+    try { localStorage.setItem(key, on ? '1' : '0') } catch (_) {}
+  }
+
+  function paintFindOptions() {
+    barCase.classList.toggle('is-on', findCase)
+    barCase.setAttribute('aria-pressed', findCase ? 'true' : 'false')
+    barWord.classList.toggle('is-on', findWord)
+    barWord.setAttribute('aria-pressed', findWord ? 'true' : 'false')
+  }
+
+  function setReplaceOpen(on) {
+    replaceOpen = !!on
+    barReplaceRow.hidden = !replaceOpen
+    barExpand.classList.toggle('is-on', replaceOpen)
+    barExpand.setAttribute('aria-expanded', replaceOpen ? 'true' : 'false')
+    barExpand.title = replaceOpen ? '收起替换' : '替换（⌥⌘F）'
+    if (findBarVisible) {
+      findBarHeight = barEl.offsetHeight || findBarHeight
+      view.requestMeasure()
+    }
+  }
+
+  function resetFindState() {
+    findOrigin = ''
+    findSpec = emptyFindSpec()
+    findActive = 0
+    findWantScroll = false
+    previewRanges = []
+    if (typeof CSS !== 'undefined' && CSS.highlights) {
+      CSS.highlights.delete('cv-notes-find')
+      CSS.highlights.delete('cv-notes-find-active')
+    }
+    view.dispatch({ effects: clearFindQuery.of(null) })
+    if (barCount) {
+      barCount.textContent = ''
+      barCount.classList.remove('is-empty')
+    }
+    notifyFind(0, 0)
+  }
+
+  function runFindFromBar(opts) {
+    const q = barInput.value
+    findOrigin = 'bar'
+    findSpec = { tokens: [], query: q, caseSensitive: findCase, wholeWord: findWord }
+    findActive = 0
+    findWantScroll = false
+    if (!q) {
+      resetFindState()
+      return { total: 0, index: 0 }
+    }
+    if (mode === 'preview') {
+      requestPreviewFind()
+      return { total: previewRanges.length, index: 0 }
+    }
+    view.dispatch({ effects: setFindQuery.of({ spec: findSpec, active: 0 }) })
+    const total = view.state.field(findField).ranges.length
+    if (total && (!opts || opts.reveal !== false)) focusFindSource(0)
+    else notifyFind(total, 0)
+    return { total, index: 0 }
+  }
+
+  function replaceCurrent(replacement) {
+    if (mode === 'preview') return { replaced: 0, total: 0, index: 0 }
+    const found = view.state.field(findField)
+    if (!found.ranges.length) return { replaced: 0, total: 0, index: 0 }
+    const idx = Math.min(Math.max(0, findActive | 0), found.ranges.length - 1)
+    const target = found.ranges[idx]
+    const insert = String(replacement == null ? '' : replacement)
+    view.dispatch({
+      changes: { from: target.from, to: target.to, insert },
+      selection: { anchor: target.from + insert.length },
+      userEvent: 'input.replace',
+    })
+    const next = view.state.field(findField)
+    const total = next.ranges.length
+    let nextIdx = 0
+    if (total) {
+      const after = target.from + insert.length
+      let at = next.ranges.findIndex((r) => r.from >= after)
+      if (at < 0) at = 0
+      nextIdx = at
+      focusFindSource(nextIdx)
+    } else {
+      notifyFind(0, 0)
+    }
+    metric('notes_find_replace', { payload: { all: false, n: 1 } })
+    return { replaced: 1, total, index: nextIdx }
+  }
+
+  function replaceAll(replacement) {
+    if (mode === 'preview') return { replaced: 0, total: 0, index: 0 }
+    const found = view.state.field(findField)
+    const ranges = found.ranges.slice()
+    if (!ranges.length) return { replaced: 0, total: 0, index: 0 }
+    const insert = String(replacement == null ? '' : replacement)
+    view.dispatch({
+      changes: ranges.map((r) => ({ from: r.from, to: r.to, insert })),
+      userEvent: 'input.replace.all',
+    })
+    const next = view.state.field(findField)
+    const total = next.ranges.length
+    findActive = 0
+    if (total) focusFindSource(0)
+    else notifyFind(0, 0)
+    metric('notes_find_replace', { payload: { all: true, n: ranges.length } })
+    return { replaced: ranges.length, total, index: 0 }
+  }
+
+  function closeFind(opts) {
+    if (!barEl || barEl.hidden) return false
+    barEl.hidden = true
+    setFindBarVisible(false)
+    resetFindState()
+    if (!opts || opts.focus !== false) view.focus()
+    return true
+  }
+
+  function focusFindInput() {
+    if (!barEl || barEl.hidden) return false
+    barInput.focus()
+    barInput.select()
+    return true
+  }
+
+  function setFindBarVisible(on) {
+    const next = !!on
+    if (findBarVisible === next) return
+    findBarVisible = next
+    if (next) findBarHeight = barEl.offsetHeight || findBarHeight
+    view.requestMeasure()
+  }
+
+  function startFind(opts) {
+    if (mode === 'preview') return false
+    const options = opts || {}
+    if (!barEl.hidden) {
+      if (options.replace != null) setReplaceOpen(options.replace)
+      focusFindInput()
+      return true
+    }
+    if (options.prefill !== false) {
+      const sel = view.state.selection.main
+      if (sel && !sel.empty) {
+        const picked = view.state.sliceDoc(sel.from, sel.to)
+        if (picked && picked.length <= 200 && !/[\r\n]/.test(picked)) barInput.value = picked
+      }
+    }
+    if (findOrigin && findOrigin !== 'bar') resetFindState()
+    setReplaceOpen(options.replace === undefined ? replaceOpen : !!options.replace)
+    paintFindOptions()
+    barEl.hidden = false
+    setFindBarVisible(true)
+    if (barInput.value) runFindFromBar({ reveal: true })
+    else resetFindState()
+    requestAnimationFrame(() => { barInput.focus(); barInput.select() })
+    metric('notes_find_open', { payload: { replace: replaceOpen } })
+    return true
+  }
+
+  function stepFind(delta) {
+    const total = mode === 'preview' ? previewRanges.length : view.state.field(findField).ranges.length
+    if (!total) return { total: 0, index: 0 }
+    return focusFindAt(findActive + delta)
+  }
+
+  barEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('button')
+    if (!btn) return
+    const opt = btn.dataset.opt
+    if (opt === 'case' || opt === 'word') {
+      if (opt === 'case') {
+        findCase = !findCase
+        saveFindOption(FIND_CASE_KEY, findCase)
+      } else {
+        findWord = !findWord
+        saveFindOption(FIND_WORD_KEY, findWord)
+      }
+      paintFindOptions()
+      barInput.focus()
+      if (barInput.value) runFindFromBar({ reveal: true })
+      return
+    }
+    switch (btn.dataset.act) {
+      case 'prev':
+        stepFind(-1)
+        barInput.focus()
+        break
+      case 'next':
+        stepFind(1)
+        barInput.focus()
+        break
+      case 'replace-toggle':
+        setReplaceOpen(!replaceOpen)
+        if (replaceOpen) {
+          barReplace.focus()
+          barReplace.select()
+        } else {
+          barInput.focus()
+        }
+        break
+      case 'close':
+        closeFind()
+        break
+      case 'replace-one':
+        replaceCurrent(barReplace.value)
+        barReplace.focus()
+        break
+      case 'replace-all':
+        replaceAll(barReplace.value)
+        barReplace.focus()
+        break
+      default:
+        break
+    }
+  })
+
+  barInput.addEventListener('input', () => { runFindFromBar({ reveal: true }) })
+
+  barEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      closeFind()
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+      e.preventDefault()
+      e.stopPropagation()
+      focusFindInput()
+      return
+    }
+    if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.target === barReplace) {
+      if (e.altKey && (e.metaKey || e.ctrlKey)) replaceAll(barReplace.value)
+      else replaceCurrent(barReplace.value)
+      return
+    }
+    stepFind(e.shiftKey ? -1 : 1)
+  })
+
+  function computePreviewRanges(spec) {
     const out = []
-    const list = (tokens || []).filter(Boolean)
-    if (!list.length) return out
-    const re = new RegExp('(' + list.map(escapeRegExp).join('|') + ')', 'gi')
+    if (!spec || (!spec.query && !(spec.tokens || []).length)) return out
     const walker = document.createTreeWalker(previewInner, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
         const p = n.parentElement
@@ -866,13 +1145,10 @@ async function mount(root, opts) {
     while (walker.nextNode()) nodes.push(walker.currentNode)
     for (const node of nodes) {
       const s = node.nodeValue
-      re.lastIndex = 0
-      let m
-      while ((m = re.exec(s)) !== null) {
-        if (m[0].length === 0) { re.lastIndex += 1; continue }
+      for (const hit of findRanges(s, spec)) {
         const r = document.createRange()
-        r.setStart(node, m.index)
-        r.setEnd(node, m.index + m[0].length)
+        r.setStart(node, hit.from)
+        r.setEnd(node, hit.to)
         out.push(r)
       }
     }
@@ -901,12 +1177,32 @@ async function mount(root, opts) {
     previewEl.scrollTop = Math.max(0, Math.min(max, top))
   }
 
+  function paintFindCount(total, index) {
+    if (!barCount || findOrigin !== 'bar') return
+    const q = barInput ? barInput.value.trim() : ''
+    if (!q) {
+      barCount.textContent = ''
+      barCount.classList.remove('is-empty')
+      return
+    }
+    if (!total) {
+      barCount.textContent = '无结果'
+      barCount.classList.add('is-empty')
+      return
+    }
+    const i = Math.min(Math.max(0, index | 0), total - 1)
+    barCount.textContent = `${i + 1}/${total}`
+    barCount.classList.remove('is-empty')
+  }
+
   function notifyFind(total, index) {
-    if (findChangeCb) findChangeCb({ total: total | 0, index: index | 0 })
+    const state = { total: total | 0, index: index | 0 }
+    if (findChangeCb) findChangeCb(state)
+    paintFindCount(state.total, state.index)
   }
 
   function applyPreviewFindNow() {
-    previewRanges = computePreviewRanges(findTokens)
+    previewRanges = computePreviewRanges(findSpec)
     findActive = paintPreviewFind(findActive)
     if (findWantScroll && previewRanges.length) scrollPreviewRange(previewRanges[findActive])
     findWantScroll = false
@@ -927,7 +1223,7 @@ async function mount(root, opts) {
     }
     const idx = ((i % v.ranges.length) + v.ranges.length) % v.ranges.length
     view.dispatch({
-      effects: setFindQuery.of({ tokens: findTokens, active: idx }),
+      effects: setFindQuery.of({ spec: findSpec, active: idx }),
       selection: { anchor: v.ranges[idx].from },
       scrollIntoView: true,
       userEvent: 'select.find',
@@ -937,13 +1233,29 @@ async function mount(root, opts) {
     return idx
   }
 
-  function applyFindForMode() {
-    if (!findTokens.length) return
+  function focusFindAt(i) {
+    if (!findSpec.query && !findSpec.tokens.length) return { total: 0, index: 0 }
+    findActive = Math.max(0, i | 0)
+    findWantScroll = true
     if (mode === 'preview') {
+      requestPreviewFind()
+      return { total: previewRanges.length, index: findActive }
+    }
+    const idx = focusFindSource(findActive)
+    return { total: view.state.field(findField).ranges.length, index: idx }
+  }
+
+  function applyFindForMode() {
+    if (!findSpec.query && !findSpec.tokens.length) return
+    if (mode === 'preview') {
+      if (findOrigin === 'bar') {
+        closeFind({ focus: false })
+        return
+      }
       requestPreviewFind()
       return
     }
-    view.dispatch({ effects: setFindQuery.of({ tokens: findTokens, active: findActive }) })
+    view.dispatch({ effects: setFindQuery.of({ spec: findSpec, active: findActive }) })
     if (findWantScroll) {
       findWantScroll = false
       focusFindSource(findActive)
@@ -1133,44 +1445,68 @@ async function mount(root, opts) {
     },
     focus() { view.focus() },
     find(tokens) {
-      findTokens = (tokens || []).filter(Boolean)
+      const list = (tokens || []).filter(Boolean)
+      if (!barEl.hidden) {
+        barEl.hidden = true
+        setFindBarVisible(false)
+      }
+      findOrigin = 'sidebar'
+      findSpec = { tokens: list, query: '', caseSensitive: false, wholeWord: false }
       findActive = 0
       findWantScroll = false
-      if (!findTokens.length) {
-        api.clearFind()
+      if (!list.length) {
+        resetFindState()
         return { total: 0 }
       }
       if (mode === 'preview') {
         requestPreviewFind()
         return { total: previewRanges.length }
       }
-      view.dispatch({ effects: setFindQuery.of({ tokens: findTokens, active: 0 }) })
+      view.dispatch({ effects: setFindQuery.of({ spec: findSpec, active: 0 }) })
       const total = view.state.field(findField).ranges.length
       notifyFind(total, 0)
       return { total }
     },
-    focusMatch(i) {
-      if (!findTokens.length) return { total: 0, index: 0 }
-      findActive = Math.max(0, i | 0)
-      findWantScroll = true
-      if (mode === 'preview') {
-        requestPreviewFind()
-        return { total: previewRanges.length, index: findActive }
+    findText(query, opts) {
+      const options = opts || {}
+      const q = query == null ? '' : String(query)
+      findOrigin = 'bar'
+      findSpec = {
+        tokens: [],
+        query: q,
+        caseSensitive: options.caseSensitive == null ? findCase : !!options.caseSensitive,
+        wholeWord: options.wholeWord == null ? findWord : !!options.wholeWord,
       }
-      const idx = focusFindSource(findActive)
-      return { total: view.state.field(findField).ranges.length, index: idx }
-    },
-    clearFind() {
-      findTokens = []
       findActive = 0
       findWantScroll = false
-      previewRanges = []
-      if (typeof CSS !== 'undefined' && CSS.highlights) {
-        CSS.highlights.delete('cv-notes-find')
-        CSS.highlights.delete('cv-notes-find-active')
+      if (!q) {
+        resetFindState()
+        return { total: 0, index: 0 }
       }
-      view.dispatch({ effects: clearFindQuery.of(null) })
-      notifyFind(0, 0)
+      if (mode === 'preview') {
+        requestPreviewFind()
+        return { total: previewRanges.length, index: 0 }
+      }
+      view.dispatch({ effects: setFindQuery.of({ spec: findSpec, active: 0 }) })
+      const total = view.state.field(findField).ranges.length
+      if (total) focusFindSource(0)
+      else notifyFind(0, 0)
+      return { total, index: 0 }
+    },
+    focusMatch(i) { return focusFindAt(i) },
+    stepFind(delta) { return stepFind(delta) },
+    replaceCurrent(replacement) { return replaceCurrent(replacement) },
+    replaceAll(replacement) { return replaceAll(replacement) },
+    startFind(opts) { return startFind(opts) },
+    isFindOpen() { return !!(barEl && !barEl.hidden) },
+    focusFind() { return focusFindInput() },
+    closeFind(opts) { return closeFind(opts) },
+    clearFind(opts) {
+      if (barEl) barEl.hidden = true
+      setFindBarVisible(false)
+      resetFindState()
+      if (opts && opts.focus) view.focus()
+      return { total: 0 }
     },
     onFindChange(cb) { findChangeCb = typeof cb === 'function' ? cb : null },
   }

@@ -161,7 +161,7 @@ test('highlight.js loads on demand, not on wall boot', () => {
 test('notes editor bundle is loaded lazily, not on wall boot', () => {
   assert.doesNotMatch(html, /<script src="\/assets\/notes-editor\/notes-editor\.js/);
   assert.match(html, /function loadNotesEditorBundle\(\)/);
-  assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n32'/);
+  assert.match(html, /s\.src = '\/assets\/notes-editor\/notes-editor\.js\?v=n33'/);
 });
 
 test('wall card prose wraps token-atomically, pan surfaces untouched', () => {

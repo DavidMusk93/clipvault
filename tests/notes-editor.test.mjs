@@ -433,8 +433,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n32/);
-  assert.match(html, /notes-editor\.css\?v=n32/);
+  assert.match(html, /notes-editor\.js\?v=n33/);
+  assert.match(html, /notes-editor\.css\?v=n33/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
@@ -533,14 +533,14 @@ test('note search highlights hits in the rail and jumps into the doc', () => {
   assert.match(html, /id="notesFindCount"/);
   assert.match(html, /notes_find_reveal/);
   // Editor API: source decorations + CSS Custom Highlight API for preview.
-  assert.match(entry, /function findRanges/);
+  assert.match(entry, /import \{ findRanges \} from '\.\.\/\.\.\/notes-find\.mjs'/);
   assert.match(entry, /const findField = StateField\.define/);
   assert.match(entry, /cm-find-hit cm-find-active/);
   assert.match(entry, /function computePreviewRanges/);
   assert.match(entry, /CSS\.highlights\.set\('cv-notes-find'/);
   assert.match(entry, /find\(tokens\) \{/);
   assert.match(entry, /focusMatch\(i\) \{/);
-  assert.match(entry, /clearFind\(\) \{/);
+  assert.match(entry, /clearFind\(opts\) \{/);
   assert.match(css, /::highlight\(cv-notes-find\)/);
   assert.match(css, /::highlight\(cv-notes-find-active\)/);
 });
