@@ -7,9 +7,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { root } from './helpers/src.mjs';
+import { findRanges } from '../web/notes-find.mjs';
 
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
-const entry = readFileSync(join(root, 'web/assets/notes-editor/entry.js'), 'utf8');
 
 function fnSource(source, name) {
   const start = source.indexOf(`function ${name}(`);
@@ -35,13 +35,12 @@ const side = build(
   ['escapeRegExp', 'searchTokens', 'matchRanges', 'noteExcerpt', 'decodeNoteBody', 'noteSearchSnippet'],
   html,
 );
-const editor = build(['escapeRegExp', 'findRanges'], entry);
 
 test('sidebar and editor find share one matcher (tokens in, ranges out)', () => {
   const tokens = side.searchTokens('gateway 网关');
   const text = 'The gateway and 网关 both appear; Gateway again.';
   const rail = side.matchRanges(text, tokens).map((r) => [r.start, r.end]);
-  const doc = editor.findRanges(text, tokens).map((r) => [r.from, r.to]);
+  const doc = findRanges(text, { tokens }).map((r) => [r.from, r.to]);
   assert.deepEqual(rail, doc);
   assert.ok(rail.length >= 3, 'multi-token, case-insensitive, CJK');
 });

@@ -16,7 +16,7 @@
   <!-- Markdown preview: mature libs only (no DIY grammar) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n32" />
+  <link rel="stylesheet" href="/assets/notes-editor/notes-editor.css?v=n33" />
   <script src="/assets/motion.js?v=m1"></script>
   <script src="/assets/notes-metrics.js?v=n13"></script>
   <script src="/assets/ui-track.js?v=u1"></script>
@@ -3151,6 +3151,7 @@
           <button type="button" data-cmd="link" title="链接"><span class="material-symbols-outlined">link</span></button>
           <button type="button" data-cmd="table" title="表格"><span class="material-symbols-outlined">table</span></button>
           <button type="button" data-cmd="hr" title="分割线"><span class="material-symbols-outlined">horizontal_rule</span></button>
+          <button type="button" data-act="find" title="查找（⌘F）" aria-label="查找"><span class="material-symbols-outlined">search</span></button>
         </div>
         <span class="notes-status" id="notesStatus" data-state="idle" title="保存状态">
           <span class="notes-status-label" id="notesStatusLabel"></span>
@@ -4980,6 +4981,7 @@ window.ClipViewMasonry = Masonry;
     function applyNoteReveal(q) {
       const ed = notesState.editor;
       const tokens = q ? searchTokens(q).filter(t => t && !t.startsWith('#')) : [];
+      if (ed && typeof ed.closeFind === 'function') ed.closeFind({ focus: false });
       if (!ed || !tokens.length || typeof ed.find !== 'function') {
         if (ed && typeof ed.clearFind === 'function') ed.clearFind();
         notesState.find = null;
@@ -5005,6 +5007,7 @@ window.ClipViewMasonry = Masonry;
     function scheduleNotesSearch() {
       const qRaw = (document.getElementById('notesSearch')?.value || '').trim();
       clearTimeout(notesSearchTimer);
+      if (notesState.editor?.isFindOpen?.()) notesState.editor.closeFind({ focus: false });
       const gen = ++notesState.searchGen;
       // Instant local feedback; the ranked server result replaces it when it lands.
       notesState.searching = false;
@@ -5245,7 +5248,7 @@ window.ClipViewMasonry = Masonry;
       if (notesEditorLoading) return notesEditorLoading;
       notesEditorLoading = new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = '/assets/notes-editor/notes-editor.js?v=n32';
+        s.src = '/assets/notes-editor/notes-editor.js?v=n33';
         s.async = true;
         s.onload = () => resolve(globalThis.ClipNotesEditor);
         s.onerror = () => reject(new Error('notes-editor load failed'));
@@ -6115,8 +6118,14 @@ window.ClipViewMasonry = Masonry;
       paintNotesModes();
     });
     document.getElementById('notesTools')?.addEventListener('click', (e) => {
+      if (!notesState.editor) return;
+      if (e.target.closest('[data-act="find"]')) {
+        clearNoteFind();
+        notesState.editor.startFind?.({ replace: false });
+        return;
+      }
       const btn = e.target.closest('[data-cmd]');
-      if (!btn || !notesState.editor) return;
+      if (!btn) return;
       notesState.editor.command(btn.dataset.cmd);
       paintNotesModes();
     });
@@ -6129,6 +6138,11 @@ window.ClipViewMasonry = Masonry;
       const open = document.getElementById('notesPanel')?.classList.contains('open');
       if (!open) return;
       if (e.key === 'Escape') {
+        if (notesState.editor?.isFindOpen?.()) {
+          e.preventDefault();
+          notesState.editor.closeFind();
+          return;
+        }
         if (document.getElementById('linkToast')?.classList.contains('open')) return;
         closeNotesPanel();
         return;
@@ -6144,15 +6158,29 @@ window.ClipViewMasonry = Masonry;
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
+        const ed = notesState.editor;
+        if (ed?.startFind && ed.getMode?.() !== 'preview') {
+          if (ed.isFindOpen?.()) {
+            if (e.altKey) ed.startFind({ replace: true });
+            else ed.focusFind?.();
+          } else {
+            clearNoteFind();
+            ed.startFind({ replace: !!e.altKey });
+          }
+          return;
+        }
         const s = document.getElementById('notesSearch');
         s?.focus();
         s?.select();
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
-        if (!notesState.find) return;
         e.preventDefault();
-        stepNoteFind(e.shiftKey ? -1 : 1);
+        if (notesState.editor?.isFindOpen?.()) {
+          notesState.editor.stepFind(e.shiftKey ? -1 : 1);
+          return;
+        }
+        if (notesState.find) stepNoteFind(e.shiftKey ? -1 : 1);
       }
     });
     if (parseAppHash().kind === 'notes') {
