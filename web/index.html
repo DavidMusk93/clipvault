@@ -2870,6 +2870,10 @@
       </div>
       <h3 style="font-size:14px;font-weight:600;margin:12px 0 6px">备份源</h3>
       <div id="bkDestList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+      <div class="backup-row" style="align-items:flex-start">
+        <div style="flex:1;min-width:0"><strong>ostore 远程冷备</strong><div class="backup-label" id="bkOstoreStatus">读取中…</div></div>
+        <button type="button" id="bkOstoreRun" class="secondary">备份到 ostore</button>
+      </div>
       <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>
       <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
       <div class="backup-row" id="bkQuarkRow" style="display:none"><span class="backup-label">夸克自动发现</span><span class="backup-value" id="bkQuarkDiscover">—</span></div>
@@ -12253,6 +12257,14 @@ window.ClipViewMasonry = Masonry;
         const btn = document.getElementById('backupOpenBtn');
         const label = document.getElementById('backupBtnLabel');
         const dests = s.destinations || [];
+        const os = s.ostore;
+        const osLabel = document.getElementById('bkOstoreStatus');
+        if (osLabel) {
+          const state = !os?.configured ? '未配置' : os.inProgress ? '上传中' : os.phase === 'ok' ? '已完成' : os.phase === 'error' ? '失败' : '等待备份';
+          osLabel.textContent = state + (os?.lastSuccessUnix ? ' · 上次成功 ' + formatLocalTime(os.lastSuccessUnix) : '') + (os?.lastError ? ' · ' + os.lastError : '') + (os?.configured ? ' · 上传 ' + (os.uploaded || 0) + ' · 跳过 ' + (os.skipped || 0) : '');
+          const osButton = document.getElementById('bkOstoreRun');
+          if (osButton) osButton.disabled = !os?.configured || !!os?.inProgress;
+        }
         const anyAvail = dests.some(d => d.enabled && d.available)
           || s.cloudDocsAvailable || s.googleDriveAvailable;
         const qd = s.quarkDiscovery;
@@ -12446,6 +12458,15 @@ window.ClipViewMasonry = Masonry;
     });
     document.getElementById('syRefresh')?.addEventListener('click', () => refreshSyncStatus());
 
+    document.getElementById('bkOstoreRun')?.addEventListener('click', async () => {
+      toast('正在生成本机快照…');
+      try {
+        const r = await fetch(API + '/api/backup/ostore/run', { method: 'POST' });
+        const j = await r.json();
+        toast(j.ok ? '本机备份完成，远程上传已排队' : (j.message || '备份失败'));
+      } catch (_) { toast('备份请求失败'); }
+      refreshBackupStatus();
+    });
     document.getElementById('bkRunNow')?.addEventListener('click', async () => {
       toast('开始备份…');
       const r = await fetch(API + '/api/backup/run', { method: 'POST' });

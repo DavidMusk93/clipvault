@@ -112,6 +112,7 @@ final class CloudDocsBackupService {
         var googleDriveAvailable: Bool = false
         var googleDrivePath: String? = nil
         var hostId: String? = nil
+        var ostore: OstoreBackup.Status? = nil
     }
 
     private let database: DatabaseManager
@@ -581,6 +582,7 @@ final class CloudDocsBackupService {
                     self.database.itemCount { count in
                         self.queue.async {
                             var anyOk = false
+                            var ostoreSource: URL? = nil
                             var messages: [String] = []
                             var totalBlobNew = 0
                             var lastBlobCount = 0
@@ -654,6 +656,7 @@ final class CloudDocsBackupService {
                                         self.destLastError[dest.id] = nil
                                         messages.append("\(BackupDestinationResolver.displayLabel(dest)): 未变")
                                         anyOk = true
+                                        ostoreSource = root
                                         continue
                                     }
                                     allSkip = false
@@ -712,6 +715,7 @@ final class CloudDocsBackupService {
                                         self.destLastPhase[dest.id] = "ok"
                                     }
                                     anyOk = true
+                                    ostoreSource = root
                                     let repairedNote = cas.repaired > 0 ? " repair=\(cas.repaired)" : ""
                                     messages.append(
                                         "\(BackupDestinationResolver.displayLabel(dest)): ok blobs=\(blobNames.count)\(repairedNote)"
@@ -743,6 +747,7 @@ final class CloudDocsBackupService {
                                             self.destLastSuccessUnix[dest.id] = created.timeIntervalSince1970
                                             messages.append("Google Drive: 本机暂存（云端 File Provider 死锁/不可写）")
                                             anyOk = true
+                                            ostoreSource = stage
                                             print("[Backup] dest=gdrive cloud fail → local staging ok: \(stage.path) (cloud err: \(error.localizedDescription))")
                                             continue
                                         } catch {
@@ -756,6 +761,9 @@ final class CloudDocsBackupService {
                                 }
                             }
 
+                            if let source = ostoreSource, snapshotOverrideId == nil {
+                                _ = OstoreBackup.shared.enqueue(root: source)
+                            }
                             try? self.fm.removeItem(at: artifact)
                             self.scrubLegacyArtifacts()
 
@@ -1524,7 +1532,8 @@ final class CloudDocsBackupService {
             quarkDiscovery: lite ? nil : BackupDestinationResolver.discoverQuark(),
             googleDriveAvailable: gdrive != nil,
             googleDrivePath: gdrive?.path,
-            hostId: ClipHostIdentity.id
+            hostId: ClipHostIdentity.id,
+            ostore: OstoreBackup.shared.status()
         )
     }
 
