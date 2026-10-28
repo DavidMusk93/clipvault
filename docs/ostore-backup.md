@@ -7,10 +7,10 @@ ClipVault 在本机备份成功后，把该主机的数据库和 CAS 媒体增�
 在 ClipVault 数据目录的 `config/ostore-backup.json` 写入以下格式，权限设为 `0600`。密钥只放服务端，禁止提交或下发到浏览器。
 
 ```json
-{"baseURL":"https://cc.guohuasun.com/ostore","token":"<OSTORE_TOKEN>"}
+{"baseURL":"https://cc.guohuasun.com/clipvault-ostore","token":"<OSTORE_TOKEN>"}
 ```
 
-地址必须为 HTTPS。当前 cc 实例使用 JSON API，和 xstream 共用访问令牌与存储根目录；ClipVault 仅写 `clipvault/` 前缀。
+地址必须为 HTTPS。cc 的 `ostore-clipvault.service` 使用独立令牌、根目录 `/srv/ostore-clipvault` 和 loopback 端口 8782；Caddy 将 `/clipvault-ostore/` 反代至该实例。它与 xstream 的 ostore 权限和数据隔离。
 
 ## 运行和状态
 
