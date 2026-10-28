@@ -308,6 +308,12 @@ class WebServer {
             handlePostClip(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/config" {
             handleBackupConfig(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/backup/ostore/run" {
+            guard OstoreBackup.shared.status().configured else {
+                sendJSONObject(["ok": false, "message": "尚未配置 ostore"], connection: connection)
+                return
+            }
+            handleBackupRun(connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/run" {
             handleBackupRun(connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/restore" {
