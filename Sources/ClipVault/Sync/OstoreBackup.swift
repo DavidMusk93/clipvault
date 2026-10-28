@@ -126,7 +126,20 @@ final class OstoreBackup {
                 guard let reply = try? JSONDecoder().decode(Reply.self, from: data), reply.sha256 == digest else { throw failure("ostore 上传校验失败") }
                 update { $0.uploaded += 1 }
             }
-            for name in names { try upload(source.appendingPathComponent("blobs/" + name), prefix + "/blobs/" + name) }
+            let uploads = OperationQueue()
+            uploads.maxConcurrentOperationCount = 8
+            let errorLock = NSLock()
+            var firstError: Error?
+            for name in names {
+                uploads.addOperation {
+                    errorLock.lock(); let failed = firstError != nil; errorLock.unlock()
+                    if failed { return }
+                    do { try upload(source.appendingPathComponent("blobs/" + name), prefix + "/blobs/" + name) }
+                    catch { errorLock.lock(); if firstError == nil { firstError = error }; errorLock.unlock() }
+                }
+            }
+            uploads.waitUntilAllOperationsAreFinished()
+            if let error = firstError { throw error }
             try upload(db, prefix + "/databases/" + manifest.sha256 + ".db")
             try upload(db, prefix + "/latest/clipflow.db")
             try upload(m, prefix + "/latest/MANIFEST.json")
