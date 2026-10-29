@@ -231,7 +231,7 @@ test('unified row keeps the queued click honest and disables only when unconfigu
 });
 
 // ---- DOM path: render the ostore row exactly as the panel does ----
-function loadOstoreRow() {
+function loadOstoreRow(fail = false) {
   const start = indexHtml.indexOf('function ostoreRow(os)');
   const end = indexHtml.indexOf('async function refreshBackupStatus(');
   assert.ok(start >= 0 && end > start, 'cannot slice ostoreRow');
@@ -247,7 +247,7 @@ function loadOstoreRow() {
     API: 'http://api.test',
     toast: (m) => calls.push({ toast: m }),
     refreshBackupStatus: () => calls.push({ refresh: true }),
-    fetch: (url, opts) => { calls.push({ url, body: opts?.body }); return Promise.resolve({ json: async () => ({ ok: true }) }); }
+    fetch: (url, opts) => { calls.push({ url, body: opts?.body }); return Promise.resolve({ ok: !fail, json: async () => fail ? ({ ok: false, message: '保存失败' }) : ({ ok: true }) }); }
   };
   const fn = new Function('document', 'esc', 'formatLocalTime', 'API', 'toast', 'refreshBackupStatus', 'fetch',
     `${snippet}\nreturn ostoreRow;`)(fakes.document, fakes.esc, fakes.formatLocalTime, fakes.API, fakes.toast, fakes.refreshBackupStatus, fakes.fetch);
@@ -274,6 +274,18 @@ test('ostoreRow renders a switch and writes config on toggle', { skip: domSkip }
   assert.equal(post.body, JSON.stringify({ ostoreEnabled: false }));
   assert.ok(calls.some((c) => c.toast === '已关闭 ostore 远程冷备'));
   assert.ok(calls.some((c) => c.refresh));
+});
+
+test('ostoreRow restores the switch and reports a rejected change', { skip: domSkip }, async () => {
+  const { row, calls } = loadOstoreRow(true);
+  const el = row({ configured: true, enabled: true, phase: 'ok' });
+  const input = el.querySelector('input[data-ostore]');
+  input.checked = false;
+  input.dispatchEvent(new jsdomWindow.Event('change'));
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(input.checked, true);
+  assert.equal(input.disabled, false);
+  assert.ok(calls.some((c) => c.toast === '设置失败：保存失败'));
 });
 
 test('ostoreRow shows 未配置 with a disabled switch and the config hint', { skip: domSkip }, () => {
