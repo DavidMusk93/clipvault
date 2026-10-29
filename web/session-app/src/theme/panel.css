@@ -15,7 +15,12 @@
       --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", system-ui, sans-serif;
       --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* The reset lives in the base layer. Unlayered, `* { padding: 0 }` outranks
+       every Tailwind utility (@layer utilities), which silently zeroed all
+       spacing in the analysis sheet (p-4 / mb-6 / mt-2 computed to 0). */
+    @layer base {
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+    }
     html, body {
       height: 100%;
       overflow: hidden;
@@ -645,7 +650,11 @@
       font-weight: 650; letter-spacing: -0.02em; margin: 0.85em 0 0.35em;
     }
     .md-preview p { margin: 0 0 0.55em; }
+    /* Tailwind preflight strips list markers; markdown lists need them back. */
     .md-preview ul, .md-preview ol { margin: 0.15em 0 0.55em; padding-left: 1.25em; }
+    .md-preview ul { list-style: disc; }
+    .md-preview ol { list-style: decimal; }
+    .md-preview ul ul { list-style: circle; }
     .md-preview li { margin: 0.1em 0; }
     .md-preview blockquote {
       margin: 0.4em 0 0.6em; padding: 0 0 0 10px;

@@ -4,7 +4,7 @@ import { ackFinding, getMine, type Mine, type MineFinding } from "../../api/mine
 import { cn } from "../../lib/cn";
 import { Ledger } from "./Ledger";
 import { Losses } from "./Losses";
-import { mineDraftMarkdown } from "./lib";
+import { mineDraftMarkdown, windowText } from "./lib";
 import { Timeline } from "./Timeline";
 import { Verdict } from "./Verdict";
 
@@ -37,7 +37,7 @@ function readSaved(): { scope: Scope; dirs: string[] } {
  * 「分析」sheet — rebuilt from the taste (docs/design-taste.md 「分析」), styled on
  * Apple HIG: 8pt spacing grid, SF type scale, grouped white cards on the system
  * grouped background, controls ≥28px, chrome kept out of the way.
- * ① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 → ④ 账本.
+ * ① 判定（分数 + 损耗构成 + 费用）→ ② 发现 → ③ 回合 → ④ 账本.
  */
 export default function Analysis({
   sessionId,
@@ -135,66 +135,64 @@ export default function Analysis({
     if (!data?.ok) return null;
     const w = data.window || {};
     const s = data.summary || {};
+    const tags: [string, string][] = [];
+    if (w.truncated) tags.push(["已截断", "bg-mine-loss/12 text-mine-loss"]);
+    if (data.baseline?.source)
+      tags.push([`对照 ${data.baseline.source}`, "bg-black/[0.06] text-role-system"]);
+    if (!s.usage_turns) tags.push(["无计费数据", "bg-mine-money/12 text-mine-money"]);
     return (
-      <p className="text-[12px] tabular-nums text-role-system">
-        {String(w.from || "?")} → {String(w.to || "?")} · {s.n_turns || 0} 回合 · {s.n_tools || 0}{" "}
-        工具
-        {w.instances?.length ? ` · ${w.instances.join("/")}` : ""}
-        {w.truncated ? (
-          <span className="ml-2 rounded-full bg-mine-loss/12 px-2 py-0.5 text-[11px] font-semibold text-mine-loss">
-            截断
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] tabular-nums text-role-system">
+        <span>
+          {windowText(w) || "—"} · {s.n_turns || 0} 回合 · {s.n_tools || 0} 工具
+          {w.instances?.length ? ` · ${w.instances.join(" / ")}` : ""}
+        </span>
+        {tags.map(([t, cls]) => (
+          <span key={t} className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}>
+            {t}
           </span>
-        ) : null}
-        {data.baseline?.source ? (
-          <span className="ml-2 rounded-full bg-black/[0.06] px-2 py-0.5 text-[11px] text-role-system">
-            对照 {data.baseline.source}
-          </span>
-        ) : null}
-        {!s.usage_turns ? (
-          <span className="ml-2 rounded-full bg-mine-money/12 px-2 py-0.5 text-[11px] text-mine-money">
-            无计费数据
-          </span>
-        ) : null}
+        ))}
       </p>
     );
   }, [data]);
 
-  const navItems: [string, string][] = [
-    ["mineLosses", `损耗 ${findings.length}`],
-    ...((data?.turns?.length ? [["mineTimeline", `回合 ${data.turns.length}`]] : []) as [
+  const navItems: [string, string, number | null][] = [
+    ["mineVerdict", "判定", null],
+    ["mineLosses", "发现", findings.length],
+    ...((data?.turns?.length ? [["mineTimeline", "回合", data.turns.length]] : []) as [
       string,
       string,
+      number,
     ][]),
-    ["mineLedger", `账本 ${Object.keys(data?.blocks || {}).length}`],
+    ["mineLedger", "账本", Object.keys(data?.blocks || {}).length],
   ];
+
+  const pill =
+    "h-7 rounded-full border border-black/10 bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-black/[0.03] focus-visible:outline-2 focus-visible:outline-accent";
 
   return (
     <div className="absolute inset-x-2 bottom-[52px] top-2 z-10 flex min-h-0 flex-col overflow-hidden rounded-[18px] border border-black/10 bg-[#F5F5F7] shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
-      {/* Header: title, summary, scope segment, filter disclosure */}
-      <div className="flex-none border-b border-black/[0.06] bg-[#F5F5F7]/90 px-5 pb-3 pt-3.5">
-        <div className="flex items-center gap-3">
+      {/* Header: title + actions · scope + directions + jump links · window facts */}
+      <div className="flex-none border-b border-black/[0.06] bg-[#F5F5F7] px-5 pb-3 pt-4">
+        <div className="flex items-center gap-2">
           <h2 className="flex-1 text-[17px] font-semibold tracking-[-0.02em] text-ink">会话分析</h2>
-          <button
-            type="button"
-            onClick={() => void copyDraft()}
-            className="h-7 rounded-full border border-black/10 bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-black/[0.03]"
-          >
+          <button type="button" onClick={() => void copyDraft()} className={pill}>
             {copyLabel}
           </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-7 rounded-full border border-black/10 bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-black/[0.03]"
-          >
+          <button type="button" onClick={onClose} className={pill}>
             关闭
           </button>
         </div>
-        <div className="mt-2 flex items-center gap-3">
-          <div className="inline-flex shrink-0 rounded-[9px] bg-black/[0.06] p-0.5">
+        <div className="mt-1">{summary}</div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <fieldset
+            aria-label="范围"
+            className="inline-flex shrink-0 rounded-[9px] border-0 bg-black/[0.06] p-0.5"
+          >
             {(["session", "recent"] as const).map((s) => (
               <button
                 key={s}
                 type="button"
+                aria-pressed={scope === s}
                 onClick={() => {
                   setScope(s);
                   persist(s, dirs);
@@ -207,24 +205,40 @@ export default function Analysis({
                 {s === "session" ? "当前会话" : "最近 7 天"}
               </button>
             ))}
-          </div>
+          </fieldset>
           <button
             type="button"
+            aria-expanded={filtersOpen}
             onClick={() => setFiltersOpen((v) => !v)}
-            className="h-7 shrink-0 rounded-full border border-black/10 bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-black/[0.03]"
+            className={pill}
           >
-            方向 {activeDirs.length}/{directions.length || "—"}
+            方向 {activeDirs.length}/{directions.length || "—"} {filtersOpen ? "▴" : "▾"}
           </button>
+          {data?.ok && (
+            <nav aria-label="跳转" className="ml-auto flex items-center gap-0.5">
+              {navItems.map(([id, label, n]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => jump(id)}
+                  className="h-7 rounded-[7px] px-2 text-[12.5px] font-medium text-role-system hover:bg-black/[0.05] hover:text-ink"
+                >
+                  {label}
+                  {n != null && <span className="ml-1 tabular-nums">{n}</span>}
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
-        <div className="mt-2">{summary}</div>
         {filtersOpen && (
-          <div className="mt-2.5 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {directions.map((d) => {
               const on = !dirs.length || dirs.includes(d.id);
               return (
                 <button
                   key={d.id}
                   type="button"
+                  aria-pressed={on}
                   onClick={() => toggleDir(d.id)}
                   className={cn(
                     "h-7 rounded-full border px-3 text-[12.5px] font-medium transition-colors",
@@ -241,7 +255,10 @@ export default function Analysis({
         )}
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto overscroll-contain px-5 py-4">
+      <div
+        ref={scrollRef}
+        className="@container min-h-0 flex-1 overflow-auto overscroll-contain px-5 pb-6 pt-5"
+      >
         {q.isPending && !data ? (
           <p className="py-6 text-center text-[13px] text-role-system">分析中…</p>
         ) : null}
@@ -252,19 +269,7 @@ export default function Analysis({
         ) : null}
         {data?.ok ? (
           <>
-            <nav className="mb-4 flex flex-wrap gap-2">
-              {navItems.map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => jump(id)}
-                  className="h-7 rounded-full bg-black/[0.05] px-3 text-[12.5px] font-medium text-ink hover:bg-black/[0.09]"
-                >
-                  {label}
-                </button>
-              ))}
-            </nav>
-            <Verdict data={data} />
+            <Verdict data={data} onJump={jump} />
             <Losses data={data} onTurn={toggleTurn} onAck={onAck} />
             <Timeline data={data} openTurn={openTurn} onToggleTurn={toggleTurn} />
             <Ledger data={data} />

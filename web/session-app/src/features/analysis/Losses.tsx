@@ -1,7 +1,6 @@
 import type { Mine, MineFinding, MineRef } from "../../api/mine";
-import { barPct, deltaText, deltaTone, metricOf, mineSpan, mineUsd, pickKind, sevOf } from "./lib";
-import { AnalysisChart } from "./MineChart";
-import { Section, SectionHead } from "./Section";
+import { barPct, deltaText, deltaTone, metricOf, mineSpan, mineUsd, sevOf } from "./lib";
+import { Pill, Section, SectionHead } from "./Section";
 
 const abbrev = (s: unknown, n = 44): string => {
   const t = String(s || "");
@@ -33,7 +32,7 @@ function Refs({ refs, onTurn }: { refs: MineRef[] | undefined; onTurn: (n: numbe
   const shown = grouped.slice(0, 4);
   const more = grouped.length - shown.length;
   return (
-    <div className="mt-2.5 flex flex-wrap gap-1.5">
+    <div className="mt-3 flex flex-wrap gap-1.5">
       {shown.map(({ ref: r, n }) => (
         <button
           key={`${r.turn}-${r.label}-${r.exit_code}`}
@@ -153,28 +152,36 @@ function LossCard({
   return (
     <article
       id={`loss-${f.id || i}`}
-      className={`scroll-mt-12 rounded-[14px] border border-black/[0.06] border-l-2 p-4 ${sev.card}`}
+      className="scroll-mt-4 rounded-[14px] border border-black/[0.06] bg-white p-4"
     >
-      <div className="mb-2 flex items-center gap-2.5">
-        <span className="text-[12px] font-semibold text-role-system tabular-nums">{i + 1}</span>
-        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${sev.badge}`}>
-          {sev.label}
+      <div className="mb-3 flex items-start gap-2.5">
+        <span className="mt-0.5 w-4 shrink-0 text-[13px] font-semibold tabular-nums text-role-system">
+          {i + 1}
         </span>
-        <h4 className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">
-          {f.title}
-        </h4>
-        <span className="flex items-baseline gap-1.5 text-[12px] text-role-system">
-          <b className="text-[15px] font-semibold tabular-nums text-ink">
+        <div className="min-w-0 flex-1">
+          <h4 className="text-[15px] font-semibold leading-snug tracking-[-0.01em] text-ink">
+            {f.title}
+          </h4>
+          <div className="mt-1 flex items-center gap-2">
+            <Pill tone={sev.badge}>{sev.label}</Pill>
+            <span className="text-[12px] text-role-system">
+              {imp.kind === "estimated" ? "估算" : "实测"}
+            </span>
+          </div>
+        </div>
+        <span className="flex shrink-0 flex-col items-end">
+          <b className="text-[17px] font-semibold leading-tight tabular-nums text-mine-loss">
             {mineSpan(imp.s)}
-            {Number(imp.usd) > 0 ? ` · ${mineUsd(imp.usd)}` : ""}
           </b>
-          {imp.kind === "estimated" ? "估算" : "实测"}
+          {Number(imp.usd) > 0 && (
+            <span className="text-[12px] tabular-nums text-mine-money">{mineUsd(imp.usd)}</span>
+          )}
         </span>
       </div>
 
       {m && (
         <div
-          className={`mb-2 flex flex-wrap items-center gap-3 rounded-[10px] px-3 py-1.5 text-[12.5px] ${
+          className={`mb-3 ml-[26px] flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] px-3 py-2 text-[12.5px] ${
             reached ? "bg-mine-good/8" : "bg-black/[0.03]"
           }`}
         >
@@ -214,34 +221,36 @@ function LossCard({
         </div>
       )}
 
-      <div className="flex flex-col gap-1 text-[13px] leading-relaxed">
-        {f.text && <p className="text-ink">{f.text}</p>}
-        {f.cause && (
-          <p className="text-role-system">
-            <b className="mr-1.5 font-semibold text-ink">原因</b>
-            {f.cause}
-          </p>
-        )}
-        {f.action && (
-          <p className="text-role-assistant">
-            <b className="mr-1.5 font-semibold">动作</b>
-            {f.action}
-          </p>
-        )}
-        {f.gate && (
-          <p className="text-role-system">
-            <b className="mr-1.5 font-semibold text-ink">闸门</b>
-            {String(f.gate).replace(/^-\s*/, "")}
-          </p>
-        )}
+      <div className="ml-[26px]">
+        {f.text && <p className="mb-2 text-[13px] leading-normal text-ink">{f.text}</p>}
+        <dl className="grid grid-cols-[36px_minmax(0,1fr)] gap-x-2 gap-y-1.5 text-[13px] leading-normal">
+          {f.cause && (
+            <>
+              <dt className="font-medium text-role-system">原因</dt>
+              <dd className="text-ink">{f.cause}</dd>
+            </>
+          )}
+          {f.action && (
+            <>
+              <dt className="font-medium text-role-assistant">动作</dt>
+              <dd className="text-role-assistant">{f.action}</dd>
+            </>
+          )}
+          {f.gate && (
+            <>
+              <dt className="font-medium text-role-system">闸门</dt>
+              <dd className="text-ink">{String(f.gate).replace(/^-\s*/, "")}</dd>
+            </>
+          )}
+        </dl>
+        <Refs refs={f.refs} onTurn={onTurn} />
+        <Ack f={f} onAck={onAck} />
       </div>
-      <Refs refs={f.refs} onTurn={onTurn} />
-      <Ack f={f} onAck={onAck} />
     </article>
   );
 }
 
-/** ② 损耗排行 · 按 $ / 秒. */
+/** ② 发现: one card per finding, ordered by impact. Composition lives in ①. */
 export function Losses({
   data,
   onTurn,
@@ -256,55 +265,22 @@ export function Losses({
   if (!list.length) {
     return (
       <Section id="mineLosses">
-        <SectionHead title="损耗排行" count={0} />
-        <p className="text-[13px] text-role-system">
+        <SectionHead title="发现" count={0} />
+        <p className="rounded-[14px] border border-black/[0.06] bg-white p-4 text-[13px] text-role-system">
           {data.n_rows ? "没有信号形成结论" : "还没有足够事件"}
         </p>
       </Section>
     );
   }
 
-  const byUsd = list
-    .filter((f) => Number(f.impact?.usd) > 0)
-    .sort((a, b) => Number(b.impact.usd) - Number(a.impact.usd));
-  const byS = [...list].sort((a, b) => Number(b.impact?.s || 0) - Number(a.impact?.s || 0));
-  const items = (rows: MineFinding[], useUsd: boolean) =>
-    rows.map((f) => ({
-      label: f.title || f.id,
-      value: useUsd ? Number(f.impact.usd) : Number(f.impact?.s) || 0,
-      sub: f.impact?.kind === "estimated" ? "估算" : "实测",
-      color: sevOf(f.sev).color,
-      jump: `loss-${f.id}`,
-    }));
-  const usdItems = items(byUsd, true);
-  const sItems = items(byS, false);
-  const usdDonut = pickKind("bars", usdItems) === "donut";
-  const sDonut = pickKind("bars", sItems) === "donut";
-
   return (
     <Section id="mineLosses">
       <SectionHead
-        title="损耗排行 · 按 $ / 秒"
+        title="发现"
         count={list.length}
-        hint={hasEst ? "含估算项" : undefined}
+        hint={hasEst ? "按影响排序 · 含估算项" : "按影响排序"}
       />
-      <div className="flex flex-col gap-4">
-        {usdItems.length > 0 && (
-          <div>
-            <div className="mb-1.5 text-[12px] text-role-system">
-              {usdDonut ? "按 $ 占比" : "按 $ 排序"}
-            </div>
-            <AnalysisChart kind="bars" items={usdItems} unit="USD" centerSub="损耗构成（$）" />
-          </div>
-        )}
-        <div>
-          <div className="mb-1.5 text-[12px] text-role-system">
-            {sDonut ? "按秒占比（含墙钟空档）" : "按秒排序（含墙钟空档）"}
-          </div>
-          <AnalysisChart kind="bars" items={sItems} unit="s" centerSub="损耗构成（秒）" />
-        </div>
-      </div>
-      <div className="mt-4 flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         {list.map((f, i) => (
           <LossCard key={f.id || i} f={f} i={i} data={data} onTurn={onTurn} onAck={onAck} />
         ))}
