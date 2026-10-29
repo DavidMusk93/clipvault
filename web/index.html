@@ -2654,6 +2654,27 @@
     .backup-stats .backup-row { margin: 9px 0; align-items: baseline; }
     .backup-stats .backup-label { flex: 0 0 auto; }
     .backup-stats .backup-value { max-width: 74%; line-height: 1.35; }
+    /* Backup drawer uses the existing system colors and controls. */
+    #backupDrawer .backup-body { padding-top: 20px; }
+    .backup-overview { padding: 18px; border: 0.5px solid var(--separator); border-radius: 18px; background: rgba(255,255,255,.65); }
+    .backup-overview-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .backup-overview h3 { font-size:18px; letter-spacing:-.025em; margin:0; }
+    .backup-overview p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+    .backup-overview .backup-actions { margin:16px 0 0; }
+    .backup-section-heading { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:24px 0 10px; }
+    .backup-section-heading h3 { font-size:15px; margin:0; }
+    .backup-section-heading span { color:var(--muted); font-size:12px; }
+    #bkDestList { display:flex; flex-direction:column; gap:10px; }
+    #bkDestList > .backup-row { margin:0; padding:14px; border:0.5px solid var(--separator); border-radius:14px; background:rgba(255,255,255,.55); }
+    #bkDestList .backup-label { overflow-wrap:anywhere; }
+    #bkDestList details { margin-top:8px; }
+    #bkDestList summary, #backupDrawer .backup-details > summary { cursor:pointer; color:var(--accent); font-size:12px; width:fit-content; }
+    #bkDestList summary:focus-visible, #backupDrawer summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    #bkDestList .backup-stats { margin:10px 0 0; background:var(--fill); }
+    #backupDrawer .backup-details { margin-top:18px; padding-top:14px; border-top:0.5px solid var(--separator); }
+    #backupDrawer .backup-details > summary { color:var(--ink); font-size:14px; font-weight:600; }
+    #backupDrawer .backup-details .backup-value { font-weight:500; overflow-wrap:anywhere; }
+    #backupDrawer button:disabled { cursor:wait; opacity:.65; }
     .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
     .backup-actions button {
       height: 34px; padding: 0 14px; border-radius: var(--radius-pill); border: 0;
@@ -2862,34 +2883,33 @@
       <button type="button" class="btn-icon" id="backupCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <p style="margin-bottom:12px;color:var(--md-outline)">
-        多备份源 fan-out：一次 <code>sqlite3_backup</code> 制品 → iCloud / Google Drive / 夸克网盘。
-        瘦库 + blobs CAS；latest 分钟级；命名快照默认 ≥30 分钟 ×3。
-      </p>
-      <div class="backup-row"><span class="backup-label">策略</span><span class="backup-value" id="bkPolicy">—</span></div>
-      <div class="backup-row"><span class="backup-label">命名快照数</span><span class="backup-value" id="bkSnapCount">—</span></div>
-      <div class="backup-row"><span class="backup-label">上次命名快照</span><span class="backup-value" id="bkLastSnap">—</span></div>
-      <div class="backup-row">
-        <div>
-          <div style="font-weight:600">启用自动备份</div>
-          <div class="backup-label">剪贴板变更后节流 · 未变跳过 · 多源并行写入</div>
+      <section class="backup-overview" aria-label="备份概览">
+        <div class="backup-overview-top">
+          <div><h3 id="bkOverviewTitle">正在读取备份状态…</h3><p id="bkOverviewDetail">请稍候</p></div>
+          <label class="switch" title="自动备份"><input type="checkbox" id="backupEnabled" aria-label="启用自动备份"/><span></span></label>
         </div>
-        <label class="switch"><input type="checkbox" id="backupEnabled"/><span></span></label>
-      </div>
-      <h3 style="font-size:14px;font-weight:600;margin:12px 0 6px">备份源</h3>
-      <div id="bkDestList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
-      <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>
-      <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
-      <div class="backup-row" id="bkQuarkRow" style="display:none"><span class="backup-label">夸克自动发现</span><span class="backup-value" id="bkQuarkDiscover">—</span></div>
-
-      <div class="backup-row"><span class="backup-label">状态</span><span class="backup-value" id="bkPhase">—</span></div>
-      <div class="backup-row"><span class="backup-label">错误</span><span class="backup-value" id="bkErr">—</span></div>
-      <div class="backup-actions">
-        <button type="button" id="bkRunNow">立即备份</button>
-        <button type="button" class="secondary" id="bkRefresh">刷新状态</button>
-      </div>
-      <h3 style="font-size:14px;font-weight:600;margin-top:8px">命名快照（稀疏历史）</h3><p class="backup-label" style="margin:4px 0 8px">日常恢复优先用 latest；命名快照用于回滚到更早时间点。</p>
+        <div class="backup-actions">
+          <button type="button" id="bkRunNow">立即备份</button>
+          <button type="button" class="secondary" id="bkRefresh">刷新状态</button>
+        </div>
+        <p id="bkActionStatus" role="status" aria-live="polite"></p>
+      </section>
+      <div class="backup-section-heading"><h3>备份位置</h3><span>选择要使用的位置</span></div>
+      <div id="bkDestList"></div>
+      <div class="backup-section-heading"><h3>恢复备份</h3><span>选择一个时间点</span></div>
+      <p class="backup-label" style="margin:0 0 8px">最新备份适合日常恢复，历史快照可用于回到较早的时间。</p>
       <ul class="snap-list" id="bkSnaps"></ul>
+      <details class="backup-details">
+        <summary>备份详情</summary>
+        <div class="backup-row"><span class="backup-label">策略</span><span class="backup-value" id="bkPolicy">—</span></div>
+        <div class="backup-row"><span class="backup-label">历史快照</span><span class="backup-value" id="bkSnapCount">—</span></div>
+        <div class="backup-row"><span class="backup-label">上次历史快照</span><span class="backup-value" id="bkLastSnap">—</span></div>
+        <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>
+        <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
+        <div class="backup-row" id="bkQuarkRow" style="display:none"><span class="backup-label">夸克状态</span><span class="backup-value" id="bkQuarkDiscover">—</span></div>
+        <div class="backup-row"><span class="backup-label">状态</span><span class="backup-value" id="bkPhase">—</span></div>
+        <div class="backup-row"><span class="backup-label">错误</span><span class="backup-value" id="bkErr">—</span></div>
+      </details>
 
       <h3 style="font-size:14px;font-weight:600;margin-top:20px">多机同步（最终一致）</h3>
       <p class="backup-label" style="margin:4px 0 8px">
@@ -12308,18 +12328,19 @@ window.ClipViewMasonry = Masonry;
       row.style.alignItems = 'flex-start';
       let pill;
       if (!os?.configured) pill = '<span class="pill bad">未配置</span>';
+      else if (os.enabled === false) pill = '<span class="pill">已关闭</span>';
       else if (os.phase === 'error') pill = '<span class="pill bad">失败</span>';
       else if (os.inProgress) pill = '<span class="pill warn">上传中</span>';
       else pill = '<span class="pill ok">可用</span>';
-      // Same wording as the cloud-drive rows: 上次 + phase. State words live in the pill.
-      const line = (os?.lastSuccessUnix ? '上次: ' + formatLocalTime(os.lastSuccessUnix) : '尚未成功')
-        + ' · phase: ' + (!os?.configured ? 'not_configured' : (os?.phase || '—'))
+      const phaseText = os?.inProgress ? '正在上传' : os?.phase === 'error' ? '上次上传失败' : os?.phase === 'ok' ? '上传完成' : '等待上传';
+      const line = (os?.lastSuccessUnix ? '上次成功 ' + formatLocalTime(os.lastSuccessUnix) : '尚未成功')
+        + ' · ' + phaseText
         + (os?.queued ? ' · 已排队下一轮' : '')
         + (os?.lastError ? ' · ' + esc(os.lastError) : '');
       row.innerHTML =
         '<div style="min-width:0;flex:1">' +
         '<div style="font-weight:600;display:flex;gap:8px;align-items:center">ostore 远程冷备 ' + pill + '</div>' +
-        '<div class="backup-label" style="word-break:break-all;margin-top:4px">' + esc(os?.baseURL || '—') + '</div>' +
+        '<details data-backup-detail="ostore"><summary>查看位置和详情</summary><div class="backup-label" style="margin-top:6px">' + esc(os?.baseURL || '—') + '</div></details>' +
         (os?.configured ? '' : '<div class="backup-label" style="margin-top:4px;color:var(--warn)">在数据目录 config/ostore-backup.json 写入 {"baseURL":"https://…","token":"…"} 后重启服务</div>') +
         '<div class="backup-label" id="bkOstoreStatus">' + line + '</div>' +
         '<div id="bkOstoreStats" class="backup-stats" style="margin-top:8px"></div>' +
@@ -12328,13 +12349,24 @@ window.ClipViewMasonry = Masonry;
         '<input type="checkbox" data-ostore="1"' + (os && os.enabled === false ? '' : ' checked') + (os?.configured ? '' : ' disabled') + '/><span></span>' +
         '</label>';
       row.querySelector('input[data-ostore]')?.addEventListener('change', async (e) => {
-        const on = e.currentTarget.checked;
-        await fetch(API + '/api/backup/config', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ostoreEnabled: on })
-        });
-        toast(on ? '已启用 ostore 远程冷备' : '已关闭 ostore 远程冷备');
-        refreshBackupStatus();
+        const input = e.currentTarget;
+        const on = input.checked;
+        input.disabled = true;
+        try {
+          const response = await fetch(API + '/api/backup/config', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ostoreEnabled: on })
+          });
+          const result = await response.json();
+          if (!response.ok || result.ok === false) throw new Error(result.message || '设置未保存');
+          toast(on ? '已启用 ostore 远程冷备' : '已关闭 ostore 远程冷备');
+        } catch (error) {
+          input.checked = !on;
+          toast('设置失败：' + (error.message || '请重试'));
+        } finally {
+          input.disabled = false;
+          refreshBackupStatus();
+        }
       });
       return row;
     }
@@ -12376,6 +12408,10 @@ window.ClipViewMasonry = Masonry;
         else { label.textContent = '备份'; }
 
         document.getElementById('backupEnabled').checked = !!s.enabled;
+        const overviewTitle = document.getElementById('bkOverviewTitle');
+        const overviewDetail = document.getElementById('bkOverviewDetail');
+        if (overviewTitle) overviewTitle.textContent = s.inProgress ? '正在备份' : s.lastError ? '备份需要关注' : s.lastSuccessUnix || s.lastSuccessAt ? '备份已完成' : '尚无成功备份';
+        if (overviewDetail) overviewDetail.textContent = (s.enabled ? '自动备份已开启' : '自动备份已关闭') + ' · ' + (s.lastSuccessUnix || s.lastSuccessAt ? '上次成功 ' + formatLocalTime(s.lastSuccessUnix || s.lastSuccessAt) : '等待首次成功') + (s.lastError ? ' · ' + s.lastError : '');
         const bkRootEl = document.getElementById('bkRoot');
         if (bkRootEl) bkRootEl.textContent = (s.hostId ? (s.hostId + ' · ') : '') + (s.backupRootPath || '—');
         document.getElementById('bkLast').textContent = s.lastSuccessUnix != null
@@ -12399,6 +12435,7 @@ window.ClipViewMasonry = Masonry;
 
         const destHost = document.getElementById('bkDestList');
         if (destHost) {
+          const openDetails = new Set([...destHost.querySelectorAll('details[open][data-backup-detail]')].map(el => el.dataset.backupDetail));
           destHost.innerHTML = '';
           const dlist = dests.length ? dests : [
             { id: 'icloud', label: 'iCloud Drive', enabled: true, available: !!s.cloudDocsAvailable, rootPath: s.cloudDocsPath, hint: s.cloudDocsAvailable ? null : '请开启 iCloud 云盘' },
@@ -12409,20 +12446,23 @@ window.ClipViewMasonry = Masonry;
             row.className = 'backup-row';
             row.style.alignItems = 'flex-start';
             let pill;
-            if (!d.available) pill = '<span class="pill bad">未就绪</span>';
+            if (!d.enabled) pill = '<span class="pill">已关闭</span>';
+            else if (!d.available) pill = '<span class="pill bad">未就绪</span>';
             else if (d.type === 'quark' && String(d.lastPhase || '') === 'ok:staging_cloud_listed') pill = '<span class="pill ok">云端可见</span>';
             else if (d.type === 'quark' && String(d.lastPhase || '').startsWith('ok')) pill = '<span class="pill warn">本地暂存</span>';
             else pill = '<span class="pill ok">可用</span>';
             row.innerHTML =
               '<div style="min-width:0;flex:1">' +
               '<div style="font-weight:600;display:flex;gap:8px;align-items:center">' + esc(d.label || d.id) + ' ' + pill + '</div>' +
-              '<div class="backup-label" style="word-break:break-all;margin-top:4px">' + esc(d.rootPath || '—') + '</div>' +
+              (d.type === 'quark' && d.hint ? '<div class="backup-label" style="margin-top:6px;color:var(--warn)">本地暂存；云端完整性尚未验证</div>' : '') +
+              '<details data-backup-detail="' + escAttr(d.id) + '"><summary>查看位置和详情</summary>' +
+              '<div class="backup-label" style="margin-top:6px">' + esc(d.rootPath || '—') + '</div>' +
               (d.hint ? ('<div class="backup-label" style="margin-top:4px;color:var(--warn)">' + esc(d.hint) + '</div>') : '') +
+              '</details>' +
               '<div class="backup-label">' +
               (d.lastSuccessAt || d.lastSuccessUnix != null
-                ? ('上次: ' + esc(formatLocalTime(d.lastSuccessUnix != null ? d.lastSuccessUnix : d.lastSuccessAt)) + (d.lastPhase ? ' · ' : ''))
-                : '') +
-              (d.lastPhase ? 'phase: ' + esc(d.lastPhase) : '') +
+                ? ('上次成功 ' + esc(formatLocalTime(d.lastSuccessUnix != null ? d.lastSuccessUnix : d.lastSuccessAt)))
+                : '尚未成功') +
               (d.lastError ? ' · ' + esc(d.lastError) : '') +
               '</div>' +
               '</div>' +
@@ -12430,19 +12470,31 @@ window.ClipViewMasonry = Masonry;
               '<input type="checkbox" data-dest="' + escAttr(d.id) + '" ' + (d.enabled ? 'checked' : '') + '/><span></span>' +
               '</label>';
             row.querySelector('input[data-dest]')?.addEventListener('change', async (e) => {
-              const id = e.currentTarget.getAttribute('data-dest');
-              const on = e.currentTarget.checked;
-              await fetch(API + '/api/backup/config', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ destinationId: id, destinationEnabled: on })
-              });
-              toast((on ? '已启用 ' : '已关闭 ') + (d.label || id));
-              refreshBackupStatus();
+              const input = e.currentTarget;
+              const id = input.getAttribute('data-dest');
+              const on = input.checked;
+              input.disabled = true;
+              try {
+                const response = await fetch(API + '/api/backup/config', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ destinationId: id, destinationEnabled: on })
+                });
+                const result = await response.json();
+                if (!response.ok || result.ok === false) throw new Error(result.message || '设置未保存');
+                toast((on ? '已启用 ' : '已关闭 ') + (d.label || id));
+              } catch (error) {
+                input.checked = !on;
+                toast('设置失败：' + (error.message || '请重试'));
+              } finally {
+                input.disabled = false;
+                refreshBackupStatus();
+              }
             });
             destHost.appendChild(row);
           });
           // 第 4 个备份源：和上面三行同一套结构（pill + 路径 + 上次/phase + 右侧开关）。
           destHost.appendChild(ostoreRow(os));
+          destHost.querySelectorAll('details[data-backup-detail]').forEach(el => { el.open = openDetails.has(el.dataset.backupDetail); });
           paintOstoreStats(os);
         }
 
@@ -12457,7 +12509,7 @@ window.ClipViewMasonry = Masonry;
           list.forEach(snap => {
             const li = document.createElement('li');
             const origin = snap.origin === 'peer' ? '其他机器' : (snap.origin === 'legacy' ? '旧共享 latest' : (snap.isLatest ? '本机 latest' : '本机快照'));
-            const title = snap.origin === 'peer' ? (snap.host || snap.id) : (snap.isLatest ? 'latest' : snap.id);
+            const title = snap.origin === 'peer' ? (snap.host || snap.id) : (snap.isLatest ? '最新备份' : snap.id);
             li.innerHTML = `
               <div class="snap-row">
                 <strong>${esc(title)}</strong>
@@ -12488,13 +12540,24 @@ window.ClipViewMasonry = Masonry;
     }
 
     document.getElementById('backupEnabled')?.addEventListener('change', async (e) => {
-      const enabled = e.target.checked;
-      await fetch(API + '/api/backup/config', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ enabled })
-      });
-      toast(enabled ? '已开启自动备份（多源）' : '已关闭自动备份');
-      refreshBackupStatus();
+      const input = e.target;
+      const enabled = input.checked;
+      input.disabled = true;
+      try {
+        const response = await fetch(API + '/api/backup/config', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ enabled })
+        });
+        const result = await response.json();
+        if (!response.ok || result.ok === false) throw new Error(result.message || '设置未保存');
+        toast(enabled ? '已开启自动备份' : '已关闭自动备份');
+      } catch (error) {
+        input.checked = !enabled;
+        toast('设置失败：' + (error.message || '请重试'));
+      } finally {
+        input.disabled = false;
+        refreshBackupStatus();
+      }
     });
 
     async function refreshSyncStatus() {
@@ -12546,12 +12609,26 @@ window.ClipViewMasonry = Masonry;
     });
     document.getElementById('syRefresh')?.addEventListener('click', () => refreshSyncStatus());
 
-    document.getElementById('bkRunNow')?.addEventListener('click', async () => {
-      toast('开始备份…');
-      const r = await fetch(API + '/api/backup/run', { method: 'POST' });
-      const j = await r.json();
-      toast(j.message || (j.ok ? '备份完成' : '备份失败'));
-      refreshBackupStatus();
+    document.getElementById('bkRunNow')?.addEventListener('click', async (e) => {
+      const button = e.currentTarget;
+      const status = document.getElementById('bkActionStatus');
+      button.disabled = true;
+      button.textContent = '备份中…';
+      status.textContent = '正在生成备份，请稍候。';
+      try {
+        const r = await fetch(API + '/api/backup/run', { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.message || '备份失败');
+        status.textContent = j.message || '本机备份完成。';
+        toast('本机备份完成');
+      } catch (error) {
+        status.textContent = '备份失败：' + (error.message || '请重试');
+        toast(status.textContent);
+      } finally {
+        button.disabled = false;
+        button.textContent = '立即备份';
+        refreshBackupStatus();
+      }
     });
     document.getElementById('bkRefresh')?.addEventListener('click', refreshBackupStatus);
 
