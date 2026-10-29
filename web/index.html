@@ -2646,8 +2646,15 @@
       font-weight: 550; text-align: right; word-break: break-all; max-width: 60%;
       font-variant-numeric: tabular-nums;
     }
-    .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
-    .backup-actions button {
+    .backup-stats {
+      border: 0.5px solid var(--separator); border-radius: var(--radius-sm);
+      padding: 2px 12px; margin: 0 0 12px; background: rgba(255,255,255,0.55);
+      font-variant-numeric: tabular-nums;
+    }
+    .backup-stats .backup-row { margin: 9px 0; align-items: baseline; }
+    .backup-stats .backup-label { flex: 0 0 auto; }
+    .backup-stats .backup-value { max-width: 74%; line-height: 1.35; }
+    .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }    .backup-actions button {
       height: 34px; padding: 0 14px; border-radius: var(--radius-pill); border: 0;
       font: inherit; font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
       cursor: pointer; background: var(--accent); color: #fff;
@@ -2874,6 +2881,7 @@
         <div style="flex:1;min-width:0"><strong>ostore 远程冷备</strong><div class="backup-label" id="bkOstoreStatus">读取中…</div></div>
         <button type="button" id="bkOstoreRun" class="secondary">备份到 ostore</button>
       </div>
+      <div id="bkOstoreStats" class="backup-stats"></div>
       <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>
       <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
       <div class="backup-row" id="bkQuarkRow" style="display:none"><span class="backup-label">夸克自动发现</span><span class="backup-value" id="bkQuarkDiscover">—</span></div>
@@ -12247,6 +12255,54 @@ window.ClipViewMasonry = Masonry;
       return (n/1048576).toFixed(2) + ' MB';
     }
 
+    function fmtCount(n) {
+      if (n == null || !isFinite(n)) return '—';
+      return Number(n).toLocaleString('en-US');
+    }
+
+    // ostore 冷备统计。live 计数描述本轮（或最近一轮）；lastRun 由服务端持久化，
+    // 重启后仍显示真实数字，而不是「上传 0 · 跳过 0」。
+    function paintOstoreStats(os) {
+      const host = document.getElementById('bkOstoreStats');
+      if (!host) return;
+      if (!os || !os.configured) {
+        host.innerHTML = '<p class="backup-label" style="margin:8px 0">未配置：在数据目录 config/ostore-backup.json 写入 {"baseURL":"https://…","token":"…"} 后重启服务。</p>';
+        return;
+      }
+      const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+      const rows = [];
+      const row = (label, value) => {
+        rows.push('<div class="backup-row"><span class="backup-label">' + label + '</span><span class="backup-value">' + value + '</span></div>');
+      };
+      const total = n(os.total);
+      if (total > 0 || os.inProgress) {
+        row('本轮对象', '上传 ' + fmtCount(n(os.uploaded)) + ' · 跳过 ' + fmtCount(n(os.skipped)) +
+          ' · 未完成 ' + fmtCount(n(os.pending)) + (n(os.failed) ? ' · 失败 ' + fmtCount(n(os.failed)) : '') +
+          (total ? ' / 共 ' + fmtCount(total) : ''));
+        row('本轮字节', fmtBytes(n(os.uploadedBytes)) + ' 上传 · ' + fmtBytes(n(os.skippedBytes)) + ' 跳过');
+        const elapsed = os.inProgress && os.startedUnix ? Math.max(0, Math.round(Date.now() / 1000 - os.startedUnix)) : null;
+        row('耗时', os.durationSeconds != null
+          ? os.durationSeconds.toFixed(1) + ' s'
+          : (elapsed != null ? '进行中 ' + elapsed + ' s' : '—'));
+      }
+      if (n(os.manifestObjects)) row('本地清单', fmtCount(os.manifestObjects) + ' 对象 · ' + fmtBytes(n(os.manifestBytes)));
+      if (n(os.remoteObjects)) row('远端对象', fmtCount(os.remoteObjects) + ' 对象 · ' + fmtBytes(n(os.remoteBytes)));
+      const run = os.lastRun;
+      if (run) {
+        const bits = [
+          run.finishedUnix ? formatLocalTime(run.finishedUnix) : '—',
+          run.phase === 'ok' ? '成功' : '失败',
+          '上传 ' + fmtCount(n(run.uploaded)),
+          '跳过 ' + fmtCount(n(run.skipped))
+        ];
+        if (n(run.failed)) bits.push('失败 ' + fmtCount(run.failed));
+        if (run.durationSeconds != null) bits.push(run.durationSeconds.toFixed(1) + ' s');
+        if (run.error) bits.push(run.error);
+        row('上次运行', bits.map((b) => esc(String(b))).join(' · '));
+      }
+      host.innerHTML = rows.join('');
+    }
+
     async function refreshBackupStatus({ lite = false } = {}) {
       const t0 = performance.now();
       const kind = lite ? 'lite' : 'full';
@@ -12261,10 +12317,11 @@ window.ClipViewMasonry = Masonry;
         const osLabel = document.getElementById('bkOstoreStatus');
         if (osLabel) {
           const state = !os?.configured ? '未配置' : os.inProgress ? '上传中' : os.phase === 'ok' ? '已完成' : os.phase === 'error' ? '失败' : '等待备份';
-          osLabel.textContent = state + (os?.lastSuccessUnix ? ' · 上次成功 ' + formatLocalTime(os.lastSuccessUnix) : '') + (os?.lastError ? ' · ' + os.lastError : '') + (os?.configured ? ' · 上传 ' + (os.uploaded || 0) + ' · 跳过 ' + (os.skipped || 0) : '');
+          osLabel.textContent = state + (os?.lastSuccessUnix ? ' · 上次成功 ' + formatLocalTime(os.lastSuccessUnix) : '') + (os?.lastError ? ' · ' + os.lastError : '');
           const osButton = document.getElementById('bkOstoreRun');
           if (osButton) osButton.disabled = !os?.configured || !!os?.inProgress;
         }
+        paintOstoreStats(os);
         const anyAvail = dests.some(d => d.enabled && d.available)
           || s.cloudDocsAvailable || s.googleDriveAvailable;
         const qd = s.quarkDiscovery;
