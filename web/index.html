@@ -2654,6 +2654,22 @@
     .backup-stats .backup-row { margin: 9px 0; align-items: baseline; }
     .backup-stats .backup-label { flex: 0 0 auto; }
     .backup-stats .backup-value { max-width: 74%; line-height: 1.35; }
+    /* Inline pill action (e.g. 备份到 ostore). Without this the row renders a raw
+       UA <button>: 23px, 2px outset border, no radius — it never lines up with the
+       destination switches on the right edge. */
+    .backup-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; min-height: 30px;
+    }
+    .backup-pill {
+      flex: 0 0 auto; height: 30px; padding: 0 14px;
+      border-radius: var(--radius-pill); border: 0.5px solid var(--separator-strong);
+      background: var(--fill); color: var(--ink);
+      font: inherit; font-size: 12px; font-weight: 600; letter-spacing: -0.01em;
+      cursor: pointer; transition: background var(--press), transform var(--press);
+    }
+    .backup-pill:active { transform: scale(0.97); }
+    .backup-pill:disabled { opacity: 0.45; cursor: default; transform: none; }
     .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }    .backup-actions button {
       height: 34px; padding: 0 14px; border-radius: var(--radius-pill); border: 0;
       font: inherit; font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
@@ -2878,8 +2894,13 @@
       <h3 style="font-size:14px;font-weight:600;margin:12px 0 6px">备份源</h3>
       <div id="bkDestList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
       <div class="backup-row" style="align-items:flex-start">
-        <div style="flex:1;min-width:0"><strong>ostore 远程冷备</strong><div class="backup-label" id="bkOstoreStatus">读取中…</div></div>
-        <button type="button" id="bkOstoreRun" class="secondary">备份到 ostore</button>
+        <div style="flex:1;min-width:0">
+          <div class="backup-head">
+            <strong>ostore 远程冷备</strong>
+            <button type="button" id="bkOstoreRun" class="backup-pill">备份到 ostore</button>
+          </div>
+          <div class="backup-label" id="bkOstoreStatus">读取中…</div>
+        </div>
       </div>
       <div id="bkOstoreStats" class="backup-stats"></div>
       <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>

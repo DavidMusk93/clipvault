@@ -177,3 +177,18 @@ test('paintOstoreStats tells the user what to configure, never a fake zero', { s
   assert.match(host.textContent, /config\/ostore-backup\.json/);
   assert.doesNotMatch(host.textContent, /本轮对象/);
 });
+
+test('the ostore action is a panel pill inside the title row, not a raw UA button', () => {
+  const head = sliceFrom(indexHtml, '<div class="backup-head">', 400);
+  assert.match(head, /<strong>ostore 远程冷备<\/strong>/);
+  assert.match(head, /id="bkOstoreRun" class="backup-pill"/);
+  assert.doesNotMatch(head, /class="secondary"/);
+  const pill = sliceFrom(indexHtml, '    .backup-pill {', 600);
+  assert.match(pill, /height: 30px/);
+  assert.match(pill, /border-radius: var\(--radius-pill\)/);
+  assert.match(pill, /border: 0\.5px solid var\(--separator-strong\)/);
+  assert.match(pill, /font: inherit; font-size: 12px/);
+  assert.match(indexHtml, /\.backup-pill:disabled \{/);
+  // The head must own the layout, otherwise the button drifts out of the row.
+  assert.match(sliceFrom(indexHtml, '    .backup-head {', 300), /justify-content: space-between/);
+});
