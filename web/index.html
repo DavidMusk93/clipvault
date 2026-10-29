@@ -2646,53 +2646,6 @@
       font-weight: 550; text-align: right; word-break: break-all; max-width: 60%;
       font-variant-numeric: tabular-nums;
     }
-    .backup-stats {
-      border: 0.5px solid var(--separator); border-radius: var(--radius-sm);
-      padding: 2px 12px; margin: 0 0 12px; background: rgba(255,255,255,0.55);
-      font-variant-numeric: tabular-nums;
-    }
-    .backup-stats .backup-row { margin: 9px 0; align-items: baseline; }
-    .backup-stats .backup-label { flex: 0 0 auto; }
-    .backup-stats .backup-value { max-width: 74%; line-height: 1.35; }
-    .backup-history-items { display:flex; align-items:end; gap:4px; height:92px; overflow-x:auto; padding:4px 2px; border-bottom:1px solid var(--separator); }
-    .backup-history-items button { flex:0 0 18px; min-height:5px; border:0; border-radius:3px 3px 0 0; background:var(--accent); cursor:pointer; }
-    .backup-history-items button[data-error="true"] { background:var(--danger); }
-    .backup-history-items button[aria-pressed="true"] { outline:2px solid var(--ink); outline-offset:2px; }
-    .backup-history-items button:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
-    .backup-chart { margin:10px 0 12px; }
-    .backup-chart-title { font-weight:600; font-size:12px; margin-bottom:8px; }
-    .backup-chart-track { display:flex; gap:3px; height:12px; }
-    .backup-chart-track span { min-width:0; box-shadow:inset 0 0 0 .5px rgba(255,255,255,.75); }
-    .backup-chart-track .uploaded { background:#0071e3; }
-    .backup-chart-track .skipped { background:#2e7d32; }
-    .backup-chart-track .pending { background:#c47a2c; }
-    .backup-chart-track .failed { background:#c62828; }
-    .backup-chart-legend { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
-    .backup-chart-legend button { font:inherit; font-size:11px; padding:5px 8px; border:0.5px solid var(--separator-strong); border-radius:var(--radius-pill); background:transparent; color:var(--ink); cursor:pointer; }
-    .backup-chart-legend button[aria-pressed="true"] { background:var(--fill); border-color:var(--accent); }
-    .backup-chart-legend button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-    .backup-chart-detail { font-size:12px; color:var(--muted); margin:8px 0 0; }
-    /* Backup drawer uses the existing system colors and controls. */
-    #backupDrawer .backup-body { padding-top: 20px; }
-    .backup-overview { padding: 18px; border: 0.5px solid var(--separator); border-radius: 18px; background: rgba(255,255,255,.65); }
-    .backup-overview-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-    .backup-overview h3 { font-size:18px; letter-spacing:-.025em; margin:0; }
-    .backup-overview p { margin:4px 0 0; color:var(--muted); font-size:12px; }
-    .backup-overview .backup-actions { margin:16px 0 0; }
-    .backup-section-heading { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:24px 0 10px; }
-    .backup-section-heading h3 { font-size:15px; margin:0; }
-    .backup-section-heading span { color:var(--muted); font-size:12px; }
-    #bkDestList { display:flex; flex-direction:column; gap:10px; }
-    #bkDestList > .backup-row { margin:0; padding:14px; border:0.5px solid var(--separator); border-radius:14px; background:rgba(255,255,255,.55); }
-    #bkDestList .backup-label { overflow-wrap:anywhere; }
-    #bkDestList details { margin-top:8px; }
-    #bkDestList summary, #backupDrawer .backup-details > summary { cursor:pointer; color:var(--accent); font-size:12px; width:fit-content; }
-    #bkDestList summary:focus-visible, #backupDrawer summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
-    #bkDestList .backup-stats { margin:10px 0 0; background:var(--fill); }
-    #backupDrawer .backup-details { margin-top:18px; padding-top:14px; border-top:0.5px solid var(--separator); }
-    #backupDrawer .backup-details > summary { color:var(--ink); font-size:14px; font-weight:600; }
-    #backupDrawer .backup-details .backup-value { font-weight:500; overflow-wrap:anywhere; }
-    #backupDrawer button:disabled { cursor:wait; opacity:.65; }
     .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
     .backup-actions button {
       height: 34px; padding: 0 14px; border-radius: var(--radius-pill); border: 0;
@@ -2901,51 +2854,10 @@
       <button type="button" class="btn-icon" id="backupCloseBtn" title="关闭"><span class="material-symbols-outlined">close</span></button>
     </header>
     <div class="backup-body">
-      <section class="backup-overview" aria-label="备份概览">
-        <div class="backup-overview-top">
-          <div><h3 id="bkOverviewTitle">正在读取备份状态…</h3><p id="bkOverviewDetail">请稍候</p></div>
-          <label class="switch" title="自动备份"><input type="checkbox" id="backupEnabled" aria-label="启用自动备份"/><span></span></label>
-        </div>
-        <div class="backup-actions">
-          <button type="button" id="bkRunNow">立即备份</button>
-          <button type="button" class="secondary" id="bkRefresh">刷新状态</button>
-        </div>
-        <p id="bkActionStatus" role="status" aria-live="polite"></p>
-      </section>
-      <div class="backup-section-heading"><h3>备份历史</h3><span>按时间查看每次运行</span></div>
-      <div class="backup-overview" id="bkHistory">
-        <div class="backup-chart-legend" aria-label="历史时间范围">
-          <button type="button" data-history-days="1" aria-pressed="true">24 小时</button>
-          <button type="button" data-history-days="7" aria-pressed="false">7 天</button>
-        </div>
-        <div class="backup-chart-legend" aria-label="备份类型">
-          <button type="button" data-history-kind="local" aria-pressed="true">本机备份</button>
-          <button type="button" data-history-kind="ostore" aria-pressed="false">ostore 上传</button>
-          <button type="button" data-history-kind="all" aria-pressed="false">全部</button>
-        </div>
-        <p class="backup-label" id="bkHistoryCoverage">正在读取历史…</p>
-        <div id="bkHistoryChart"></div>
-        <p class="backup-chart-detail" id="bkHistoryDetail" aria-live="polite"></p>
-      </div>
-      <div class="backup-section-heading"><h3>备份耗时</h3><span>最近 24 小时 · 手动本机备份</span></div>
-      <div class="backup-overview" id="bkMetrics" aria-live="polite">正在读取备份指标…</div>
-      <div class="backup-section-heading"><h3>备份位置</h3><span>选择要使用的位置</span></div>
-      <div id="bkDestList"></div>
-      <div class="backup-section-heading"><h3>恢复备份</h3><span>选择一个时间点</span></div>
-      <p class="backup-label" style="margin:0 0 8px">最新备份适合日常恢复，历史快照可用于回到较早的时间。</p>
-      <ul class="snap-list" id="bkSnaps"></ul>
-      <details class="backup-details">
-        <summary>备份详情</summary>
-        <div class="backup-row"><span class="backup-label">策略</span><span class="backup-value" id="bkPolicy">—</span></div>
-        <div class="backup-row"><span class="backup-label">历史快照</span><span class="backup-value" id="bkSnapCount">—</span></div>
-        <div class="backup-row"><span class="backup-label">上次历史快照</span><span class="backup-value" id="bkLastSnap">—</span></div>
-        <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>
-        <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
-        <div class="backup-row" id="bkQuarkRow" style="display:none"><span class="backup-label">夸克状态</span><span class="backup-value" id="bkQuarkDiscover">—</span></div>
-        <div class="backup-row"><span class="backup-label">状态</span><span class="backup-value" id="bkPhase">—</span></div>
-        <div class="backup-row"><span class="backup-label">错误</span><span class="backup-value" id="bkErr">—</span></div>
-      </details>
+      <div id="bkPanel" data-ui-zone="backup"><p class="backup-label">正在读取备份状态…</p></div>
 
+      <details class="bk-diag bk-legacy-wrap">
+        <summary>多机同步与性能指标</summary>
       <h3 style="font-size:14px;font-weight:600;margin-top:20px">多机同步（最终一致）</h3>
       <p class="backup-label" style="margin:4px 0 8px">
         事务写在 <code>trx/</code> 目录（不是 ops）。云盘负责运输。备份按机器分目录，互不覆盖。
@@ -2981,6 +2893,7 @@
         <button type="button" class="secondary" id="nmRefresh">刷新指标</button>
         <button type="button" class="secondary" id="nmBaseline">标记基线</button>
       </div>
+      </details>
     </div>
   </aside>
 
@@ -12284,276 +12197,68 @@ window.ClipViewMasonry = Masonry;
       if (e.key === 'Escape' && debugDrawer?.classList.contains('open')) closeDebug();
     });
 
-    // ===== CloudDocs backup panel =====
+    // ===== Backup drawer =====
+    // Rendering + interaction live in /assets/backup-panel.mjs (pure builders,
+    // tests/backup-panel.test.mjs). This file owns only the fetch of
+    // /api/backup/status, the top-bar badge and the drawer open/close.
     const bkOpen = document.getElementById('backupOpenBtn');
     const bkDrawer = document.getElementById('backupDrawer');
     const bkScrim = document.getElementById('backupScrim');
-    function openBackup() {
+    let backupPanel = null;
+    let backupPanelLoad = null;
+    let backupLastStatus = null;
+    function loadBackupPanel() {
+      if (backupPanel) return Promise.resolve(backupPanel);
+      if (backupPanelLoad) return backupPanelLoad;
+      backupPanelLoad = (async () => {
+        if (!document.getElementById('backupPanelCss')) {
+          const link = document.createElement('link');
+          link.id = 'backupPanelCss';
+          link.rel = 'stylesheet';
+          link.href = '/assets/backup-panel.css?v=b1';
+          document.head.appendChild(link);
+        }
+        const mod = await import('/assets/backup-panel.mjs?v=b1');
+        backupPanel = mod.mountBackupPanel({
+          root: document.getElementById('bkPanel'),
+          api: API,
+          toast,
+          formatTime: (v) => formatLocalTime(v),
+          timeZone: () => displayTimeZone(),
+          refreshStatus: () => refreshBackupStatus({ lite: false }),
+          onRestored: () => fetchPage({ reset: true }),
+        });
+        if (backupLastStatus) backupPanel.paint(backupLastStatus);
+        return backupPanel;
+      })().catch((e) => {
+        backupPanelLoad = null;
+        console.error(e);
+        const host = document.getElementById('bkPanel');
+        if (host) host.innerHTML = '<p class="backup-label">备份面板加载失败，请重新打开。</p>';
+        return null;
+      });
+      return backupPanelLoad;
+    }
+    async function openBackup() {
       bkDrawer.classList.add('open');
       bkScrim.classList.add('open');
-      refreshBackupStatus({ lite: false });
-      refreshBackupMetrics();
-      refreshBackupHistory();
+      const panel = await loadBackupPanel();
+      await refreshBackupStatus({ lite: false });
+      if (panel && bkDrawer.classList.contains('open')) panel.open();
       refreshSyncStatus();
     }
-    function closeBackup() { bkDrawer.classList.remove('open'); bkScrim.classList.remove('open'); }
+    function closeBackup() {
+      bkDrawer.classList.remove('open');
+      bkScrim.classList.remove('open');
+      backupPanel?.close();
+    }
     bkOpen?.addEventListener('click', openBackup);
     document.getElementById('backupCloseBtn')?.addEventListener('click', closeBackup);
     bkScrim?.addEventListener('click', closeBackup);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && bkDrawer?.classList.contains('open')) closeBackup();
+    });
 
-    function fmtBytes(n) {
-      if (n == null) return '—';
-      if (n < 1024) return n + ' B';
-      if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
-      return (n/1048576).toFixed(2) + ' MB';
-    }
-
-    function fmtCount(n) {
-      if (n == null || !isFinite(n)) return '—';
-      return Number(n).toLocaleString('en-US');
-    }
-
-    // ostore 冷备统计。live 计数描述本轮（或最近一轮）；lastRun 由服务端持久化，
-    // 重启后仍显示真实数字，而不是「上传 0 · 跳过 0」。
-    let ostoreChartSelection = 'uploaded';
-    function paintOstoreStats(os) {
-      const host = document.getElementById('bkOstoreStats');
-      if (!host) return;
-      if (!os || !os.configured) {
-        host.innerHTML = '<p class="backup-label" style="margin:8px 0">未配置：在数据目录 config/ostore-backup.json 写入 {"baseURL":"https://…","token":"…"} 后重启服务。</p>';
-        return;
-      }
-      const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
-      const rows = [];
-      const row = (label, value) => {
-        rows.push('<div class="backup-row"><span class="backup-label">' + label + '</span><span class="backup-value">' + value + '</span></div>');
-      };
-      const total = n(os.total);
-      const sample = total > 0 ? os : os.lastRun;
-      if (sample && n(sample.total) > 0) {
-        const segments = [
-          { key:'uploaded', label:'已上传', value:n(sample.uploaded), explanation:'本轮已上传并校验的对象' },
-          { key:'skipped', label:'已跳过', value:n(sample.skipped), explanation:'远端已有相同内容的对象' },
-          { key:'pending', label:'未完成', value:Math.max(0, n(sample.total) - n(sample.uploaded) - n(sample.skipped) - n(sample.failed)), explanation:'本轮尚未完成的对象' },
-          { key:'failed', label:'失败', value:n(sample.failed), explanation:'本轮处理失败的对象' }
-        ];
-        const selected = segments.find(item => item.key === ostoreChartSelection) || segments[0];
-        const count = n(sample.total);
-        const track = segments.filter(item => item.value > 0).map(item => '<span class="' + item.key + '" style="flex:' + item.value + '"></span>').join('');
-        const legend = segments.map(item => '<button type="button" data-backup-segment="' + item.key + '" aria-pressed="' + (item.key === selected.key) + '">' + item.label + ' ' + fmtCount(item.value) + '</button>').join('');
-        rows.push('<div class="backup-chart"><div class="backup-chart-title">' + (total > 0 && os.inProgress ? '本轮对象进度' : '上次对象处理') + ' · 共 ' + fmtCount(count) + ' 个</div><div class="backup-chart-track" aria-hidden="true">' + track + '</div><div class="backup-chart-legend" aria-label="查看对象处理情况">' + legend + '</div><p class="backup-chart-detail" aria-live="polite">' + selected.explanation + '：' + fmtCount(selected.value) + ' / ' + fmtCount(count) + '（' + (selected.value * 100 / count).toFixed(1) + '%）</p></div>');
-      }
-      if (total > 0 || os.inProgress) {
-        row('本轮对象', '上传 ' + fmtCount(n(os.uploaded)) + ' · 跳过 ' + fmtCount(n(os.skipped)) +
-          ' · 未完成 ' + fmtCount(n(os.pending)) + (n(os.failed) ? ' · 失败 ' + fmtCount(n(os.failed)) : '') +
-          (total ? ' / 共 ' + fmtCount(total) : ''));
-        row('本轮字节', fmtBytes(n(os.uploadedBytes)) + ' 上传 · ' + fmtBytes(n(os.skippedBytes)) + ' 跳过');
-        const elapsed = os.inProgress && os.startedUnix ? Math.max(0, Math.round(Date.now() / 1000 - os.startedUnix)) : null;
-        row('耗时', os.durationSeconds != null
-          ? os.durationSeconds.toFixed(1) + ' s'
-          : (elapsed != null ? '进行中 ' + elapsed + ' s' : '—'));
-      }
-      if (n(os.manifestObjects)) row('本地清单', fmtCount(os.manifestObjects) + ' 对象 · ' + fmtBytes(n(os.manifestBytes)));
-      if (n(os.remoteObjects)) row('远端对象', fmtCount(os.remoteObjects) + ' 对象 · ' + fmtBytes(n(os.remoteBytes)));
-      const run = os.lastRun;
-      if (run) {
-        const bits = [
-          run.finishedUnix ? formatLocalTime(run.finishedUnix) : '—',
-          run.phase === 'ok' ? '成功' : '失败',
-          '上传 ' + fmtCount(n(run.uploaded)),
-          '跳过 ' + fmtCount(n(run.skipped))
-        ];
-        if (n(run.failed)) bits.push('失败 ' + fmtCount(run.failed));
-        if (run.durationSeconds != null) bits.push(run.durationSeconds.toFixed(1) + ' s');
-        if (run.error) bits.push(run.error);
-        row('上次运行', bits.map((b) => esc(String(b))).join(' · '));
-      }
-      host.innerHTML = rows.join('');
-      host.querySelectorAll('[data-backup-segment]').forEach(button => {
-        button.addEventListener('click', () => {
-          ostoreChartSelection = button.dataset.backupSegment;
-          paintOstoreStats(os);
-          host.querySelector('[data-backup-segment="' + ostoreChartSelection + '"]')?.focus();
-        });
-      });
-    }
-
-    // 备份源第 4 行：ostore 远程冷备。三行云盘用什么，它就用什么 —— 同样的
-    // pill、同样的路径/上次/phase 行、同样右侧的开关（写 config 的 enabled），
-    // 不再单独造一个文字按钮。
-    function ostoreRow(os) {
-      const row = document.createElement('div');
-      row.className = 'backup-row';
-      row.style.alignItems = 'flex-start';
-      let pill;
-      if (!os?.configured) pill = '<span class="pill bad">未配置</span>';
-      else if (os.enabled === false) pill = '<span class="pill">已关闭</span>';
-      else if (os.phase === 'error') pill = '<span class="pill bad">失败</span>';
-      else if (os.inProgress) pill = '<span class="pill warn">上传中</span>';
-      else pill = '<span class="pill ok">可用</span>';
-      const phaseText = os?.inProgress ? '正在上传' : os?.phase === 'error' ? '上次上传失败' : os?.phase === 'ok' ? '上传完成' : '等待上传';
-      const line = (os?.lastSuccessUnix ? '上次成功 ' + formatLocalTime(os.lastSuccessUnix) : '尚未成功')
-        + ' · ' + phaseText
-        + (os?.queued ? ' · 已排队下一轮' : '')
-        + (os?.lastError ? ' · ' + esc(os.lastError) : '');
-      row.innerHTML =
-        '<div style="min-width:0;flex:1">' +
-        '<div style="font-weight:600;display:flex;gap:8px;align-items:center">ostore 远程冷备 ' + pill + '</div>' +
-        '<details data-backup-detail="ostore"><summary>查看位置和详情</summary><div class="backup-label" style="margin-top:6px">' + esc(os?.baseURL || '—') + '</div></details>' +
-        (os?.configured ? '' : '<div class="backup-label" style="margin-top:4px;color:var(--warn)">在数据目录 config/ostore-backup.json 写入 {"baseURL":"https://…","token":"…"} 后重启服务</div>') +
-        '<div class="backup-label" id="bkOstoreStatus">' + line + '</div>' +
-        '<div id="bkOstoreStats" class="backup-stats" style="margin-top:8px"></div>' +
-        '</div>' +
-        '<label class="switch" title="启用 ostore 远程冷备">' +
-        '<input type="checkbox" data-ostore="1"' + (os && os.enabled === false ? '' : ' checked') + (os?.configured ? '' : ' disabled') + '/><span></span>' +
-        '</label>';
-      row.querySelector('input[data-ostore]')?.addEventListener('change', async (e) => {
-        const input = e.currentTarget;
-        const on = input.checked;
-        input.disabled = true;
-        try {
-          const response = await fetch(API + '/api/backup/config', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ostoreEnabled: on })
-          });
-          const result = await response.json();
-          if (!response.ok || result.ok === false) throw new Error(result.message || '设置未保存');
-          toast(on ? '已启用 ostore 远程冷备' : '已关闭 ostore 远程冷备');
-        } catch (error) {
-          input.checked = !on;
-          toast('设置失败：' + (error.message || '请重试'));
-        } finally {
-          input.disabled = false;
-          refreshBackupStatus();
-        }
-      });
-      return row;
-    }
-
-    let backupHistoryDays = 1;
-    let backupHistoryKind = 'local';
-    let backupHistoryRequest = 0;
-    async function refreshBackupHistory() {
-      const chart = document.getElementById('bkHistoryChart');
-      const coverage = document.getElementById('bkHistoryCoverage');
-      const detail = document.getElementById('bkHistoryDetail');
-      if (!chart || !coverage || !detail) return;
-      const requestId = ++backupHistoryRequest;
-      const from = Date.now() - backupHistoryDays * 86400000;
-      coverage.textContent = '正在读取历史…';
-      try {
-        const names = ['backup_cycle', 'backup_local_run', 'backup_ostore_run'];
-        const [responses, statusResponse] = await Promise.all([
-          Promise.all(names.map(name => fetch(API + '/api/ui-metrics/recent?name=' + name + '&limit=200&from=' + from))),
-          fetch(API + '/api/backup/status?lite=1')
-        ]);
-        if (responses.some(response => !response.ok) || !statusResponse.ok) throw new Error('指标读取失败');
-        const [datasets, status] = await Promise.all([Promise.all(responses.map(response => response.json())), statusResponse.json()]);
-        if (datasets.some(data => !data.ok || !Array.isArray(data.events))) throw new Error('指标读取失败');
-        if (requestId !== backupHistoryRequest) return;
-        // backup_cycle already records manual runs; exclude their newer duplicate.
-        const events = datasets.flatMap(data => data.events).filter(event =>
-          !(event.name === 'backup_local_run' && event.payload?.kind === 'manual') &&
-          Number.isFinite(event.ts) && Number.isFinite(event.dur_ms) && event.dur_ms >= 0
-        );
-        // Before per-run metrics existed, only the last finished ostore run was saved.
-        // Include that real record once, without pretending earlier runs are known.
-        const last = status.ostore?.lastRun;
-        if (Number.isFinite(last?.finishedUnix) && Number.isFinite(last?.durationSeconds) && last.finishedUnix * 1000 >= from &&
-            !events.some(event => event.name === 'backup_ostore_run' && Math.abs(event.ts - last.finishedUnix * 1000) < 5000)) {
-          events.push({ name:'backup_ostore_run', ts:last.finishedUnix * 1000, dur_ms:last.durationSeconds * 1000,
-            ok:last.phase === 'ok', persisted:true,
-            payload:{ applied:last.uploaded, reused:last.skipped, bytes:last.uploadedBytes } });
-        }
-        events.sort((a, b) => a.ts - b.ts);
-        const limited = datasets.some(data => data.events.length >= 200);
-        coverage.textContent = (limited ? '每种记录最多显示最近 200 次；较早记录可能未显示。' : '显示所选时间内已有的运行记录。') +
-          ' 手动本机备份含既有历史；自动本机备份和 ostore 逐轮记录从新版本开始，ostore 另含此前留存的最后一轮。';
-        const visible = events.filter(event => backupHistoryKind === 'all' || (backupHistoryKind === 'ostore' ? event.name === 'backup_ostore_run' : event.name !== 'backup_ostore_run'));
-        chart.innerHTML = '';
-        detail.textContent = '';
-        if (!visible.length) { chart.textContent = '此时间范围暂无运行记录。'; return; }
-        const list = document.createElement('div');
-        list.className = 'backup-history-items';
-        list.setAttribute('aria-label', '备份运行耗时，按时间从左到右排列');
-        const max = Math.max(...visible.map(event => event.dur_ms), 1);
-        const nameFor = event => event.name === 'backup_ostore_run' ? (event.persisted ? 'ostore 上传（留存的上次运行）' : 'ostore 上传') : event.name === 'backup_cycle' ? '手动本机备份' : event.payload?.kind === 'safety' ? '恢复前安全备份' : '自动本机备份';
-        const describe = event => nameFor(event) + ' · ' + formatLocalTime(event.ts / 1000) + ' · ' + (event.ok === true ? '成功' : event.ok === false ? '失败' : '结果未知') + ' · 耗时 ' + fmtVal(event.dur_ms, 'ms') +
-          (event.name === 'backup_ostore_run' && event.payload ? ' · 上传 ' + (event.payload.applied ?? '—') + ' · 跳过 ' + (event.payload.reused ?? '—') + ' · 上传 ' + (event.payload.bytes != null ? fmtBytes(event.payload.bytes) : '—') : '');
-        visible.forEach((event, i) => {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.style.height = Math.max(5, Math.round(event.dur_ms / max * 78)) + 'px';
-          button.dataset.error = String(event.ok === false);
-          button.setAttribute('aria-label', describe(event));
-          button.setAttribute('aria-pressed', String(i === visible.length - 1));
-          button.title = describe(event);
-          button.addEventListener('click', () => {
-            list.querySelectorAll('button').forEach(item => item.setAttribute('aria-pressed', 'false'));
-            button.setAttribute('aria-pressed', 'true');
-            detail.textContent = describe(event);
-          });
-          list.appendChild(button);
-        });
-        chart.appendChild(list);
-        detail.textContent = describe(visible[visible.length - 1]);
-      } catch (_) {
-        if (requestId !== backupHistoryRequest) return;
-        chart.textContent = '';
-        detail.textContent = '';
-        coverage.textContent = '历史记录读取失败，请刷新状态重试。';
-      }
-    }
-    document.querySelectorAll('[data-history-days]').forEach(button => button.addEventListener('click', () => {
-      backupHistoryDays = Number(button.dataset.historyDays);
-      document.querySelectorAll('[data-history-days]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
-      refreshBackupHistory();
-    }));
-
-    document.querySelectorAll('[data-history-kind]').forEach(button => button.addEventListener('click', () => {
-      backupHistoryKind = button.dataset.historyKind;
-      document.querySelectorAll('[data-history-kind]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
-      refreshBackupHistory();
-    }));
-
-    let backupMetricSelection = 'p50_ms';
-    async function refreshBackupMetrics() {
-      const host = document.getElementById('bkMetrics');
-      if (!host) return;
-      try {
-        const response = await fetch(API + '/api/ui-metrics/summary');
-        if (!response.ok) throw new Error('指标读取失败');
-        const data = await response.json();
-        const metric = (data.names || []).find(item => item.name === 'backup_cycle');
-        if (!metric || !metric.n || metric.p50_ms == null || metric.p95_ms == null || metric.max_ms == null) {
-          host.textContent = '暂无足够的手动本机备份耗时数据。';
-          return;
-        }
-        const items = [
-          { key:'p50_ms', label:'中位数', value:metric.p50_ms, explanation:'一半样本不超过此耗时' },
-          { key:'p95_ms', label:'P95', value:metric.p95_ms, explanation:'95% 的样本不超过此耗时' },
-          { key:'max_ms', label:'最长', value:metric.max_ms, explanation:'窗口内最长的一次耗时' }
-        ];
-        function paint() {
-          const current = items.find(item => item.key === backupMetricSelection) || items[0];
-          const max = Math.max(...items.map(item => item.value), 1);
-          host.innerHTML = '<div class="backup-chart-title">' + fmtCount(metric.n) + ' 次手动本机备份</div>' +
-            '<div class="backup-chart-legend">' + items.map(item => '<button type="button" data-backup-metric="' + item.key + '" aria-pressed="' + (item.key === current.key) + '">' + item.label + ' ' + esc(fmtVal(item.value, 'ms')) + '</button>').join('') + '</div>' +
-            '<div class="backup-chart-track" style="margin-top:10px" aria-hidden="true"><span class="uploaded" style="flex:' + Math.max(current.value, 0.001) + '"></span><span style="flex:' + Math.max(max - current.value, 0.001) + ';background:var(--fill)"></span></div>' +
-            '<p class="backup-chart-detail">' + current.explanation + ' · ' + esc(fmtVal(current.value, 'ms')) + '；不含 ostore 异步上传。</p>';
-          host.querySelectorAll('[data-backup-metric]').forEach(button => button.addEventListener('click', () => {
-            backupMetricSelection = button.dataset.backupMetric;
-            paint();
-            host.querySelector('[data-backup-metric="' + backupMetricSelection + '"]')?.focus();
-          }));
-        }
-        paint();
-      } catch (_) {
-        host.textContent = '备份指标暂时无法读取，请刷新状态重试。';
-      }
-    }
-
-    let backupHistoryMarker = null;
     async function refreshBackupStatus({ lite = false } = {}) {
       const t0 = performance.now();
       const kind = lite ? 'lite' : 'full';
@@ -12561,162 +12266,19 @@ window.ClipViewMasonry = Masonry;
         const res = await fetch(API + '/api/backup/status' + (lite ? '?lite=1' : ''));
         if (!res.ok) throw new Error('status ' + res.status);
         const s = await res.json();
+        // `?lite=1` omits quark discovery; keep the last full reading for the drawer.
+        if (lite && backupLastStatus?.quarkDiscovery && !s.quarkDiscovery) s.quarkDiscovery = backupLastStatus.quarkDiscovery;
+        backupLastStatus = s;
         const btn = document.getElementById('backupOpenBtn');
         const label = document.getElementById('backupBtnLabel');
         const dests = s.destinations || [];
-        const os = s.ostore;
-        const historyMarker = String(s.lastSuccessUnix || '') + ':' + String(os?.lastRun?.finishedUnix || '') + ':' + String(os?.phase || '');
-        if (backupHistoryMarker !== null && backupHistoryMarker !== historyMarker && bkDrawer.classList.contains('open')) refreshBackupHistory();
-        backupHistoryMarker = historyMarker;
         const anyAvail = dests.some(d => d.enabled && d.available)
           || s.cloudDocsAvailable || s.googleDriveAvailable;
-        const qd = s.quarkDiscovery;
-        const qrow = document.getElementById('bkQuarkRow');
-        const qel = document.getElementById('bkQuarkDiscover');
-        if (qrow && qel) {
-          if (qd && (qd.appInstalled || qd.stagingPath)) {
-            qrow.style.display = '';
-            // Prefer short status: cloud list is soft evidence only.
-            let bits = [];
-            if (qd.appInstalled) bits.push('客户端已装');
-            if (qd.stagingHasArtifact) bits.push('本机制品就绪');
-            if (qd.cloudListedClipVaultBackups) bits.push('云端列表可见 ClipVault-Backups');
-            else bits.push('云端列表未见（仍只算本机暂存）');
-            if (qd.accountConfigFound && !qd.anyCategoryBackupEnabled) bits.push('电脑备份分类均为关');
-            qel.textContent = bits.join(' · ') + (qd.stagingPath ? (' · ' + qd.stagingPath) : '');
-          } else {
-            qrow.style.display = 'none';
-          }
-        }
         btn.classList.remove('on', 'warn');
         if (!anyAvail) { btn.classList.add('warn'); label.textContent = '无备份源'; }
         else if (s.enabled) { btn.classList.add('on'); label.textContent = s.inProgress ? '备份中…' : '已备份'; }
         else { label.textContent = '备份'; }
-
-        document.getElementById('backupEnabled').checked = !!s.enabled;
-        const overviewTitle = document.getElementById('bkOverviewTitle');
-        const overviewDetail = document.getElementById('bkOverviewDetail');
-        if (overviewTitle) overviewTitle.textContent = s.inProgress ? '正在备份' : s.lastError ? '备份需要关注' : s.lastSuccessUnix || s.lastSuccessAt ? '备份已完成' : '尚无成功备份';
-        if (overviewDetail) overviewDetail.textContent = (s.enabled ? '自动备份已开启' : '自动备份已关闭') + ' · ' + (s.lastSuccessUnix || s.lastSuccessAt ? '上次成功 ' + formatLocalTime(s.lastSuccessUnix || s.lastSuccessAt) : '等待首次成功') + (s.lastError ? ' · ' + s.lastError : '');
-        const bkRootEl = document.getElementById('bkRoot');
-        if (bkRootEl) bkRootEl.textContent = (s.hostId ? (s.hostId + ' · ') : '') + (s.backupRootPath || '—');
-        document.getElementById('bkLast').textContent = s.lastSuccessUnix != null
-          ? formatLocalTime(s.lastSuccessUnix)
-          : (s.lastSuccessAt ? formatLocalTime(s.lastSuccessAt) : '尚未成功');
-        const pol = document.getElementById('bkPolicy');
-        if (pol) pol.textContent = s.policy || '—';
-        const sc = document.getElementById('bkSnapCount');
-        if (sc) sc.textContent = (s.snapshotCount != null ? s.snapshotCount : (s.snapshots||[]).length) + ' / keep ' + (s.config && s.config.keepSnapshots != null ? s.config.keepSnapshots : '—');
-        const ls = document.getElementById('bkLastSnap');
-        if (ls) {
-          ls.textContent = s.lastSnapshotUnix != null
-            ? formatLocalTime(s.lastSnapshotUnix)
-            : (s.lastSnapshotAt ? formatLocalTime(s.lastSnapshotAt) : '—');
-        }
-        let phase = s.lastPhase || '—';
-        if (s.inProgress) phase = '进行中 · ' + phase;
-        if (s.dirty) phase += ' · dirty';
-        document.getElementById('bkPhase').textContent = phase;
-        document.getElementById('bkErr').textContent = s.lastError || '—';
-
-        const destHost = document.getElementById('bkDestList');
-        if (destHost) {
-          const openDetails = new Set([...destHost.querySelectorAll('details[open][data-backup-detail]')].map(el => el.dataset.backupDetail));
-          destHost.innerHTML = '';
-          const dlist = dests.length ? dests : [
-            { id: 'icloud', label: 'iCloud Drive', enabled: true, available: !!s.cloudDocsAvailable, rootPath: s.cloudDocsPath, hint: s.cloudDocsAvailable ? null : '请开启 iCloud 云盘' },
-            { id: 'gdrive', label: 'Google Drive', enabled: true, available: !!s.googleDriveAvailable, rootPath: s.googleDrivePath, hint: s.googleDriveAvailable ? null : '请安装并登录 Google Drive for Desktop' }
-          ];
-          dlist.forEach(d => {
-            const row = document.createElement('div');
-            row.className = 'backup-row';
-            row.style.alignItems = 'flex-start';
-            let pill;
-            if (!d.enabled) pill = '<span class="pill">已关闭</span>';
-            else if (!d.available) pill = '<span class="pill bad">未就绪</span>';
-            else if (d.type === 'quark' && String(d.lastPhase || '') === 'ok:staging_cloud_listed') pill = '<span class="pill ok">云端可见</span>';
-            else if (d.type === 'quark' && String(d.lastPhase || '').startsWith('ok')) pill = '<span class="pill warn">本地暂存</span>';
-            else pill = '<span class="pill ok">可用</span>';
-            row.innerHTML =
-              '<div style="min-width:0;flex:1">' +
-              '<div style="font-weight:600;display:flex;gap:8px;align-items:center">' + esc(d.label || d.id) + ' ' + pill + '</div>' +
-              (d.type === 'quark' && d.hint ? '<div class="backup-label" style="margin-top:6px;color:var(--warn)">本地暂存；云端完整性尚未验证</div>' : '') +
-              '<details data-backup-detail="' + escAttr(d.id) + '"><summary>查看位置和详情</summary>' +
-              '<div class="backup-label" style="margin-top:6px">' + esc(d.rootPath || '—') + '</div>' +
-              (d.hint ? ('<div class="backup-label" style="margin-top:4px;color:var(--warn)">' + esc(d.hint) + '</div>') : '') +
-              '</details>' +
-              '<div class="backup-label">' +
-              (d.lastSuccessAt || d.lastSuccessUnix != null
-                ? ('上次成功 ' + esc(formatLocalTime(d.lastSuccessUnix != null ? d.lastSuccessUnix : d.lastSuccessAt)))
-                : '尚未成功') +
-              (d.lastError ? ' · ' + esc(d.lastError) : '') +
-              '</div>' +
-              '</div>' +
-              '<label class="switch" title="启用此备份源">' +
-              '<input type="checkbox" data-dest="' + escAttr(d.id) + '" ' + (d.enabled ? 'checked' : '') + '/><span></span>' +
-              '</label>';
-            row.querySelector('input[data-dest]')?.addEventListener('change', async (e) => {
-              const input = e.currentTarget;
-              const id = input.getAttribute('data-dest');
-              const on = input.checked;
-              input.disabled = true;
-              try {
-                const response = await fetch(API + '/api/backup/config', {
-                  method: 'POST', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ destinationId: id, destinationEnabled: on })
-                });
-                const result = await response.json();
-                if (!response.ok || result.ok === false) throw new Error(result.message || '设置未保存');
-                toast((on ? '已启用 ' : '已关闭 ') + (d.label || id));
-              } catch (error) {
-                input.checked = !on;
-                toast('设置失败：' + (error.message || '请重试'));
-              } finally {
-                input.disabled = false;
-                refreshBackupStatus();
-              }
-            });
-            destHost.appendChild(row);
-          });
-          // 第 4 个备份源：和上面三行同一套结构（pill + 路径 + 上次/phase + 右侧开关）。
-          destHost.appendChild(ostoreRow(os));
-          destHost.querySelectorAll('details[data-backup-detail]').forEach(el => { el.open = openDetails.has(el.dataset.backupDetail); });
-          paintOstoreStats(os);
-        }
-
-        const ul = document.getElementById('bkSnaps');
-        ul.innerHTML = '';
-        const list = [];
-        if (s.latest) list.push(s.latest);
-        (s.snapshots || []).forEach(x => list.push(x));
-        if (!list.length) {
-          ul.innerHTML = '<li class="snap-meta">暂无快照。开启备份或点「立即备份」。</li>';
-        } else {
-          list.forEach(snap => {
-            const li = document.createElement('li');
-            const origin = snap.origin === 'peer' ? '其他机器' : (snap.origin === 'legacy' ? '旧共享 latest' : (snap.isLatest ? '本机 latest' : '本机快照'));
-            const title = snap.origin === 'peer' ? (snap.host || snap.id) : (snap.isLatest ? '最新备份' : snap.id);
-            li.innerHTML = `
-              <div class="snap-row">
-                <strong>${esc(title)}</strong>
-                <button type="button" class="secondary" data-restore="${escAttr(snap.id)}" style="height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--md-outline-v);background:var(--md-surface-c);cursor:pointer;font-size:12px">恢复</button>
-              </div>
-              <div class="snap-meta">${esc(origin)}${snap.host && snap.origin !== 'self' ? ' · ' + esc(snap.host) : ''} · ${snap.createdAtUnix != null ? formatLocalTime(snap.createdAtUnix) : (snap.createdAt ? formatLocalTime(snap.createdAt) : '')} · ${fmtBytes(snap.byteSize)} · items ${snap.itemCount ?? '—'}</div>
-              <div class="snap-meta" style="word-break:break-all">${(snap.sha256||'').slice(0,16)}…</div>`;
-            li.querySelector('[data-restore]')?.addEventListener('click', async (e) => {
-              const id = e.currentTarget.getAttribute('data-restore');
-              if (!confirm('从快照恢复将替换当前数据库。\\n恢复前会自动再备份一份安全快照。\\n\\n确认恢复: ' + id + ' ?')) return;
-              const r = await fetch(API + '/api/backup/restore', {
-                method: 'POST', headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({ id })
-              });
-              const j = await r.json();
-              toast(j.message || (j.ok ? '恢复完成' : '恢复失败'));
-              if (j.ok) { await fetchPage({ reset: true }); refreshBackupStatus(); }
-            });
-            ul.appendChild(li);
-          });
-        }
+        if (backupPanel && bkDrawer.classList.contains('open')) backupPanel.paint(s);
         nm('wall_backup', { dur_ms: performance.now() - t0, ok: true, payload: { kind, phase: 'end' } });
       } catch (e) {
         console.error(e);
@@ -12724,27 +12286,6 @@ window.ClipViewMasonry = Masonry;
         document.getElementById('backupBtnLabel').textContent = '备份?';
       }
     }
-
-    document.getElementById('backupEnabled')?.addEventListener('change', async (e) => {
-      const input = e.target;
-      const enabled = input.checked;
-      input.disabled = true;
-      try {
-        const response = await fetch(API + '/api/backup/config', {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ enabled })
-        });
-        const result = await response.json();
-        if (!response.ok || result.ok === false) throw new Error(result.message || '设置未保存');
-        toast(enabled ? '已开启自动备份' : '已关闭自动备份');
-      } catch (error) {
-        input.checked = !enabled;
-        toast('设置失败：' + (error.message || '请重试'));
-      } finally {
-        input.disabled = false;
-        refreshBackupStatus();
-      }
-    });
 
     async function refreshSyncStatus() {
       try {
@@ -12794,31 +12335,6 @@ window.ClipViewMasonry = Masonry;
       if (j.ok) mergeHead();
     });
     document.getElementById('syRefresh')?.addEventListener('click', () => refreshSyncStatus());
-
-    document.getElementById('bkRunNow')?.addEventListener('click', async (e) => {
-      const button = e.currentTarget;
-      const status = document.getElementById('bkActionStatus');
-      button.disabled = true;
-      button.textContent = '备份中…';
-      status.textContent = '正在生成备份，请稍候。';
-      try {
-        const r = await fetch(API + '/api/backup/run', { method: 'POST' });
-        const j = await r.json();
-        if (!r.ok || !j.ok) throw new Error(j.message || '备份失败');
-        status.textContent = j.message || '本机备份完成。';
-        toast('本机备份完成');
-      } catch (error) {
-        status.textContent = '备份失败：' + (error.message || '请重试');
-        toast(status.textContent);
-      } finally {
-        button.disabled = false;
-        button.textContent = '立即备份';
-        refreshBackupStatus();
-        refreshBackupMetrics();
-        refreshBackupHistory();
-      }
-    });
-    document.getElementById('bkRefresh')?.addEventListener('click', () => { refreshBackupStatus(); refreshBackupMetrics(); refreshBackupHistory(); });
 
     const NM_BASELINE_KEY = 'clipvault.metrics.baseline.v1';
     let currentSummary = null;
