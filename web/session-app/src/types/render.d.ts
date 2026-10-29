@@ -17,6 +17,7 @@ declare module "@render" {
   export function layoutKey(item: LayoutItem): string;
   export function bundleTitle(rows: ImRow[]): string;
   export function rowPreview(row: ImRow): string;
+  export function parseHookTs(ts: unknown): Date | null;
   export function localDateTime(ts: unknown): string;
   export function relLocalTime(ts: unknown, nowMs?: number): string;
   export function recencyTone(ts: unknown, nowMs?: number): string;

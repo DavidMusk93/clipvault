@@ -1,6 +1,6 @@
 import type { Mine, MineTable } from "../../api/mine";
 import { Table, Td, Th } from "../../components/ui/table";
-import { colorAt, isKnownPhase, MINE_NUM_COLS, phaseColor, phaseLabel, pickKind } from "./lib";
+import { colorAt, isKnownPhase, ledgerChart, MINE_NUM_COLS, phaseColor, phaseLabel } from "./lib";
 import { AnalysisChart } from "./MineChart";
 import { Section, SectionHead } from "./Section";
 
@@ -9,10 +9,12 @@ function TableChart({ t }: { t: MineTable }) {
   if (!c) return null;
   const rows = t.rows || [];
   if (!rows.length) return null;
-  const picked = pickKind(
+  const picked = ledgerChart(
     c.kind,
     rows.map((r) => ({ value: Number(r[c.value] ?? 0) })),
   );
+  // The table below already carries an in-cell bar per numeric column.
+  if (!picked) return null;
   const items = rows.map((r, i) => {
     const raw = String(r[c.label] ?? "");
     const phase = isKnownPhase(raw);
@@ -27,7 +29,7 @@ function TableChart({ t }: { t: MineTable }) {
   });
   return (
     <div className="my-2">
-      <AnalysisChart kind={c.kind} items={items} unit={c.unit || ""} centerSub={t.caption} />
+      <AnalysisChart kind={picked} items={items} unit={c.unit || ""} centerSub={t.caption} />
     </div>
   );
 }
@@ -68,7 +70,7 @@ function DataTable({ t }: { t: MineTable }) {
                 const raw = row[c.id] ?? "";
                 if (!MINE_NUM_COLS.has(c.id)) {
                   return (
-                    <Td key={c.id} className="max-w-[300px] truncate py-1.5" title={String(raw)}>
+                    <Td key={c.id} className="max-w-[320px] truncate py-1.5" title={String(raw)}>
                       {String(raw)}
                     </Td>
                   );
@@ -102,7 +104,7 @@ export function Ledger({ data }: { data: Mine }) {
   if (!blocks.length) return null;
   return (
     <Section id="mineLedger">
-      <SectionHead title="账本 · 事实" count={blocks.length} hint="始终展开" />
+      <SectionHead title="账本" count={blocks.length} hint="事实计数 · 始终展开" />
       <div className="flex flex-col gap-3">
         {blocks.map(([id, b]) => {
           const axis = b.axis === "user" ? "user" : "agent";
@@ -111,21 +113,20 @@ export function Ledger({ data }: { data: Mine }) {
             <section
               key={id}
               id={`blk-${id}`}
-              className={`scroll-mt-12 rounded-[14px] border border-black/[0.06] border-l-2 bg-white p-4 ${
-                axis === "user" ? "border-l-role-user" : "border-l-role-assistant"
-              }`}
+              className="scroll-mt-4 rounded-[14px] border border-black/[0.06] bg-white p-4"
             >
-              <div className="mb-1.5 flex items-baseline gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-role-system">
-                  {axis === "user" ? "用户" : "Agent"}
-                </span>
-                <h3
-                  className={`flex-1 text-[14px] font-semibold tracking-[-0.01em] ${
-                    axis === "user" ? "text-role-user" : "text-role-assistant"
+              <div className="mb-1 flex items-center gap-2">
+                <i
+                  className={`size-2 shrink-0 rounded-full ${
+                    axis === "user" ? "bg-role-user" : "bg-role-assistant"
                   }`}
-                >
+                />
+                <h3 className="flex-1 text-[14px] font-semibold tracking-[-0.01em] text-ink">
                   {b.title || id}
                 </h3>
+                <span className="text-[11.5px] text-role-system">
+                  {axis === "user" ? "用户侧" : "Agent 侧"}
+                </span>
               </div>
               {b.note && (
                 <p className="mb-1 text-[12.5px] leading-relaxed text-role-system">{b.note}</p>

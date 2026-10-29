@@ -1,4 +1,5 @@
 import { CHART_PALETTE, colorAt, fmtValue, PHASE_COLORS, SEV_COLORS } from "@charts";
+import { parseHookTs } from "@render";
 import type { Mine } from "../../api/mine";
 
 /**
@@ -187,3 +188,200 @@ export const mineDraftMarkdown = (data: Mine | null): string => {
     "",
   ].join("\n");
 };
+
+// ---------------------------------------------------------------------------
+// Sheet readings (pure; tested in lib.test.ts). The sheet answers, in order:
+// how bad was it → where did the loss go → which turn → the ledger behind it.
+// ---------------------------------------------------------------------------
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const dayOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const hmOf = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+/** Local HH:mm of a hook timestamp (naive UTC in the store). */
+export const localHm = (ts: unknown): string => {
+  const d = parseHookTs(ts);
+  return d ? hmOf(d) : "";
+};
+
+/** Analysis window in local time, minutes resolution. Never raw UTC microseconds. */
+export function windowText(w: { from?: unknown; to?: unknown } | null | undefined): string {
+  const a = parseHookTs(w?.from);
+  const b = parseHookTs(w?.to);
+  if (!a || !b) return "";
+  if (dayOf(a) === dayOf(b)) return `${dayOf(a)} ${hmOf(a)}–${hmOf(b)}`;
+  return `${dayOf(a).slice(5)} ${hmOf(a)} – ${dayOf(b).slice(5)} ${hmOf(b)}`;
+}
+
+export type LossPart = {
+  id: string;
+  label: string;
+  s: number;
+  usd: number;
+  kind: string;
+  color: string;
+};
+
+/** One hue for loss, stepped by rank: the legend names the parts, colour only says "loss". */
+const LOSS_RAMP = [1, 0.72, 0.52, 0.36, 0.24];
+
+/**
+ * Losses that share one axis. `idle` is a wall-clock gap between events, not
+ * tool time (docs/session-analysis.md L1g), so it never joins the composition
+ * or the shared bar scale — in a 7-day window it would be 99% of the bar.
+ */
+export function lossParts(data: Mine | null | undefined): {
+  parts: LossPart[];
+  idle: LossPart | null;
+  totalS: number;
+  totalUsd: number;
+} {
+  const all = (data?.losses || []).map((l) => ({
+    id: String(l.id),
+    label: String(l.label || l.id),
+    s: Number(l.s) || 0,
+    usd: Number(l.usd) || 0,
+    kind: String(l.kind || "measured"),
+    color: SEV_COLORS.high,
+  }));
+  const idleRaw = all.find((l) => l.id === "idle" && l.s > 0) || null;
+  const parts = all
+    .filter((l) => l.id !== "idle" && l.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .map((l, i) => ({
+      ...l,
+      color: `rgba(194,65,12,${LOSS_RAMP[Math.min(i, LOSS_RAMP.length - 1)]})`,
+    }));
+  return {
+    parts,
+    idle: idleRaw ? { ...idleRaw, color: "rgba(60,60,67,0.30)" } : null,
+    totalS: parts.reduce((a, l) => a + l.s, 0),
+    totalUsd: all.reduce((a, l) => a + l.usd, 0),
+  };
+}
+
+export type Tone = "good" | "ok" | "warn" | "bad";
+export const scoreTone = (score: number): Tone =>
+  score >= 85 ? "good" : score >= 70 ? "ok" : score >= 50 ? "warn" : "bad";
+
+/** The status card in one sentence + one line of facts. */
+export function verdictHeadline(data: Mine): {
+  score: number | null;
+  grade: string;
+  tone: Tone;
+  title: string;
+  detail: string;
+  idle: string;
+} {
+  const s = data.summary || {};
+  const h = s.health;
+  const score = h ? Number(h.score) || 0 : null;
+  const lp = lossParts(data);
+  const top = lp.parts[0];
+  const title =
+    lp.totalS > 0
+      ? `可归因损耗 ${mineSpan(lp.totalS)}${lp.totalUsd > 0 ? ` · ${mineUsd(lp.totalUsd)}` : ""}`
+      : "没有可归因的损耗";
+  const facts = [
+    top ? `最大一项 ${top.label} ${mineSpan(top.s)}` : "",
+    `${Number(s.n_turns) || 0} 回合`,
+    `${Number(s.n_tools) || 0} 工具`,
+  ].filter(Boolean);
+  return {
+    score,
+    grade: h?.grade || "",
+    tone: scoreTone(score ?? 0),
+    title,
+    detail: facts.join(" · "),
+    idle: lp.idle
+      ? `另有长空档 ${mineSpan(lp.idle.s)}（事件之间的墙钟间隔，不与工具耗时同轴）`
+      : "",
+  };
+}
+
+/** KPI grid: data-driven from `metrics` so each number carries its baseline Δ. */
+export const KPI_IDS = [
+  "work_s",
+  "wait_s",
+  "fail_n",
+  "extra_trips",
+  "tools_per_turn",
+  "reread_extra",
+  "locate_s",
+  "waste_pct",
+] as const;
+
+export const metricText = (m: { value?: unknown; unit?: string } | null | undefined): string => {
+  if (!m || m.value === null || m.value === undefined || m.value === "") return "—";
+  if (m.unit === "s") return mineSpan(m.value);
+  const n = Number(m.value);
+  // Small ratios (2.87 次/文件) must keep their decimals; fmtValue rounds to 0.
+  const digits = Number.isFinite(n) && !Number.isInteger(n) && Math.abs(n) < 10 ? 2 : 1;
+  return fmtValue(m.value, m.unit === "次" ? "" : m.unit || "", digits);
+};
+
+export type TurnBar = {
+  index: number;
+  pct: number;
+  fail: boolean;
+  color: string;
+  phase: string;
+};
+
+/** Turn strip marks: height = tool wall clock on one scale, colour = phase, fail flagged. */
+export function turnBars(turns: MineTurnLike[]): TurnBar[] {
+  const max = Math.max(1, ...turns.map((t) => Number(t.wall_s) || 0));
+  return turns.map((t) => ({
+    index: Number(t.index),
+    pct: Math.max(4, Math.round((100 * (Number(t.wall_s) || 0)) / max)),
+    fail: Number(t.fails) > 0,
+    color: phaseColor(String(t.phase), 0),
+    phase: String(t.phase),
+  }));
+}
+
+type MineTurnLike = {
+  index: number;
+  phase: string;
+  ts: string;
+  wall_s?: number;
+  fails?: number;
+  tools?: number;
+  cost_usd?: number;
+};
+
+/** Phase legend under the strip: where the wall clock went, by phase. */
+export function phaseTotals(turns: MineTurnLike[]) {
+  const by = new Map<string, number>();
+  for (const t of turns) by.set(t.phase, (by.get(t.phase) || 0) + (Number(t.wall_s) || 0));
+  return [...by.entries()]
+    .filter(([, s]) => s > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([phase, s]) => ({ phase, label: phaseLabel(phase), s, color: phaseColor(phase, 0) }));
+}
+
+export function turnReadout(t: MineTurnLike): string {
+  return [
+    `#${t.index}`,
+    phaseLabel(t.phase),
+    localHm(t.ts),
+    mineSpan(t.wall_s),
+    `${Number(t.tools) || 0} 工具`,
+    Number(t.fails) ? `${Number(t.fails)} 失败` : "",
+    Number(t.cost_usd) ? mineUsd(t.cost_usd) : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * Ledger chart policy. The table already draws an in-cell magnitude bar for each
+ * numeric column, so a `bars` chart of the same column only repeats it; a ring
+ * with a single part is a filled circle that says "100%". Neither is drawn.
+ */
+export function ledgerChart(declared: string, items: { value: number }[]): ChartKind | null {
+  const picked = pickKind(declared, items);
+  if (picked === "bars") return null;
+  if (picked === "donut" && items.filter((i) => Number(i.value) > 0).length < 2) return null;
+  return picked;
+}

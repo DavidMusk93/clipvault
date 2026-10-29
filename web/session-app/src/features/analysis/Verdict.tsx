@@ -1,154 +1,253 @@
+import { useState } from "react";
 import type { Mine } from "../../api/mine";
-import { deltaText, deltaTone, metricOf, mineSpan, mineUsd } from "./lib";
-import { CompositionBar, Donut } from "./MineChart";
-import { Section, SectionHead } from "./Section";
+import { cn } from "../../lib/cn";
+import {
+  deltaText,
+  deltaTone,
+  fmtValue,
+  KPI_IDS,
+  lossParts,
+  metricOf,
+  metricText,
+  mineSpan,
+  mineUsd,
+  pct,
+  type Tone,
+  verdictHeadline,
+} from "./lib";
+import { Card, Section } from "./Section";
 
-const scoreClass = (score: number) =>
-  score >= 85
-    ? "text-mine-good"
-    : score >= 70
-      ? "text-honey"
-      : score >= 50
-        ? "text-mine-loss"
-        : "text-red-700";
+const TONE_TEXT: Record<Tone, string> = {
+  good: "text-mine-good",
+  ok: "text-honey",
+  warn: "text-mine-loss",
+  bad: "text-red-700",
+};
+const TONE_RING: Record<Tone, string> = {
+  good: "#2e7d32",
+  ok: "#c47a2c",
+  warn: "#c2410c",
+  bad: "#b91c1c",
+};
 
-/** ① 损耗判定: score + KPI + 时间/钱构成 + 缓存环形 (golden-ratio grid). */
-export function Verdict({ data }: { data: Mine }) {
+/** Score as a ring: the number is the reading, the arc only restates it. */
+function ScoreRing({ score, grade, tone }: { score: number | null; grade: string; tone: Tone }) {
+  const r = 30;
+  const c = 2 * Math.PI * r;
+  const v = Math.max(0, Math.min(100, score ?? 0));
+  return (
+    <div
+      className="relative size-[76px] shrink-0"
+      role="img"
+      aria-label={`健康分 ${score ?? "—"} ${grade}`}
+    >
+      <svg viewBox="0 0 76 76" className="size-full -rotate-90" aria-hidden="true">
+        <circle cx="38" cy="38" r={r} fill="none" stroke="rgba(60,60,67,0.10)" strokeWidth="6" />
+        <circle
+          cx="38"
+          cy="38"
+          r={r}
+          fill="none"
+          stroke={TONE_RING[tone]}
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeDasharray={`${(c * v) / 100} ${c}`}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <b className={cn("text-[24px] font-bold leading-none tabular-nums", TONE_TEXT[tone])}>
+          {score ?? "—"}
+        </b>
+        <span className="mt-1 text-[11px] text-role-system">{grade}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Loss composition: one hue (loss), parts ordered by size, numbers beside every
+ * mark. Hovering a legend row lights its segment; clicking jumps to the card.
+ */
+function LossBar({ data, onJump }: { data: Mine; onJump: (id: string) => void }) {
+  const { parts, totalS } = lossParts(data);
+  const [hot, setHot] = useState<string | null>(null);
+  if (!parts.length) return null;
+  return (
+    <div className="mt-4">
+      <div className="flex h-2.5 gap-[3px]" aria-hidden="true">
+        {parts.map((p) => (
+          <i
+            key={p.id}
+            className="block h-full transition-opacity"
+            style={{
+              flex: `${Math.max(p.s, totalS * 0.012)} 1 0`,
+              background: p.color,
+              opacity: hot && hot !== p.id ? 0.25 : 1,
+            }}
+          />
+        ))}
+      </div>
+      <ul className="mt-2.5 flex flex-col">
+        {parts.map((p) => (
+          <li key={p.id}>
+            <button
+              type="button"
+              onMouseEnter={() => setHot(p.id)}
+              onMouseLeave={() => setHot(null)}
+              onFocus={() => setHot(p.id)}
+              onBlur={() => setHot(null)}
+              onClick={() => onJump(`loss-${p.id}`)}
+              className="flex h-7 w-full items-center gap-2 rounded-[6px] px-1 text-left text-[12.5px] hover:bg-black/[0.03]"
+            >
+              <i className="size-2.5 shrink-0" style={{ background: p.color }} />
+              <span className="min-w-0 flex-1 truncate text-ink">{p.label}</span>
+              <b className="font-semibold tabular-nums text-ink">{mineSpan(p.s)}</b>
+              <span className="w-11 text-right tabular-nums text-role-system">
+                {pct(p.s, totalS).toFixed(0)}%
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Input tokens served from cache vs not: a meter, not a ring that is always full. */
+function CostCard({ data }: { data: Mine }) {
   const s = data.summary || {};
-  const h = s.health || { score: 0, grade: "" };
-  const flow = s.flow || {};
-  const losses = data.losses || [];
-  const lossS = losses.reduce((a, l) => a + (Number(l.s) || 0), 0);
-  const lossUsd = losses.reduce((a, l) => a + (Number(l.usd) || 0), 0);
-  const score = Number(h.score) || 0;
-
-  const kpis = [
-    { label: "工作秒", value: mineSpan(s.work_s), id: "work_s", tone: "text-mine-time" },
-    { label: "等待秒", value: mineSpan(s.wait_s), id: "wait_s", tone: "text-mine-time" },
-    { label: "可归因损耗", value: mineSpan(lossS), id: "loss_s", tone: "text-mine-loss" },
-    { label: "失败调用", value: String(s.fail_n ?? 0), id: "fail_n", tone: "text-mine-loss" },
-    {
-      label: "额外往返",
-      value: String(flow.extra_roundtrips ?? 0),
-      id: "extra_trips",
-      tone: "text-mine-loss",
-    },
-    {
-      label: "费用",
-      value: s.usage_turns ? mineUsd(s.cost_usd) : "—",
-      id: "cost_usd",
-      tone: "text-mine-money",
-    },
-    {
-      label: "缓存命中",
-      value: s.usage_turns ? `${s.cache_hit_pct}%` : "—",
-      id: "cache_hit_pct",
-      tone: "text-mine-money",
-    },
-    {
-      label: "工具/回合",
-      value: String(s.tools_per_turn ?? 0),
-      id: "tools_per_turn",
-      tone: "text-ink",
-    },
-  ];
-
-  const workOk = Math.max(0, (Number(s.work_s) || 0) - (Number(s.fail_s) || 0));
-  const timeItems = [
-    { label: "工作（不含失败）", value: workOk, color: "#0071e3" },
-    { label: "等待", value: Number(s.wait_s) || 0, color: "rgba(60,60,67,0.38)" },
-    { label: "失败", value: Number(s.fail_s) || 0, color: "#c2410c" },
-  ];
-  const tokenItems = [
-    { label: "输出", value: Number(s.tokens_out) || 0, color: "#2f8f83" },
-    { label: "写缓存", value: Number(s.cache_write) || 0, color: "#c47a2c" },
-    { label: "缓存读", value: Number(s.cache_read) || 0, color: "rgba(47,143,131,0.40)" },
-  ];
+  const cost = metricOf(data, "cost_usd");
+  const hit = metricOf(data, "cache_hit_pct");
   const cache = data.series?.cache;
-  const cacheItems = [
-    { label: "缓存读", value: Number(cache?.read) || 0, color: "#2f8f83" },
-    { label: "未缓存输入", value: Number(cache?.uncached) || 0, color: "#c47a2c" },
-  ];
-  const loop = data.loop;
+  const read = Number(cache?.read) || 0;
+  const uncached = Number(cache?.uncached) || 0;
+  if (!s.usage_turns) {
+    return (
+      <Card className="flex flex-col justify-center">
+        <span className="text-[12px] text-role-system">费用</span>
+        <b className="mt-1 text-[20px] font-semibold text-ink">—</b>
+        <span className="mt-1 text-[12px] text-role-system">
+          无计费数据（本窗口没有 usage 回合）
+        </span>
+      </Card>
+    );
+  }
+  const dCost = deltaText(cost);
+  const dHit = deltaText(hit);
+  return (
+    <Card className="flex flex-col">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[12px] text-role-system">费用</span>
+        <Delta text={dCost} tone={deltaTone(cost)} />
+      </div>
+      <b className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.02em] tabular-nums text-mine-money">
+        {mineUsd(s.cost_usd)}
+      </b>
+      <div className="mt-4 flex items-baseline justify-between gap-3">
+        <span className="text-[12px] text-role-system">
+          缓存命中 <b className="font-semibold tabular-nums text-ink">{s.cache_hit_pct}%</b>
+        </span>
+        <Delta text={dHit} tone={deltaTone(hit)} />
+      </div>
+      <div className="mt-2 flex h-2.5 gap-[3px]" aria-hidden="true">
+        <i className="block h-full bg-mine-money" style={{ flex: `${read} 1 0` }} />
+        <i
+          className="block h-full bg-honey"
+          style={{ flex: `${Math.max(uncached, (read + uncached) * 0.012)} 1 0` }}
+        />
+      </div>
+      <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px]">
+        <dt className="flex items-center gap-1.5 text-role-system">
+          <i className="size-2.5 bg-mine-money" />
+          缓存读
+        </dt>
+        <dd className="text-right font-semibold tabular-nums text-ink">{fmtValue(read, "tok")}</dd>
+        <dt className="flex items-center gap-1.5 text-role-system">
+          <i className="size-2.5 bg-honey" />
+          未缓存输入
+        </dt>
+        <dd className="text-right font-semibold tabular-nums text-ink">
+          {fmtValue(uncached, "tok")}
+        </dd>
+        <dt className="pl-4 text-role-system">输出</dt>
+        <dd className="text-right tabular-nums text-ink">{fmtValue(s.tokens_out, "tok")}</dd>
+        <dt className="pl-4 text-role-system">写缓存</dt>
+        <dd className="text-right tabular-nums text-ink">{fmtValue(s.cache_write, "tok")}</dd>
+      </dl>
+    </Card>
+  );
+}
 
+function Delta({ text, tone }: { text: string; tone: string }) {
+  if (!text) return null;
+  return (
+    <span
+      className={cn(
+        "text-[11.5px] tabular-nums",
+        tone === "up" ? "text-mine-loss" : tone === "down" ? "text-mine-good" : "text-role-system",
+      )}
+      title="较对照窗口"
+    >
+      {text}
+    </span>
+  );
+}
+
+/** ① 损耗判定: verdict card (1.618) + cost card (1), then the KPI grid. */
+export function Verdict({ data, onJump }: { data: Mine; onJump: (id: string) => void }) {
+  const v = verdictHeadline(data);
+  const loop = data.loop;
+  const kpis = KPI_IDS.map((id) => metricOf(data, id)).filter(
+    (m): m is NonNullable<typeof m> => !!m,
+  );
   return (
     <Section id="mineVerdict">
-      <SectionHead
-        title="损耗判定"
-        count={losses.length}
-        hint={`可归因 ${mineSpan(lossS)}${lossUsd ? ` · ${mineUsd(lossUsd)}` : ""}`}
-      />
-      <div className="grid grid-cols-[88px_1.618fr_1fr] gap-x-5 gap-y-3 rounded-[16px] border border-black/[0.06] bg-white p-4">
-        <div className="row-span-2 flex flex-col items-center justify-center border-r border-black/[0.06] pr-5">
-          <b
-            className={`text-[40px] font-bold leading-none tracking-[-0.03em] tabular-nums ${scoreClass(score)}`}
-          >
-            {h.score ?? "—"}
-          </b>
-          <span className="mt-1.5 text-[12px] text-role-system">{h.grade}</span>
-        </div>
-
-        <div className="col-span-2 flex flex-wrap gap-x-7 gap-y-3">
-          {kpis.map((k) => {
-            const m = metricOf(data, k.id);
-            const d = deltaText(m);
-            const tone = deltaTone(m);
-            return (
-              <div key={k.id} className="flex min-w-[68px] flex-col gap-0.5">
-                <b
-                  className={`text-[20px] font-semibold leading-none tracking-[-0.01em] tabular-nums ${k.tone}`}
-                >
-                  {k.value}
-                </b>
-                <span className="text-[11.5px] text-role-system">{k.label}</span>
-                {d && (
-                  <em
-                    className={`text-[11px] not-italic ${
-                      tone === "up"
-                        ? "text-mine-loss"
-                        : tone === "down"
-                          ? "text-mine-good"
-                          : "text-role-system"
-                    }`}
-                  >
-                    {d}
-                  </em>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-3 pt-1">
-          <CompositionBar items={timeItems} unit="s" />
-          {tokenItems.some((t) => t.value > 0) && <CompositionBar items={tokenItems} unit="tok" />}
+      <div className="grid grid-cols-1 gap-3 @xl:grid-cols-[minmax(0,1.618fr)_minmax(0,1fr)]">
+        <Card>
+          <div className="flex items-center gap-4">
+            <ScoreRing score={v.score} grade={v.grade} tone={v.tone} />
+            <div className="min-w-0">
+              <h3 className="text-[17px] font-semibold leading-snug tracking-[-0.02em] text-ink">
+                {v.title}
+              </h3>
+              <p className="mt-1 text-[12.5px] leading-normal text-role-system">{v.detail}</p>
+            </div>
+          </div>
+          <LossBar data={data} onJump={onJump} />
+          {v.idle && <p className="mt-2 text-[12px] leading-normal text-role-system">{v.idle}</p>}
           {loop && (
-            <div className="flex items-center gap-2 text-[12px] text-role-system">
-              <b className="rounded-full bg-role-assistant/10 px-2 py-0.5 text-[11px] font-semibold text-role-assistant">
-                闭环
-              </b>
-              声明 {loop.total} 条 · 闭环 {(loop.closed || []).length} · 未改善{" "}
+            <p className="mt-3 border-t border-black/[0.06] pt-3 text-[12.5px] text-role-system">
+              <b className="mr-1.5 font-semibold text-role-assistant">闭环</b>
+              声明 {loop.total} 条 · 已闭环 {(loop.closed || []).length} · 未改善{" "}
               {(loop.open || []).length}
               {(loop.dismissed || []).length ? ` · 已忽略 ${(loop.dismissed || []).length}` : ""}
-            </div>
+            </p>
           )}
-        </div>
-
-        <div className="min-w-0 border-l border-black/[0.06] pl-5">
-          {s.usage_turns ? (
-            <Donut
-              items={cacheItems}
-              unit="tok"
-              center={`${s.cache_hit_pct}%`}
-              centerSub="缓存命中"
-            />
-          ) : (
-            <div className="flex h-[140px] items-center text-[13px] text-role-system">
-              无计费数据
-            </div>
-          )}
-        </div>
+        </Card>
+        <CostCard data={data} />
       </div>
+
+      {kpis.length > 0 && (
+        <Card className="mt-3 px-0 py-3">
+          <dl className="grid grid-cols-2 gap-y-3 @md:grid-cols-4">
+            {kpis.map((m) => (
+              <div
+                key={m.id}
+                className="flex flex-col gap-0.5 border-black/[0.06] px-4 [&:not(:nth-child(2n+1))]:border-l @md:[&:not(:nth-child(2n+1))]:border-l-0 @md:[&:not(:nth-child(4n+1))]:border-l"
+                title={m.note || undefined}
+              >
+                <dt className="text-[11.5px] text-role-system">{m.label}</dt>
+                <dd className="flex items-baseline gap-1.5">
+                  <b className="text-[17px] font-semibold tracking-[-0.01em] tabular-nums text-ink">
+                    {metricText(m)}
+                  </b>
+                  <Delta text={deltaText(m)} tone={deltaTone(m)} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
+      )}
     </Section>
   );
 }
