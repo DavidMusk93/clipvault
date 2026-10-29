@@ -10,7 +10,8 @@ import { fmtValue, pct, pickKind } from "./lib";
 
 type Inst = {
   setOption: (o: unknown, opts?: unknown) => void;
-  on: (event: string, handler: (p: { dataIndex?: number }) => void) => void;
+  on: (event: string, handler: (p: { dataIndex?: number; seriesIndex?: number }) => void) => void;
+  dispatchAction: (a: Record<string, unknown>) => void;
   resize: () => void;
   dispose: () => void;
 };
@@ -24,11 +25,17 @@ export function MineChart({
   spec,
   height,
   onJump,
+  onHover,
+  highlight,
   className,
 }: {
   spec: MineChartSpec;
   height: number;
   onJump?: (jump: number | string) => void;
+  /** Pointer over a datum (index) or off the chart (null): lets an HTML table follow. */
+  onHover?: (i: number | null) => void;
+  /** Datum lit from outside (a table row under the pointer). */
+  highlight?: number | null;
   className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -37,6 +44,8 @@ export function MineChart({
   specRef.current = spec;
   const onJumpRef = useRef(onJump);
   onJumpRef.current = onJump;
+  const onHoverRef = useRef(onHover);
+  onHoverRef.current = onHover;
   // Skip redundant setOption: a parent re-render (turn toggle, refresh) creates a
   // new spec object even when the data did not change.
   const specKey = JSON.stringify(spec);
@@ -50,9 +59,17 @@ export function MineChart({
       const chart = echarts.init(ref.current) as unknown as Inst;
       inst.current = chart;
       chart.on("click", (p) => {
-        const it = specRef.current.items[p.dataIndex ?? -1];
+        const idx = specRef.current.kind === "stack" ? p.seriesIndex : p.dataIndex;
+        const it = specRef.current.items[idx ?? -1];
         if (it?.jump != null) onJumpRef.current?.(it.jump);
       });
+      // A stack is one series per part; everything else is one series of data.
+      chart.on("mouseover", (p) =>
+        onHoverRef.current?.(
+          (specRef.current.kind === "stack" ? p.seriesIndex : p.dataIndex) ?? null,
+        ),
+      );
+      chart.on("mouseout", () => onHoverRef.current?.(null));
       chart.setOption(buildMineOption(specRef.current), { notMerge: true });
       ro = new ResizeObserver(() => chart.resize());
       if (ref.current) ro.observe(ref.current);
@@ -70,6 +87,21 @@ export function MineChart({
     keyRef.current = specKey;
     inst.current?.setOption(buildMineOption(spec), { notMerge: true });
   }, [specKey, spec]);
+
+  // Outside highlight: downplay everything, light one datum. No setOption, so
+  // the chart never re-lays out while a row is hovered.
+  useEffect(() => {
+    const c = inst.current;
+    if (!c) return;
+    const stack = specRef.current.kind === "stack";
+    c.dispatchAction({ type: "downplay" });
+    if (highlight == null || highlight < 0) return;
+    c.dispatchAction(
+      stack
+        ? { type: "highlight", seriesIndex: highlight }
+        : { type: "highlight", seriesIndex: 0, dataIndex: highlight },
+    );
+  }, [highlight]);
 
   return <div ref={ref} className={cn("w-full", className)} style={{ height }} />;
 }
