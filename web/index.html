@@ -12553,6 +12553,7 @@ window.ClipViewMasonry = Masonry;
       }
     }
 
+    let backupHistoryMarker = null;
     async function refreshBackupStatus({ lite = false } = {}) {
       const t0 = performance.now();
       const kind = lite ? 'lite' : 'full';
@@ -12564,6 +12565,9 @@ window.ClipViewMasonry = Masonry;
         const label = document.getElementById('backupBtnLabel');
         const dests = s.destinations || [];
         const os = s.ostore;
+        const historyMarker = String(s.lastSuccessUnix || '') + ':' + String(os?.lastRun?.finishedUnix || '') + ':' + String(os?.phase || '');
+        if (backupHistoryMarker !== null && backupHistoryMarker !== historyMarker && bkDrawer.classList.contains('open')) refreshBackupHistory();
+        backupHistoryMarker = historyMarker;
         const anyAvail = dests.some(d => d.enabled && d.available)
           || s.cloudDocsAvailable || s.googleDriveAvailable;
         const qd = s.quarkDiscovery;
