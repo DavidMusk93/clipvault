@@ -80,7 +80,7 @@ test('panel renders the ostore statistics block', () => {
   assert.match(indexHtml, /id="bkOstoreStats"/);
   assert.match(indexHtml, /function paintOstoreStats\(os\)/);
   assert.match(indexHtml, /paintOstoreStats\(os\);/);
-  const paint = sliceFrom(indexHtml, 'function paintOstoreStats(os)', 3000);
+  const paint = sliceFrom(indexHtml, 'function paintOstoreStats(os)', 6000);
   for (const label of ['本轮对象', '本轮字节', '耗时', '本地清单', '远端对象', '上次运行']) {
     assert.ok(paint.includes(label), `paintOstoreStats missing ${label}`);
   }
@@ -156,6 +156,18 @@ test('paintOstoreStats renders counts, bytes, remote totals and the last run', {
   assert.match(text, /62\.4 s/);
   assert.match(text, /上次运行/);
   assert.match(text, /成功 · 上传 1 · 跳过 1,503 · 62\.4 s/);
+});
+
+test('ostore chart selection explains actual counts and survives a refresh', { skip: domSkip }, () => {
+  const paint = loadPaint();
+  const host = jsdomWindow.document.getElementById('bkOstoreStats');
+  const status = { configured:true, inProgress:true, total:10, uploaded:2, skipped:6, failed:1, pending:1 };
+  paint(status);
+  host.querySelector('[data-backup-segment="skipped"]').click();
+  assert.match(host.querySelector('.backup-chart-detail').textContent, /远端已有相同内容的对象：6 \/ 10（60\.0%）/);
+  assert.equal(host.querySelector('[data-backup-segment="skipped"]').getAttribute('aria-pressed'), 'true');
+  paint(status);
+  assert.equal(host.querySelector('[data-backup-segment="skipped"]').getAttribute('aria-pressed'), 'true');
 });
 
 test('paintOstoreStats keeps last-run stats after a restart (live counters zeroed)', { skip: domSkip }, () => {
