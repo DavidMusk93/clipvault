@@ -377,7 +377,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
     根优先 My Drive/ClipVault/cvbak（避开 wedged backup/）
 ```
 
-禁止：热 copy 开着的 db；双机写同一 `latest/`；把 bulk full 当默认。自检：`rg -n 'forceFullCopy:\s*true' Sources/ClipVault/` 应无匹配（或仅拒绝分支）。
+禁止：热 copy 开着的 db；双机写同一 `latest/`；把 bulk full 当默认；给单个备份源造专属文字按钮 —— 备份面板 4 行同形（pill + 路径 + 上次/phase + 右侧开关），手动触发只留面板级「立即备份」。自检：`rg -n 'forceFullCopy:\s*true' Sources/ClipVault/` 应无匹配（或仅拒绝分支）。
 
 墙图 `/api/image?id=` 与归档资产同一套回源：`hydrateBlob`（live/attach ∪ backup CAS）。禁止 SQLite 有 type=image 却对墙 404。`blobs/` 禁止指到 `Documents/` 的 symlink（LaunchAgent TCC 读不到历史 CAS；列目录失败不得报 `blobs=0` 成功）。
 

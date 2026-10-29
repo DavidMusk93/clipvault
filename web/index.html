@@ -2654,23 +2654,8 @@
     .backup-stats .backup-row { margin: 9px 0; align-items: baseline; }
     .backup-stats .backup-label { flex: 0 0 auto; }
     .backup-stats .backup-value { max-width: 74%; line-height: 1.35; }
-    /* Inline pill action (e.g. 备份到 ostore). Without this the row renders a raw
-       UA <button>: 23px, 2px outset border, no radius — it never lines up with the
-       destination switches on the right edge. */
-    .backup-head {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; min-height: 30px;
-    }
-    .backup-pill {
-      flex: 0 0 auto; height: 30px; padding: 0 14px;
-      border-radius: var(--radius-pill); border: 0.5px solid var(--separator-strong);
-      background: var(--fill); color: var(--ink);
-      font: inherit; font-size: 12px; font-weight: 600; letter-spacing: -0.01em;
-      cursor: pointer; transition: background var(--press), transform var(--press);
-    }
-    .backup-pill:active { transform: scale(0.97); }
-    .backup-pill:disabled { opacity: 0.45; cursor: default; transform: none; }
-    .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }    .backup-actions button {
+    .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+    .backup-actions button {
       height: 34px; padding: 0 14px; border-radius: var(--radius-pill); border: 0;
       font: inherit; font-weight: 600; font-size: 13px; letter-spacing: -0.01em;
       cursor: pointer; background: var(--accent); color: #fff;
@@ -2893,16 +2878,6 @@
       </div>
       <h3 style="font-size:14px;font-weight:600;margin:12px 0 6px">备份源</h3>
       <div id="bkDestList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
-      <div class="backup-row" style="align-items:flex-start">
-        <div style="flex:1;min-width:0">
-          <div class="backup-head">
-            <strong>ostore 远程冷备</strong>
-            <button type="button" id="bkOstoreRun" class="backup-pill">备份到 ostore</button>
-          </div>
-          <div class="backup-label" id="bkOstoreStatus">读取中…</div>
-        </div>
-      </div>
-      <div id="bkOstoreStats" class="backup-stats"></div>
       <div class="backup-row"><span class="backup-label">主目录</span><span class="backup-value" id="bkRoot">—</span></div>
       <div class="backup-row"><span class="backup-label">上次成功</span><span class="backup-value" id="bkLast">—</span></div>
       <div class="backup-row" id="bkQuarkRow" style="display:none"><span class="backup-label">夸克自动发现</span><span class="backup-value" id="bkQuarkDiscover">—</span></div>
@@ -12324,6 +12299,46 @@ window.ClipViewMasonry = Masonry;
       host.innerHTML = rows.join('');
     }
 
+    // 备份源第 4 行：ostore 远程冷备。三行云盘用什么，它就用什么 —— 同样的
+    // pill、同样的路径/上次/phase 行、同样右侧的开关（写 config 的 enabled），
+    // 不再单独造一个文字按钮。
+    function ostoreRow(os) {
+      const row = document.createElement('div');
+      row.className = 'backup-row';
+      row.style.alignItems = 'flex-start';
+      let pill;
+      if (!os?.configured) pill = '<span class="pill bad">未配置</span>';
+      else if (os.phase === 'error') pill = '<span class="pill bad">失败</span>';
+      else if (os.inProgress) pill = '<span class="pill warn">上传中</span>';
+      else pill = '<span class="pill ok">可用</span>';
+      // Same wording as the cloud-drive rows: 上次 + phase. State words live in the pill.
+      const line = (os?.lastSuccessUnix ? '上次: ' + formatLocalTime(os.lastSuccessUnix) : '尚未成功')
+        + ' · phase: ' + (!os?.configured ? 'not_configured' : (os?.phase || '—'))
+        + (os?.queued ? ' · 已排队下一轮' : '')
+        + (os?.lastError ? ' · ' + esc(os.lastError) : '');
+      row.innerHTML =
+        '<div style="min-width:0;flex:1">' +
+        '<div style="font-weight:600;display:flex;gap:8px;align-items:center">ostore 远程冷备 ' + pill + '</div>' +
+        '<div class="backup-label" style="word-break:break-all;margin-top:4px">' + esc(os?.baseURL || '—') + '</div>' +
+        (os?.configured ? '' : '<div class="backup-label" style="margin-top:4px;color:var(--warn)">在数据目录 config/ostore-backup.json 写入 {"baseURL":"https://…","token":"…"} 后重启服务</div>') +
+        '<div class="backup-label" id="bkOstoreStatus">' + line + '</div>' +
+        '<div id="bkOstoreStats" class="backup-stats" style="margin-top:8px"></div>' +
+        '</div>' +
+        '<label class="switch" title="启用 ostore 远程冷备">' +
+        '<input type="checkbox" data-ostore="1"' + (os && os.enabled === false ? '' : ' checked') + (os?.configured ? '' : ' disabled') + '/><span></span>' +
+        '</label>';
+      row.querySelector('input[data-ostore]')?.addEventListener('change', async (e) => {
+        const on = e.currentTarget.checked;
+        await fetch(API + '/api/backup/config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ostoreEnabled: on })
+        });
+        toast(on ? '已启用 ostore 远程冷备' : '已关闭 ostore 远程冷备');
+        refreshBackupStatus();
+      });
+      return row;
+    }
+
     async function refreshBackupStatus({ lite = false } = {}) {
       const t0 = performance.now();
       const kind = lite ? 'lite' : 'full';
@@ -12335,14 +12350,6 @@ window.ClipViewMasonry = Masonry;
         const label = document.getElementById('backupBtnLabel');
         const dests = s.destinations || [];
         const os = s.ostore;
-        const osLabel = document.getElementById('bkOstoreStatus');
-        if (osLabel) {
-          const state = !os?.configured ? '未配置' : os.inProgress ? '上传中' : os.phase === 'ok' ? '已完成' : os.phase === 'error' ? '失败' : '等待备份';
-          osLabel.textContent = state + (os?.lastSuccessUnix ? ' · 上次成功 ' + formatLocalTime(os.lastSuccessUnix) : '') + (os?.lastError ? ' · ' + os.lastError : '');
-          const osButton = document.getElementById('bkOstoreRun');
-          if (osButton) osButton.disabled = !os?.configured || !!os?.inProgress;
-        }
-        paintOstoreStats(os);
         const anyAvail = dests.some(d => d.enabled && d.available)
           || s.cloudDocsAvailable || s.googleDriveAvailable;
         const qd = s.quarkDiscovery;
@@ -12434,6 +12441,9 @@ window.ClipViewMasonry = Masonry;
             });
             destHost.appendChild(row);
           });
+          // 第 4 个备份源：和上面三行同一套结构（pill + 路径 + 上次/phase + 右侧开关）。
+          destHost.appendChild(ostoreRow(os));
+          paintOstoreStats(os);
         }
 
         const ul = document.getElementById('bkSnaps');
@@ -12536,15 +12546,6 @@ window.ClipViewMasonry = Masonry;
     });
     document.getElementById('syRefresh')?.addEventListener('click', () => refreshSyncStatus());
 
-    document.getElementById('bkOstoreRun')?.addEventListener('click', async () => {
-      toast('正在生成本机快照…');
-      try {
-        const r = await fetch(API + '/api/backup/ostore/run', { method: 'POST' });
-        const j = await r.json();
-        toast(j.ok ? '本机备份完成，远程上传已排队' : (j.message || '备份失败'));
-      } catch (_) { toast('备份请求失败'); }
-      refreshBackupStatus();
-    });
     document.getElementById('bkRunNow')?.addEventListener('click', async () => {
       toast('开始备份…');
       const r = await fetch(API + '/api/backup/run', { method: 'POST' });

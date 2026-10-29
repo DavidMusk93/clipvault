@@ -25,7 +25,12 @@ final class OstoreBackup {
 
     struct Status: Codable {
         var configured = false
+        /// Mirror step on/off (`enabled` in ostore-backup.json, default true).
+        var enabled = true
+        var baseURL: String? = nil
         var inProgress = false
+        /// Another root is waiting behind the running one (click while uploading).
+        var queued = false
         var phase = "not_configured"
         var host: String? = nil
         var lastSuccessUnix: Double? = nil
@@ -51,7 +56,7 @@ final class OstoreBackup {
         var lastRun: Run? = nil
     }
 
-    private struct Config: Decodable { let baseURL: String; let token: String }
+    private struct Config: Decodable { let baseURL: String; let token: String; let enabled: Bool? }
     private struct Entry: Decodable { let path: String; let type: String; let sha256: String?; let size: Int? }
     private struct Listing: Decodable { let entries: [Entry] }
     private struct Persisted: Codable {
@@ -87,19 +92,41 @@ final class OstoreBackup {
     func status() -> Status {
         lock.lock(); defer { lock.unlock() }
         var result = state
-        result.configured = (try? loadConfig()) != nil
+        let config = try? loadConfig()
+        result.configured = config != nil
+        result.enabled = config?.enabled ?? true
+        result.baseURL = config?.baseURL
+        result.queued = pending != nil
         result.pending = max(0, result.total - result.uploaded - result.skipped - result.failed)
         return result
     }
 
     func enqueue(root: URL) -> Bool {
-        guard (try? loadConfig()) != nil else { return false }
+        guard let config = try? loadConfig(), config.enabled != false else { return false }
         lock.lock()
         if state.inProgress { pending = root; lock.unlock(); return true }
         state.inProgress = true; state.phase = "queued"; state.lastError = nil
         lock.unlock()
         post()
         worker.async { self.run(root: root) }
+        return true
+    }
+
+    /// Toggle the mirror step from the panel switch. Writes `enabled` back into the
+    /// same 0600 config file and keeps baseURL / token (and any unknown keys) intact.
+    @discardableResult
+    func setEnabled(_ on: Bool) -> Bool {
+        let url = configURL
+        guard let data = try? Data(contentsOf: url),
+              var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+        obj["enabled"] = on
+        guard let out = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) else { return false }
+        guard (try? out.write(to: url, options: .atomic)) != nil else { return false }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        if !on {
+            lock.lock(); pending = nil; lock.unlock()
+        }
+        post()
         return true
     }
 
