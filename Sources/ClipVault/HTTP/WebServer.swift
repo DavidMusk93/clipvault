@@ -309,8 +309,13 @@ class WebServer {
         } else if method == "POST" && pathOnly == "/api/backup/config" {
             handleBackupConfig(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/ostore/run" {
-            guard OstoreBackup.shared.status().configured else {
+            let st = OstoreBackup.shared.status()
+            guard st.configured else {
                 sendJSONObject(["ok": false, "message": "尚未配置 ostore"], connection: connection)
+                return
+            }
+            guard st.enabled else {
+                sendJSONObject(["ok": false, "message": "ostore 冷备已关闭（打开备份源处的开关）"], connection: connection)
                 return
             }
             handleBackupRun(connection: connection)
@@ -2738,6 +2743,28 @@ class WebServer {
         }
         guard let json = jsonBody(from: data) else {
             sendErrorResponse(connection: connection, status: 400, message: "Bad Request")
+            return
+        }
+        // { "ostoreEnabled": false } — the ostore row's switch. Same control shape as
+        // the cloud-drive destinations, different config file (credentials live there).
+        if let raw = json["ostoreEnabled"] {
+            let on = (raw as? Bool) ?? (raw as? NSNumber)?.boolValue
+            guard let on = on else {
+                sendErrorResponse(connection: connection, status: 400, message: "ostoreEnabled must be bool")
+                return
+            }
+            guard OstoreBackup.shared.setEnabled(on) else {
+                sendJSONObject(["ok": false, "message": "ostore 未配置（缺少 config/ostore-backup.json）"], connection: connection)
+                return
+            }
+            backup.statusSnapshot { status in
+                if let data = try? JSONEncoder().encode(status),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    self.sendJSONObject(obj, connection: connection)
+                } else {
+                    self.sendJSONObject(["ok": true], connection: connection)
+                }
+            }
             return
         }
         backup.updateConfig(json) { _ in
