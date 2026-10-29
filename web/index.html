@@ -2654,6 +2654,19 @@
     .backup-stats .backup-row { margin: 9px 0; align-items: baseline; }
     .backup-stats .backup-label { flex: 0 0 auto; }
     .backup-stats .backup-value { max-width: 74%; line-height: 1.35; }
+    .backup-chart { margin:10px 0 12px; }
+    .backup-chart-title { font-weight:600; font-size:12px; margin-bottom:8px; }
+    .backup-chart-track { display:flex; gap:3px; height:12px; }
+    .backup-chart-track span { min-width:0; box-shadow:inset 0 0 0 .5px rgba(255,255,255,.75); }
+    .backup-chart-track .uploaded { background:#0071e3; }
+    .backup-chart-track .skipped { background:#2e7d32; }
+    .backup-chart-track .pending { background:#c47a2c; }
+    .backup-chart-track .failed { background:#c62828; }
+    .backup-chart-legend { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+    .backup-chart-legend button { font:inherit; font-size:11px; padding:5px 8px; border:0.5px solid var(--separator-strong); border-radius:var(--radius-pill); background:transparent; color:var(--ink); cursor:pointer; }
+    .backup-chart-legend button[aria-pressed="true"] { background:var(--fill); border-color:var(--accent); }
+    .backup-chart-legend button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .backup-chart-detail { font-size:12px; color:var(--muted); margin:8px 0 0; }
     /* Backup drawer uses the existing system colors and controls. */
     #backupDrawer .backup-body { padding-top: 20px; }
     .backup-overview { padding: 18px; border: 0.5px solid var(--separator); border-radius: 18px; background: rgba(255,255,255,.65); }
@@ -2894,6 +2907,8 @@
         </div>
         <p id="bkActionStatus" role="status" aria-live="polite"></p>
       </section>
+      <div class="backup-section-heading"><h3>备份耗时</h3><span>最近 24 小时 · 手动本机备份</span></div>
+      <div class="backup-overview" id="bkMetrics" aria-live="polite">正在读取备份指标…</div>
       <div class="backup-section-heading"><h3>备份位置</h3><span>选择要使用的位置</span></div>
       <div id="bkDestList"></div>
       <div class="backup-section-heading"><h3>恢复备份</h3><span>选择一个时间点</span></div>
@@ -12257,6 +12272,7 @@ window.ClipViewMasonry = Masonry;
       bkDrawer.classList.add('open');
       bkScrim.classList.add('open');
       refreshBackupStatus({ lite: false });
+      refreshBackupMetrics();
       refreshSyncStatus();
     }
     function closeBackup() { bkDrawer.classList.remove('open'); bkScrim.classList.remove('open'); }
@@ -12278,6 +12294,7 @@ window.ClipViewMasonry = Masonry;
 
     // ostore 冷备统计。live 计数描述本轮（或最近一轮）；lastRun 由服务端持久化，
     // 重启后仍显示真实数字，而不是「上传 0 · 跳过 0」。
+    let ostoreChartSelection = 'uploaded';
     function paintOstoreStats(os) {
       const host = document.getElementById('bkOstoreStats');
       if (!host) return;
@@ -12291,6 +12308,20 @@ window.ClipViewMasonry = Masonry;
         rows.push('<div class="backup-row"><span class="backup-label">' + label + '</span><span class="backup-value">' + value + '</span></div>');
       };
       const total = n(os.total);
+      const sample = total > 0 ? os : os.lastRun;
+      if (sample && n(sample.total) > 0) {
+        const segments = [
+          { key:'uploaded', label:'已上传', value:n(sample.uploaded), explanation:'本轮已上传并校验的对象' },
+          { key:'skipped', label:'已跳过', value:n(sample.skipped), explanation:'远端已有相同内容的对象' },
+          { key:'pending', label:'未完成', value:Math.max(0, n(sample.total) - n(sample.uploaded) - n(sample.skipped) - n(sample.failed)), explanation:'本轮尚未完成的对象' },
+          { key:'failed', label:'失败', value:n(sample.failed), explanation:'本轮处理失败的对象' }
+        ];
+        const selected = segments.find(item => item.key === ostoreChartSelection) || segments[0];
+        const count = n(sample.total);
+        const track = segments.filter(item => item.value > 0).map(item => '<span class="' + item.key + '" style="flex:' + item.value + '"></span>').join('');
+        const legend = segments.map(item => '<button type="button" data-backup-segment="' + item.key + '" aria-pressed="' + (item.key === selected.key) + '">' + item.label + ' ' + fmtCount(item.value) + '</button>').join('');
+        rows.push('<div class="backup-chart"><div class="backup-chart-title">' + (total > 0 && os.inProgress ? '本轮对象进度' : '上次对象处理') + ' · 共 ' + fmtCount(count) + ' 个</div><div class="backup-chart-track" aria-hidden="true">' + track + '</div><div class="backup-chart-legend" aria-label="查看对象处理情况">' + legend + '</div><p class="backup-chart-detail" aria-live="polite">' + selected.explanation + '：' + fmtCount(selected.value) + ' / ' + fmtCount(count) + '（' + (selected.value * 100 / count).toFixed(1) + '%）</p></div>');
+      }
       if (total > 0 || os.inProgress) {
         row('本轮对象', '上传 ' + fmtCount(n(os.uploaded)) + ' · 跳过 ' + fmtCount(n(os.skipped)) +
           ' · 未完成 ' + fmtCount(n(os.pending)) + (n(os.failed) ? ' · 失败 ' + fmtCount(n(os.failed)) : '') +
@@ -12317,6 +12348,13 @@ window.ClipViewMasonry = Masonry;
         row('上次运行', bits.map((b) => esc(String(b))).join(' · '));
       }
       host.innerHTML = rows.join('');
+      host.querySelectorAll('[data-backup-segment]').forEach(button => {
+        button.addEventListener('click', () => {
+          ostoreChartSelection = button.dataset.backupSegment;
+          paintOstoreStats(os);
+          host.querySelector('[data-backup-segment="' + ostoreChartSelection + '"]')?.focus();
+        });
+      });
     }
 
     // 备份源第 4 行：ostore 远程冷备。三行云盘用什么，它就用什么 —— 同样的
@@ -12369,6 +12407,43 @@ window.ClipViewMasonry = Masonry;
         }
       });
       return row;
+    }
+
+    let backupMetricSelection = 'p50_ms';
+    async function refreshBackupMetrics() {
+      const host = document.getElementById('bkMetrics');
+      if (!host) return;
+      try {
+        const response = await fetch(API + '/api/ui-metrics/summary');
+        if (!response.ok) throw new Error('指标读取失败');
+        const data = await response.json();
+        const metric = (data.names || []).find(item => item.name === 'backup_cycle');
+        if (!metric || !metric.n || metric.p50_ms == null || metric.p95_ms == null || metric.max_ms == null) {
+          host.textContent = '暂无足够的手动本机备份耗时数据。';
+          return;
+        }
+        const items = [
+          { key:'p50_ms', label:'中位数', value:metric.p50_ms, explanation:'一半样本不超过此耗时' },
+          { key:'p95_ms', label:'P95', value:metric.p95_ms, explanation:'95% 的样本不超过此耗时' },
+          { key:'max_ms', label:'最长', value:metric.max_ms, explanation:'窗口内最长的一次耗时' }
+        ];
+        function paint() {
+          const current = items.find(item => item.key === backupMetricSelection) || items[0];
+          const max = Math.max(...items.map(item => item.value), 1);
+          host.innerHTML = '<div class="backup-chart-title">' + fmtCount(metric.n) + ' 次手动本机备份</div>' +
+            '<div class="backup-chart-legend">' + items.map(item => '<button type="button" data-backup-metric="' + item.key + '" aria-pressed="' + (item.key === current.key) + '">' + item.label + ' ' + esc(fmtVal(item.value, 'ms')) + '</button>').join('') + '</div>' +
+            '<div class="backup-chart-track" style="margin-top:10px" aria-hidden="true"><span class="uploaded" style="flex:' + Math.max(current.value, 0.001) + '"></span><span style="flex:' + Math.max(max - current.value, 0.001) + ';background:var(--fill)"></span></div>' +
+            '<p class="backup-chart-detail">' + current.explanation + ' · ' + esc(fmtVal(current.value, 'ms')) + '；不含 ostore 异步上传。</p>';
+          host.querySelectorAll('[data-backup-metric]').forEach(button => button.addEventListener('click', () => {
+            backupMetricSelection = button.dataset.backupMetric;
+            paint();
+            host.querySelector('[data-backup-metric="' + backupMetricSelection + '"]')?.focus();
+          }));
+        }
+        paint();
+      } catch (_) {
+        host.textContent = '备份指标暂时无法读取，请刷新状态重试。';
+      }
     }
 
     async function refreshBackupStatus({ lite = false } = {}) {
@@ -12628,9 +12703,10 @@ window.ClipViewMasonry = Masonry;
         button.disabled = false;
         button.textContent = '立即备份';
         refreshBackupStatus();
+        refreshBackupMetrics();
       }
     });
-    document.getElementById('bkRefresh')?.addEventListener('click', refreshBackupStatus);
+    document.getElementById('bkRefresh')?.addEventListener('click', () => { refreshBackupStatus(); refreshBackupMetrics(); });
 
     const NM_BASELINE_KEY = 'clipvault.metrics.baseline.v1';
     let currentSummary = null;
