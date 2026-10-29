@@ -82,8 +82,13 @@ test('backup status anyAvail expression is not split by injects', () => {
 });
 
 test('quarkDiscovery UI hooks stay wired', () => {
-  assert.match(indexHtml, /id="bkQuarkDiscover"/);
-  assert.match(indexHtml, /s\.quarkDiscovery/);
+  // Rendered by the lazily-imported backup drawer; index.html keeps the full
+  // reading (`?lite=1` omits discovery) so the drawer never loses it.
+  const backupPanel = fs.readFileSync(path.join(root, 'web/assets/backup-panel.mjs'), 'utf8');
+  assert.match(backupPanel, /id="\$\{id\}"/);
+  assert.match(backupPanel, /'bkQuarkDiscover', quark\]/);
+  assert.match(backupPanel, /quarkSummary\(s\?\.quarkDiscovery\)/);
+  assert.match(indexHtml, /s\.quarkDiscovery = backupLastStatus\.quarkDiscovery/);
   assert.match(indexHtml, /card-header-lead/);
   const swift = src('WebServer.swift');
   assert.match(swift, /backup_status/);
