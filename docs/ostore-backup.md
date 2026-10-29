@@ -14,7 +14,28 @@ ClipVault 在本机备份成功后，把该主机的数据库和 CAS 媒体增�
 
 ## 运行和状态
 
-本机备份成功或内容未变时自动排队；`POST /api/backup/ostore/run` 先运行本机备份，再异步上传。`GET /api/backup/status` 的 `ostore` 包含配置、阶段、最近成功时间、错误和本轮上传/跳过数量。运行状态保存在进程内，重启后重新开始统计。Web 备份面板展示同一状态。
+本机备份成功或内容未变时自动排队；`POST /api/backup/ostore/run` 先运行本机备份，再异步上传。`GET /api/backup/status` 的 `ostore` 就是面板看到的全部统计：
+
+| 字段 | 含义 |
+| --- | --- |
+| `phase` / `inProgress` / `lastError` | 本轮阶段、是否在上传、错误 |
+| `total` / `uploaded` / `skipped` / `failed` / `pending` | 本轮对象数（blobs + `databases/SHA.db` + `latest/clipflow.db` + `latest/MANIFEST.json`）与其中已传、已跳过、失败、未完成 |
+| `uploadedBytes` / `skippedBytes` | 本轮字节数（按实际文件大小） |
+| `manifestObjects` / `manifestBytes` | 本轮本地清单声明的对象数与字节数（恢复预期量） |
+| `remoteObjects` / `remoteBytes` | 本轮结束时重新列一次远端 host 前缀得到的实际对象数与字节数 |
+| `startedUnix` / `durationSeconds` | 本轮起止与耗时 |
+| `lastSuccessUnix` | 最近一次成功时间 |
+| `lastRun` | 上一轮完整快照（phase/host/计数/字节/耗时/错误） |
+
+```text
+live counters ──(每 ≤2s 一次 backup_status ping)──> Web 面板本轮对象/本轮字节/耗时
+       \
+        └─(run 结束)──> lastRun ──> config/ostore-backup.state.json (0600)
+                                            \
+                                             └─> 重启后仍显示「上次运行」与远端对象数
+```
+
+本轮计数只在进程内累加；`lastRun` 与 `lastSuccessUnix` 落盘到 `config/ostore-backup.state.json`（0600，与凭据同目录），所以重启不会再把统计清零成「上传 0 · 跳过 0」。上传进行中每 2 秒最多广播一次 `backup_status`，避免长时间上传时面板停在陈旧数字。
 
 ```text
 local sqlite3_backup + verified CAS
@@ -24,7 +45,7 @@ local sqlite3_backup + verified CAS
     -> ostore clipvault/backup/hosts/H/latest/{clipflow.db,MANIFEST.json}
 ```
 
-逐文件 SHA-256 对账，已有对象跳过，上传响应的 SHA-256 必须匹配。数据库与清单不匹配、媒体缺失、鉴权或网络错误时报告失败；本机备份不回滚。最新清单最后上传，但两个 latest 文件不是原子事务；上传中断时 `latest/clipflow.db` 可能与清单不一致，恢复时必须校验。数据库内容寻址副本保留当前和上一个版本；媒体不会自动删除。
+逐文件 SHA-256 对账，已有对象跳过，上传响应的 SHA-256 必须匹配；`uploaded + skipped` 即本轮通过哈希校验的对象数（面板「本轮对象」）。数据库与清单不匹配、媒体缺失、鉴权或网络错误时报告失败；本机备份不回滚。最新清单最后上传，但两个 latest 文件不是原子事务；上传中断时 `latest/clipflow.db` 可能与清单不一致，恢复时必须校验。数据库内容寻址副本保留当前和上一个版本；媒体不会自动删除。
 
 ## 灾难恢复
 
