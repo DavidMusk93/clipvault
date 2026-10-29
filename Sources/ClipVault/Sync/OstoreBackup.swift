@@ -225,6 +225,10 @@ final class OstoreBackup {
             try? data.write(to: url, options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         }
+        UiMetrics.shared.emit("backup_ostore_run", durMs: (now - started) * 1000, ok: ok,
+                              payload: ["n": run.total, "bytes": run.uploadedBytes,
+                                        "applied": run.uploaded, "reused": run.skipped,
+                                        "miss": run.failed])
         post()
     }
 

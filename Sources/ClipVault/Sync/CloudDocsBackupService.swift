@@ -538,6 +538,14 @@ final class CloudDocsBackupService {
             return
         }
 
+        // Record completed backup attempts, including automatic runs. Earlier guard
+        // exits (clean/throttled/in progress) are scheduling decisions, not runs.
+        let originalCompletion = completion
+        let completion: ((Bool, String) -> Void)? = { ok, message in
+            UiMetrics.shared.emit("backup_local_run", durMs: (Date().timeIntervalSince1970 - now) * 1000,
+                                  ok: ok, payload: ["kind": snapshotOverrideId != nil ? "safety" : (wantSnapshot ? "manual" : "automatic")])
+            originalCompletion?(ok, message)
+        }
         inProgress = true
         lastPhase = "prepare"
         lastError = nil
