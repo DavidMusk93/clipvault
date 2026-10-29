@@ -2654,6 +2654,11 @@
     .backup-stats .backup-row { margin: 9px 0; align-items: baseline; }
     .backup-stats .backup-label { flex: 0 0 auto; }
     .backup-stats .backup-value { max-width: 74%; line-height: 1.35; }
+    .backup-history-items { display:flex; align-items:end; gap:4px; height:92px; overflow-x:auto; padding:4px 2px; border-bottom:1px solid var(--separator); }
+    .backup-history-items button { flex:0 0 18px; min-height:5px; border:0; border-radius:3px 3px 0 0; background:var(--accent); cursor:pointer; }
+    .backup-history-items button[data-error="true"] { background:var(--danger); }
+    .backup-history-items button[aria-pressed="true"] { outline:2px solid var(--ink); outline-offset:2px; }
+    .backup-history-items button:focus-visible { outline:2px solid var(--ink); outline-offset:2px; }
     .backup-chart { margin:10px 0 12px; }
     .backup-chart-title { font-weight:600; font-size:12px; margin-bottom:8px; }
     .backup-chart-track { display:flex; gap:3px; height:12px; }
@@ -2907,6 +2912,21 @@
         </div>
         <p id="bkActionStatus" role="status" aria-live="polite"></p>
       </section>
+      <div class="backup-section-heading"><h3>备份历史</h3><span>按时间查看每次运行</span></div>
+      <div class="backup-overview" id="bkHistory">
+        <div class="backup-chart-legend" aria-label="历史时间范围">
+          <button type="button" data-history-days="1" aria-pressed="true">24 小时</button>
+          <button type="button" data-history-days="7" aria-pressed="false">7 天</button>
+        </div>
+        <div class="backup-chart-legend" aria-label="备份类型">
+          <button type="button" data-history-kind="local" aria-pressed="true">本机备份</button>
+          <button type="button" data-history-kind="ostore" aria-pressed="false">ostore 上传</button>
+          <button type="button" data-history-kind="all" aria-pressed="false">全部</button>
+        </div>
+        <p class="backup-label" id="bkHistoryCoverage">正在读取历史…</p>
+        <div id="bkHistoryChart"></div>
+        <p class="backup-chart-detail" id="bkHistoryDetail" aria-live="polite"></p>
+      </div>
       <div class="backup-section-heading"><h3>备份耗时</h3><span>最近 24 小时 · 手动本机备份</span></div>
       <div class="backup-overview" id="bkMetrics" aria-live="polite">正在读取备份指标…</div>
       <div class="backup-section-heading"><h3>备份位置</h3><span>选择要使用的位置</span></div>
@@ -12273,6 +12293,7 @@ window.ClipViewMasonry = Masonry;
       bkScrim.classList.add('open');
       refreshBackupStatus({ lite: false });
       refreshBackupMetrics();
+      refreshBackupHistory();
       refreshSyncStatus();
     }
     function closeBackup() { bkDrawer.classList.remove('open'); bkScrim.classList.remove('open'); }
@@ -12408,6 +12429,92 @@ window.ClipViewMasonry = Masonry;
       });
       return row;
     }
+
+    let backupHistoryDays = 1;
+    let backupHistoryKind = 'local';
+    let backupHistoryRequest = 0;
+    async function refreshBackupHistory() {
+      const chart = document.getElementById('bkHistoryChart');
+      const coverage = document.getElementById('bkHistoryCoverage');
+      const detail = document.getElementById('bkHistoryDetail');
+      if (!chart || !coverage || !detail) return;
+      const requestId = ++backupHistoryRequest;
+      const from = Date.now() - backupHistoryDays * 86400000;
+      coverage.textContent = '正在读取历史…';
+      try {
+        const names = ['backup_cycle', 'backup_local_run', 'backup_ostore_run'];
+        const [responses, statusResponse] = await Promise.all([
+          Promise.all(names.map(name => fetch(API + '/api/ui-metrics/recent?name=' + name + '&limit=200&from=' + from))),
+          fetch(API + '/api/backup/status?lite=1')
+        ]);
+        if (responses.some(response => !response.ok) || !statusResponse.ok) throw new Error('指标读取失败');
+        const [datasets, status] = await Promise.all([Promise.all(responses.map(response => response.json())), statusResponse.json()]);
+        if (datasets.some(data => !data.ok || !Array.isArray(data.events))) throw new Error('指标读取失败');
+        if (requestId !== backupHistoryRequest) return;
+        // backup_cycle already records manual runs; exclude their newer duplicate.
+        const events = datasets.flatMap(data => data.events).filter(event =>
+          !(event.name === 'backup_local_run' && event.payload?.kind === 'manual') &&
+          Number.isFinite(event.ts) && Number.isFinite(event.dur_ms) && event.dur_ms >= 0
+        );
+        // Before per-run metrics existed, only the last finished ostore run was saved.
+        // Include that real record once, without pretending earlier runs are known.
+        const last = status.ostore?.lastRun;
+        if (Number.isFinite(last?.finishedUnix) && Number.isFinite(last?.durationSeconds) && last.finishedUnix * 1000 >= from &&
+            !events.some(event => event.name === 'backup_ostore_run' && Math.abs(event.ts - last.finishedUnix * 1000) < 5000)) {
+          events.push({ name:'backup_ostore_run', ts:last.finishedUnix * 1000, dur_ms:last.durationSeconds * 1000,
+            ok:last.phase === 'ok', persisted:true,
+            payload:{ applied:last.uploaded, reused:last.skipped, bytes:last.uploadedBytes } });
+        }
+        events.sort((a, b) => a.ts - b.ts);
+        const limited = datasets.some(data => data.events.length >= 200);
+        coverage.textContent = (limited ? '每种记录最多显示最近 200 次；较早记录可能未显示。' : '显示所选时间内已有的运行记录。') +
+          ' 手动本机备份含既有历史；自动本机备份和 ostore 逐轮记录从新版本开始，ostore 另含此前留存的最后一轮。';
+        const visible = events.filter(event => backupHistoryKind === 'all' || (backupHistoryKind === 'ostore' ? event.name === 'backup_ostore_run' : event.name !== 'backup_ostore_run'));
+        chart.innerHTML = '';
+        detail.textContent = '';
+        if (!visible.length) { chart.textContent = '此时间范围暂无运行记录。'; return; }
+        const list = document.createElement('div');
+        list.className = 'backup-history-items';
+        list.setAttribute('aria-label', '备份运行耗时，按时间从左到右排列');
+        const max = Math.max(...visible.map(event => event.dur_ms), 1);
+        const nameFor = event => event.name === 'backup_ostore_run' ? (event.persisted ? 'ostore 上传（留存的上次运行）' : 'ostore 上传') : event.name === 'backup_cycle' ? '手动本机备份' : event.payload?.kind === 'safety' ? '恢复前安全备份' : '自动本机备份';
+        const describe = event => nameFor(event) + ' · ' + formatLocalTime(event.ts / 1000) + ' · ' + (event.ok === true ? '成功' : event.ok === false ? '失败' : '结果未知') + ' · 耗时 ' + fmtVal(event.dur_ms, 'ms') +
+          (event.name === 'backup_ostore_run' && event.payload ? ' · 上传 ' + (event.payload.applied ?? '—') + ' · 跳过 ' + (event.payload.reused ?? '—') + ' · 上传 ' + (event.payload.bytes != null ? fmtBytes(event.payload.bytes) : '—') : '');
+        visible.forEach((event, i) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.style.height = Math.max(5, Math.round(event.dur_ms / max * 78)) + 'px';
+          button.dataset.error = String(event.ok === false);
+          button.setAttribute('aria-label', describe(event));
+          button.setAttribute('aria-pressed', String(i === visible.length - 1));
+          button.title = describe(event);
+          button.addEventListener('click', () => {
+            list.querySelectorAll('button').forEach(item => item.setAttribute('aria-pressed', 'false'));
+            button.setAttribute('aria-pressed', 'true');
+            detail.textContent = describe(event);
+          });
+          list.appendChild(button);
+        });
+        chart.appendChild(list);
+        detail.textContent = describe(visible[visible.length - 1]);
+      } catch (_) {
+        if (requestId !== backupHistoryRequest) return;
+        chart.textContent = '';
+        detail.textContent = '';
+        coverage.textContent = '历史记录读取失败，请刷新状态重试。';
+      }
+    }
+    document.querySelectorAll('[data-history-days]').forEach(button => button.addEventListener('click', () => {
+      backupHistoryDays = Number(button.dataset.historyDays);
+      document.querySelectorAll('[data-history-days]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      refreshBackupHistory();
+    }));
+
+    document.querySelectorAll('[data-history-kind]').forEach(button => button.addEventListener('click', () => {
+      backupHistoryKind = button.dataset.historyKind;
+      document.querySelectorAll('[data-history-kind]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      refreshBackupHistory();
+    }));
 
     let backupMetricSelection = 'p50_ms';
     async function refreshBackupMetrics() {
@@ -12704,9 +12811,10 @@ window.ClipViewMasonry = Masonry;
         button.textContent = '立即备份';
         refreshBackupStatus();
         refreshBackupMetrics();
+        refreshBackupHistory();
       }
     });
-    document.getElementById('bkRefresh')?.addEventListener('click', () => { refreshBackupStatus(); refreshBackupMetrics(); });
+    document.getElementById('bkRefresh')?.addEventListener('click', () => { refreshBackupStatus(); refreshBackupMetrics(); refreshBackupHistory(); });
 
     const NM_BASELINE_KEY = 'clipvault.metrics.baseline.v1';
     let currentSummary = null;
