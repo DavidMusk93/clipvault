@@ -272,7 +272,7 @@ export default function Analysis({
             <Verdict data={data} onJump={jump} />
             <Losses data={data} onTurn={toggleTurn} onAck={onAck} />
             <Timeline data={data} openTurn={openTurn} onToggleTurn={toggleTurn} />
-            <Ledger data={data} />
+            <Ledger data={data} onJump={jump} />
           </>
         ) : null}
         {data && !data.ok ? (

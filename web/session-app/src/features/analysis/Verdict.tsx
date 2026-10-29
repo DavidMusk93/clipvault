@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Mine } from "../../api/mine";
 import { cn } from "../../lib/cn";
 import {
+  dailyCost,
   deltaText,
   deltaTone,
   fmtValue,
@@ -113,6 +114,59 @@ function LossBar({ data, onJump }: { data: Mine; onJump: (id: string) => void })
   );
 }
 
+/** Cost by day: columns on one scale, hover reads the day. Zero stays zero. */
+function DailyCost({ data }: { data: Mine }) {
+  const days = dailyCost(data);
+  const [hot, setHot] = useState<number | null>(null);
+  if (days.length < 2) return null;
+  const max = Math.max(...days.map((d) => d.usd), 0);
+  const d = hot != null ? days[hot] : null;
+  const sum = days.reduce((a, x) => a + x.usd, 0);
+  return (
+    <div className="mt-auto pt-4">
+      <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[12px] text-role-system">
+        <span>按天</span>
+        <span className="tabular-nums">
+          {d ? (
+            <>
+              {d.day.slice(5)} · <b className="font-semibold text-mine-money">{mineUsd(d.usd)}</b> ·{" "}
+              {d.n} 回合
+            </>
+          ) : (
+            <>
+              {days.length} 天 · 日均 {mineUsd(sum / days.length)}
+            </>
+          )}
+        </span>
+      </div>
+      <div
+        className="flex h-12 items-end gap-1 border-b border-black/[0.10]"
+        onPointerLeave={() => setHot(null)}
+      >
+        {days.map((x, i) => (
+          <span
+            key={x.day}
+            onPointerEnter={() => setHot(i)}
+            className="flex h-full min-w-0 flex-1 cursor-default items-end"
+          >
+            <i
+              className="block w-full bg-mine-money transition-opacity"
+              style={{
+                height: `${max > 0 && x.usd > 0 ? Math.max(4, Math.round((100 * x.usd) / max)) : 0}%`,
+                opacity: hot != null && hot !== i ? 0.35 : 1,
+              }}
+            />
+          </span>
+        ))}
+      </div>
+      <div className="mt-1 flex justify-between text-[11px] tabular-nums text-role-system">
+        <span>{days[0].day.slice(5)}</span>
+        <span>{days[days.length - 1].day.slice(5)}</span>
+      </div>
+    </div>
+  );
+}
+
 /** Input tokens served from cache vs not: a meter, not a ring that is always full. */
 function CostCard({ data }: { data: Mine }) {
   const s = data.summary || {};
@@ -174,6 +228,7 @@ function CostCard({ data }: { data: Mine }) {
         <dt className="pl-4 text-role-system">写缓存</dt>
         <dd className="text-right tabular-nums text-ink">{fmtValue(s.cache_write, "tok")}</dd>
       </dl>
+      <DailyCost data={data} />
     </Card>
   );
 }

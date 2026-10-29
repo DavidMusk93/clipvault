@@ -328,16 +328,148 @@ export type TurnBar = {
   phase: string;
 };
 
-/** Turn strip marks: height = tool wall clock on one scale, colour = phase, fail flagged. */
-export function turnBars(turns: MineTurnLike[]): TurnBar[] {
-  const max = Math.max(1, ...turns.map((t) => Number(t.wall_s) || 0));
-  return turns.map((t) => ({
-    index: Number(t.index),
-    pct: Math.max(4, Math.round((100 * (Number(t.wall_s) || 0)) / max)),
-    fail: Number(t.fails) > 0,
-    color: phaseColor(String(t.phase), 0),
-    phase: String(t.phase),
-  }));
+/** What the strip's height can encode. Colour stays phase; red cap stays failure. */
+export const STRIP_METRICS = [
+  { id: "wall_s", label: "墙钟" },
+  { id: "tools", label: "工具" },
+  { id: "cost_usd", label: "费用" },
+  { id: "tokens_out", label: "输出" },
+] as const;
+export type StripMetric = (typeof STRIP_METRICS)[number]["id"];
+
+export const stripValueText = (key: StripMetric, v: unknown): string => {
+  if (key === "wall_s") return mineSpan(v);
+  if (key === "cost_usd") return mineUsd(v);
+  if (key === "tokens_out") return fmtValue(v, "tok");
+  return `${Number(v) || 0} 工具`;
+};
+
+/**
+ * Turn strip marks: height = the chosen metric on one scale, colour = phase,
+ * fail flagged. A zero is drawn as zero (baseline only), never as a stub.
+ */
+export function turnBars(turns: MineTurnLike[], key: StripMetric = "wall_s"): TurnBar[] {
+  const val = (t: MineTurnLike) => Number((t as Record<string, unknown>)[key]) || 0;
+  const max = Math.max(0, ...turns.map(val));
+  return turns.map((t) => {
+    const v = val(t);
+    return {
+      index: Number(t.index),
+      pct: v > 0 && max > 0 ? Math.max(4, Math.round((100 * v) / max)) : 0,
+      fail: Number(t.fails) > 0,
+      color: phaseColor(String(t.phase), 0),
+      phase: String(t.phase),
+    };
+  });
+}
+
+/** Where the local day changes between consecutive turns (7-day scope). */
+export function dayBreaks(turns: { ts: string }[]): { at: number; label: string }[] {
+  const out: { at: number; label: string }[] = [];
+  let prev = "";
+  turns.forEach((t, i) => {
+    const d = parseHookTs(t.ts);
+    const day = d ? dayOf(d) : "";
+    if (i > 0 && day && prev && day !== prev) out.push({ at: i, label: day.slice(5) });
+    if (day) prev = day;
+  });
+  return out;
+}
+
+/** Evidence spread of a finding: how many refs point at each turn. */
+export function refHits(refs: { turn?: number | null }[] | undefined): Map<number, number> {
+  const m = new Map<number, number>();
+  for (const r of refs || []) {
+    if (r.turn === null || r.turn === undefined) continue;
+    const n = Number(r.turn);
+    if (!Number.isFinite(n)) continue;
+    m.set(n, (m.get(n) || 0) + 1);
+  }
+  return m;
+}
+
+export type SortState = { key: string; dir: "asc" | "desc" } | null;
+
+/** Header click cycles desc → asc → original order. Numbers sort as numbers. */
+export const nextSort = (cur: SortState, key: string): SortState =>
+  !cur || cur.key !== key ? { key, dir: "desc" } : cur.dir === "desc" ? { key, dir: "asc" } : null;
+
+export function sortRows<T extends Record<string, unknown>>(
+  rows: T[],
+  sort: SortState,
+  numeric: (key: string) => boolean = (k) => MINE_NUM_COLS.has(k),
+): T[] {
+  if (!sort) return rows;
+  const { key, dir } = sort;
+  const sign = dir === "asc" ? 1 : -1;
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const x = a.r[key];
+      const y = b.r[key];
+      const c = numeric(key)
+        ? (Number(x) || 0) - (Number(y) || 0)
+        : String(x ?? "").localeCompare(String(y ?? ""), "zh");
+      return c ? sign * c : a.i - b.i;
+    })
+    .map((e) => e.r);
+}
+
+/** Ledger filter: a row stays when any text cell contains the query. */
+export function filterRows<T extends Record<string, unknown>>(
+  rows: T[],
+  cols: { id: string }[],
+  query: string,
+): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((r) =>
+    cols.some((c) =>
+      String(r[c.id] ?? "")
+        .toLowerCase()
+        .includes(q),
+    ),
+  );
+}
+
+/** Sum rows (合计) are not parts: a composition that includes them double-counts. */
+export const isTotalLabel = (s: unknown) => /合计|总计/.test(String(s ?? ""));
+
+/** `metric | value` tables read as a tile grid, not as a two-column list. */
+export const isKvTable = (cols: { id: string }[] | undefined) =>
+  (cols || []).length === 2 && cols?.[1]?.id === "value";
+
+/** A ledger table that lists turns (ts + prompt) repeats ③ 回合. */
+export const isTurnTable = (cols: { id: string }[] | undefined) => {
+  const ids = new Set((cols || []).map((c) => c.id));
+  return ids.has("ts") && ids.has("prompt");
+};
+
+/** Prompt clues (路径 / 仓库) from the ledger, keyed by turn ts, so ③ can show them inline. */
+export function turnClues(
+  blocks:
+    | Record<string, { tables?: { cols?: { id: string }[]; rows?: Record<string, unknown>[] }[] }>
+    | undefined,
+): Map<string, { path: boolean; repo: boolean }> {
+  const out = new Map<string, { path: boolean; repo: boolean }>();
+  for (const b of Object.values(blocks || {})) {
+    for (const t of b.tables || []) {
+      const ids = new Set((t.cols || []).map((c) => c.id));
+      if (!(ids.has("ts") && ids.has("path") && ids.has("repo"))) continue;
+      for (const r of t.rows || []) {
+        out.set(String(r.ts), { path: r.path === "有", repo: r.repo === "有" });
+      }
+    }
+  }
+  return out;
+}
+
+/** Long paths keep their file name: the directory is what truncates. */
+export function splitPath(s: unknown): { dir: string; base: string } {
+  const t = String(s ?? "");
+  const i = t.lastIndexOf("/");
+  if (i <= 0 || i === t.length - 1 || t.includes(" ")) return { dir: "", base: t };
+  return { dir: t.slice(0, i + 1), base: t.slice(i + 1) };
 }
 
 type MineTurnLike = {
@@ -384,4 +516,22 @@ export function ledgerChart(declared: string, items: { value: number }[]): Chart
   if (picked === "bars") return null;
   if (picked === "donut" && items.filter((i) => Number(i.value) > 0).length < 2) return null;
   return picked;
+}
+
+/** Per-day cost from the ledger's 「每天成本曲线」 table (agent.metrics). */
+export function dailyCost(
+  data: Mine | null | undefined,
+): { day: string; usd: number; n: number }[] {
+  for (const b of Object.values(data?.blocks || {})) {
+    for (const t of b.tables || []) {
+      const ids = new Set((t.cols || []).map((c) => c.id));
+      if (!(ids.has("day") && ids.has("usd"))) continue;
+      return (t.rows || []).map((r) => ({
+        day: String(r.day ?? ""),
+        usd: Number(r.usd) || 0,
+        n: Number(r.n) || 0,
+      }));
+    }
+  }
+  return [];
 }

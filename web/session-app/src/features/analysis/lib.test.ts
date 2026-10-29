@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Mine } from "../../api/mine";
 import {
+  dailyCost,
+  dayBreaks,
+  filterRows,
+  isKvTable,
+  isTotalLabel,
+  isTurnTable,
   ledgerChart,
   lossParts,
   metricText,
+  nextSort,
   phaseTotals,
+  refHits,
+  sortRows,
+  splitPath,
   turnBars,
+  turnClues,
   turnReadout,
   verdictHeadline,
   windowText,
@@ -119,5 +130,135 @@ describe("ledger chart policy", () => {
     expect(ledgerChart("line", [{ value: 1 }, { value: 2 }, { value: 3 }, { value: 4 }])).toBe(
       "line",
     );
+  });
+});
+
+describe("strip multi-metric and day breaks", () => {
+  const turns = [
+    {
+      index: 1,
+      phase: "implement",
+      ts: "2026-10-26 03:00:00",
+      wall_s: 100,
+      tools: 20,
+      cost_usd: 0.5,
+      fails: 0,
+    },
+    {
+      index: 2,
+      phase: "debug",
+      ts: "2026-10-27 04:00:00",
+      wall_s: 200,
+      tools: 10,
+      cost_usd: 0,
+      fails: 1,
+    },
+    {
+      index: 3,
+      phase: "other",
+      ts: "2026-10-27 05:00:00",
+      wall_s: 0,
+      tools: 0,
+      cost_usd: 0,
+      fails: 0,
+    },
+  ];
+
+  it("scales height to the chosen metric; zero stays zero", () => {
+    const byWall = turnBars(turns, "wall_s");
+    expect(byWall.map((b) => b.pct)).toEqual([50, 100, 0]);
+    const byTools = turnBars(turns, "tools");
+    expect(byTools.map((b) => b.pct)).toEqual([100, 50, 0]);
+    const byCost = turnBars(turns, "cost_usd");
+    expect(byCost.map((b) => b.pct)).toEqual([100, 0, 0]);
+  });
+
+  it("locates local day boundaries between turns", () => {
+    const breaks = dayBreaks(turns);
+    expect(breaks).toHaveLength(1);
+    expect(breaks[0].at).toBe(1);
+    expect(breaks[0].label).toBe("10-27");
+  });
+
+  it("tallies evidence hits by turn index", () => {
+    const hits = refHits([{ turn: 1 }, { turn: 2 }, { turn: 1 }, { turn: null }]);
+    expect(hits.get(1)).toBe(2);
+    expect(hits.get(2)).toBe(1);
+    expect(hits.has(3)).toBe(false);
+  });
+});
+
+describe("table helpers", () => {
+  it("cycles sort state: desc -> asc -> null", () => {
+    expect(nextSort(null, "n")).toEqual({ key: "n", dir: "desc" });
+    expect(nextSort({ key: "n", dir: "desc" }, "n")).toEqual({ key: "n", dir: "asc" });
+    expect(nextSort({ key: "n", dir: "asc" }, "n")).toBeNull();
+    expect(nextSort({ key: "n", dir: "asc" }, "other")).toEqual({ key: "other", dir: "desc" });
+  });
+
+  it("sorts rows numerically for metric columns and alphabetically for text", () => {
+    const rows = [
+      { name: "b", n: 2 },
+      { name: "a", n: 10 },
+      { name: "c", n: 1 },
+    ];
+    const byN = sortRows(rows, { key: "n", dir: "desc" }, (k) => k === "n");
+    expect(byN.map((r) => r.n)).toEqual([10, 2, 1]);
+    const byName = sortRows(rows, { key: "name", dir: "asc" }, () => false);
+    expect(byName.map((r) => r.name)).toEqual(["a", "b", "c"]);
+  });
+
+  it("filters rows across text columns", () => {
+    const rows = [{ file: "web/index.html" }, { file: "Sources/Server.swift" }];
+    expect(filterRows(rows, [{ id: "file" }], "swift")).toEqual([{ file: "Sources/Server.swift" }]);
+    expect(filterRows(rows, [{ id: "file" }], "")).toHaveLength(2);
+  });
+
+  it("detects special table shapes", () => {
+    expect(isKvTable([{ id: "metric" }, { id: "value" }])).toBe(true);
+    expect(isKvTable([{ id: "a" }, { id: "b" }, { id: "c" }])).toBe(false);
+    expect(isTurnTable([{ id: "ts" }, { id: "prompt" }])).toBe(true);
+    expect(isTotalLabel("合计")).toBe(true);
+    expect(isTotalLabel("总计")).toBe(true);
+    expect(isTotalLabel("RunCommand")).toBe(false);
+  });
+
+  it("extracts prompt clues by ts", () => {
+    const blocks = {
+      prompt: {
+        tables: [
+          {
+            cols: [{ id: "ts" }, { id: "path" }, { id: "repo" }],
+            rows: [{ ts: "2026-10-26 03:00:00", path: "有", repo: "无" }],
+          },
+        ],
+      },
+    };
+    const clues = turnClues(blocks);
+    expect(clues.get("2026-10-26 03:00:00")).toEqual({ path: true, repo: false });
+  });
+
+  it("splits paths keeping file name while directory truncates", () => {
+    expect(splitPath("/Users/bytedance/web/index.html")).toEqual({
+      dir: "/Users/bytedance/web/",
+      base: "index.html",
+    });
+    expect(splitPath("no-slash")).toEqual({ dir: "", base: "no-slash" });
+  });
+
+  it("extracts daily cost series from blocks", () => {
+    const data = {
+      blocks: {
+        metrics: {
+          tables: [
+            {
+              cols: [{ id: "day" }, { id: "usd" }],
+              rows: [{ day: "2026-10-26", usd: 3.25, n: 10 }],
+            },
+          ],
+        },
+      },
+    } as unknown as Mine;
+    expect(dailyCost(data)).toEqual([{ day: "2026-10-26", usd: 3.25, n: 10 }]);
   });
 });
