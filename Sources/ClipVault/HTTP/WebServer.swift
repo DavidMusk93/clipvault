@@ -88,6 +88,10 @@ class WebServer {
     private var lastProc: [String: Int] = [:]
     private static let sseMaxBuffered = 32
     private static let sseHeartbeatSeconds: Int = 15
+    /// No padding. Measured 2026-10-31 on xyz69.top: the `data:` line is in the
+    /// first packet, and a 64KB hello made every reconnect dump tens of KB onto
+    /// the Tailscale hop. A browser that had not seen headers by 20s then aborted,
+    /// so the pad never flushed a stuck stream and the retry storm kept the pipe busy.
     private static let sseResyncFrame = Data("data: {\"type\":\"resync_required\"}\n\n".utf8)
     private static let ssePingFrame = Data(": ping\n\ndata: {\"type\":\"ping\"}\n\n".utf8)
     
@@ -1644,7 +1648,7 @@ class WebServer {
         }
         dict["linkCount"] = item.linkCount
         dict["shared"] = item.shared
-        // Thumb URL for image types — client never loads full blob in feed
+        // Feed uses a thumb. Click / open-in-tab uses the stored original (`full`).
         if item.type == .image {
             dict["thumbUrl"] = "/api/image?id=\(item.id.uuidString)&size=thumb&cv=3"
             dict["fullUrl"] = "/api/image?id=\(item.id.uuidString)&size=full"

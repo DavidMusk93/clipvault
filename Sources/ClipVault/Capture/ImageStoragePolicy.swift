@@ -143,7 +143,7 @@ enum ImageStoragePolicy {
 
     /// Feed card preview. Tall strips: crop the **top** 4:3 at source, then
     /// scale by width (no long-edge 360 — that made 1179×16690 into a 25px sliver).
-    static func encodePreview(_ data: Data, maxShort: CGFloat, cropTallToCard: Bool) -> (Data, String)? {
+    static func encodePreview(_ data: Data, maxShort: CGFloat, cropTallToCard: Bool, quality: CGFloat? = nil) -> (Data, String)? {
         guard let source = CGImageSourceCreateWithData(
             data as CFData,
             [kCGImageSourceShouldCache: false] as CFDictionary
@@ -173,8 +173,8 @@ enum ImageStoragePolicy {
         let tw = max(1, Int((cw * s).rounded()))
         let th = max(1, Int((ch * s).rounded()))
         let raster = (s < 0.999 ? (resample(work, width: tw, height: th) ?? work) : work)
-        let quality: CGFloat = cropTallToCard ? 0.86 : 0.88
-        guard let encoded = encode(raster, jpeg: true, quality: quality) else { return nil }
+        let q = quality ?? (cropTallToCard ? 0.86 : 0.88)
+        guard let encoded = encode(raster, jpeg: true, quality: q) else { return nil }
         return (encoded, "image/jpeg")
     }
 

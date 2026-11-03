@@ -11070,7 +11070,7 @@ window.ClipViewMasonry = Masonry;
 
     function openLightbox(url, item) {
       if (!url) return;
-      fullUrlForLightbox = url;
+      fullUrlForLightbox = (item && fullSrc(item)) || url;
       const lb = document.getElementById('lightbox');
       const inner = lb.querySelector('.lightbox-inner');
       const img = document.getElementById('lightboxImg');
@@ -11346,7 +11346,12 @@ window.ClipViewMasonry = Masonry;
     let resyncTimer = 0;
     let resyncing = false;
     let resyncQueued = false;
-    const SSE_STALE_MS = 18000;
+    const SSE_STALE_MS = 45000;
+    // The tunnel has delivered a finished JSON in ~38s while the origin answered
+    // in <30ms. A 20s grace aborted the stream before those bytes arrived, then
+    // the watch opened another one. Wait longer than that stall.
+    const SSE_CONNECT_GRACE_MS = 60000;
+    let sseConnectAt = 0;
 
     // ---- Live update coalescing ---------------------------------------------
     // A sync apply / capture burst posts one `update` per item. Ingesting each
@@ -11446,8 +11451,13 @@ window.ClipViewMasonry = Masonry;
     }
 
     function sseIsFresh() {
-      return liveSSE
-        && liveSSE.readyState === EventSource.OPEN
+      if (!liveSSE) return false;
+      // A slow tunnel can take a couple of seconds to deliver response headers.
+      // Tearing the socket down while it is still CONNECTING is what flapped /api/events.
+      if (liveSSE.readyState === EventSource.CONNECTING) {
+        return sseConnectAt > 0 && (Date.now() - sseConnectAt) < SSE_CONNECT_GRACE_MS;
+      }
+      return liveSSE.readyState === EventSource.OPEN
         && (Date.now() - sseLastEventAt) <= SSE_STALE_MS;
     }
 
@@ -11583,6 +11593,7 @@ window.ClipViewMasonry = Masonry;
         try { liveSSE.close(); } catch (_) {}
         liveSSE = null;
       }
+      sseConnectAt = Date.now();
       const es = new EventSource(API + '/api/events');
       liveSSE = es;
       es.onopen = () => {
@@ -11808,8 +11819,10 @@ window.ClipViewMasonry = Masonry;
         if (!sseLeader && sseBc) return;
         if (sseIsFresh()) return;
         nm('sse_state', { ok: false, payload: { kind: 'wall', phase: 'watch', reason: 'stale' } });
+        // Reopen only. `onopen` resyncs once the stream is actually up. Resyncing
+        // here piled multi-minute `/api/clips` fetches onto a pipe that had not
+        // delivered the previous one.
         setupSSE();
-        scheduleResync();
       }, 8000);
     }
     // Drift assurance. SSE first, verify anyway: if a client is idle it never runs

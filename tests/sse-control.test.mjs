@@ -124,6 +124,15 @@ test('server SSE: retry, no buffering, heartbeat, bounded resync', () => {
   assert.match(web, /: ping/);
   assert.match(web, /sseMaxBuffered = 32/);
   assert.match(web, /sseHeartbeatSeconds: Int = 15/);
+  assert.doesNotMatch(web, /sseHelloPad/);
+  assert.doesNotMatch(web, /sseEventPad/);
+  assert.doesNotMatch(web, /func sseWire/);
+  assert.match(indexHtml, /SSE_STALE_MS = 45000/);
+  assert.match(indexHtml, /SSE_CONNECT_GRACE_MS = 60000/);
+  assert.match(indexHtml, /EventSource\.CONNECTING/);
+  assert.match(indexHtml, /data-preview="\$\{escAttr\(fullSrc\(item\)\)\}"/);
+  assert.doesNotMatch(indexHtml, /function previewSrc/);
+  assert.doesNotMatch(indexHtml, /size=medium/);
   const enqueue = sliceFrom(web, 'func enqueueSSELocked', 1200);
   assert.match(enqueue, /resyncRequired \{ return \}/);
   assert.match(enqueue, /sseMaxBuffered/);
