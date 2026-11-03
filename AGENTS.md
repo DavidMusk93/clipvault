@@ -327,7 +327,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 抽取：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」。X Article atomic：`MEDIA`/`IMAGE` → 图；`MARKDOWN` → 代码；`DIVIDER` → `<hr>`；`LINK` → `<a>`；其余 `.cv-x-dropped`。inline LINK / `data.urls` / mention 也画 `<a>`（仅 http(s)）。有 `article.title` 时正文 `header-*` 下移一级。`entityMap` 按 `key` 查，禁止当下标。禁止只凭 `cv-x-article` 当成功。X **长帖/Note** 不是 Article：vxtwitter 全文按空行切 `<p>`/`<h2>`，禁止 Readability 单 `<span>` 一坨字。渲染手册：`docs/archive-render.md`。
 
-选区条：28px 浅玻璃；黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**。划线定位：存下的 quote 已把连续空白收成一个空格；正文 text node 里的换行要折叠后映回原偏移再包 mark。prefix/suffix 仍对照原文。对不上就不上色。禁止为了划线改 CAS。
+选区条：28px 浅玻璃；黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**。划线定位：quote 是选区在正文索引里的原文切片（含换行；`<br>` 占一个换行），prefix/suffix 是这个切片两侧的原文。元素边界的选区也要落到同一套偏移。旧行里被折过空白的 quote 只在回放时按字符对齐。对不上就不上色。禁止为了划线改 CAS。
 
 代码：`ArchiveBlobClosure.swift` · `enqueueArchive` / `repairArchiveClosures` / `hydrateBlob`。nmem `clipvault_archive_closure_sync_20260817`。
 
