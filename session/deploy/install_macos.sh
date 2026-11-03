@@ -51,6 +51,14 @@ else
   cp -f "$REPO_ROOT/session/target/release/clipvault-ingest" "$BIN_DIR/"
 fi
 chmod 755 "$BIN_DIR/clipvault-hook" "$BIN_DIR/clipvault-flush" "$BIN_DIR/clipvault-aggregator" "$BIN_DIR/clipvault-ingest"
+# An unsigned replacement is killed by launchd (OS_REASON_CODESIGNING) and
+# KeepAlive brings it back in a loop. :9488 flaps, and the wall fan-in spends
+# that whole interval reconnecting.
+for bin in clipvault-hook clipvault-flush clipvault-aggregator clipvault-ingest; do
+  [ -f "$BIN_DIR/$bin" ] || continue
+  xattr -cr "$BIN_DIR/$bin" 2>/dev/null || true
+  codesign --force --sign - "$BIN_DIR/$bin" >/dev/null 2>&1 || true
+done
 
 # --- hooks env (PG) + wrapper ----------------------------------------------
 for f in trae-hooks.env pi-hooks.env clipvault_hook.sh; do
