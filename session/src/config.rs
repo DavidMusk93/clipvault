@@ -53,6 +53,12 @@ pub fn pg_config() -> Result<tokio_postgres::Config> {
     };
     cfg.options("-c TimeZone=UTC");
     cfg.connect_timeout(connect_timeout());
+    // A published port can ACK bytes and then never answer (docker-proxy
+    // upstream blackhole). Keepalives only help when the peer stops ACKing.
+    cfg.keepalives(true);
+    cfg.keepalives_idle(Duration::from_secs(30));
+    cfg.keepalives_interval(Duration::from_secs(10));
+    cfg.keepalives_retries(3);
     Ok(cfg)
 }
 

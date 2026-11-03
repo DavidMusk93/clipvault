@@ -90,6 +90,57 @@ exit 0
 EOF
 chmod 755 "$ENV_DIR/clipvault_hook.sh"
 
+# Harness / solo agent reads ~/.trae/hooks.json, not ~/.trae-cn/hooks.json.
+# Older hosts still point that file at trae_sm_hook.sh; forward that name.
+mkdir -p /root/.trae /root/.trae/cli /root/.trae-cn-server/ai-agent/hooks_env
+python3 - "$ENV_DIR/clipvault_hook.sh" <<'PY'
+import json, sys
+hook = sys.argv[1]
+events = [
+    "SessionStart", "UserPromptSubmit", "Notification", "TaskCompleted",
+    "PreCompact", "Stop", "SessionEnd", "PreToolUse", "PostToolUse",
+    "PostToolUseFailure", "PermissionRequest",
+]
+doc = {}
+for name in events:
+    entry = {"hooks": [{"type": "command", "command": f"{hook} --event {name}"}]}
+    if name in ("PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"):
+        entry["matcher"] = ".*"
+    doc[name] = [entry]
+text = json.dumps(doc, indent=2) + "\n"
+for path in ("/root/.trae/hooks.json", "/root/.trae/cli/hooks.json"):
+    try:
+        old = open(path).read()
+    except FileNotFoundError:
+        old = ""
+    if old and "clipvault_hook.sh" not in old and "trae_sm_hook.sh" not in old:
+        print(f"leave {path}: unrelated hooks")
+        continue
+    open(path, "w").write(text)
+    print(f"wrote {path}")
+PY
+sm=/root/.trae-cn-server/ai-agent/hooks_env/trae_sm_hook.sh
+if [ -f "$sm" ] && ! grep -q clipvault_hook.sh "$sm"; then
+  cp -a "$sm" "${sm}.bak-clipvault"
+fi
+cat > "$sm" <<EOF
+#!/bin/bash
+# Harness hooks.json on older hosts still execs this path.
+set +e
+event=""
+if [ -n "\${1:-}" ] && [ "\${1#-}" = "\$1" ]; then
+  event="\$1"
+  shift
+fi
+target="$ENV_DIR/clipvault_hook.sh"
+if [ -n "\$event" ]; then
+  exec "\$target" --event "\$event" "\$@"
+else
+  exec "\$target" "\$@"
+fi
+EOF
+chmod 755 "$sm"
+
 # 3. systemd: PG tunnel (remote hosts only) + flush daemon
 if [ "$LOCAL_PG" != "1" ]; then
 cat > /etc/systemd/system/clipvault-pg-tunnel.service <<EOF

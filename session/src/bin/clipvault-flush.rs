@@ -29,6 +29,10 @@ use tokio_postgres::{Client, NoTls};
 
 const WATCHDOG: Duration = Duration::from_secs(30);
 const PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
+/// Bound one PostgreSQL call. docker-proxy accepts and ACKs on 127.0.0.1 even
+/// when the container bridge is gone, so a query never errors and never
+/// finishes. Without this the drain loop wedges and the spool grows forever.
+const PG_CALL: Duration = Duration::from_secs(20);
 
 /// Age after which a consumed spool file is deleted from `done/`. Set
 /// `CLIPVAULT_DONE_RETENTION_DAYS=0` to keep every file forever.
@@ -120,6 +124,30 @@ async fn main() -> Result<()> {
                 last_prune = Instant::now();
             }
         }
+    }
+}
+
+/// Why a write did not land. `Transport` means the connection itself is
+/// unusable (timeout, reset); the spool file must stay for the next pass.
+/// `Rejected` means PostgreSQL answered and refused the statement.
+enum WriteError {
+    Transport,
+    Rejected,
+}
+
+fn classify(err: &anyhow::Error) -> WriteError {
+    let text = format!("{err:#}").to_ascii_lowercase();
+    if text.contains("connection")
+        || text.contains("closed")
+        || text.contains("timed out")
+        || text.contains("timeout")
+        || text.contains("broken pipe")
+        || text.contains("reset")
+        || text.contains("communicating")
+    {
+        WriteError::Transport
+    } else {
+        WriteError::Rejected
     }
 }
 
@@ -224,33 +252,55 @@ impl PgSink {
             return 0;
         }
 
-        if self.batch_hooks(&batch).await {
-            let mut written = 0;
-            for file in &files {
-                written += file.rows.iter().filter(|r| r.is_some()).count();
-                let unparsable: Vec<String> = file
-                    .lines
-                    .iter()
-                    .zip(&file.rows)
-                    .filter(|(_, r)| r.is_none())
-                    .map(|(l, _)| l.clone())
-                    .collect();
-                finish_file(spool_dir, &file.path, unparsable);
+        match self.batch_hooks(&batch).await {
+            Ok(()) => {
+                let mut written = 0;
+                for file in &files {
+                    written += file.rows.iter().filter(|r| r.is_some()).count();
+                    let unparsable: Vec<String> = file
+                        .lines
+                        .iter()
+                        .zip(&file.rows)
+                        .filter(|(_, r)| r.is_none())
+                        .map(|(l, _)| l.clone())
+                        .collect();
+                    finish_file(spool_dir, &file.path, unparsable);
+                }
+                return written;
             }
-            return written;
+            // The bridge accepted the TCP handshake and then answered nothing.
+            // Per-row retries would each wait out PG_CALL and pin the spool.
+            Err(WriteError::Transport) => return 0,
+            Err(WriteError::Rejected) => {}
         }
 
-        // Batch failed: isolate per row so one bad row cannot block the rest.
+        // Statement rejected: isolate per row so one bad row cannot block the rest.
+        // A transport failure stops the pass and leaves the remaining files untouched.
         let mut written = 0;
         for file in &files {
             let mut remain = Vec::new();
+            let mut stopped = false;
             for (line, row) in file.lines.iter().zip(&file.rows) {
+                if stopped {
+                    remain.push(line.clone());
+                    continue;
+                }
                 match row {
-                    Some(event) if self.write_hook_one(event).await => written += 1,
-                    _ => remain.push(line.clone()),
+                    Some(event) => match self.write_hook_one(event).await {
+                        Ok(()) => written += 1,
+                        Err(WriteError::Rejected) => remain.push(line.clone()),
+                        Err(WriteError::Transport) => {
+                            stopped = true;
+                            remain.push(line.clone());
+                        }
+                    },
+                    None => remain.push(line.clone()),
                 }
             }
             finish_file(spool_dir, &file.path, remain);
+            if stopped {
+                return written;
+            }
         }
         written
     }
@@ -275,33 +325,59 @@ impl PgSink {
         written
     }
 
-    async fn batch_hooks(&mut self, rows: &[db::Row]) -> bool {
-        let Ok(client) = self.client().await else {
-            return false;
+    async fn batch_hooks(&mut self, rows: &[db::Row]) -> Result<(), WriteError> {
+        let inserted = {
+            let Ok(client) = self.client().await else {
+                eprintln!("clipvault-flush: pg connect failed");
+                return Err(WriteError::Transport);
+            };
+            tokio::time::timeout(
+                PG_CALL,
+                db::insert_batch(client, "hook_events", &model::HOOK_COLS, rows),
+            )
+            .await
         };
-        match db::insert_batch(client, "hook_events", &model::HOOK_COLS, rows).await {
-            Ok(_) => true,
-            Err(_) => {
+        match inserted {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => {
+                eprintln!("clipvault-flush: batch insert failed: {e:#}");
                 self.drop_connection();
-                false
+                Err(classify(&e))
+            }
+            Err(_) => {
+                eprintln!("clipvault-flush: batch insert timed out");
+                self.drop_connection();
+                Err(WriteError::Transport)
             }
         }
     }
 
-    async fn write_hook_one(&mut self, row: &HookEvent) -> bool {
-        let Ok(client) = self.client().await else {
-            return false;
+    async fn write_hook_one(&mut self, row: &HookEvent) -> Result<(), WriteError> {
+        let inserted = {
+            let Ok(client) = self.client().await else {
+                eprintln!("clipvault-flush: pg connect failed");
+                return Err(WriteError::Transport);
+            };
+            tokio::time::timeout(PG_CALL, row.insert(client)).await
         };
-        match row.insert(client).await {
-            Ok(n) => {
+        match inserted {
+            Ok(Ok(n)) => {
                 if n > 0 {
-                    notify(client, &row.sse_payload().to_string()).await;
+                    if let Ok(client) = self.client().await {
+                        notify(client, &row.sse_payload().to_string()).await;
+                    }
                 }
-                true
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                eprintln!("clipvault-flush: insert failed: {e:#}");
+                self.drop_connection();
+                Err(classify(&e))
             }
             Err(_) => {
+                eprintln!("clipvault-flush: insert timed out");
                 self.drop_connection();
-                false
+                Err(WriteError::Transport)
             }
         }
     }
@@ -326,12 +402,22 @@ impl PgSink {
         } else {
             return false;
         };
-        let Ok(client) = self.client().await else {
-            return false;
+        let inserted = {
+            let Ok(client) = self.client().await else {
+                eprintln!("clipvault-flush: pg connect failed");
+                return false;
+            };
+            tokio::time::timeout(PG_CALL, metrics::insert_row(client, table, cols, &row)).await
         };
-        match metrics::insert_row(client, table, cols, &row).await {
-            Ok(()) => true,
+        match inserted {
+            Ok(Ok(())) => true,
+            Ok(Err(e)) => {
+                eprintln!("clipvault-flush: metric insert failed: {e:#}");
+                self.drop_connection();
+                false
+            }
             Err(_) => {
+                eprintln!("clipvault-flush: metric insert timed out");
                 self.drop_connection();
                 false
             }
