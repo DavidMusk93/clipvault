@@ -36,7 +36,8 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20260905a/);
+  assert.match(swift, /archive-view\.css\?v=20261103a/);
+  assert.match(swift, /highlight\.min\.js\?v=11\.7\.0/);
   assert.match(swift, /style-src 'self' 'unsafe-inline'/);
   assert.match(viewCss, /background: #1d1d1f/);
   assert.match(viewCss, /\.cv-code/);
@@ -47,6 +48,9 @@ test('archive view drops Pico gray wash and styles code/figures as their own med
   assert.match(readerJs, /function wrapCodeBlocks/);
   assert.match(readerJs, /function wrapFigures/);
   assert.match(readerJs, /function highlightSource/);
+  assert.match(readerJs, /function guessLang/);
+  assert.match(readerJs, /hljs\.highlight\(/);
+  assert.doesNotMatch(readerJs, /highlightAuto/);
   assert.match(readerJs, /Line wrapping/);
   assert.match(readerJs, /cv-code-copy/);
   assert.match(readerJs, /function toneFigure/);
@@ -203,6 +207,49 @@ test('wall image 404 hydrates the same CAS replicas as archive', () => {
   assert.match(backup, /resolvingSymlinksInPath/);
   assert.match(backup, /local CAS unlistable/);
   assert.match(backup, /throws -> CASSyncResult/);
+});
+
+test('stripped language class still highlights sql and rust, not prose', async (t) => {
+  const { JSDOM } = await import('jsdom');
+  const hljsSrc = readFileSync(join(root, 'web/assets/highlight.min.js'), 'utf8');
+  assert.match(hljsSrc, /BSD-3-Clause/);
+  assert.ok(hljsSrc.length > 80_000);
+  const sql = 'select i as k, md5(i::varchar) as v\\nfrom generate_series(1, {rows}) t(i)';
+  const rust = 'let mut parquet_options = ParquetOptions::default();\\nparquet_options.dictionary_enabled = false;\\ndf.write_parquet(\\n    \\"t.parquet\\",\\n    Some(table_options)\\n).await?;';
+  const plan = '# pushdown_filters disabled\\nFilterExec k=&lt;VAL&gt; (output_rows=1)\\n  DataSourceExec predicate=k=&lt;VAL&gt;';
+  const prose = 'The values come from the table where the key matches a point lookup.';
+  const dom = new JSDOM(
+    `<!DOCTYPE html><html data-cv-enhance><body><main class="cv-article">
+      <pre><code>${sql}</code></pre>
+      <pre><code>${rust}</code></pre>
+      <pre><code>${plan}</code></pre>
+      <pre><code>${prose}</code></pre>
+      <pre><code class="language-go">package main\\nfunc main() {\\n  x := 1\\n}</code></pre>
+    </main></body></html>`,
+    { runScripts: 'outside-only', url: 'http://127.0.0.1/api/archive/view' }
+  );
+  t.after(() => dom.window.close());
+  dom.window.eval(hljsSrc);
+  dom.window.eval(readerJs);
+  // jsdom stays readyState=loading; a deferred script in a browser runs at interactive.
+  if (dom.window.document.readyState === 'loading') {
+    dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+  }
+  const plates = [...dom.window.document.querySelectorAll('.cv-code')];
+  assert.equal(plates.length, 5);
+  const label = (plate) => plate.querySelector('.cv-code-lang').textContent;
+  assert.equal(label(plates[0]), 'SQL');
+  assert.match(plates[0].innerHTML, /hljs-keyword/);
+  assert.match(plates[0].innerHTML, />select</);
+  assert.equal(label(plates[1]), 'Rust');
+  assert.match(plates[1].innerHTML, /hljs-keyword/);
+  assert.match(plates[1].innerHTML, />let</);
+  assert.equal(label(plates[2]), '代码');
+  assert.equal(plates[2].querySelector('.hljs-keyword, .cv-k'), null);
+  assert.equal(label(plates[3]), '代码');
+  assert.equal(plates[3].querySelector('.hljs-keyword, .cv-k'), null);
+  assert.equal(label(plates[4]), 'Go');
+  assert.match(plates[4].innerHTML, /hljs-keyword/);
 });
 
 test('archive HTML contract: asset sha is 64 hex and extractable', () => {

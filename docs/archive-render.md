@@ -138,6 +138,7 @@ inline 还认：
 
 - 图只走 `/api/archive/asset?sha=`
 - `enhanceTechnicalMedia` 只包 `.cv-code` / `.cv-figure` / `.cv-table` / `.cv-callout`
+- 代码上色在 View：自托管 `highlight.min.js` 11.7.0，token 映到 Xcode Dark 四色。Readability 剥掉 `language-*` 后按正文指纹猜 sql/rust/…（`guessLang`）。禁止 `highlightAuto`（会把散文涂成某种语言）。猜不中保持纯色。禁止把 token span 写回 CAS
 - `.cv-article hr` 已有分割线样式，X 的 `<hr>` 直接用
 - 已归档条目要看到新抽取逻辑：**重新点「归档网页」**。View CSS/JS 改了刷新即可
 
