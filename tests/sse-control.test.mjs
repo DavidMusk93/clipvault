@@ -175,6 +175,11 @@ test('frontend SSE: native retry, coalesced mergeHead, visibility resync', () =>
   assert.match(indexHtml, /function teardownSSE/);
   assert.match(indexHtml, /trae_ask/);
   assert.match(web, /class TraeAskFanIn/);
+  const fanDone = sliceFrom(web, 'didCompleteWithError error: Error?', 700);
+  assert.match(fanDone, /NSURLErrorCancelled/, 'our own cancel must not schedule another fan-in');
+  assert.match(fanDone, /session === current/, 'a replaced session must not schedule another fan-in');
+  const fanRetry = sliceFrom(web, 'private func scheduleRetry()', 500);
+  assert.match(fanRetry, /retryWork\?\.cancel\(\)/, 'only one fan-in retry may be armed');
   assert.doesNotMatch(indexHtml, /setupTraeAskSSE/);
   assert.doesNotMatch(indexHtml, /EventSource\('\/trae\/api\/stream'\)/);
   assert.doesNotMatch(
