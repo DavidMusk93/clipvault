@@ -36,6 +36,25 @@ install_bin() {
     cp "$READABILITY" "$(dirname "$LIVE_BIN")/Readability.js"
     echo "Installed Readability.js next to binary"
   fi
+  # SwiftPM's generated Bundle.module fatalErrors if this directory is missing.
+  # Archive is the first caller, so a binary-only install looks like a hang/crash.
+  local bundle_name="ClipVault_ClipVaultServer.bundle"
+  local bundle_src=""
+  local cand
+  for cand in \
+    "$REPO_ROOT/.build/release/$bundle_name" \
+    "$REPO_ROOT/.build/out/Products/Release/$bundle_name" \
+    "$REPO_ROOT/.build/arm64-apple-macosx/release/$bundle_name"
+  do
+    if [ -d "$cand" ]; then bundle_src="$cand"; break; fi
+  done
+  if [ -n "$bundle_src" ]; then
+    rm -rf "$(dirname "$LIVE_BIN")/$bundle_name"
+    cp -R "$bundle_src" "$(dirname "$LIVE_BIN")/$bundle_name"
+    echo "Installed $bundle_name next to binary"
+  else
+    echo "WARN: $bundle_name not in .build; archive will crash on Bundle.module" >&2
+  fi
 }
 
 if [ -n "${NEW_BIN:-}" ] && [ -x "$NEW_BIN" ]; then
