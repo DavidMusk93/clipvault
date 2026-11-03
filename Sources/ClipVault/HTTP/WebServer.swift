@@ -2850,24 +2850,33 @@ final class TraeAskFanIn: NSObject, URLSessionDataDelegate {
     private func start() {
         lock.lock()
         retryWork?.cancel()
-        task?.cancel()
-        session?.invalidateAndCancel()
-        session = nil
+        retryWork = nil
+        let oldTask = task
+        let oldSession = session
         task = nil
+        session = nil
         buf.removeAll(keepingCapacity: true)
         lock.unlock()
+        // Drop the previous task before the new one exists. Its completion is
+        // a cancel, not a failure — didCompleteWithError must not schedule
+        // another start. Leaving that callback live stacked one timer per
+        // attempt (hundreds of reconnects while :9488 was down).
+        oldTask?.cancel()
+        oldSession?.invalidateAndCancel()
         guard let url = WebServer.traeBackendURL(from: "/trae/api/stream") else { return }
         let config = URLSessionConfiguration.default
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.timeoutIntervalForRequest = 86400
         config.timeoutIntervalForResource = 86400
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        self.session = session
         var req = URLRequest(url: url)
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let task = session.dataTask(with: req)
+        lock.lock()
+        self.session = session
         self.task = task
+        lock.unlock()
         task.resume()
         print("[SSE] trae ask fan-in \(url.absoluteString)")
     }
@@ -2887,6 +2896,13 @@ final class TraeAskFanIn: NSObject, URLSessionDataDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let ns = error as NSError?, ns.domain == NSURLErrorDomain, ns.code == NSURLErrorCancelled {
+            return
+        }
+        lock.lock()
+        let current = self.session
+        lock.unlock()
+        guard session === current else { return }
         scheduleRetry()
     }
 
@@ -2910,11 +2926,12 @@ final class TraeAskFanIn: NSObject, URLSessionDataDelegate {
 
     private func scheduleRetry() {
         lock.lock()
+        retryWork?.cancel()
         let wait = retrySec
         retrySec = min(15, retrySec * 1.6)
-        lock.unlock()
         let work = DispatchWorkItem { [weak self] in self?.start() }
         retryWork = work
+        lock.unlock()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + wait, execute: work)
     }
 }
