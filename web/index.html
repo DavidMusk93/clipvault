@@ -7067,6 +7067,12 @@ window.ClipViewMasonry = Masonry;
       if (item.type === 'image') {
         return normalizeCopyText(item.ocrText || '');
       }
+      // A span/meta wrapper is the companion sentence, not the notes-rich reflow.
+      if (item.type === 'html' && htmlIsDecorative(item.htmlContent || '')) {
+        const raw = String(item.textContent || '');
+        const plain = raw.trim() ? raw : stripHtmlToText(item.htmlContent || '');
+        return normalizeCopyText(plain);
+      }
       // text/url: always raw payload — card body may be pretty-printed JSON.
       if (item.type === 'text' || item.type === 'url') {
         const raw = String(item.textContent || item.preview || '');
@@ -7314,6 +7320,19 @@ window.ClipViewMasonry = Masonry;
 
     function stripEventHandlerAttrs(html) {
       return String(html || '').replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    }
+
+    function htmlIsDecorative(html) {
+      if (!html) return false;
+      const s = String(html).trim();
+      if (!s) return false;
+      return !/<(table|thead|tbody|tfoot|tr|td|th|caption|ul|ol|li|dl|dt|dd|h[1-6]|blockquote|img|figure|svg|hr)\b/i.test(s);
+    }
+
+    function itemFaceType(item) {
+      if (!item) return 'other';
+      if (item.type === 'html' && htmlIsDecorative(item.htmlContent || '')) return 'text';
+      return item.type || 'other';
     }
 
     function notesFragmentUseful(fragment) {
@@ -9311,7 +9330,9 @@ window.ClipViewMasonry = Masonry;
       const card = document.createElement('article');
       card.className = 'm3-card' + (Masonry.isCompact(item) ? ' is-compact' : '');
       card.dataset.id = item.id;
-      card.dataset.type = item.type;
+      const faceType = itemFaceType(item);
+      const wrapperHtml = item.type !== 'rtf' && htmlIsDecorative(item.htmlContent || '');
+      card.dataset.type = faceType;
       card.dataset.pinned = itemIsPinned(item) ? '1' : '0';
       const timeStr = formatItemTime(item);
 
@@ -9346,7 +9367,7 @@ window.ClipViewMasonry = Masonry;
         // Clipboard often stores a URL as type=text. Same toolbar as type=url.
         const href = itemUrlHref(item) || normalizePlainText(item.textContent || item.preview || '');
         body = renderUrlCardBody(item, href);
-      } else if (item.type === 'rtf' || item.type === 'html' || item.htmlContent) {
+      } else if (item.type === 'rtf' || ((item.type === 'html' || item.htmlContent) && !wrapperHtml)) {
         // Rich structure when useful (lists/emphasis); empty Cocoa holes collapsed in renderNotesFragment.
         // Prose CSS is white-space:normal — not pre — so blank lines do not explode.
         // Code-like plain falls through to hljs keyword highlight.
@@ -9377,7 +9398,12 @@ window.ClipViewMasonry = Masonry;
           body = renderPlainBody('（富文本无正文，请重新复制）', ' is-rtf', { itemId: item.id, archived: itemIsArchived(item) });
         }
       } else {
-        const plain = normalizePlainText(item.textContent || item.preview || '');
+        let plainSource = item.textContent || item.preview || '';
+        if (wrapperHtml && !String(item.textContent || '').trim()) {
+          const stripped = stripHtmlToText(item.htmlContent || '');
+          if (stripped) plainSource = stripped;
+        }
+        const plain = normalizePlainText(plainSource);
         if (plain) {
           if (searchQuery) {
             const fmt = formatTextForDisplay(plain, { beautifiers: browserBeautifiers(), enabled: getClipDisplayMode(item.id, detectStructuredText(plain).kind) === 'pretty' });
@@ -9437,7 +9463,7 @@ window.ClipViewMasonry = Masonry;
             <button type="button" class="icon-btn is-danger" data-del="${item.id}" title="移入回收箱" aria-label="删除"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9.5 7.5V6.2A1.7 1.7 0 0 1 11.2 4.5h1.6a1.7 1.7 0 0 1 1.7 1.7v1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.2 7.5l.6 11.2a1.7 1.7 0 0 0 1.7 1.6h3a1.7 1.7 0 0 0 1.7-1.6l.6-11.2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M10.2 11v5.5M13.8 11v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
           </div>`;
       // Compact: header = type + optional ×N + one time. No 「首次」 secondary line.
-      const tm = typeMeta(item.type);
+      const tm = typeMeta(faceType);
       const multiRef = itemHasMultiRef(item);
       const countBadge = multiRef
         ? `<button type="button" class="badge-count" data-events-open="${escAttr(item.id)}"

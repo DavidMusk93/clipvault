@@ -177,7 +177,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 **OCR 是派生字段。** 对端 `refreshRemoteFields` 按更长文本写入。禁止假定对端会自己再跑 Vision。
 
-禁止：改 timestamp 冒充置顶；`{...old,...item}` 留下旧 `pinnedAt`；判断写进 capture 正文；`text_hash` 当 locator。
+禁止：改 timestamp 冒充置顶；`{...old,...item}` 留下旧 `pinnedAt`；判断写进 capture 正文；`text_hash` 当 locator。无表/列表/标题/引言/图/分隔线的 HTML 是包装，捕获、同步 apply、一次性 `demote_decorative_html_v1` 收成 `type=text`（正文留下，`content_hash` 与 timestamp 不改）；RTF 不降。
 
 检索：FTS `judgment_text` = 评价备注 + View 划线/评论。写完必须 `refreshJudgmentTextLocked`。禁止 `LIKE reader_ops.payload`。
 
@@ -209,6 +209,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 | 类型 chip 改 `type=` 后 `fetchPage({reset:true})` 走完整 keyset | 只 `clientFilter` 内存里的 30 条 |
 | html chip `IN ('html','rtf')`（Notes 粘贴） | html 把 rtf 当丢失 |
 | html/rtf 墙卡 `notes-rich`（表/标题/引言）；>48KB 按 id hydrate（one-shot，空体禁止循环重拉） | 当浏览器（信任 `style` / 可点 `<a>` / 远程 `<img>` / `on*` / SVG / 表单） |
+| 无结构 html 当纯文本卡（`itemFaceType`）；富文本 chip 仍是服务端 `type IN ('html','rtf')` | 只改徽章、不改库里的 type（chip 计数会对不上） |
 | 有序列 shortest-col 绝对定位；prepend 重算坐标 | 新卡堆某一列 / flex 空列一条线 |
 | 对端团块保持 N 张卡 | 合成一张 / 为团块砍尾 / 为团块拨钟 |
 | 活更新 burst 按 id 分批拉全（tail 回队列）；已知 id 的 `timestamp` 变大就移动同一张卡，重排受影响的两天 | 折成一次 head merge（只装 `PAGE_SIZE` 30）/ 报 `'have'` 早退 / 推进 `lastHeadSig` 却不应用变化 |

@@ -395,6 +395,7 @@ final class DatabaseManager: ObservableObject {
                 guard let self = self else { return }
                 self.migrateInlineBlobsToFiles(maxBatches: 200)
                 self.peelArchiveHtmlOutOfRow()
+                self.demoteDecorativeHtmlRows()
                 self.backfillTextHashes(limit: 2000)
                 self.drainDuplicates(maxBatches: 40)
                 // Undo any substr_fold soft-deletes (feature removed — too aggressive).
@@ -912,6 +913,90 @@ final class DatabaseManager: ObservableObject {
         let n = Int(sqlite3_changes(db))
         if n > 0 {
             print("[DatabaseManager] peeled \(n) archive html_content rows → CAS pointer only")
+        }
+        return n
+    }
+
+    /// One-shot: pasteboard wrappers stored as type=html become plain text.
+    /// Structural HTML stays. content_hash and timestamp stay. RTF is not selected.
+    /// Idempotent if the process dies before the meta key is set.
+    @discardableResult
+    private func demoteDecorativeHtmlRows() -> Int {
+        guard let db = db else { return 0 }
+        let metaKey = "demote_decorative_html_v1"
+        if metaGet(metaKey) == "1" { return 0 }
+
+        let selectSQL = """
+        SELECT id, text_content, html_content, ocr_text, source_app
+        FROM clipboard_items
+        WHERE type = 'html' AND html_content IS NOT NULL;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, selectSQL, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        var rows: [(id: String, text: String?, html: String, ocr: String?, source: String?)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+            guard !id.isEmpty else { continue }
+            let text = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+            let html = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+            let ocr = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+            let source = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+            if ClipboardItem.htmlIsDecorative(html) {
+                rows.append((id: id, text: text, html: html, ocr: ocr, source: source))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        guard execQuiet("BEGIN IMMEDIATE;") else { return 0 }
+        let updateSQL = """
+        UPDATE clipboard_items
+        SET type = 'text',
+            html_content = NULL,
+            html_bytes = 0,
+            text_content = ?
+        WHERE id = ? AND type = 'html';
+        """
+        var update: OpaquePointer?
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &update, nil) == SQLITE_OK else {
+            execQuiet("ROLLBACK;")
+            return 0
+        }
+        defer { sqlite3_finalize(update) }
+
+        var n = 0
+        for row in rows {
+            let hadText = row.text.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
+            let kept = ClipboardItem.plainKeepingDecorativeHTML(row.html, companion: row.text)
+            sqlite3_reset(update)
+            sqlite3_clear_bindings(update)
+            bindText(update, 1, kept)
+            bindText(update, 2, row.id)
+            guard sqlite3_step(update) == SQLITE_DONE else {
+                execQuiet("ROLLBACK;")
+                return 0
+            }
+            if sqlite3_changes(db) == 0 { continue }
+            if !hadText, let kept,
+               let th = ClipboardItem.semanticTextHash(plain: kept, html: nil) {
+                setTextHash(id: row.id, hash: th)
+            }
+            upsertFTS(id: row.id, text: kept, ocr: row.ocr, source: row.source, html: nil)
+            n += 1
+        }
+        metaSet(metaKey, "1")
+        guard execQuiet("COMMIT;") else {
+            execQuiet("ROLLBACK;")
+            return 0
+        }
+        if n > 0 {
+            print("[DatabaseManager] demoted decorative html rows=\(n)")
+            _ = appendOperationLogSync(
+                action: "demote_decorative_html",
+                itemId: nil,
+                contentHash: nil,
+                detail: "rows=\(n)",
+                source: "migrate"
+            )
         }
         return n
     }
@@ -1719,6 +1804,16 @@ final class DatabaseManager: ObservableObject {
         bumpTimestamp: Bool
     ) -> Bool {
         guard let db = db else { return false }
+        // A peer can still send a span/meta wrapper as type=html. Demote before
+        // COALESCE, or refreshRemoteFields would put the wrapper back.
+        var typeRaw = typeRaw
+        var textContent = textContent
+        var htmlContent = htmlContent
+        if typeRaw == "html", let html = htmlContent, ClipboardItem.htmlIsDecorative(html) {
+            typeRaw = "text"
+            textContent = ClipboardItem.plainKeepingDecorativeHTML(html, companion: textContent)
+            htmlContent = nil
+        }
         let idStr = id.uuidString
         let type = ClipboardType(rawValue: typeRaw) ?? .other
 
@@ -5851,6 +5946,7 @@ final class DatabaseManager: ObservableObject {
             self.bootstrapFTSIfNeeded()
             self.migrateInlineBlobsToFiles(maxBatches: 200)
             self.peelArchiveHtmlOutOfRow()
+            self.demoteDecorativeHtmlRows()
             self.backfillTextHashes(limit: 2000)
             self.runAnalyze()
             self.appendOperationLogSync(

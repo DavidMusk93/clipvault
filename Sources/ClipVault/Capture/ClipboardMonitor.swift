@@ -374,12 +374,23 @@ class ClipboardMonitor: ObservableObject {
     }
 
     private func createHTMLItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
-        guard let html = getHTML() else { return nil }
+        guard let html = getHTML(), !html.isEmpty else { return nil }
         // Companion public.utf8-plain-text often has correct newlines/spaces (所见即所得).
-        // Prefer it as textContent so copy/search stay type:text without stripping HTML markup.
         var plain = getText()
         if let p = plain, p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             plain = nil
+        }
+        // A span/meta/pre wrapper around a sentence is plain text. Lists, tables,
+        // headings, quotes, images, and rules stay type=html. RTF never reaches here.
+        if ClipboardItem.htmlIsDecorative(html) {
+            guard let text = ClipboardItem.plainKeepingDecorativeHTML(html, companion: plain) else {
+                return nil
+            }
+            let hash = computeHash(for: text)
+            return ClipboardItem(
+                timestamp: timestamp, type: .text, contentHash: hash,
+                textContent: text, sourceApp: sourceApp
+            )
         }
         let hash = computeHash(for: html)
         return ClipboardItem(
