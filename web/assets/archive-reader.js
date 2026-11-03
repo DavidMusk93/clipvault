@@ -127,6 +127,7 @@
     var setE = false;
     for (var i = 0; i < index.parts.length; i++) {
       var p = index.parts[i];
+      if (!p.node) continue;
       if (!setS && start >= p.start && start <= p.end) {
         range.setStart(p.node, Math.min(p.node.nodeValue.length, start - p.start));
         setS = true;
@@ -145,8 +146,7 @@
     var start = abs;
     var end = Math.min(index.text.length, abs + take);
     if (end - start < 16) start = Math.max(0, abs - take);
-    var raw = index.text.slice(start, end);
-    var quote = raw.replace(/\s+/g, " ").trim();
+    var quote = index.text.slice(start, end);
     if (quote.length < 8) return null;
     var prefix = index.text.slice(Math.max(0, start - 24), start);
     var suffix = index.text.slice(end, end + 24);
@@ -459,35 +459,86 @@
     return idx.text.slice(abs.end, abs.end + 24);
   }
 
+  function isReaderChrome(node) {
+    return !!(node && node.nodeType === 1 && node.closest && node.closest(".cv-reader-ui, .cv-selbar, .cv-note"));
+  }
+
+  // Same characters JS treats as whitespace, listed so the legacy reader does not use a regexp.
+  function isWs(ch) {
+    var c = ch.charCodeAt(0);
+    return c === 9 || c === 10 || c === 11 || c === 12 || c === 13 || c === 32
+      || c === 0xa0 || c === 0x1680 || c === 0x2028 || c === 0x2029
+      || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff
+      || (c >= 0x2000 && c <= 0x200a);
+  }
+
   function buildIndex(root) {
-    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: function (n) {
-        if (!n.nodeValue) return NodeFilter.FILTER_REJECT;
-        if (n.parentElement && n.parentElement.closest(".cv-reader-ui, .cv-selbar, .cv-note")) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
     var parts = [];
+    var spans = new Map();
     var acc = "";
-    while (walker.nextNode()) {
-      var t = walker.currentNode;
-      parts.push({ node: t, start: acc.length, end: acc.length + t.nodeValue.length });
-      acc += t.nodeValue;
+    function blank(node) {
+      spans.set(node, { start: acc.length, end: acc.length });
     }
-    return { text: acc, parts: parts };
+    function walk(node) {
+      if (!node) return;
+      if (node.nodeType === 1 && isReaderChrome(node)) {
+        blank(node);
+        return;
+      }
+      if (node.nodeType === 3) {
+        var value = node.nodeValue || "";
+        var start = acc.length;
+        if (value) {
+          parts.push({ node: node, start: start, end: start + value.length });
+          acc += value;
+        }
+        spans.set(node, { start: start, end: acc.length });
+        return;
+      }
+      if (node.nodeType !== 1) {
+        blank(node);
+        return;
+      }
+      if (node.tagName === "BR") {
+        var at = acc.length;
+        parts.push({ node: null, start: at, end: at + 1 });
+        acc += "\n";
+        spans.set(node, { start: at, end: at + 1 });
+        return;
+      }
+      var from = acc.length;
+      for (var i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+      spans.set(node, { start: from, end: acc.length });
+    }
+    walk(root);
+    return { text: acc, parts: parts, spans: spans };
+  }
+
+  function pointToAbs(index, node, offset) {
+    if (!node || !index.spans) return -1;
+    var span = index.spans.get(node);
+    if (!span) return -1;
+    if (node.nodeType === 3) {
+      var len = node.nodeValue ? node.nodeValue.length : 0;
+      var rel = offset;
+      if (rel < 0) rel = 0;
+      if (rel > len) rel = len;
+      return span.start + rel;
+    }
+    if (node.nodeType !== 1) return span.start;
+    if (offset <= 0) return span.start;
+    if (offset >= node.childNodes.length) return span.end;
+    var child = node.childNodes[offset];
+    var childSpan = child && index.spans.get(child);
+    if (childSpan) return childSpan.start;
+    var prev = node.childNodes[offset - 1];
+    var prevSpan = prev && index.spans.get(prev);
+    return prevSpan ? prevSpan.end : span.start;
   }
 
   function rangeToAbs(index, range) {
-    function pos(node, offset) {
-      for (var i = 0; i < index.parts.length; i++) {
-        if (index.parts[i].node === node) return index.parts[i].start + offset;
-      }
-      return -1;
-    }
-    var s = pos(range.startContainer, range.startOffset);
-    var e = pos(range.endContainer, range.endOffset);
+    var s = pointToAbs(index, range.startContainer, range.startOffset);
+    var e = pointToAbs(index, range.endContainer, range.endOffset);
     if (s < 0 || e < 0 || e <= s) return null;
     return { start: s, end: e };
   }
@@ -500,45 +551,73 @@
     return preOk && sufOk;
   }
 
-  // A stored quote collapses every whitespace run to one space. A text node can
-  // still hold the newline, so a collapsed hit must map back onto the original offsets.
-  function collapseWithMap(text) {
-    var collapsed = "";
-    var map = [];
-    var i = 0;
-    while (i < text.length) {
-      if (/\s/.test(text.charAt(i))) {
-        var start = i;
-        i += 1;
-        while (i < text.length && /\s/.test(text.charAt(i))) i += 1;
-        collapsed += " ";
-        map.push(start);
-      } else {
-        collapsed += text.charAt(i);
-        map.push(i);
-        i += 1;
-      }
-    }
-    return { text: collapsed, map: map };
+  function trimWs(s) {
+    var a = 0;
+    var b = s.length;
+    while (a < b && isWs(s.charAt(a))) a++;
+    while (b > a && isWs(s.charAt(b - 1))) b--;
+    return s.slice(a, b);
   }
 
-  function locateCollapsed(text, quote, prefix, suffix) {
-    var q2 = String(quote).replace(/\s+/g, " ").trim();
-    if (!q2) return null;
-    var folded = collapseWithMap(text);
-    var from = 0;
-    while (from < folded.text.length) {
-      var i = folded.text.indexOf(q2, from);
-      if (i < 0) return null;
-      var last = i + q2.length - 1;
-      if (last < folded.map.length) {
-        var start = folded.map[i];
-        var end = folded.map[last] + 1;
-        if (end > start && anchorOk(text, start, end, prefix, suffix)) {
-          return { start: start, end: end };
+  // Quotes saved before the range was stored verbatim had their whitespace runs
+  // folded and their edges trimmed. Replay those rows onto the original offsets.
+  function alignFold(text, quote, origin) {
+    var q = 0;
+    var i = origin;
+    while (q < quote.length) {
+      if (i >= text.length) return null;
+      var qc = quote.charAt(q);
+      var tc = text.charAt(i);
+      if (isWs(qc)) {
+        if (!isWs(tc)) return null;
+        while (q < quote.length && isWs(quote.charAt(q))) q++;
+        while (i < text.length && isWs(text.charAt(i))) i++;
+        continue;
+      }
+      if (qc !== tc) return null;
+      q++;
+      i++;
+    }
+    return { start: origin, end: i };
+  }
+
+  function acceptFold(text, core, prefix, suffix) {
+    var leads = [core.start];
+    var p = core.start;
+    while (p > 0 && isWs(text.charAt(p - 1))) {
+      p--;
+      leads.push(p);
+    }
+    var trails = [core.end];
+    var t = core.end;
+    while (t < text.length && isWs(text.charAt(t))) {
+      t++;
+      trails.push(t);
+    }
+    for (var a = 0; a < leads.length; a++) {
+      for (var b = 0; b < trails.length; b++) {
+        if (leads[a] >= trails[b]) continue;
+        if (anchorOk(text, leads[a], trails[b], prefix, suffix)) {
+          return { start: leads[a], end: trails[b] };
         }
       }
-      from = i + 1;
+    }
+    return null;
+  }
+
+  function locateFolded(text, quote, prefix, suffix) {
+    var q = trimWs(quote);
+    if (!q) return null;
+    var from = 0;
+    while (from < text.length) {
+      var at = text.indexOf(q.charAt(0), from);
+      if (at < 0) return null;
+      var core = alignFold(text, q, at);
+      if (core) {
+        var hit = acceptFold(text, core, prefix, suffix);
+        if (hit) return hit;
+      }
+      from = at + 1;
     }
     return null;
   }
@@ -555,7 +634,7 @@
       }
       from = i + 1;
     }
-    return locateCollapsed(text, quote, prefix, suffix);
+    return locateFolded(text, quote, prefix, suffix);
   }
 
   function wrapAbs(index, start, end, hid, hasNote) {
@@ -564,7 +643,7 @@
       var p = index.parts[i];
       var a = Math.max(start, p.start);
       var b = Math.min(end, p.end);
-      if (b <= a) continue;
+      if (b <= a || !p.node) continue;
       toWrap.push({ node: p.node, from: a - p.start, to: b - p.start });
     }
     toWrap.reverse().forEach(function (w) {
@@ -604,13 +683,17 @@
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
     var range = sel.getRangeAt(0);
-    if (!root.contains(range.commonAncestorContainer)) return null;
-    var quote = range.toString().replace(/\s+/g, " ").trim();
+    var host = range.commonAncestorContainer;
+    if (host !== root && !root.contains(host)) return null;
+    var idx = buildIndex(root);
+    var abs = rangeToAbs(idx, range);
+    if (!abs) return null;
+    var quote = idx.text.slice(abs.start, abs.end);
     if (quote.length < 2 || quote.length > 800) return null;
     return {
       quote: quote,
-      prefix: contextSlice(range, true),
-      suffix: contextSlice(range, false),
+      prefix: idx.text.slice(Math.max(0, abs.start - 24), abs.start),
+      suffix: idx.text.slice(abs.end, abs.end + 24),
       headingId: nearestHeadingId(range.startContainer),
     };
   }
@@ -1787,6 +1870,8 @@
       locateQuote: locateQuote,
       buildIndex: buildIndex,
       applyHighlights: applyHighlights,
+      serializeSelection: serializeSelection,
+      rangeToAbs: rangeToAbs,
     };
   }
 

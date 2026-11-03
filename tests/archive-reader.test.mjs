@@ -120,6 +120,69 @@ test('newline inside a text node still paints the collapsed quote', async (t) =>
   assert.match(marks[0].textContent, /when\nwriting/);
 });
 
+test('a highlight is the selected range, including its own whitespace', async (t) => {
+  const { JSDOM } = await import('jsdom');
+  const sentence = '\nBy default, DataFusion already does not add bloom filters when\nwriting Parquet files.\n';
+  const dom = new JSDOM(
+    '<!DOCTYPE html><html data-cv-test><body><main class="cv-article">' +
+      '<p id="edge"></p>' +
+      '<p id="break">when<br>writing</p>' +
+      '<p id="one">alpha</p><p id="two">beta</p>' +
+    '</main></body></html>',
+    { runScripts: 'outside-only', url: 'http://127.0.0.1/api/archive/view' }
+  );
+  t.after(() => dom.window.close());
+  const { document } = dom.window;
+  const edge = document.getElementById('edge');
+  edge.appendChild(document.createTextNode('BEFORE'));
+  const body = document.createTextNode(sentence);
+  edge.appendChild(body);
+  edge.appendChild(document.createTextNode('AFTER'));
+  dom.window.eval(js);
+  const api = dom.window.__cvReaderTest;
+  const root = document.querySelector('main.cv-article');
+
+  const whole = document.createRange();
+  whole.setStart(body, 0);
+  whole.setEnd(body, body.nodeValue.length);
+  const sel = dom.window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(whole);
+  const saved = api.serializeSelection(root);
+  assert.equal(saved.quote, sentence);
+  assert.equal(saved.prefix.slice(-6), 'BEFORE');
+  assert.equal(saved.suffix.slice(0, 5), 'AFTER');
+  const idx = api.buildIndex(root);
+  const abs = api.rangeToAbs(idx, whole);
+  assert.equal(idx.text.slice(abs.start, abs.end), whole.toString());
+  api.applyHighlights(root, [saved && { id: 'edge', quote: saved.quote, prefix: saved.prefix, suffix: saved.suffix }]);
+  const edgeMarks = [...edge.querySelectorAll('mark.cv-hl')];
+  assert.equal(edgeMarks.length, 1);
+  assert.equal(edgeMarks[0].textContent, sentence);
+
+  const broken = document.getElementById('break');
+  const across = document.createRange();
+  across.selectNodeContents(broken);
+  sel.removeAllRanges();
+  sel.addRange(across);
+  const brSaved = api.serializeSelection(root);
+  assert.equal(brSaved.quote, 'when\nwriting');
+  api.applyHighlights(root, [{ id: 'br', quote: brSaved.quote, prefix: brSaved.prefix, suffix: brSaved.suffix }]);
+  const pieces = [...broken.querySelectorAll('mark.cv-hl')].map((m) => m.textContent);
+  assert.deepEqual(pieces, ['when', 'writing']);
+
+  const cross = document.createRange();
+  cross.setStart(document.getElementById('one'), 0);
+  cross.setEnd(document.getElementById('two'), document.getElementById('two').childNodes.length);
+  sel.removeAllRanges();
+  sel.addRange(cross);
+  assert.equal(cross.commonAncestorContainer, root);
+  const crossSaved = api.serializeSelection(root);
+  assert.equal(crossSaved.quote, cross.toString());
+  assert.match(crossSaved.quote, /alpha/);
+  assert.match(crossSaved.quote, /beta/);
+});
+
 test('server persists reader_state + reader_ops, not archive HTML', () => {
   assert.match(swiftDb, /CREATE TABLE IF NOT EXISTS reader_ops/, 'ops table');
   assert.match(swiftDb, /reader_state/, 'projection column');

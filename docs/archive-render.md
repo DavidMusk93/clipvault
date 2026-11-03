@@ -27,7 +27,7 @@ ClipVault 离线阅读面怎么从 URL 变成可排版的 HTML。产品入口与
 
 禁止：View 为高亮改 CAS；同步拉出版商 CDN 图（CSP `img-src 'self'`，iframe 会像「归档为空」）。
 
-划线：`serializeSelection` 存折叠后的 quote（连续空白变成一个空格）和原文 prefix/suffix。`locateQuote` 先按原文精确找；找不到就把正文 `\s+` 收成空格并记下原偏移，命中后再按原文范围包 `<mark class="cv-hl">`。text node 里的换行因此仍能上色。禁止把 mark 写回 CAS，禁止为这一步重归档。
+划线：索引按文档顺序收集文本，`<br>` 记一个换行，使这段字符串等于该节点上 `Range.toString()`。`serializeSelection` 把选区两端（含元素边界）换成这套偏移，quote / prefix / suffix 都是切片，不再折叠空白。`locateQuote` 用这个原文切片包 `<mark class="cv-hl">`。以前存下来、空白已被折成单空格的 quote 只在回放时按字符对齐。禁止把 mark 写回 CAS，禁止为这一步重归档。
 
 ## 捕获流水线
 
