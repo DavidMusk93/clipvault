@@ -1233,6 +1233,93 @@
     return LANG_LABEL[lang] || lang.toUpperCase();
   }
 
+  // highlight.js names differ from the short ids used on the code plate.
+  var HLJS_NAME = {
+    rs: "rust",
+    py: "python",
+    sh: "bash",
+    js: "javascript",
+    ts: "typescript",
+    yml: "yaml",
+    md: "markdown",
+    text: "",
+    plaintext: "",
+    txt: "",
+  };
+
+  function hljsName(lang) {
+    if (!lang || lang === "text") return "";
+    var name = HLJS_NAME[lang] || lang;
+    if (!window.hljs || !window.hljs.getLanguage || !window.hljs.getLanguage(name)) return "";
+    return name;
+  }
+
+  /**
+   * Readability strips language-* classes, so archived <pre> is often bare.
+   * Fingerprints only. Automatic language detection paints English prose.
+   * A block needs one strong shape and a clear lead over the runner-up.
+   */
+  function guessLang(src) {
+    var s = String(src || "");
+    var trimmed = s.trim();
+    if (trimmed.length < 8 || s.length > 80000) return "";
+    var score = { sql: 0, rs: 0, py: 0, go: 0, js: 0, ts: 0, sh: 0, json: 0, swift: 0, java: 0, html: 0, cpp: 0 };
+    function bump(lang, n) { score[lang] += n; }
+    if (/\bselect\b[\s\S]{0,200}\bfrom\b/i.test(s)) bump("sql", 6);
+    if (/\b(insert\s+into|create\s+(?:table|view|index)|union\s+all)\b/i.test(s)) bump("sql", 5);
+    if (/\bcopy\b/i.test(s) && /\b(?:to|from|options)\b/i.test(s)) bump("sql", 5);
+    if (/::(?:varchar|int|bigint|text|float)\b/i.test(s)) bump("sql", 4);
+    if (/\bgenerate_series\s*\(/i.test(s)) bump("sql", 3);
+    if (/\blet\s+mut\b/.test(s)) bump("rs", 5);
+    if (/\basync\s+move\b/.test(s)) bump("rs", 5);
+    if (/\bfn\s+[A-Za-z_]\w*\s*\(/.test(s)) bump("rs", 4);
+    if (/\.await\??/.test(s)) bump("rs", 4);
+    if (/\b(?:impl|struct|enum|trait|pub)\b/.test(s)) bump("rs", 2);
+    if (/::/.test(s) && /\b(?:let|fn|use|pub|impl|mut)\b/.test(s)) bump("rs", 3);
+    if (/(?:^|\n)\s*def\s+\w+\s*\(/.test(s)) bump("py", 5);
+    if (/(?:^|\n)\s*(?:from|import)\s+\w+/.test(s)) bump("py", 3);
+    if (/\bfunc\s+(?:\([^)]*\)\s*)?[A-Za-z_]\w*\s*\(/.test(s)) bump("go", 5);
+    if (/(?:^|\n)\s*package\s+[a-z]\w*\s*(?:\n|$)/.test(s)) bump("go", 4);
+    if (/:=/.test(s) && /\bfunc\b/.test(s)) bump("go", 3);
+    if (/\b(?:const|let|var)\s+\w+\s*=/.test(s) && /=>|\bfunction\b/.test(s)) bump("js", 4);
+    if (/\binterface\s+[A-Z]\w+/.test(s) && /:\s*[A-Za-z]/.test(s)) bump("ts", 4);
+    if (/^#!/.test(trimmed) || /\b(?:fi|esac|elif)\b/.test(s)) bump("sh", 5);
+    if (/(?:^|\n)\s*(?:export|echo|set\s+-e)\b/.test(s)) bump("sh", 3);
+    if (/^\s*[\[{]/.test(trimmed) && /"[\w$]+"\s*:/.test(s) && /[}\]]\s*$/.test(trimmed)) bump("json", 6);
+    if (/<\/[a-z][\w:-]*>/i.test(s) && /<[a-z][\w:-]*[\s>]/i.test(s)) bump("html", 5);
+    if (/\b(?:public|private)\s+(?:class|static|void)\b/.test(s)) bump("java", 5);
+    if (/\b#include\s*</.test(s) || /\bstd::/.test(s)) bump("cpp", 5);
+    if (/\bfunc\s+\w+\s*\([^)]*\)\s*(?:async\s*)?\{/.test(s) && /\b(?:var|let|guard)\b/.test(s)) bump("swift", 4);
+    var best = "";
+    var bestN = 0;
+    var second = 0;
+    for (var k in score) {
+      var n = score[k];
+      if (n > bestN) {
+        second = bestN;
+        best = k;
+        bestN = n;
+      } else if (n > second) {
+        second = n;
+      }
+    }
+    if (bestN < 4) return "";
+    if (second > 0 && bestN - second < 2) return "";
+    return best;
+  }
+
+  function ensureHljs(done) {
+    if (window.hljs && window.hljs.highlight) {
+      done(window.hljs);
+      return;
+    }
+    var s = document.createElement("script");
+    s.src = "/assets/highlight.min.js?v=11.7.0";
+    s.onload = function () { done(window.hljs && window.hljs.highlight ? window.hljs : null); };
+    s.onerror = function () { done(null); };
+    (document.head || document.documentElement).appendChild(s);
+  }
+
   function escapeHtml(s) {
     return String(s)
       .replace(/&/g, "&amp;")
@@ -1383,9 +1470,18 @@
       }
       var raw = code.textContent || "";
       code.textContent = raw;
-      var lang = langOf(code) || langOf(pre);
+      var lang = langOf(code) || langOf(pre) || guessLang(raw);
       if (lang) code.setAttribute("data-lang", lang);
-      var painted = lang ? highlightSource(raw, lang) : "";
+      var painted = "";
+      var hlName = hljsName(lang);
+      if (hlName) {
+        try {
+          painted = window.hljs.highlight(raw, { language: hlName, ignoreIllegals: true }).value || "";
+        } catch (_) {
+          painted = "";
+        }
+      }
+      if (!painted && lang) painted = highlightSource(raw, lang);
       if (painted) code.innerHTML = painted;
       var wrap = document.createElement("div");
       wrap.className = "cv-code";
@@ -1623,21 +1719,23 @@
     var root = articleRoot();
     if (document.documentElement.hasAttribute("data-cv-enhance")) {
       promoteLazyImages(root);
-      enhanceTechnicalMedia(root);
+      ensureHljs(function () { enhanceTechnicalMedia(root); });
       return;
     }
     var id = archiveId();
     if (!root || !id) return;
     promoteLazyImages(root);
-    enhanceTechnicalMedia(root);
-    var headings = collectHeadings(root);
-    apiGet(id)
-      .then(function (res) {
-        mount(headings, id, (res && res.ok && res.state) || {}, (res && res.ok && res.ops) || []);
-      })
-      .catch(function () {
-        mount(headings, id, {}, []);
-      });
+    ensureHljs(function () {
+      enhanceTechnicalMedia(root);
+      var headings = collectHeadings(root);
+      apiGet(id)
+        .then(function (res) {
+          mount(headings, id, (res && res.ok && res.state) || {}, (res && res.ok && res.ops) || []);
+        })
+        .catch(function () {
+          mount(headings, id, {}, []);
+        });
+    });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
