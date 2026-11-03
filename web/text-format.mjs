@@ -64,17 +64,43 @@ function b64ToUtf8(b64raw) {
   let b64 = String(b64raw || '').replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
   const pad = b64.length % 4;
   if (pad) b64 += '='.repeat(4 - pad);
-  if (typeof atob === 'function') {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    try {
-      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-    } catch (_) {
-      return bin;
+  try {
+    let utf;
+    if (typeof atob === 'function') {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      utf = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } else {
+      utf = Buffer.from(b64, 'base64').toString('utf8');
     }
+    if (!utf || utf.includes('\uFFFD')) return null;
+    return utf;
+  } catch (_) {
+    return null;
   }
-  return Buffer.from(b64, 'base64').toString('utf8');
+}
+
+/** Decoded clipboard text worth showing. Replacement chars and binary soup are not. */
+function decodedUtf8IsReadable(utf) {
+  if (!utf || utf.length < 8 || utf.includes('\uFFFD')) return false;
+  let good = 0;
+  let bad = 0;
+  for (const ch of utf) {
+    const c = ch.codePointAt(0);
+    if (c === 9 || c === 10 || c === 13) { good++; continue; }
+    if (c < 32 || c === 127 || (c >= 0x80 && c <= 0x9F)) { bad++; continue; }
+    if ((c >= 0xE000 && c <= 0xF8FF) || (c >= 0xF0000 && c <= 0xFFFFD) || (c >= 0x100000 && c <= 0x10FFFD)) {
+      bad++;
+      continue;
+    }
+    if ((c >= 0xFDD0 && c <= 0xFDEF) || (c & 0xFFFE) === 0xFFFE) { bad++; continue; }
+    if (c < 128 || /\p{L}|\p{N}|\p{P}|\p{Z}/u.test(ch)) { good++; continue; }
+    bad++;
+  }
+  const n = good + bad;
+  if (!n || bad / n > 0.05) return false;
+  return good / n >= 0.85;
 }
 
 function looksLikeJwt(t) {
@@ -447,14 +473,7 @@ function looksLikeBase64Blob(t) {
   if (s.length % 4 !== 0) return false;
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(s)) return false;
   try {
-    const utf = b64ToUtf8(s);
-    if (!utf || utf.length < 8) return false;
-    let printable = 0;
-    for (let i = 0; i < utf.length; i++) {
-      const c = utf.charCodeAt(i);
-      if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127) || c > 127) printable++;
-    }
-    return printable / utf.length >= 0.85;
+    return decodedUtf8IsReadable(b64ToUtf8(s));
   } catch (_) {
     return false;
   }
@@ -672,6 +691,9 @@ export function formatTextForDisplay(text, options = {}) {
         });
       case 'base64': {
         const utf = b64ToUtf8(raw.trim().replace(/\s+/g, ''));
+        if (!decodedUtf8IsReadable(utf)) {
+          return out({ kind: 'plain', icon: '', lang: 'plaintext', display: raw });
+        }
         const inner = detectStructuredText(utf);
         let display = '// decoded UTF-8\n' + utf;
         if (inner.kind === 'json') {

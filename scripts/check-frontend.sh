@@ -23,6 +23,9 @@ node --test tests/*.test.mjs
 echo "[check-frontend] swiftc x-article coverage"
 swiftc -parse-as-library -O tests/x_article_main.swift "$SRC/Archive/XArticleHTML.swift" -o /tmp/clipvault-x-article-html-test
 /tmp/clipvault-x-article-html-test
+echo "[check-frontend] swiftc weixin article slice"
+swiftc -parse-as-library -O tests/weixin_article_main.swift "$SRC/Archive/WeixinArticleHTML.swift" -o /tmp/clipvault-weixin-article-test
+/tmp/clipvault-weixin-article-test
 echo "[check-frontend] swiftc compose merge"
 swiftc -parse-as-library -O tests/compose_merge_main.swift "$SRC/Store/ComposeMerge.swift" -o /tmp/clipvault-compose-merge-test
 /tmp/clipvault-compose-merge-test

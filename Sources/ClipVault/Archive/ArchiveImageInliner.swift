@@ -89,8 +89,7 @@ enum ArchiveImageInliner {
     // MARK: - private
 
     private static func attr(_ tag: String, _ name: String) -> String? {
-        let pat = #"(?i)\b"# + NSRegularExpression.escapedPattern(for: name) + #"\s*=\s*"([^"]*)""#
-        guard let re = try? NSRegularExpression(pattern: pat) else { return nil }
+        guard let re = WeixinArticleHTML.attributeRegex(name, capture: true) else { return nil }
         let ns = tag as NSString
         guard let m = re.firstMatch(in: tag, range: NSRange(location: 0, length: ns.length)),
               m.numberOfRanges > 1 else { return nil }
@@ -121,7 +120,7 @@ enum ArchiveImageInliner {
     private static func rewriteTag(_ tag: String, sha: String) -> String {
         let local = assetPrefix + sha
         var next = tag
-        if let re = try? NSRegularExpression(pattern: #"(?i)\bsrc\s*=\s*"[^"]*""#) {
+        if let re = WeixinArticleHTML.attributeRegex("src") {
             let range = NSRange(location: 0, length: (next as NSString).length)
             if re.firstMatch(in: next, range: range) != nil {
                 next = re.stringByReplacingMatches(in: next, range: range, withTemplate: "src=\"\(local)\"")
@@ -130,7 +129,7 @@ enum ArchiveImageInliner {
             }
         }
         for name in ["data-src", "data-original", "data-lazy-src", "data-actualsrc"] {
-            if let re = try? NSRegularExpression(pattern: #"(?i)\b"# + name + #"\s*=\s*"[^"]*""#) {
+            if let re = WeixinArticleHTML.attributeRegex(name) {
                 let range = NSRange(location: 0, length: (next as NSString).length)
                 next = re.stringByReplacingMatches(in: next, range: range, withTemplate: "")
             }
@@ -160,19 +159,22 @@ enum ArchiveImageInliner {
         return map
     }
 
-    /// Same topology as archive WKWebView: system proxy is often off; miro.medium.com
-    /// only loads through v2raya SOCKS :2080. URLSession.shared would hang View.
-    private static let fetchSession: URLSession = {
+    /// miro.medium.com only loads through v2raya SOCKS :2080. qpic / weixin
+    /// answer on the direct path and must not share that session.
+    private static let directSession: URLSession = makeSession(socks: false)
+    private static let socksSession: URLSession = makeSession(socks: true)
+
+    private static func makeSession(socks: Bool) -> URLSession {
         let c = URLSessionConfiguration.ephemeral
         c.timeoutIntervalForRequest = 8
         c.timeoutIntervalForResource = 12
-        if #available(macOS 14.0, *), ArchiveProxy.localhostPortOpen(2080) {
+        if socks, #available(macOS 14.0, *), ArchiveProxy.localhostPortOpen(2080) {
             c.proxyConfigurations = [
                 ProxyConfiguration(socksv5Proxy: NWEndpoint.hostPort(host: "127.0.0.1", port: 2080))
             ]
         }
         return URLSession(configuration: c)
-    }()
+    }
 
     private static func fetch(_ url: URL, referer: URL?) -> Data? {
         var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
@@ -183,9 +185,10 @@ enum ArchiveImageInliner {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
             forHTTPHeaderField: "User-Agent"
         )
+        let session = WeixinArticleHTML.prefersDirectHost(url.host) ? directSession : socksSession
         let sem = DispatchSemaphore(value: 0)
         var out: Data?
-        fetchSession.dataTask(with: req) { data, resp, _ in
+        session.dataTask(with: req) { data, resp, _ in
             if let data,
                let http = resp as? HTTPURLResponse,
                (200..<300).contains(http.statusCode),
