@@ -635,16 +635,23 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
     }
 
     static func loadReadabilityJS() -> String {
+        let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let binDir = exe.deletingLastPathComponent()
+        // Loose file is the deploy contract (scripts/restart-clipvault.sh).
+        // Touch Bundle.module only when the .bundle is actually installed:
+        // the generated accessor fatalErrors, which killed the server on archive
+        // (2026-11-03, resource_bundle_accessor.swift:44).
+        let bundleDir = binDir.appendingPathComponent("ClipVault_ClipVaultServer.bundle")
         #if SWIFT_PACKAGE
-        if let url = Bundle.module.url(forResource: "Readability", withExtension: "js"),
+        if FileManager.default.fileExists(atPath: bundleDir.path),
+           let url = Bundle.module.url(forResource: "Readability", withExtension: "js"),
            let s = try? String(contentsOf: url, encoding: .utf8), s.count > 1000 {
             return s
         }
         #endif
-        let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         let candidates = [
-            exe.deletingLastPathComponent().appendingPathComponent("Readability.js"),
-            exe.deletingLastPathComponent().appendingPathComponent("Resources/Readability.js"),
+            binDir.appendingPathComponent("Readability.js"),
+            binDir.appendingPathComponent("Resources/Readability.js"),
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 .appendingPathComponent("Sources/ClipVault/Archive/Resources/Readability.js"),
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
