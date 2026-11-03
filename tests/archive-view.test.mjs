@@ -6,8 +6,23 @@ import test from 'node:test';
 import { src, root } from './helpers/src.mjs';
 
 const swift = src('WebServer.swift');
+const archiveSwift = src('WebArchiveService.swift');
+const inlinerSwift = src('ArchiveImageInliner.swift');
+const weixinSwift = src('WeixinArticleHTML.swift');
 const viewCss = readFileSync(join(root, 'web/assets/archive-view.css'), 'utf8');
 const readerJs = readFileSync(join(root, 'web/assets/archive-reader.js'), 'utf8');
+
+test('weixin articles are fetched direct, not through the SOCKS web view', () => {
+  assert.match(archiveSwift, /WeixinArticleHTML\.isArticleURL/);
+  assert.match(archiveSwift, /WeixinArticleHTML\.extract/);
+  assert.match(archiveSwift, /engine: "weixin-html"/);
+  assert.match(archiveSwift, /prefersDirectHost/);
+  assert.match(archiveSwift, /timeoutFired/);
+  assert.match(inlinerSwift, /prefersDirectHost\(url\.host\)/);
+  assert.match(inlinerSwift, /WeixinArticleHTML\.attributeRegex\("src"\)/);
+  assert.doesNotMatch(inlinerSwift, /\\bsrc\\s\*=/);
+  assert.match(weixinSwift, /attributeRegex/);
+});
 
 test('archive view allows youtube/vimeo frames', () => {
   assert.match(swift, /frame-src https:\/\/www\.youtube-nocookie\.com https:\/\/www\.youtube\.com https:\/\/player\.vimeo\.com/);

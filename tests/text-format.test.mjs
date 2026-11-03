@@ -162,6 +162,35 @@ test('structuredKindIsCodey', () => {
   assert.equal(structuredKindIsCodey('url'), false);
 });
 
+test('base64 of readable utf-8 still decodes', () => {
+  const text = 'hello clipboard, this is readable utf-8 text.';
+  const b64 = Buffer.from(text, 'utf8').toString('base64');
+  const f = formatTextForDisplay(b64);
+  assert.equal(f.kind, 'base64');
+  assert.equal(f.pretty, true);
+  assert.match(f.display, /hello clipboard/);
+  assert.match(f.label, /已解码/);
+});
+
+test('base64 of chinese still decodes', () => {
+  const text = '存算分离冷查询提速，缓存可以跨计算组复用。';
+  const b64 = Buffer.from(text, 'utf8').toString('base64');
+  const f = formatTextForDisplay(b64);
+  assert.equal(f.kind, 'base64');
+  assert.match(f.display, /存算分离/);
+  assert.match(f.label, /已解码/);
+});
+
+test('base64 that decodes to garbage stays the original text', () => {
+  const b64 = Buffer.alloc(48, 0xff).toString('base64');
+  assert.equal(detectStructuredText(b64).kind, 'plain');
+  const f = formatTextForDisplay(b64);
+  assert.equal(f.kind, 'plain');
+  assert.equal(f.pretty, false);
+  assert.equal(f.display, b64);
+  assert.equal(f.label, '');
+});
+
 test('detect order jwt over base64-ish', () => {
   const hdr = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const pay = Buffer.from(JSON.stringify({ sub: '1' })).toString('base64url');

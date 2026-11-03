@@ -125,6 +125,35 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             finish(jobId: job.id, error: "无效 URL", title: nil, html: nil, text: nil)
             return
         }
+        // WeChat articles ship the body in the first HTML (`#js_content`).
+        // WKWebView + SOCKS on that shell stalls or dies with the process
+        // (2026-11-03, mp.weixin.qq.com/s/7l4Kcmt4v7k1vEpLM_BYOg).
+        if WeixinArticleHTML.isArticleURL(job.url) {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                if let page = ArchiveProxy.fetchDocument(url),
+                   let article = WeixinArticleHTML.extract(html: page) {
+                    print("[Archive] weixin fast-path \(job.url) bytes=\(article.html.utf8.count)")
+                    DispatchQueue.main.async {
+                        self.finish(
+                            jobId: job.id,
+                            error: nil,
+                            title: article.title.isEmpty ? nil : article.title,
+                            html: article.html,
+                            text: article.text,
+                            engine: "weixin-html"
+                        )
+                    }
+                    return
+                }
+                print("[Archive] weixin fast-path miss \(job.url); falling back to WebKit")
+                DispatchQueue.main.async {
+                    self.session = Session(owner: self, job: job, url: url)
+                    self.session?.start()
+                }
+            }
+            return
+        }
         // X Articles: Draft.js MARKDOWN/headings are not in the logged-out DOM.
         // Note tweets: vxtwitter full text with `\n\n`; Readability is one <span> blob.
         if XArticleHTML.isXURL(job.url) {
@@ -287,6 +316,8 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         var finished = false
         var loadAttempt = 0
         var usingSocksProxy = false
+        var triedDirect = false
+        var triedSocks = false
 
         init(owner: WebArchiveService, job: Job, url: URL) {
             self.owner = owner
@@ -298,7 +329,14 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
             ClipboardMonitor.shared?.suppressCapture(for: WebArchiveService.navigationTimeout + 8, reason: "archive")
             // System HTTP/SOCKS proxy is often off; the browser still uses v2raya :2080.
             // Prefer that SOCKS when it is listening so Medium is not a 45s direct timeout.
-            let socks = ArchiveProxy.localhostPortOpen(2080)
+            // mp.weixin.qq.com / qpic answer on the direct path and stall on that hop.
+            let socksUp = ArchiveProxy.localhostPortOpen(2080)
+            let directFirst = WeixinArticleHTML.prefersDirectHost(url.host)
+            beginLoad(socks: !directFirst && socksUp)
+        }
+
+        private func beginLoad(socks: Bool) {
+            if socks { triedSocks = true } else { triedDirect = true }
             attachWebView(socksProxy: socks)
             armTimeout()
             startLoad()
@@ -351,10 +389,30 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         private func armTimeout() {
             timeoutWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
-                self?.fail("归档超时（页面过慢或需登录）")
+                self?.timeoutFired()
             }
             timeoutWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + WebArchiveService.navigationTimeout, execute: work)
+        }
+
+        /// A hung load never hits didFail. Try the path we have not used yet
+        /// before giving up — SOCKS-first blackholes mp.weixin.qq.com.
+        private func timeoutFired() {
+            guard !finished else { return }
+            let socksUp = ArchiveProxy.localhostPortOpen(2080)
+            if !triedSocks && socksUp {
+                print("[Archive] timeout; retry via SOCKS 2080 \(url.host ?? "")")
+                loadAttempt = 0
+                beginLoad(socks: true)
+                return
+            }
+            if !triedDirect {
+                print("[Archive] timeout; retry direct \(url.host ?? "")")
+                loadAttempt = 0
+                beginLoad(socks: false)
+                return
+            }
+            fail("归档超时（页面过慢或需登录）")
         }
 
         private func startLoad() {
@@ -411,12 +469,17 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 ns.code == NSURLErrorTimedOut || ns.code == NSURLErrorCannotConnectToHost
                     || ns.code == NSURLErrorNetworkConnectionLost
             )
-            if timedOut && !usingSocksProxy {
+            let socksUp = ArchiveProxy.localhostPortOpen(2080)
+            if timedOut && !triedSocks && socksUp {
                 print("[Archive] direct failed (\(ns.code)); retry via SOCKS 2080 \(url.host ?? "")")
-                attachWebView(socksProxy: true)
                 loadAttempt = 0
-                armTimeout()
-                startLoad()
+                beginLoad(socks: true)
+                return
+            }
+            if timedOut && !triedDirect {
+                print("[Archive] SOCKS failed (\(ns.code)); retry direct \(url.host ?? "")")
+                loadAttempt = 0
+                beginLoad(socks: false)
                 return
             }
             if timedOut && usingSocksProxy && loadAttempt < 2 {
@@ -595,6 +658,53 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
 }
 
 enum ArchiveProxy {
+    /// Direct document GET. Domestic hosts go direct first; everyone else tries
+    /// SOCKS :2080 first when it is listening, then direct.
+    static func fetchDocument(_ url: URL) -> String? {
+        let socksUp = localhostPortOpen(2080)
+        let directFirst = WeixinArticleHTML.prefersDirectHost(url.host)
+        let order: [Bool] = directFirst ? [false, socksUp] : (socksUp ? [true, false] : [false])
+        var seen = Set<Bool>()
+        for useSocks in order where seen.insert(useSocks).inserted {
+            if let html = httpGet(url, socks: useSocks), html.utf8.count > 80 {
+                return html
+            }
+        }
+        return nil
+    }
+
+    private static func httpGet(_ url: URL, socks: Bool) -> String? {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 20
+        cfg.timeoutIntervalForResource = 25
+        cfg.httpMaximumConnectionsPerHost = 2
+        if socks, #available(macOS 14.0, *) {
+            cfg.proxyConfigurations = [
+                ProxyConfiguration(socksv5Proxy: NWEndpoint.hostPort(host: "127.0.0.1", port: 2080))
+            ]
+        }
+        let session = URLSession(configuration: cfg)
+        defer { session.invalidateAndCancel() }
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        req.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+        let sem = DispatchSemaphore(value: 0)
+        var out: String?
+        session.dataTask(with: req) { data, resp, _ in
+            defer { sem.signal() }
+            guard let data,
+                  let http = resp as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  data.count <= 8_000_000,
+                  let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else { return }
+            out = text
+        }.resume()
+        _ = sem.wait(timeout: .now() + 26)
+        return out
+    }
+
     /// Fast TCP probe so we do not wait 45s on a black-holed direct path.
     static func localhostPortOpen(_ port: UInt16) -> Bool {
         let conn = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)

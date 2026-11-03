@@ -114,6 +114,18 @@ test('masonry must not collapse into one occupied column', () => {
   );
 });
 
+test('replacing a card keeps its column box and always re-packs', () => {
+  // A new node has stylesheet width:100%. Skipping the pack when height is
+  // unchanged leaves that card full-bleed over the day.
+  const rep = htmlFn('replaceCardInPlace');
+  assert.match(html, /function adoptMasonryBox/);
+  assert.match(rep, /adoptMasonryBox\(old, next\)/);
+  assert.match(rep, /repackCardHost\(next\)/);
+  assert.doesNotMatch(rep, /Math\.abs\(delta\)/);
+  const pack = htmlFn('repackCardHost');
+  assert.match(pack, /relayoutDays/);
+});
+
 test('card media is height-locked and late growth is reconciled, not rebuilt', () => {
   // A stray image in a note/preview card must not grow the packed card height.
   assert.match(html, /\.md-preview img \{ max-width: 100%; max-height: /);
