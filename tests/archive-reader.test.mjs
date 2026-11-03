@@ -74,6 +74,52 @@ test('reader comment sheet lists append-only ops as a timeline', () => {
   assert.match(swiftDb, /timeLocal/, 'ops carry wall time');
 });
 
+test('newline inside a text node still paints the collapsed quote', async (t) => {
+  const { JSDOM } = await import('jsdom');
+  const sentence = 'By default, DataFusion already does not add bloom filters when writing Parquet files.';
+  const broken = sentence.replace(' when writing ', ' when\nwriting ');
+  const dom = new JSDOM(
+    `<!DOCTYPE html><html data-cv-test><body><main class="cv-article">` +
+      `<p>BEFORE ${broken} AFTER</p>` +
+      `<p>Later note: ${broken} END</p>` +
+      `<p>AAA same\nwords BBB same words CCC</p>` +
+      `<p>keep  double spaces</p>` +
+    `</main></body></html>`,
+    { runScripts: 'outside-only', url: 'http://127.0.0.1/api/archive/view' }
+  );
+  t.after(() => dom.window.close());
+  dom.window.eval(js);
+  const api = dom.window.__cvReaderTest;
+  const root = dom.window.document.querySelector('main.cv-article');
+  const idx = api.buildIndex(root);
+  assert.match(root.querySelector('p').firstChild.nodeValue, /when\nwriting/);
+
+  const first = api.locateQuote(idx, sentence, 'BEFORE ', ' AFTER');
+  assert.equal(idx.text.slice(first.start, first.end), broken);
+  const second = api.locateQuote(idx, sentence, 'Later note: ', ' END');
+  assert.equal(idx.text.slice(second.start, second.end), broken);
+  assert.ok(second.start > first.start);
+  assert.equal(api.locateQuote(idx, sentence, 'BEFORE ', ' END'), null);
+  assert.equal(api.locateQuote(idx, sentence, 'ZZZ_NO_MATCH_', ''), null);
+  assert.equal(api.locateQuote(idx, '   ', '', ''), null);
+  assert.equal(api.locateQuote(idx, '', '', ''), null);
+  assert.equal(api.locateQuote(idx, 'this sentence is not in the article', '', ''), null);
+
+  assert.equal(idx.text.slice(api.locateQuote(idx, 'same words', 'BBB ', '').start,
+    api.locateQuote(idx, 'same words', 'BBB ', '').end), 'same words');
+  assert.equal(idx.text.slice(api.locateQuote(idx, 'same words', 'AAA ', '').start,
+    api.locateQuote(idx, 'same words', 'AAA ', '').end), 'same\nwords');
+  const doubled = api.locateQuote(idx, 'keep double spaces', '', '');
+  assert.equal(idx.text.slice(doubled.start, doubled.end), 'keep  double spaces');
+
+  api.applyHighlights(root, [{ id: 'h-nl', quote: sentence, prefix: 'BEFORE ', suffix: ' AFTER' }]);
+  const marks = [...root.querySelectorAll('mark.cv-hl')];
+  assert.equal(marks.length, 1);
+  assert.equal(marks[0].dataset.hlId, 'h-nl');
+  assert.equal(marks[0].textContent, broken);
+  assert.match(marks[0].textContent, /when\nwriting/);
+});
+
 test('server persists reader_state + reader_ops, not archive HTML', () => {
   assert.match(swiftDb, /CREATE TABLE IF NOT EXISTS reader_ops/, 'ops table');
   assert.match(swiftDb, /reader_state/, 'projection column');

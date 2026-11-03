@@ -492,26 +492,70 @@
     return { start: s, end: e };
   }
 
-  function locateQuote(index, quote, prefix, suffix) {
-    if (!quote) return null;
-    var from = 0;
-    while (from < index.text.length) {
-      var i = index.text.indexOf(quote, from);
-      if (i < 0) {
-        var collapsed = index.text.replace(/\s+/g, " ");
-        var q2 = quote.replace(/\s+/g, " ");
-        i = collapsed.indexOf(q2);
-        if (i < 0) return null;
-        return null;
+  function anchorOk(text, start, end, prefix, suffix) {
+    var pre = text.slice(Math.max(0, start - (prefix || "").length), start);
+    var suf = text.slice(end, end + (suffix || "").length);
+    var preOk = !prefix || pre.slice(-prefix.length) === prefix || prefix.slice(-pre.length) === pre;
+    var sufOk = !suffix || suf.slice(0, suffix.length) === suffix || suffix.slice(0, suf.length) === suf;
+    return preOk && sufOk;
+  }
+
+  // A stored quote collapses every whitespace run to one space. A text node can
+  // still hold the newline, so a collapsed hit must map back onto the original offsets.
+  function collapseWithMap(text) {
+    var collapsed = "";
+    var map = [];
+    var i = 0;
+    while (i < text.length) {
+      if (/\s/.test(text.charAt(i))) {
+        var start = i;
+        i += 1;
+        while (i < text.length && /\s/.test(text.charAt(i))) i += 1;
+        collapsed += " ";
+        map.push(start);
+      } else {
+        collapsed += text.charAt(i);
+        map.push(i);
+        i += 1;
       }
-      var pre = index.text.slice(Math.max(0, i - (prefix || "").length), i);
-      var suf = index.text.slice(i + quote.length, i + quote.length + (suffix || "").length);
-      var preOk = !prefix || pre.slice(-prefix.length) === prefix || prefix.slice(-pre.length) === pre;
-      var sufOk = !suffix || suf.slice(0, suffix.length) === suffix || suffix.slice(0, suf.length) === suf;
-      if (preOk && sufOk) return { start: i, end: i + quote.length };
+    }
+    return { text: collapsed, map: map };
+  }
+
+  function locateCollapsed(text, quote, prefix, suffix) {
+    var q2 = String(quote).replace(/\s+/g, " ").trim();
+    if (!q2) return null;
+    var folded = collapseWithMap(text);
+    var from = 0;
+    while (from < folded.text.length) {
+      var i = folded.text.indexOf(q2, from);
+      if (i < 0) return null;
+      var last = i + q2.length - 1;
+      if (last < folded.map.length) {
+        var start = folded.map[i];
+        var end = folded.map[last] + 1;
+        if (end > start && anchorOk(text, start, end, prefix, suffix)) {
+          return { start: start, end: end };
+        }
+      }
       from = i + 1;
     }
     return null;
+  }
+
+  function locateQuote(index, quote, prefix, suffix) {
+    if (!quote) return null;
+    var text = index.text;
+    var from = 0;
+    while (from < text.length) {
+      var i = text.indexOf(quote, from);
+      if (i < 0) break;
+      if (anchorOk(text, i, i + quote.length, prefix, suffix)) {
+        return { start: i, end: i + quote.length };
+      }
+      from = i + 1;
+    }
+    return locateCollapsed(text, quote, prefix, suffix);
   }
 
   function wrapAbs(index, start, end, hid, hasNote) {
@@ -1736,6 +1780,14 @@
           mount(headings, id, {}, []);
         });
     });
+  }
+
+  if (document.documentElement && document.documentElement.hasAttribute("data-cv-test")) {
+    window.__cvReaderTest = {
+      locateQuote: locateQuote,
+      buildIndex: buildIndex,
+      applyHighlights: applyHighlights,
+    };
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
