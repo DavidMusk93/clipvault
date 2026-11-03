@@ -317,6 +317,18 @@ export function stripEventHandlerAttrs(html) {
 }
 
 
+/**
+ * Browser pasteboards wrap a sentence in span/meta/div/p/pre/code.
+ * That is plain text. Tables, lists, headings, quotes, images, and rules stay HTML.
+ * Empty input is not decorative. Keep the tag list identical to ClipboardItem.htmlIsDecorative.
+ */
+export function htmlIsDecorative(html) {
+  if (!html) return false;
+  const s = String(html).trim();
+  if (!s) return false;
+  return !/<(table|thead|tbody|tfoot|tr|td|th|caption|ul|ol|li|dl|dt|dd|h[1-6]|blockquote|img|figure|svg|hr)\b/i.test(s);
+}
+
 export function notesFragmentUseful(fragment) {
   if (!fragment) return false;
   if (/<(ul|ol|li|p|br|b|strong|i|em|u|h[1-6]|table|thead|tbody|tr|td|th|blockquote|hr|pre|code)\b/i.test(fragment)) {

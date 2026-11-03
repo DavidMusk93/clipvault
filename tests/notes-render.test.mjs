@@ -12,6 +12,7 @@ import {
   collapseEmptyHtmlBlocks,
   stripHtmlToText,
   notesFragmentUseful,
+  htmlIsDecorative,
   NOTES_CSS_POLICY,
 } from '../web/notes-render.mjs';
 
@@ -256,6 +257,105 @@ test('inline notesFragmentUseful matches the module on every fixture', () => {
   for (const f of fixtures) {
     assert.equal(inline(f), notesFragmentUseful(f), `inline/module drift on ${JSON.stringify(f)}`);
   }
+});
+
+const DECORATIVE_HTML = [
+  '',
+  '   ',
+  "<meta charset='utf-8'><span style=\"white-space: pre-wrap;\">ci 与 boe</span>",
+  '<p>hello</p>',
+  '<div><b>bold</b> <i>plain</i></div>',
+  '<pre><code>SELECT 1</code></pre>',
+  '<a href="https://example.com">example</a>',
+  '<span>host</span>',
+];
+
+const STRUCTURAL_HTML = [
+  '<ul><li>one</li></ul>',
+  '<ol><li>two</li></ol>',
+  '<table><tr><td>cell</td></tr></table>',
+  '<h2>title</h2>',
+  '<blockquote>quote</blockquote>',
+  '<p>see <img alt="cover" src="x"> </p>',
+  '<figure><figcaption>cap</figcaption></figure>',
+  '<hr>',
+  '<svg><rect /></svg>',
+  '<dl><dt>k</dt><dd>v</dd></dl>',
+];
+
+test('htmlIsDecorative drops wrappers and keeps structure', () => {
+  assert.equal(htmlIsDecorative(''), false);
+  assert.equal(htmlIsDecorative('   '), false);
+  for (const html of DECORATIVE_HTML.filter((h) => h.trim())) {
+    assert.equal(htmlIsDecorative(html), true, `expected decorative: ${html.slice(0, 80)}`);
+  }
+  for (const html of STRUCTURAL_HTML) {
+    assert.equal(htmlIsDecorative(html), false, `expected structural: ${html.slice(0, 80)}`);
+  }
+});
+
+test('inline htmlIsDecorative matches the module on every fixture', () => {
+  const inline = new Function(
+    `${extractInlineFunction(indexHtml, 'htmlIsDecorative')}\nreturn htmlIsDecorative;`,
+  )();
+  for (const html of [...DECORATIVE_HTML, ...STRUCTURAL_HTML, '<THEAD><TR><TH>h</TH></TR></THEAD>']) {
+    assert.equal(inline(html), htmlIsDecorative(html), `drift on ${JSON.stringify(html).slice(0, 80)}`);
+  }
+});
+
+test('decorative html copies the companion sentence, not the wrapper', () => {
+  const normalizeCopyText = new Function(
+    `${extractInlineFunction(indexHtml, 'normalizeCopyText')}\nreturn normalizeCopyText;`,
+  )();
+  const inlineStrip = new Function(
+    'normalizePlainText',
+    `${extractInlineFunction(indexHtml, 'stripHtmlToText')}\nreturn stripHtmlToText;`,
+  )((s) => String(s || '').trim());
+  const copy = new Function(
+    'htmlIsDecorative',
+    'stripHtmlToText',
+    'normalizeCopyText',
+    `${extractInlineFunction(indexHtml, 'plainTextForCopy')}\nreturn plainTextForCopy;`,
+  )(htmlIsDecorative, inlineStrip, normalizeCopyText);
+  const wrapped = "<meta charset='utf-8'><span style=\"color:white\">ci 与 boe</span>";
+  assert.equal(copy({ type: 'html', textContent: 'ci 与 boe', htmlContent: wrapped }, null), 'ci 与 boe');
+  assert.equal(copy({ type: 'html', textContent: '', htmlContent: '<span>only-html</span>' }, null), 'only-html');
+  const table = '<table><tr><td>a</td><td>b</td></tr></table>';
+  assert.equal(htmlIsDecorative(table), false);
+  const card = {
+    querySelector(sel) {
+      if (sel === '.notes-rich-inner') return { innerText: 'a\tb', textContent: 'a\tb' };
+      return null;
+    },
+  };
+  assert.equal(copy({ type: 'html', textContent: 'a', htmlContent: table }, card), 'a\tb');
+  assert.equal(
+    copy({ type: 'rtf', textContent: 'notes', htmlContent: '<span>notes</span>' }, null),
+    'notes',
+  );
+});
+
+test('wall faces decorative html as text and keeps structured html rich', () => {
+  const start = indexHtml.indexOf('function buildCard');
+  assert.ok(start >= 0);
+  const body = indexHtml.slice(start, start + 30000);
+  assert.match(body, /const faceType = itemFaceType\(item\)/);
+  assert.match(body, /card\.dataset\.type = faceType/);
+  assert.match(body, /typeMeta\(faceType\)/);
+  assert.match(body, /item\.type === 'rtf' \|\| \(\(item\.type === 'html' \|\| item\.htmlContent\) && !wrapperHtml\)/);
+  const swiftItem = fs.readFileSync(path.join(__dirname, '../Sources/ClipVault/Capture/ClipboardItem.swift'), 'utf8');
+  const monitor = fs.readFileSync(path.join(__dirname, '../Sources/ClipVault/Capture/ClipboardMonitor.swift'), 'utf8');
+  const db = fs.readFileSync(path.join(__dirname, '../Sources/ClipVault/Store/DatabaseManager.swift'), 'utf8');
+  assert.match(swiftItem, /static func htmlIsDecorative/);
+  assert.match(swiftItem, /table\|thead\|tbody\|tfoot\|tr\|td\|th\|caption\|ul\|ol\|li\|dl\|dt\|dd\|h\[1-6\]\|blockquote\|img\|figure\|svg\|hr/);
+  assert.match(monitor, /ClipboardItem\.htmlIsDecorative\(html\)/);
+  assert.match(monitor, /type: \.text/);
+  assert.match(db, /demote_decorative_html_v1/);
+  assert.match(db, /func demoteDecorativeHtmlRows/);
+  assert.match(db, /self\.demoteDecorativeHtmlRows\(\)/);
+  const apply = db.slice(db.indexOf('func applySyncUpsertLocked'), db.indexOf('func applySyncUpsertLocked') + 1800);
+  assert.match(apply, /htmlIsDecorative\(html\)/);
+  assert.match(apply, /htmlContent = nil/);
 });
 
 test('index.html mirrors the sanitizer vocabulary (sync guard)', async () => {

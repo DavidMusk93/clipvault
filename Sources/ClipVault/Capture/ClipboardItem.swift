@@ -133,6 +133,28 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
             .replacingOccurrences(of: "&gt;", with: ">")
     }
 
+    /// Tags that carry structure worth keeping as HTML. span/div/p/pre/code/emphasis/meta do not.
+    /// Keep in lockstep with `htmlIsDecorative` in web/notes-render.mjs and web/index.html.
+    static let decorativeHTMLStructuralPattern =
+        "(?i)<(table|thead|tbody|tfoot|tr|td|th|caption|ul|ol|li|dl|dt|dd|h[1-6]|blockquote|img|figure|svg|hr)\\b"
+
+    /// True when HTML is non-empty and has no structural tag.
+    /// Empty input is not decorative: there is nothing to demote.
+    static func htmlIsDecorative(_ html: String) -> Bool {
+        let trimmed = html.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return trimmed.range(of: decorativeHTMLStructuralPattern, options: .regularExpression) == nil
+    }
+
+    /// Companion plain wins. Otherwise the tag-stripped visible text. Nil if blank.
+    static func plainKeepingDecorativeHTML(_ html: String, companion: String?) -> String? {
+        if let companion, !companion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return companion
+        }
+        let stripped = normalizedPlain(strippedHTML(html))
+        return stripped.isEmpty ? nil : stripped
+    }
+
     /// SHA-256 of normalized visible text (plain, else stripped HTML).
     static func semanticTextHash(plain: String?, html: String?) -> String? {
         var s = plain.map { normalizedPlain($0) } ?? ""
