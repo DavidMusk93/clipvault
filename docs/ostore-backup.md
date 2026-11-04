@@ -10,7 +10,7 @@ ClipVault 在本机备份成功后，把该主机的数据库和 CAS 媒体增�
 {"baseURL":"https://cc.guohuasun.com/clipvault-ostore","token":"<OSTORE_TOKEN>","enabled":true}
 ```
 
-`enabled` 缺省为 `true`（旧配置无需改动）。它是面板上 ostore 行的开关，写入的是同一个 `0600` 文件，只改这一个键、保留 `baseURL` / `token` 与其它未知键。cc 的 `ostore-clipvault.service` 使用独立令牌、根目录 `/srv/ostore-clipvault` 和 loopback 端口 8782；Caddy 将 `/clipvault-ostore/` 反代至该实例。它与 xstream 的 ostore 权限和数据隔离。
+`enabled` 缺省为 `true`（旧配置无需改动）。它是面板上 ostore 行的开关，写入的是同一个 `0600` 文件，只改这一个键、保留 `baseURL` / `token` 与其它未知键。cc 上现在只有一个 ostore，监听 `127.0.0.1:8781`，根目录 `/srv/ostore`。Caddy 仍把 `/clipvault-ostore/` 剥前缀后反代到这个实例。令牌用这一实例的 `OSTORE_TOKEN`，不再使用已删除的 `ostore-clipvault.service`。对象仍写在 `clipvault/` 前缀下，和网盘其它目录隔开。集群复制不包含 `clipvault/`。
 
 ## 面板形态（统一，不是特例）
 
@@ -49,7 +49,7 @@ ClipVault 在本机备份成功后，把该主机的数据库和 CAS 媒体增�
 | --- | --- |
 | `phase` / `inProgress` / `lastError` | 本轮阶段、是否在上传、错误 |
 | `queued` | 上传进行中又被点了一次：已排队，本轮结束后自动开始（不会重复上传） |
-| `total` / `uploaded` / `skipped` / `failed` / `pending` | 本轮对象数（blobs + `databases/SHA.db` + `latest/clipflow.db` + `latest/MANIFEST.json`）与其中已传、已跳过、失败、未完成 |
+| `total` / `uploaded` / `skipped` / `failed` / `pending` | 本轮对象数（blobs + 可选的整库基线 + 可选的逻辑增量 + `latest/DB-CHECKPOINT.json` + `latest/MANIFEST.json`） |
 | `uploadedBytes` / `skippedBytes` | 本轮字节数（按实际文件大小） |
 | `manifestObjects` / `manifestBytes` | 本轮本地清单声明的对象数与字节数（恢复预期量） |
 | `remoteObjects` / `remoteBytes` | 本轮结束时重新列一次远端 host 前缀得到的实际对象数与字节数 |
@@ -68,15 +68,26 @@ live counters ──(每 ≤2s 一次 backup_status ping)──> Web 面板本�
 本轮计数只在进程内累加；`lastRun` 与 `lastSuccessUnix` 落盘到 `config/ostore-backup.state.json`（0600，与凭据同目录），所以重启不会再把统计清零成「上传 0 · 跳过 0」。上传进行中每 2 秒最多广播一次 `backup_status`，避免长时间上传时面板停在陈旧数字。上传进行中再点一次「立即备份」只会把下一轮排到 `pending`（后到的覆盖先到的），状态行显示「已排队下一轮」，不会重复上传。
 
 ```text
-local sqlite3_backup + verified CAS
-    -> hosts/H/latest + hosts/H/blobs
-    -> ostore clipvault/backup/hosts/H/blobs
-    -> ostore clipvault/backup/hosts/H/databases/SHA.db
-    -> ostore clipvault/backup/hosts/H/latest/{clipflow.db,MANIFEST.json}
+local sqlite3_backup + VACUUM 整文件          # 云盘仍是整文件，允许 VACUUM
+    -> ostore blobs/<name>                    # 按文件 MD5 跳过
+    -> ostore databases/<sha256>.db           # 只在还没有基线时上传一次
+    -> ostore deltas/<md5>                    # 之后只上传变过的行
+    -> ostore latest/DB-CHECKPOINT.json
+    -> ostore latest/MANIFEST.json
 ```
 
-逐文件 SHA-256 对账，已有对象跳过，上传响应的 SHA-256 必须匹配；`uploaded + skipped` 即本轮通过哈希校验的对象数（面板「本轮对象」）。数据库与清单不匹配、媒体缺失、鉴权或网络错误时报告失败；本机备份不回滚。最新清单最后上传，但两个 latest 文件不是原子事务；上传中断时 `latest/clipflow.db` 可能与清单不一致，恢复时必须校验。数据库内容寻址副本保留当前和上一个版本；媒体不会自动删除。
+增量不看页号。VACUUM 可以重排整个文件。比较的是行：`clipboard_items` 按整行 MD5，追加表（`compose_ops`、`clipboard_events`、`operation_logs` 等）按时间戳和 id，小表按整表 MD5。没变的行不进增量文件。游标在 `config/ostore-logical.json`（0600）。基线传成功之后才记下游标。
+
+`DB-CHECKPOINT.json` 的 `version` 是 2，带 `baseSha256`、`deltaMd5`、`deltaBytes`、`counts`。
+
+对象是否已在远端，用文件的 MD5 判断，不用 SHA-256。cc 的 ostore 从 2026-11-03 起把 MD5 写进列表的 `sha256` 字段，同时另给 `md5`；PUT 响应里的 `sha256` 仍是真正的 SHA-256，`md5` 才是内容校验。跳过条件是 `md5`（或 32 位的 `sha256`）与本地 MD5 相同。对不上才 PUT，并且只接受响应里的 MD5。`uploaded + skipped` 即本轮通过校验的对象数（面板「本轮对象」）。
+
+本地清单里的 `sha256` 仍是云盘那份 vacuum 后 sqlite 的 SHA-256，用来确认 `latest/clipflow.db` 和清单是同一份。它不参与 ostore 的页块比较。
+
+数据库与清单不匹配、媒体缺失、鉴权或网络错误时报告失败；本机备份不回滚。checkpoint 在全部页块成功之后才上传。媒体和已经上传过的页块都不会自动删除。
 
 ## 灾难恢复
 
-在隔离目录下载对应 host 的 `latest/MANIFEST.json`，使用其 `sha256` 下载 `databases/<sha256>.db`，按 `blobFiles` 下载 `blobs/`，逐个校验文件完整性。清单中 `sha256` 是数据库 SHA-256；若使用 `latest/clipflow.db`，必须先与此值比较。检查 SQLite `PRAGMA integrity_check` 后，再按现有 ClipVault 恢复流程操作。不要把远端备份当成同步总线，也不要直接覆盖正在使用的数据库。
+在隔离目录下载 `latest/DB-CHECKPOINT.json`。用其中的 `baseSha256` 下载 `databases/<baseSha256>.db` 作为起点。按时间顺序把 `deltas/<deltaMd5>` 里的行 `INSERT OR REPLACE` 进对应表；`clipboard_items_removed` 里的 id 从 `clipboard_items` 删掉。全文索引可以在恢复后重建，增量里没有 FTS。媒体按 `latest/MANIFEST.json` 的 `blobFiles` 下载。检查 `PRAGMA integrity_check`。不要把远端备份当成同步总线，也不要直接覆盖正在使用的数据库。
+
+2026-11-04 中午一度按 64 页切块上传。那种做法要求页布局不变，VACUUM 会让所有块失效。那些 `db-chunks/` 对象可以忽略。
