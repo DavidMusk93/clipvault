@@ -53,6 +53,21 @@ test('pending is derived so an aborted run shows 未完成 instead of a silent g
   assert.match(ostore, /result\.pending = max\(0, result\.total - result\.uploaded - result\.skipped - result\.failed\)/);
 });
 
+test('ostore identity is MD5; snapshot filename stays the manifest SHA-256', () => {
+  assert.match(ostore, /private func md5\(_ url: URL\) throws -> String/);
+  assert.match(ostore, /Insecure\.MD5\(\)/);
+  assert.match(ostore, /guard try sha256\(db\) == manifest\.sha256/);
+  assert.match(ostore, /deltas\//);
+  assert.match(ostore, /DB-CHECKPOINT\.json/);
+  assert.match(ostore, /makeDelta\(artifact:/);
+  assert.match(ostore, /ostore-logical\.json/);
+  assert.doesNotMatch(ostore, /db-chunks/);
+  assert.match(ostore, /md5Hex\(entry\.md5\) \?\? md5Hex\(entry\.sha256\)/);
+  assert.match(ostore, /let digest = try md5\(local\)/);
+  assert.match(ostore, /md5Hex\(reply\?\.md5\) == digest \|\| md5Hex\(reply\?\.sha256\) == digest/);
+  assert.doesNotMatch(ostore, /reply\.sha256 == digest/);
+});
+
 test('byte counters come from real file sizes, remote totals from a listing', () => {
   assert.match(ostore, /private func fileSize\(_ url: URL\) -> Int/);
   assert.match(ostore, /bump \{ \$0\.skipped \+= 1; \$0\.skippedBytes \+= size \}/);
