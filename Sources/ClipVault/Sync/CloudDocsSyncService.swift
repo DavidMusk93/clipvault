@@ -203,12 +203,20 @@ final class CloudDocsSyncService {
                 _ = self.database.writeBlobFile(hash: item.contentHash + ".pdf", data: data)
             }
             let keys = self.database.existingBlobKeys(for: item.contentHash)
-            let op = self.makeOp(
+            var op = self.makeOp(
                 kind: kind,
                 itemId: itemId,
                 item: item,
                 blobKeys: keys.isEmpty ? blobs : keys
             )
+            let sem = DispatchSemaphore(value: 0)
+            var dailyCount = 1
+            self.database.performSyncWork {
+                dailyCount = self.database.captureCopyCountLocked(id: itemId)
+                sem.signal()
+            }
+            sem.wait()
+            op.copyCount = dailyCount
             self.enqueue(op)
             self.scheduleDrain(reason: "capture")
         }

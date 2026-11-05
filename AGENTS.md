@@ -62,7 +62,7 @@
 
 禁止：把 burst 折成 head merge（`PAGE_SIZE` 只有 30）；已知 id 报 `'have'` 早退而不跟 `timestamp` 移动；用「先吸收再等超时」的固定窗口静默吞剪贴板；硬删行不落 `operation_logs`；把 note / 有 `compose_ops` 的行当作重复折叠的输家。回归：`tests/wall-live-update.test.mjs`。
 
-5. **墙序 = 捕获时间。** `clipboard_items.timestamp` 只表示复制发生的时刻（本机捕获或对端捕获 `wall_ts`）。OCR、副本 upsert、hydrate **不得**改这条序。只有 `kind=touch` 才 bump。策略真源 `WallClockPolicy.swift`。事故：2026-09-11 OCR 回放 `wall_ts=Date()` + `MAX(timestamp)`。
+5. **墙序 = 捕获时间。** `clipboard_items.timestamp` 只表示复制发生的时刻（本机捕获或对端捕获 `wall_ts`）。重复计数按捕获日独立：同日再复制才更新当天记录；跨日创建 `copy_count=1` 的新记录，旧日的卡片、时间与次数不变。后台去重只能处理今天，同步不得把旧日 touch 覆写到新日。OCR、副本 upsert、hydrate **不得**改这条序。只有同日 `kind=touch` 才 bump。策略真源 `WallClockPolicy.swift`。事故：2026-09-11 OCR 回放 `wall_ts=Date()` + `MAX(timestamp)`。
 
 ---
 
@@ -353,11 +353,11 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   捕获          timestamp = 复制时刻     first_seen_at = 本机首次见到
   OCR 回放      只写 ocr_text            trx.wall_ts = 原 timestamp（禁止 Date()）
   副本 upsert   只补字段                 禁止 MAX(timestamp)
-  kind=touch    对端又复制了同一内容      才允许 bump timestamp
+  kind=touch    同捕获日内再复制                  才允许 bump；跨日新建计数为 1，旧日保留
   墙            ORDER BY timestamp DESC, id DESC
 ```
 
-策略真源：`WallClockPolicy.swift`。回归：`tests/wall_clock_main.swift`（策略 + 440 团块 keyset 必须翻到更早 text；类型 chip 走同一 keyset，禁止只滤第 1 页）。
+策略真源：`WallClockPolicy.swift`。回归：`tests/daily-capture.test.mjs`（按日哈希匹配、跨日保留、去重边界与同步计数）+ `tests/wall_clock_main.swift`（午夜/DST、策略 + 440 团块 keyset 必须翻到更早 text；类型 chip 走同一 keyset，禁止只滤第 1 页）。
 
 禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite；OCR/hydrate 拨捕获钟；把 440 张图合成一张卡；`readBlobFile` 用 `count == 64` 丢掉 `{sha}.rtf`/`{sha}.pdf`。
 
