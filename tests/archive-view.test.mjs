@@ -38,7 +38,9 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20261105a/);
+  assert.match(swift, /archive-view\.css\?v=20261105c/);
+  assert.match(viewCss, /\.cv-article-head h1/);
+  assert.match(swift, /func withArticleTitle/);
   assert.match(swift, /archive-reader\.js\?v=20261105a/);
   assert.match(viewCss, /\.cv-code\.is-diagram pre/);
   assert.match(viewCss, /line-height: 1\.35/);
@@ -118,6 +120,51 @@ test('x.com article dump is rebuilt from Draft.js, not Readability <p> soup', ()
   assert.match(svc, /XArticleHTML\.enrich/);
   assert.match(svc, /XArticleHTML\.isUsableArticleHTML/);
   assert.doesNotMatch(svc, /contains\("<pre"\) \|\| html\.lowercased\(\)\.contains\("<h2"\)/);
+});
+
+test('archive extract keeps the in-article header Readability would drop', async () => {
+  const svc = src('WebArchiveService.swift');
+  const start = svc.indexOf('function salvageArticleHeader');
+  const end = svc.indexOf('/* @cv salvage end */');
+  assert.ok(start > 0 && end > start);
+  assert.match(svc, /if \(head && htmlOut\.toLowerCase\(\)\.indexOf\('<h1'\) < 0\) htmlOut = head \+ htmlOut/);
+  const { JSDOM } = await import('jsdom');
+  const dom = new JSDOM(
+    `<!DOCTYPE html><body>
+      <header class="site-header"><h1>Internals for Interns</h1></header>
+      <main><article>
+        <header class="article-header">
+          <h1 class="article-title">Guest Posts: How //go:embed Works: From Source Files to Binary</h1>
+          <button class="share-icon-button">Share</button>
+          <div class="article-meta">
+            <span class="article-author">By Ainsley Clark</span>
+            <time datetime="2026-11-02">November 2, 2026</time>
+            <span class="article-reading-time">27 min read</span>
+            <div class="article-tags">
+              <a href="/tags/go" class="tag">#Go</a>
+              <a href="/tags/compiler" class="tag">#Compiler</a>
+            </div>
+          </div>
+        </header>
+      </article></main>
+    </body>`,
+    { url: 'https://internals-for-interns.com/posts/how-go-embed-works/' }
+  );
+  const fn = new Function('doc', `${svc.slice(start, end)}\nreturn salvageArticleHeader(doc);`);
+  const html = fn(dom.window.document);
+  assert.match(html, /<h1>Guest Posts: How \/\/go:embed Works: From Source Files to Binary<\/h1>/);
+  assert.match(html, /By Ainsley Clark/);
+  assert.match(html, /datetime="2026-11-02"/);
+  assert.match(html, /November 2, 2026/);
+  assert.match(html, /27 min read/);
+  assert.match(html, /href="https:\/\/internals-for-interns.com\/tags\/go"/);
+  assert.doesNotMatch(html, /Internals for Interns|Share/);
+  const bare = new JSDOM('<!DOCTYPE html><body><header class="site-header"><h1>Site</h1></header><p>Body</p></body>', {
+    url: 'https://example.com/',
+  });
+  assert.equal(fn(bare.window.document), '');
+  dom.window.close();
+  bare.window.close();
 });
 
 test('archive extract keeps diagram lists Readability would drop', () => {

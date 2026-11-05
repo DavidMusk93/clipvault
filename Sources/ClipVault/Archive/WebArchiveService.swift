@@ -613,6 +613,10 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                     fig.appendChild(cap);
                   }
                 })(clone);
+                // Readability treats class "header" as chrome and also strips bylines.
+                // internals-for-interns keeps the title, author, date, and tags in
+                // header.article-header, so the saved body used to start at the first <p>.
+                var head = salvageArticleHeader(clone);
                 var article = new Readability(clone).parse();
                 if (!article || !article.content) {
                   return JSON.stringify({ok:false, reason:'Readability 无正文'});
@@ -621,6 +625,8 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                 if (text.length < 40) {
                   return JSON.stringify({ok:false, reason:'正文过短'});
                 }
+                var htmlOut = article.content;
+                if (head && htmlOut.toLowerCase().indexOf('<h1') < 0) htmlOut = head + htmlOut;
                 return JSON.stringify({
                   ok: true,
                   title: article.title || document.title || '',
@@ -628,15 +634,87 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
                   excerpt: article.excerpt || '',
                   siteName: article.siteName || '',
                   text: text.slice(0, 20000),
-                  html: article.content
+                  html: htmlOut
                 });
               } catch (e) {
                 return JSON.stringify({ok:false, reason: String(e && e.message ? e.message : e)});
               }
             })()
             """
-            return lib + "\n" + runner
+            return lib + "\n" + salvageArticleHeaderJS + "\n" + runner
         }
+
+        /// Snapshot of an in-article header, taken before Readability deletes it.
+        private static let salvageArticleHeaderJS = """
+        /* @cv salvageArticleHeader */
+        function salvageArticleHeader(doc) {
+          function esc(s) {
+            return String(s == null ? '' : s)
+              .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+          }
+          function clean(s) {
+            return String(s || '').replace(/\\s+/g, ' ').trim();
+          }
+          function pick(root, sel) {
+            var el = root.querySelector(sel);
+            return el ? clean(el.textContent) : '';
+          }
+          function absURL(href) {
+            try {
+              var u = new URL(href, doc.baseURI || 'https://example.invalid/');
+              if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+              return u.href;
+            } catch (e) {
+              return '';
+            }
+          }
+          var headers = doc.querySelectorAll('header');
+          var header = null;
+          for (var i = 0; i < headers.length; i++) {
+            var h = headers[i];
+            if (!h.querySelector('h1')) continue;
+            var cls = String(h.className || '') + ' ' + String(h.id || '');
+            var named = /\\b(article|entry|post)-header\\b/i.test(cls);
+            var site = /\\b(site|nav|menu|global|masthead)-header\\b/i.test(cls);
+            if (site && !named) continue;
+            if (h.closest('article, main') || named) { header = h; break; }
+          }
+          if (!header) return '';
+          var title = clean(header.querySelector('h1').textContent);
+          if (!title || title.length > 240) return '';
+          var author = pick(header, '.article-author, [rel="author"], .byline, .p-author, .author');
+          if (author.length > 120) author = '';
+          var timeEl = header.querySelector('time');
+          var dateLabel = timeEl ? clean(timeEl.textContent) : '';
+          if (dateLabel.length > 80) dateLabel = '';
+          var datetime = timeEl ? clean(timeEl.getAttribute('datetime') || '') : '';
+          var reading = pick(header, '.article-reading-time, .reading-time, .read-time');
+          if (reading.length > 40) reading = '';
+          var tags = [];
+          var tagNodes = header.querySelectorAll('.article-tags a, a.tag, a[rel="tag"]');
+          for (var t = 0; t < tagNodes.length && tags.length < 8; t++) {
+            var label = clean(tagNodes[t].textContent);
+            if (!label || label.length > 40) continue;
+            var href = absURL(tagNodes[t].getAttribute('href') || '');
+            if (href) tags.push('<a href="' + esc(href) + '">' + esc(label) + '</a>');
+            else tags.push(esc(label));
+          }
+          var html = '<header class="cv-article-head"><h1>' + esc(title) + '</h1>';
+          var bits = [];
+          if (author) bits.push(esc(author));
+          if (dateLabel) {
+            bits.push(datetime
+              ? '<time datetime="' + esc(datetime) + '">' + esc(dateLabel) + '</time>'
+              : esc(dateLabel));
+          }
+          if (reading) bits.push(esc(reading));
+          if (bits.length) html += '<p class="cv-byline">' + bits.join(' · ') + '</p>';
+          if (tags.length) html += '<p class="cv-tags">' + tags.join(' ') + '</p>';
+          html += '</header>';
+          return html;
+        }
+        /* @cv salvage end */
+        """
     }
 
     static func loadReadabilityJS() -> String {

@@ -455,6 +455,81 @@ enum XArticleHTMLTests {
         ok("peel-render-h1", fromSoup.html.contains("<h1>“反蒸馏”隐学</h1>"))
         ok("peel-render-h2", fromSoup.html.contains("<h2>1.  交付结果，不交付过程</h2>"))
 
+        // ScarletKc 2118239212638237125: one body GIF is ApiGif (no original_img_url).
+        let gifBlocks: [[String: Any]] = [[
+            "type": "atomic",
+            "text": " ",
+            "entityRanges": [["key": 0, "length": 1, "offset": 0]],
+        ]]
+        let gifMap: [[String: Any]] = [[
+            "key": 0,
+            "value": [
+                "type": "MEDIA",
+                "data": ["mediaItems": [["mediaId": "2118234158048956417", "mediaCategory": "DraftTweetGif"]]],
+            ],
+        ]]
+        let gifArticle: [String: Any] = [
+            "title": "Typeling",
+            "media_entities": [[
+                "media_id": "2118234158048956417",
+                "media_info": [
+                    "__typename": "ApiGif",
+                    "preview_image": ["original_img_url": "https://pbs.twimg.com/tweet_video_thumb/HWV6vm2bUAEA0n4.jpg"],
+                    "variants": [[
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/tweet_video/HWV6vm2bUAEA0n4.mp4",
+                    ]],
+                ] as [String: Any],
+            ] as [String: Any]],
+            "content": ["blocks": gifBlocks, "entityMap": gifMap],
+        ]
+        let gifDoc = XArticleHTML.renderDocument(article: gifArticle)!
+        ok("gif-video", gifDoc.html.contains("cv-x-video") && gifDoc.html.contains("tweet_video/HWV6vm2bUAEA0n4.mp4"))
+        ok("gif-poster", gifDoc.html.contains("poster=\"https://pbs.twimg.com/tweet_video_thumb/HWV6vm2bUAEA0n4.jpg\""))
+        ok("gif-not-dropped", !gifDoc.html.contains("cv-x-dropped"))
+        ok("gif-cov", gifDoc.coverage.mediaExpected == 1 && gifDoc.coverage.mediaRendered == 1 && gifDoc.coverage.atomicDropped == 0)
+
+        let page = """
+        <div><span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>KSR</mi></mrow><annotation encoding="application/x-tex">KSR = 1 - used</annotation></semantics></math></span>
+        <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>P</mi><annotation encoding="application/x-tex">P(w|c)</annotation></semantics></math></span>
+        <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>KSR</mi></mrow><annotation encoding="application/x-tex">KSR = 1 - used</annotation></semantics></math></span>
+        <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>P</mi><annotation encoding="application/x-tex">P(w|c)</annotation></semantics></math></span>
+        </div>
+        """
+        let maths = XArticleHTML.mathBlocks(in: page)
+        ok("math-cycle", maths.count == 2 && maths[0].contains("KSR = 1 - used") && maths[1].contains("P(w|c)"))
+        let latexBlocks: [[String: Any]] = [
+            ["type": "unstyled", "text": "the keystroke savings rate is:"],
+            ["type": "atomic", "text": " ", "entityRanges": [["key": 0, "length": 1, "offset": 0]]],
+            ["type": "unstyled", "text": "word probability:"],
+            ["type": "atomic", "text": " ", "entityRanges": [["key": 1, "length": 1, "offset": 0]]],
+        ]
+        let latexMap: [[String: Any]] = [
+            ["key": 0, "value": ["type": "LATEX", "data": ["entityKey": "1cb29128-eca3-4a26-95e0-15fe0e938e68"]]],
+            ["key": 1, "value": ["type": "LATEX", "data": [:] as [String: Any]]],
+        ]
+        let latexDoc = XArticleHTML.renderDocument(article: [
+            "title": "Typeling",
+            "content": ["blocks": latexBlocks, "entityMap": latexMap],
+        ], math: maths)!
+        ok("latex-math", latexDoc.html.contains("cv-x-math") && latexDoc.html.contains("KSR = 1 - used") && latexDoc.html.contains("P(w|c)"))
+        ok("latex-not-dropped", !latexDoc.html.contains("cv-x-dropped"))
+        ok("latex-cov", latexDoc.coverage.atomicExpected == 2 && latexDoc.coverage.atomicDropped == 0)
+        let bare = XArticleHTML.renderDocument(article: [
+            "content": ["blocks": latexBlocks, "entityMap": latexMap],
+        ])!
+        ok("latex-still-drops", bare.html.components(separatedBy: "cv-x-dropped").count - 1 == 2)
+
+        let texDoc = XArticleHTML.renderBlocks([[
+            "type": "atomic",
+            "text": " ",
+            "entityRanges": [["key": 0, "length": 1, "offset": 0]],
+        ]], entityMap: [[
+            "key": 0,
+            "value": ["type": "LATEX", "data": ["latex": "E = mc^2"]],
+        ]])
+        ok("latex-data", texDoc.contains("E = mc^2") && texDoc.contains("cv-x-math") && !texDoc.contains("cv-x-dropped"))
+
         if fails > 0 {
             FileHandle.standardError.write(Data("x-article-html: \(fails) failed\n".utf8))
             exit(1)
