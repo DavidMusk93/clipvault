@@ -35,6 +35,18 @@ enum WallClockTests {
             !WallClockPolicy.shouldRestoreToFirstSeen(timestamp: capture, firstSeenAt: capture, copyCount: 1)
         )
 
+        let zone = TimeZone(identifier: "Asia/Shanghai")!
+        let midnight = ISO8601DateFormatter().date(from: "2026-11-06T00:00:00+08:00")!
+        ok("same-day-repeat", WallClockPolicy.isSameCaptureDay(midnight.timeIntervalSince1970 + 1, as: midnight.addingTimeInterval(3600), zone: zone))
+        ok("midnight-starts-new-counter", !WallClockPolicy.isSameCaptureDay(midnight.timeIntervalSince1970 - 0.001, as: midnight, zone: zone))
+        ok("next-midnight-excluded", !WallClockPolicy.isSameCaptureDay(midnight.timeIntervalSince1970 + 86400, as: midnight, zone: zone))
+        let ny = TimeZone(identifier: "America/New_York")!
+        for (iso, hours) in [("2026-03-08T12:00:00-04:00", 23), ("2026-11-01T12:00:00-05:00", 25)] {
+            let day = WallClockPolicy.captureDayInterval(containing: ISO8601DateFormatter().date(from: iso)!, zone: ny)
+            ok("civil-day-\(hours)-hours", day.duration == Double(hours * 3600))
+            ok("dst-day-end-exclusive-\(hours)", !WallClockPolicy.isSameCaptureDay(day.end.timeIntervalSince1970, as: day.start, zone: ny))
+        }
+
         struct Row { var id: String; var ts: Double; var type: String }
         var rows: [Row] = []
         for i in 0..<20 { rows.append(Row(id: String(format: "T1-%03d", i), ts: 3000 - Double(i) * 0.01, type: "text")) }

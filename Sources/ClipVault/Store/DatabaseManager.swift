@@ -1237,7 +1237,7 @@ final class DatabaseManager: ObservableObject {
         return total
     }
 
-    /// Keep only the newest row per content_hash; delete up to `limit` losers this tick.
+    /// Collapse duplicates only inside today's capture bucket. Older days are immutable.
     ///
     /// Hard deletes are auditable: every removal writes `dedupe_delete` into
     /// `operation_logs`. Candidates exclude notes and anything carrying compose history,
@@ -1247,12 +1247,13 @@ final class DatabaseManager: ObservableObject {
     @discardableResult
     private func dedupeStaleBatch(limit: Int) -> Int {
         guard let db = db, limit > 0 else { return 0 }
-        // Loser = exists another live capture row with same hash that is strictly newer,
-        // or same ts with larger id.
+        let day = WallClockPolicy.captureDayInterval(containing: Date(), zone: ClipTimeFormat.displayTimeZone)
+        // Never select an older day's row as a loser or a keeper.
         let selectSQL = """
         SELECT c.id, c.content_hash
         FROM clipboard_items c
-        WHERE c.pinned_at IS NULL
+        WHERE c.timestamp >= ? AND c.timestamp < ?
+          AND c.pinned_at IS NULL
           AND c.archive_html_sha IS NULL
           AND c.reader_state IS NULL
           AND c.deleted_at IS NULL
@@ -1266,7 +1267,10 @@ final class DatabaseManager: ObservableObject {
           AND EXISTS (
             SELECT 1 FROM clipboard_items k
             WHERE k.id != c.id
+              AND k.timestamp >= ? AND k.timestamp < ?
+              AND k.deleted_at IS NULL
               AND k.type != 'note'
+              AND NOT EXISTS (SELECT 1 FROM compose_ops o WHERE o.item_id = k.id)
               AND (
                 k.content_hash = c.content_hash
                 OR (
@@ -1288,6 +1292,10 @@ final class DatabaseManager: ObservableObject {
         var victims: [(String, String)] = []
         var sel: OpaquePointer?
         guard sqlite3_prepare_v2(db, selectSQL, -1, &sel, nil) == SQLITE_OK else { return 0 }
+        sqlite3_bind_double(sel, 1, day.start.timeIntervalSince1970)
+        sqlite3_bind_double(sel, 2, day.end.timeIntervalSince1970)
+        sqlite3_bind_double(sel, 3, day.start.timeIntervalSince1970)
+        sqlite3_bind_double(sel, 4, day.end.timeIntervalSince1970)
         while sqlite3_step(sel) == SQLITE_ROW {
             if let id = sqlite3_column_text(sel, 0).map({ String(cString: $0) }),
                let hash = sqlite3_column_text(sel, 1).map({ String(cString: $0) }) {
@@ -1387,26 +1395,35 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
-    private func findIdByContentHash(_ hash: String) -> String? {
-        guard let db = db else { return nil }
-        var stmt: OpaquePointer?
-        defer { if stmt != nil { sqlite3_finalize(stmt) } }
-        // Prefer newest if residual dups exist before cleanup drains them.
-        // Prefer alive row; fall back to any (bump restores soft-deleted).
-        let sql = "SELECT id FROM clipboard_items WHERE content_hash = ? ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, timestamp DESC, id DESC LIMIT 1;"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-        bindText(stmt, 1, hash)
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+    private func findIdByContentHash(_ hash: String, captureDate: Date? = nil) -> String? {
+        findIdByHash(hash, column: "content_hash", captureDate: captureDate)
     }
 
-    private func findIdByTextHash(_ hash: String) -> String? {
+    private func findIdByTextHash(_ hash: String, captureDate: Date? = nil) -> String? {
+        findIdByHash(hash, column: "text_hash", captureDate: captureDate)
+    }
+
+    /// Capture dedupe is per day; hash locators for links/archives may still search all days.
+    private func findIdByHash(_ hash: String, column: String, captureDate: Date?) -> String? {
         guard let db = db else { return nil }
         var stmt: OpaquePointer?
         defer { if stmt != nil { sqlite3_finalize(stmt) } }
-        let sql = "SELECT id FROM clipboard_items WHERE text_hash = ? ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, timestamp DESC, id DESC LIMIT 1;"
+        let dayFilter = captureDate == nil ? "" : """
+         AND timestamp >= ? AND timestamp < ? AND type != 'note'
+         AND NOT EXISTS (SELECT 1 FROM compose_ops o WHERE o.item_id = clipboard_items.id)
+        """
+        let sql = """
+        SELECT id FROM clipboard_items
+        WHERE \(column) = ?\(dayFilter)
+        ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, timestamp DESC, id DESC LIMIT 1;
+        """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         bindText(stmt, 1, hash)
+        if let captureDate {
+            let day = WallClockPolicy.captureDayInterval(containing: captureDate, zone: ClipTimeFormat.displayTimeZone)
+            sqlite3_bind_double(stmt, 2, day.start.timeIntervalSince1970)
+            sqlite3_bind_double(stmt, 3, day.end.timeIntervalSince1970)
+        }
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return sqlite3_column_text(stmt, 0).map { String(cString: $0) }
     }
@@ -1685,7 +1702,7 @@ final class DatabaseManager: ObservableObject {
         case bumped(existingId: UUID)
     }
 
-    /// Insert new content, or **bump** existing same `content_hash` to newest (no new row).
+    /// Insert a new daily capture, or bump the same content within its capture day.
     func saveItem(_ item: ClipboardItem, completion: ((Bool) -> Void)? = nil) {
         saveItemDetailed(item) { result in
             completion?(result != .failed)
@@ -1709,11 +1726,11 @@ final class DatabaseManager: ObservableObject {
             }
             let t0 = Date().timeIntervalSince1970
 
-            var existingId = self.findIdByContentHash(item.contentHash)
+            var existingId = self.findIdByContentHash(item.contentHash, captureDate: item.timestamp)
             if existingId == nil,
                ClipboardItem.textLikeTypes.contains(item.type),
                let th = ClipboardItem.semanticTextHash(plain: item.textContent, html: item.htmlContent) {
-                existingId = self.findIdByTextHash(th)
+                existingId = self.findIdByTextHash(th, captureDate: item.timestamp)
             }
             if let existingId = existingId {
                 let ok = self.bumpLatestAlive(id: existingId, item: item)
@@ -1786,7 +1803,7 @@ final class DatabaseManager: ObservableObject {
         })
     }
 
-    /// Apply remote upsert. Content-hash latest-alive: same body does not create a second row.
+    /// Apply remote capture in its civil-day bucket; OCR follows the original row id.
     /// `bumpTimestamp` only for kind=touch (peer recopied). OCR/replica upsert must not move the wall.
     @discardableResult
     func applySyncUpsertLocked(
@@ -1814,14 +1831,33 @@ final class DatabaseManager: ObservableObject {
             textContent = ClipboardItem.plainKeepingDecorativeHTML(html, companion: textContent)
             htmlContent = nil
         }
+        // Preserve row identity for derived upserts. Legacy peers may still touch an old
+        // id on a new day; fork that capture deterministically instead of rewriting history.
+        var id = id
+        var copyCount = copyCount
+        if let oldTs = captureTimestampLocked(id: id.uuidString) {
+            if !bumpTimestamp || WallClockPolicy.isSameCaptureDay(oldTs, as: timestamp, zone: ClipTimeFormat.displayTimeZone) {
+                return refreshRemoteFields(
+                    id: id.uuidString, timestamp: timestamp, sourceApp: sourceApp,
+                    ocrText: ocrText, textContent: textContent, htmlContent: htmlContent,
+                    copyCount: copyCount, bumpTimestamp: bumpTimestamp
+                )
+            }
+            let day = WallClockPolicy.captureDayInterval(containing: timestamp, zone: ClipTimeFormat.displayTimeZone)
+            let digest = SHA256.hash(data: Data("daily-capture:\(id.uuidString):\(day.start.timeIntervalSince1970)".utf8))
+            let bytes = Array(digest.prefix(16))
+            id = UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                             bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+            copyCount = 1
+        }
         let idStr = id.uuidString
         let type = ClipboardType(rawValue: typeRaw) ?? .other
 
-        // Same content already present under any id → bump that row (dedupe across hosts).
-        var existing = findIdByContentHash(contentHash)
+        // Only same-day captures can coalesce across hosts.
+        var existing = findIdByContentHash(contentHash, captureDate: timestamp)
         if existing == nil, ClipboardItem.textLikeTypes.contains(type),
            let th = ClipboardItem.semanticTextHash(plain: textContent, html: htmlContent) {
-            existing = findIdByTextHash(th)
+            existing = findIdByTextHash(th, captureDate: timestamp)
         }
         if let existing = existing {
             if existing == idStr {
@@ -1836,20 +1872,7 @@ final class DatabaseManager: ObservableObject {
                     bumpTimestamp: bumpTimestamp
                 )
             }
-            // Different id, same body: keep local id. Only a peer recopy (touch) moves the wall.
-            if bumpTimestamp {
-                let item = ClipboardItem(
-                    id: UUID(uuidString: existing) ?? id,
-                    timestamp: timestamp,
-                    type: type,
-                    contentHash: contentHash,
-                    textContent: textContent,
-                    htmlContent: htmlContent,
-                    ocrText: ocrText,
-                    sourceApp: sourceApp
-                )
-                return bumpLatestAlive(id: existing, item: item)
-            }
+            // Different id, same daily body: merge counters idempotently across hosts.
             return refreshRemoteFields(
                 id: existing,
                 timestamp: timestamp,
@@ -1858,7 +1881,7 @@ final class DatabaseManager: ObservableObject {
                 textContent: textContent,
                 htmlContent: htmlContent,
                 copyCount: copyCount,
-                bumpTimestamp: false
+                bumpTimestamp: bumpTimestamp
             )
         }
 
@@ -2036,7 +2059,7 @@ final class DatabaseManager: ObservableObject {
         return true
     }
 
-    /// Same content re-copied: keep one row, refresh timestamp / source / count; keep stable id.
+    /// Same-day recopy: refresh timestamp / source / count while keeping stable identity.
     /// If row was soft-deleted, re-copy restores the **URL capture** only — user-made
     /// web archive is derivative and must not auto-revive (save useful, not ghost archive).
     private func bumpLatestAlive(id: String, item: ClipboardItem) -> Bool {
@@ -3554,6 +3577,17 @@ final class DatabaseManager: ObservableObject {
         bindText(stmt, 1, id)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return sqlite3_column_double(stmt, 0)
+    }
+
+    /// Sync queue reads the saved daily counter before publishing a capture.
+    func captureCopyCountLocked(id: String) -> Int {
+        guard let db else { return 1 }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COALESCE(copy_count, 1) FROM clipboard_items WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else { return 1 }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, id)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 1 }
+        return max(1, Int(sqlite3_column_int(stmt, 0)))
     }
 
     /// Sync-queue helper: every alive row that already has OCR text. Call on `dbQueue`.

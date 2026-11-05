@@ -13,6 +13,18 @@ enum WallClockPolicy {
         kind == "touch"
     }
 
+    /// A capture row and its repeat counter belong to one civil day, including DST days.
+    static func captureDayInterval(containing date: Date, zone: TimeZone) -> DateInterval {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        return calendar.dateInterval(of: .day, for: date)!
+    }
+
+    static func isSameCaptureDay(_ timestamp: Double, as date: Date, zone: TimeZone) -> Bool {
+        let day = captureDayInterval(containing: date, zone: zone)
+        return timestamp >= day.start.timeIntervalSince1970 && timestamp < day.end.timeIntervalSince1970
+    }
+
     /// Derived follow-ups (OCR) reuse the row's capture clock. Nil → do not emit.
     static func wallTsForDerivedOp(captureTs: Double?) -> Double? {
         captureTs
