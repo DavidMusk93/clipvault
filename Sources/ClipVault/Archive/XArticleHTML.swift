@@ -1085,12 +1085,17 @@ enum XArticleHTML {
     static func renderFence(_ raw: String) -> String {
         let normalized = raw.replacingOccurrences(of: "\r\n", with: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Unfenced GFM pipe tables are comparison data, not source. A fenced
+        // block stays code even when the sample itself is a table.
+        if !normalized.hasPrefix("```"), let table = renderPipeTable(normalized) {
+            return table
+        }
         var lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var lang = ""
         if let first = lines.first, first.hasPrefix("```") {
             lang = String(first.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
             lines.removeFirst()
-            if let last = lines.last, last.hasPrefix("```") {
+            if let last = lines.last, last.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
                 lines.removeLast()
             }
         }
@@ -1098,6 +1103,176 @@ enum XArticleHTML {
         let body = lines.joined(separator: "\n")
         let cls = lang.isEmpty ? "" : " class=\"language-\(escape(lang))\""
         return "<pre><code\(cls)>\(escape(body))</code></pre>"
+    }
+
+    /// View and share pages serve frozen CAS. Pipe tables already stored as
+    /// `<pre>` become real tables here; fenced code (a language class) stays.
+    static func promotePipeTables(_ html: String) -> String {
+        guard html.contains("<pre"), let re = preBlockRegex else { return html }
+        let ns = html as NSString
+        let matches = re.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return html }
+        var out = ""
+        var cursor = 0
+        for m in matches {
+            let r = m.range
+            if r.location < cursor { continue }
+            let look = max(0, r.location - 180)
+            let prefix = ns.substring(with: NSRange(location: look, length: r.location - look))
+            out += ns.substring(with: NSRange(location: cursor, length: r.location - cursor))
+            let block = ns.substring(with: r)
+            if prefix.contains("cv-x-math") {
+                out += block
+            } else if let table = pipeTable(fromPre: block) {
+                out += table
+            } else {
+                out += block
+            }
+            cursor = r.location + r.length
+        }
+        if cursor < ns.length { out += ns.substring(from: cursor) }
+        return out
+    }
+
+    private static let preBlockRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: #"<pre\b[^>]*>[\s\S]*?</pre>"#, options: [.caseInsensitive])
+    }()
+
+    /// A measurement cell: `29.7`, `5 MB`, `49.6% -> 40.5% (71.0%)`, `41 to 115 µs`.
+    /// Prose (`none (standard library)`, `23 to 33 ms mean…`) does not match.
+    private static let figureCellRegex: NSRegularExpression? = {
+        let unit = "(?:%|MB|KB|GB|µs|μs|ms|s|M)"
+        let num = "[~≈]?\\d+(?:\\.\\d+)?(?:\\s*" + unit + ")?"
+        let pattern = "^\\s*" + num + "(?:\\s*(?:->|→|/|to|,)\\s*" + num + ")*(?:\\s*\\([^)\\n]{0,20}\\))?\\s*$"
+        return try? NSRegularExpression(pattern: pattern)
+    }()
+
+    private enum ColAlign { case left, center, right }
+
+    private static func pipeTable(fromPre block: String) -> String? {
+        let head = block.prefix(240)
+        if head.contains("language-") { return nil }
+        let text = stripTags(block).trimmingCharacters(in: .whitespacesAndNewlines)
+        return renderPipeTable(text)
+    }
+
+    /// Whole block is a GFM table, or nil. Separator row is authoritative for
+    /// column count and `:---` alignment. Left columns of pure figures go right.
+    private static func renderPipeTable(_ raw: String) -> String? {
+        var lines = raw.replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+        while lines.first?.isEmpty == true { lines.removeFirst() }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        guard lines.count >= 3, lines[0].contains("|"), lines[1].contains("|") else { return nil }
+        guard let aligns = separatorAligns(lines[1]), (2...12).contains(aligns.count) else { return nil }
+        guard var header = splitRow(lines[0]) else { return nil }
+        header = fit(header, aligns.count)
+        var body: [[String]] = []
+        for line in lines.dropFirst(2) {
+            if line.isEmpty { continue }
+            guard line.contains("|"), let cells = splitRow(line) else { return nil }
+            body.append(fit(cells, aligns.count))
+        }
+        guard !body.isEmpty else { return nil }
+        let cols: [ColAlign] = aligns.enumerated().map { i, gfm in
+            columnAlign(gfm: gfm, body: body.map { $0[i] })
+        }
+        func row(_ cells: [String], head: Bool) -> String {
+            let tag = head ? "th" : "td"
+            var s = "<tr>"
+            for (i, cell) in cells.enumerated() {
+                s += "<\(tag)\(alignAttr(cols[i]))>\(escape(cell))</\(tag)>"
+            }
+            s += "</tr>"
+            return s
+        }
+        var html = "<div class=\"cv-table\"><table><thead>"
+        html += row(header, head: true)
+        html += "</thead><tbody>"
+        for cells in body { html += row(cells, head: false) }
+        html += "</tbody></table></div>"
+        return html
+    }
+
+    private static func columnAlign(gfm: ColAlign, body: [String]) -> ColAlign {
+        if gfm != .left { return gfm }
+        var figures = 0
+        var prose = 0
+        for cell in body {
+            let t = cell.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { continue }
+            if isFigure(t) { figures += 1 } else { prose += 1 }
+        }
+        return (prose == 0 && figures > 0) ? .right : .left
+    }
+
+    private static func isFigure(_ s: String) -> Bool {
+        guard let re = figureCellRegex else { return false }
+        let ns = s as NSString
+        return re.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)) != nil
+    }
+
+    private static func alignAttr(_ a: ColAlign) -> String {
+        switch a {
+        case .right: return " class=\"cv-ar\""
+        case .center: return " class=\"cv-ac\""
+        case .left: return ""
+        }
+    }
+
+    private static func fit(_ cells: [String], _ cols: Int) -> [String] {
+        if cells.count == cols { return cells }
+        if cells.count > cols { return Array(cells.prefix(cols)) }
+        return cells + Array(repeating: "", count: cols - cells.count)
+    }
+
+    /// Split one GFM row on unescaped `|`. Outer pipes are optional.
+    private static func splitRow(_ line: String) -> [String]? {
+        var s = line.trimmingCharacters(in: .whitespaces)
+        guard s.contains("|") else { return nil }
+        if s.hasPrefix("|") { s.removeFirst() }
+        if s.hasSuffix("|") { s.removeLast() }
+        var cells: [String] = []
+        var cur = ""
+        var escaped = false
+        for ch in s {
+            if escaped {
+                cur.append(ch)
+                escaped = false
+                continue
+            }
+            if ch == "\\" {
+                escaped = true
+                continue
+            }
+            if ch == "|" {
+                cells.append(cur.trimmingCharacters(in: .whitespaces))
+                cur = ""
+                continue
+            }
+            cur.append(ch)
+        }
+        if escaped { cur.append("\\") }
+        cells.append(cur.trimmingCharacters(in: .whitespaces))
+        return cells
+    }
+
+    private static func separatorAligns(_ line: String) -> [ColAlign]? {
+        guard let cells = splitRow(line), cells.count >= 2 else { return nil }
+        var out: [ColAlign] = []
+        for cell in cells {
+            let t = cell.replacingOccurrences(of: " ", with: "")
+            guard t.count >= 3 else { return nil }
+            let core = t.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            guard core.count >= 3, core.allSatisfy({ $0 == "-" }) else { return nil }
+            let left = t.hasPrefix(":")
+            let right = t.hasSuffix(":")
+            if left && right { out.append(.center) }
+            else if right { out.append(.right) }
+            else { out.append(.left) }
+        }
+        return out
     }
 
     /// fxtwitter `entityMap` is a shuffled `{key,value}` list. Match `key` first;

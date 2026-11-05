@@ -23,6 +23,8 @@ test('share table and token helpers exist', () => {
   assert.match(share, /func newToken/);
   assert.match(share, /SecRandomCopyBytes/);
   assert.match(share, /rewriteAssets/);
+  assert.match(share, /XArticleHTML\.promotePipeTables/);
+  assert.match(share, /archive-view\.css\?v=20261105e/);
   assert.match(share, /noindex/);
 });
 
