@@ -491,6 +491,29 @@ svg[aria-roledescription] text { fill: #1d1d1f; }
   white-space: nowrap;
 }
 .cv-article tbody tr:nth-child(even) td { background: rgba(245, 245, 247, 0.7); }
+.cv-article .cv-table table {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.cv-article .cv-table th,
+.cv-article .cv-table td {
+  padding: 8px 10px;
+}
+.cv-article .cv-table th {
+  white-space: normal;
+  line-height: 1.25;
+}
+.cv-article .cv-table th + th,
+.cv-article .cv-table td + td {
+  border-left: 0.5px solid rgba(60, 60, 67, 0.1);
+}
+.cv-article th.cv-ac, .cv-article td.cv-ac { text-align: center; }
+.cv-article .cv-table th.cv-ar,
+.cv-article .cv-table td.cv-ar {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 iframe[src*="youtube"], iframe[src*="youtube-nocookie"], iframe[src*="vimeo"] {
   display: block;

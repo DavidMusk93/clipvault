@@ -38,7 +38,9 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20261105c/);
+  assert.match(swift, /archive-view\.css\?v=20261105e/);
+  assert.match(swift, /XArticleHTML\.promotePipeTables/);
+  assert.match(viewCss, /\.cv-ar/);
   assert.match(viewCss, /\.cv-article-head h1/);
   assert.match(swift, /func withArticleTitle/);
   assert.match(swift, /archive-reader\.js\?v=20261105a/);

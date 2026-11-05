@@ -1844,8 +1844,10 @@ class WebServer {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
                 let body = self.withArticleTitle(
-                    ArchiveImageInliner.repairDoubledAssetQuotes(
-                        ArchiveImageInliner.flattenPictures(self.promoteLazyImages(html))
+                    XArticleHTML.promotePipeTables(
+                        ArchiveImageInliner.repairDoubledAssetQuotes(
+                            ArchiveImageInliner.flattenPictures(self.promoteLazyImages(html))
+                        )
                     ),
                     title: title
                 )
@@ -1987,7 +1989,7 @@ class WebServer {
           <meta name="viewport" content="width=device-width,initial-scale=1"/>
           <title>\(safeTitle)</title>
           <meta name="color-scheme" content="light"/>
-          <link rel="stylesheet" href="/assets/archive-view.css?v=20261105c"/>
+          <link rel="stylesheet" href="/assets/archive-view.css?v=20261105e"/>
           <script src="/assets/highlight.min.js?v=11.7.0" defer></script>
           <script src="/assets/archive-reader.js?v=20261105a" defer></script>
         </head>

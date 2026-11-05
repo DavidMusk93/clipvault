@@ -57,12 +57,14 @@ enum ShareLinks {
         let title = htmlEscape(rec.snapshotTitle.isEmpty ? "分享" : rec.snapshotTitle)
         switch rec.kind {
         case "archive":
-            let body = rewriteAssets(archiveHTML ?? rec.snapshotBody, token: rec.token)
+            let body = XArticleHTML.promotePipeTables(
+                rewriteAssets(archiveHTML ?? rec.snapshotBody, token: rec.token)
+            )
             return wrap(
                 title: title,
                 kindLabel: "归档",
                 inner: "<main class=\"cv-article share-article\">\(body)</main>",
-                extraHead: "<link rel=\"stylesheet\" href=\"/assets/archive-view.css?v=20261105c\"/>",
+                extraHead: "<link rel=\"stylesheet\" href=\"/assets/archive-view.css?v=20261105e\"/>",
                 scripts: false
             )
         case "note":

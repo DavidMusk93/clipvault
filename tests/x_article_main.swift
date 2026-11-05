@@ -37,6 +37,28 @@ enum XArticleHTMLTests {
         ok("fence-pre", fence.contains("<pre><code class=\"language-ts\">"))
         ok("fence-body", fence.contains("const g = prog()"))
         ok("fence-escape", XArticleHTML.renderFence("```\na < b\n```").contains("a &lt; b"))
+        let pipe = """
+        | Model | Params | Chat |
+        | --- | --- | ---: |
+        | n-gram | 5 MB | 29.7 |
+        | a < b & c | note | keep |
+        """
+        let table = XArticleHTML.renderFence(pipe)
+        ok("pipe-table", table.contains("<div class=\"cv-table\"><table>") && table.contains("<th>Model</th>"))
+        ok("pipe-gfm-right", table.contains("<th class=\"cv-ar\">Chat</th>") && table.contains("<td class=\"cv-ar\">29.7</td>"))
+        ok("pipe-escape", table.contains("a &lt; b &amp; c") && !table.contains("<pre>"))
+        ok("pipe-mixed-left", table.contains("<td>5 MB</td>") && table.contains("<td>note</td>"))
+        let figures = XArticleHTML.renderFence("| D | N |\n| --- | --- |\n| Chat | 49.6% -> 40.5% (71.0%) |\n| IRC | 41 to 115 µs |")
+        ok("pipe-figure", figures.contains("<td class=\"cv-ar\">49.6% -&gt; 40.5% (71.0%)</td>") && figures.contains("<td class=\"cv-ar\">41 to 115 µs</td>"))
+        let fencedTable = XArticleHTML.renderFence("```md\n| A | B |\n| --- | --- |\n| 1 | 2 |\n```")
+        ok("fenced-stays-pre", fencedTable.contains("<pre><code class=\"language-md\">") && !fencedTable.contains("<table>"))
+        let stored = "<p>before</p>\n<pre><code>| A | B |\n| --- | --- |\n| x | 1 |\n| y | 2 |</code></pre>\n<pre><code class=\"language-py\">print(1)</code></pre>"
+        let promoted = XArticleHTML.promotePipeTables(stored)
+        ok("promote-table", promoted.contains("<th>A</th>") && promoted.contains("<td class=\"cv-ar\">1</td>"))
+        ok("promote-keeps-code", promoted.contains("<code class=\"language-py\">print(1)</code>"))
+        ok("promote-keeps-around", promoted.contains("<p>before</p>"))
+        let math = "<figure class=\"cv-x-math\"><pre><code>| A | B |\n| --- | --- |\n| 1 | 2 |</code></pre></figure>"
+        ok("promote-skips-math", XArticleHTML.promotePipeTables(math) == math)
 
         let blocks: [[String: Any]] = [
             ["type": "header-two", "text": "从 TestClock 看 Effect 的能力"],
