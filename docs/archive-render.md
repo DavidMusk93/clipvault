@@ -91,11 +91,12 @@ blocks[]                  entityMap[]（乱序 {key,value}）
 
 | type | 语义 | 归档 |
 | --- | --- | --- |
-| `MEDIA` / `IMAGE` | 正文图。entity 常只有 `mediaId` | `<figure><img>`，URL 来自 `article.media_entities[].media_info.original_img_url` |
+| `MEDIA` / `IMAGE` | 正文图。entity 常只有 `mediaId` | `<figure><img>`。ApiImage 用 `media_info.original_img_url`。ApiGif 没有这层 URL：静帧在 `preview_image.original_img_url`，动图在 `variants[].url`（`video/mp4`）→ `<figure class="cv-x-video"><video poster>`，字节进 CAS |
 | `MARKDOWN` | 围栏代码 | `renderFence` → `pre>code` |
 | `DIVIDER`（别名 `HR` / `HORIZONTAL_RULE`） | 装饰分割线，`data` 为空 | **`<hr>`**。不是丢图 |
 | `LINK` | inline `entityRanges`，偶尔 atomic | `<a href>`（只 http/https；`rel=noreferrer` `target=_blank`）。`javascript:` 丢掉属性，留纯文本 |
 | `TWEET` | 引用推文，`data.tweetId` | `<figure class="cv-x-quote cv-x-tweet" data-tweet=ID>` 嵌入卡：`tweetIndex` 用 fxtwitter 补作者/头像/正文；引用的是 X Article 时用 `article.title + preview_text` + `cover_media` 封面（空正文或只含 URL 都要回落）。上限 12 条。取不到也画「引用推文」链接卡，**不算 dropped** |
+| `LATEX` | 行间公式。fxtwitter 的 `data` 只有 `entityKey`，没有 TeX | 公开状态页里的 `<math>`（KaTeX annotation）按出现顺序配上，页面重复的 ABAB 收成一轮。有 `data.latex` / `tex` 则直接用。画 `<figure class="cv-x-math">` |
 | 其它（`TWITTER_CARD`…） | 未建模 | `.cv-x-dropped` +「未归档的介质（TYPE）」 |
 
 inline 还认：
@@ -115,7 +116,7 @@ inline 还认：
 
 | 字段 | 含义 |
 | --- | --- |
-| `mediaExpected` / `mediaRendered` | `media_entities`+封面 vs 实际 `<img>` |
+| `mediaExpected` / `mediaRendered` | `media_entities`+封面 vs 实际 `<img>` + `<video>` |
 | `atomicExpected` / `atomicRendered` / `atomicDropped` | atomic 块；DIVIDER 算 rendered，不算 dropped |
 | `markdownExpected` / `markdownRendered` | MARKDOWN 实体 |
 | `warnings[]` | 丢图 / 未解析介质 / 代码块缺口；UI 可展示 |

@@ -14,6 +14,11 @@ enum ArchiveImageInliner {
     }
 
     static func embed(html: String, pageURL: URL?, writeBlob: @escaping (String, Data) -> Bool) -> String {
+        let imaged = rewriteImages(html: html, pageURL: pageURL, writeBlob: writeBlob)
+        return rewriteVideos(html: imaged, pageURL: pageURL, writeBlob: writeBlob)
+    }
+
+    private static func rewriteImages(html: String, pageURL: URL?, writeBlob: @escaping (String, Data) -> Bool) -> String {
         guard let re = try? NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: [.caseInsensitive]) else {
             return html
         }
@@ -90,6 +95,7 @@ enum ArchiveImageInliner {
         if data.count >= 3, data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF { return "image/jpeg" }
         if data.starts(with: [0x47, 0x49, 0x46]) { return "image/gif" }
         if data.count > 12, data[8..<12].elementsEqual(Array("WEBP".utf8)) { return "image/webp" }
+        if data.count >= 12, data[4..<8].elementsEqual(Array("ftyp".utf8)) { return "video/mp4" }
         if data.starts(with: [0x3C, 0x73]) || data.starts(with: [0x3C, 0x3F]) { return "image/svg+xml" }
         return "application/octet-stream"
     }
@@ -149,7 +155,74 @@ enum ArchiveImageInliner {
         return next
     }
 
-    private static func fetchAll(_ urls: [URL], referer: URL?, writeBlob: @escaping (String, Data) -> Bool) -> [String: String] {
+    /// X Article GIFs are `video/mp4` (`tweet_video`), not `<img>`. Pull those
+    /// bytes into CAS too: View CSP is `img-src 'self'`, and a remote poster
+    /// would not paint offline.
+    private static func rewriteVideos(html: String, pageURL: URL?, writeBlob: @escaping (String, Data) -> Bool) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"<video\b[^>]*>"#, options: [.caseInsensitive]) else {
+            return html
+        }
+        let ns = html as NSString
+        let matches = re.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return html }
+
+        var tags: [(NSRange, String)] = []
+        var unique: [URL] = []
+        var seen = Set<String>()
+        func consider(_ raw: String?) {
+            guard var s = raw else { return }
+            s = unescapeHTML(s).trimmingCharacters(in: .whitespacesAndNewlines)
+            if s.hasPrefix("//") { s = "https:" + s }
+            guard s.hasPrefix("http://") || s.hasPrefix("https://"),
+                  !s.contains("/api/archive/asset"),
+                  let url = URL(string: s) else { return }
+            if !seen.contains(s), unique.count < maxImages {
+                seen.insert(s)
+                unique.append(url)
+            }
+        }
+        for m in matches {
+            let tag = ns.substring(with: m.range)
+            tags.append((m.range, tag))
+            consider(attr(tag, "src"))
+            consider(attr(tag, "poster"))
+        }
+        guard !unique.isEmpty else { return html }
+        let fetched = fetchAll(unique, referer: pageURL, allowVideo: true, writeBlob: writeBlob)
+        guard !fetched.isEmpty else { return html }
+
+        var out = ""
+        var cursor = 0
+        for (range, tag) in tags {
+            out += ns.substring(with: NSRange(location: cursor, length: range.location - cursor))
+            out += rewriteVideoTag(tag, fetched: fetched)
+            cursor = range.location + range.length
+        }
+        if cursor < ns.length { out += ns.substring(from: cursor) }
+        return out
+    }
+
+    private static func rewriteVideoTag(_ tag: String, fetched: [String: String]) -> String {
+        var next = tag
+        for name in ["src", "poster"] {
+            guard var raw = attr(next, name) else { continue }
+            raw = unescapeHTML(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            if raw.hasPrefix("//") { raw = "https:" + raw }
+            guard let sha = fetched[raw],
+                  let re = WeixinArticleHTML.attributeRegex(name) else { continue }
+            let local = assetPrefix + sha
+            let range = NSRange(location: 0, length: (next as NSString).length)
+            next = re.stringByReplacingMatches(in: next, range: range, withTemplate: "\(name)=\"\(local)\"")
+        }
+        return next
+    }
+
+    private static func fetchAll(
+        _ urls: [URL],
+        referer: URL?,
+        allowVideo: Bool = false,
+        writeBlob: @escaping (String, Data) -> Bool
+    ) -> [String: String] {
         let group = DispatchGroup()
         let gate = DispatchSemaphore(value: 4)
         let lock = NSLock()
@@ -159,7 +232,7 @@ enum ArchiveImageInliner {
             gate.wait()
             DispatchQueue.global(qos: .userInitiated).async {
                 defer { gate.signal(); group.leave() }
-                guard let data = fetch(url, referer: referer) else { return }
+                guard let data = fetch(url, referer: referer, allowVideo: allowVideo) else { return }
                 let sha = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                 guard writeBlob(sha, data) else { return }
                 lock.lock()
@@ -195,17 +268,23 @@ enum ArchiveImageInliner {
     /// SOCKS `SSL_ERROR_SYSCALL`, direct GET is a real PNG/JPEG. Leaving the
     /// publisher URL in the HTML makes View paint a broken image — CSP is
     /// `img-src 'self'`.
-    private static func fetch(_ url: URL, referer: URL?) -> Data? {
+    private static func fetch(_ url: URL, referer: URL?, allowVideo: Bool = false) -> Data? {
         let socksUp = ArchiveProxy.localhostPortOpen(2080)
         let preferSocks = socksUp && !WeixinArticleHTML.prefersDirectHost(url.host)
-        if let data = fetchOnce(url, referer: referer, socks: preferSocks) { return data }
+        if let data = fetchOnce(url, referer: referer, socks: preferSocks, allowVideo: allowVideo) { return data }
         let otherIsSocks = !preferSocks && socksUp
         if preferSocks == otherIsSocks { return nil }
         print("[Archive] image \(preferSocks ? "SOCKS" : "direct") failed; retry \(otherIsSocks ? "SOCKS" : "direct") \(url.host ?? "")")
-        return fetchOnce(url, referer: referer, socks: otherIsSocks)
+        return fetchOnce(url, referer: referer, socks: otherIsSocks, allowVideo: allowVideo)
     }
 
-    private static func fetchOnce(_ url: URL, referer: URL?, socks: Bool) -> Data? {
+    private static func acceptable(_ data: Data, mime: String, allowVideo: Bool) -> Bool {
+        if mime.hasPrefix("image/") || mimeType(for: data).hasPrefix("image/") { return true }
+        if allowVideo && (mime.hasPrefix("video/") || mimeType(for: data).hasPrefix("video/")) { return true }
+        return false
+    }
+
+    private static func fetchOnce(_ url: URL, referer: URL?, socks: Bool, allowVideo: Bool = false) -> Data? {
         var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
         if let referer {
             req.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
@@ -224,7 +303,7 @@ enum ArchiveImageInliner {
                data.count > 32,
                data.count <= maxBytes {
                 let mime = http.mimeType ?? ""
-                if mime.hasPrefix("image/") || mimeType(for: data).hasPrefix("image/") {
+                if acceptable(data, mime: mime, allowVideo: allowVideo) {
                     out = data
                 }
             }

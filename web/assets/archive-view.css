@@ -70,6 +70,21 @@ main.cv-article {
   scroll-margin-top: 16px;
 }
 .cv-article h1 { font-size: 1.55rem; margin: 0 0 0.85rem; }
+.cv-article .cv-article-head { margin: 0 0 1.5rem; }
+.cv-article .cv-article-head h1 {
+  font-size: 1.85rem;
+  line-height: 1.18;
+  letter-spacing: -0.028em;
+  margin: 0 0 0.4rem;
+}
+.cv-article .cv-byline {
+  margin: 0;
+  color: #6e6e73;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+.cv-article .cv-tags { margin: 0.4rem 0 0; font-size: 0.88rem; line-height: 1.5; }
+.cv-article .cv-tags a { color: #6e6e73; text-decoration: none; margin-right: 0.65rem; }
 .cv-article h2 { font-size: 1.22rem; margin: 2.05rem 0 0.65rem; }
 .cv-article h3 { font-size: 1.05rem; margin: 1.55rem 0 0.45rem; }
 .cv-article h4 { font-size: 0.98rem; margin: 1.25rem 0 0.4rem; }
@@ -370,6 +385,25 @@ main.cv-article {
   min-height: 72px;
   border-style: dashed;
   cursor: default;
+}
+.cv-article figure.cv-x-math {
+  padding: 1.15rem 1rem 1.05rem;
+  background: #fff;
+  text-align: center;
+  overflow: auto;
+}
+.cv-article figure.cv-x-math math { font-size: 1.2rem; }
+.cv-article figure.cv-x-math pre {
+  margin: 0;
+  text-align: left;
+  background: transparent;
+}
+.cv-article figure.cv-x-video { background: #111; }
+.cv-article figure.cv-x-video video {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #111;
 }
 .cv-article figure.cv-x-dropped img { cursor: default; }
 .cv-figure figcaption, .cv-article figcaption {

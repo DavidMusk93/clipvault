@@ -1843,8 +1843,11 @@ class WebServer {
             }
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
-                let body = ArchiveImageInliner.repairDoubledAssetQuotes(
-                    ArchiveImageInliner.flattenPictures(self.promoteLazyImages(html))
+                let body = self.withArticleTitle(
+                    ArchiveImageInliner.repairDoubledAssetQuotes(
+                        ArchiveImageInliner.flattenPictures(self.promoteLazyImages(html))
+                    ),
+                    title: title
                 )
                 // Do not block View on CDN fetches. Medium images go through SOCKS;
                 // URLSession.shared (direct) used to hang this GET until the iframe looked empty.
@@ -1950,6 +1953,16 @@ class WebServer {
         )
     }
 
+    /// Readability drops `header.article-header`. Until the page is archived again,
+    /// the stored title is the only header we still have. Skip when the body
+    /// already has an h1 (a fresh archive includes the salvaged header).
+    private func withArticleTitle(_ html: String, title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 1, trimmed != "归档" else { return html }
+        if html.range(of: "<h1", options: .caseInsensitive) != nil { return html }
+        return "<header class=\"cv-article-head\"><h1>\(htmlEscapeText(trimmed))</h1></header>" + html
+    }
+
     private func buildArchiveViewDocument(
         title: String,
         source: String,
@@ -1974,7 +1987,7 @@ class WebServer {
           <meta name="viewport" content="width=device-width,initial-scale=1"/>
           <title>\(safeTitle)</title>
           <meta name="color-scheme" content="light"/>
-          <link rel="stylesheet" href="/assets/archive-view.css?v=20261105a"/>
+          <link rel="stylesheet" href="/assets/archive-view.css?v=20261105c"/>
           <script src="/assets/highlight.min.js?v=11.7.0" defer></script>
           <script src="/assets/archive-reader.js?v=20261105a" defer></script>
         </head>

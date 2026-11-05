@@ -142,7 +142,12 @@ enum XArticleHTML {
             // Quoted tweets are atomic TWEET blocks, not images. Resolve them so
             // the body shows the card instead of 「未归档的介质（TWEET）」.
             let tweets = tweetIndex(article: fetched.article)
-            if let rendered = renderDocument(article: fetched.article, tweets: tweets),
+            // LATEX entities ship only an entityKey. The TeX/MathML is in the
+            // public status HTML (KaTeX annotation), not in fxtwitter's JSON.
+            let math = needsRemoteMath(fetched.article)
+                ? mathBlocks(in: fetchStatusHTML(url) ?? "")
+                : []
+            if let rendered = renderDocument(article: fetched.article, tweets: tweets, math: math),
                isUsableArticleHTML(rendered.html) {
                 return (fetched.title, rendered)
             }
@@ -165,7 +170,7 @@ enum XArticleHTML {
         renderDocument(article: article)?.html
     }
 
-    static func renderDocument(article: [String: Any], tweets: [String: TweetRef] = [:]) -> Rendered? {
+    static func renderDocument(article: [String: Any], tweets: [String: TweetRef] = [:], math: [String] = []) -> Rendered? {
         let content = article["content"] as? [String: Any] ?? article
         let blocks = content["blocks"] as? [[String: Any]] ?? []
         guard !blocks.isEmpty else { return nil }
@@ -189,13 +194,15 @@ enum XArticleHTML {
             entityMap: entityMap,
             media: media,
             tweets: tweets,
+            math: math,
             coverage: &cov,
             headingShift: headingShift
         )
         let out = html.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !out.isEmpty else { return nil }
         let wrapped = "<div class=\"cv-x-article\">\(out)</div>"
-        cov.mediaRendered = wrapped.components(separatedBy: "<img ").count - 1
+        cov.mediaRendered = (wrapped.components(separatedBy: "<img ").count - 1)
+            + (wrapped.components(separatedBy: "<video ").count - 1)
         cov.finalize()
         return Rendered(html: wrapped, coverage: cov, engine: "x-article+draftjs")
     }
@@ -275,19 +282,21 @@ enum XArticleHTML {
         return t
     }
 
-    static func renderBlocks(_ blocks: [[String: Any]], entityMap: Any?, media: [String: String] = [:], tweets: [String: TweetRef] = [:]) -> String {
+    static func renderBlocks(_ blocks: [[String: Any]], entityMap: Any?, media: [String: MediaAsset] = [:], tweets: [String: TweetRef] = [:], math: [String] = []) -> String {
         var cov = Coverage()
-        return renderBlocks(blocks, entityMap: entityMap, media: media, tweets: tweets, coverage: &cov)
+        return renderBlocks(blocks, entityMap: entityMap, media: media, tweets: tweets, math: math, coverage: &cov)
     }
 
     static func renderBlocks(
         _ blocks: [[String: Any]],
         entityMap: Any?,
-        media: [String: String] = [:],
+        media: [String: MediaAsset] = [:],
         tweets: [String: TweetRef] = [:],
+        math: [String] = [],
         coverage: inout Coverage,
         headingShift: Int = 0
     ) -> String {
+        var mathQueue = math
         var out = ""
         var listTag: String?
         func flushList() {
@@ -325,7 +334,7 @@ enum XArticleHTML {
                 out += "<pre><code>\(escape((block["text"] as? String) ?? ""))</code></pre>\n"
             case "atomic":
                 coverage.atomicExpected += 1
-                let piece = renderAtomic(block, entityMap: entityMap, media: media, tweets: tweets, coverage: &coverage)
+                let piece = renderAtomic(block, entityMap: entityMap, media: media, tweets: tweets, math: &mathQueue, coverage: &coverage)
                 out += piece
                 if !piece.hasSuffix("\n") { out += "\n" }
             default:
@@ -470,15 +479,43 @@ enum XArticleHTML {
         return nil
     }
 
+    /// Still image and, for GIFs, the mp4. Keyed by media id.
+    struct MediaAsset {
+        var still: String = ""
+        var video: String = ""
+    }
+
     /// fxtwitter: atomic MEDIA has mediaId only; bytes live on article.media_entities.
-    static func mediaIndex(_ article: [String: Any]) -> [String: String] {
-        var out: [String: String] = [:]
+    /// ApiImage uses media_info.original_img_url. ApiGif keeps the JPEG on
+    /// preview_image and the motion on variants[].url (video/mp4).
+    static func mediaIndex(_ article: [String: Any]) -> [String: MediaAsset] {
+        var out: [String: MediaAsset] = [:]
         func add(_ d: [String: Any]) {
             let id = stringVal(d["media_id"]) ?? stringVal(d["mediaId"])
+            var asset = MediaAsset()
             let info = d["media_info"] as? [String: Any]
-            guard let url = (info?["original_img_url"] as? String) ?? (d["original_img_url"] as? String),
-                  url.hasPrefix("http") else { return }
-            if let id { out[id] = url }
+            if let url = (info?["original_img_url"] as? String) ?? (d["original_img_url"] as? String),
+               url.hasPrefix("http") {
+                asset.still = url
+            }
+            if asset.still.isEmpty,
+               let preview = info?["preview_image"] as? [String: Any],
+               let url = preview["original_img_url"] as? String,
+               url.hasPrefix("http") {
+                asset.still = url
+            }
+            if let variants = info?["variants"] as? [[String: Any]] {
+                for variant in variants {
+                    guard let url = variant["url"] as? String, url.hasPrefix("http") else { continue }
+                    let kind = ((variant["content_type"] as? String) ?? "").lowercased()
+                    if kind.contains("mp4") || url.lowercased().contains(".mp4") {
+                        asset.video = url
+                        break
+                    }
+                }
+            }
+            guard let id, (!asset.still.isEmpty || !asset.video.isEmpty) else { return }
+            out[id] = asset
         }
         if let arr = article["media_entities"] as? [[String: Any]] {
             arr.forEach(add)
@@ -663,8 +700,9 @@ enum XArticleHTML {
     private static func renderAtomic(
         _ block: [String: Any],
         entityMap: Any?,
-        media: [String: String],
+        media: [String: MediaAsset],
         tweets: [String: TweetRef],
+        math: inout [String],
         coverage: inout Coverage
     ) -> String {
         let ranges = block["entityRanges"] as? [[String: Any]] ?? []
@@ -695,13 +733,25 @@ enum XArticleHTML {
             return droppedFigure(entity: "LINK", detail: nil, coverage: &coverage)
         }
         if type == "IMAGE" || type == "MEDIA" {
-            if let src = imageURL(from: ent["data"], media: media) {
+            if let asset = mediaAsset(from: ent["data"], media: media) {
                 coverage.atomicRendered += 1
-                return "<figure><img src=\"\(escape(src))\" alt=\"\"></figure>\n"
+                return mediaFigure(asset)
             }
             let ids = mediaIds(from: ent["data"])
             let detail = ids.isEmpty ? type.lowercased() : "mediaId=\(ids.joined(separator: ","))"
             return droppedFigure(entity: type, detail: detail, coverage: &coverage)
+        }
+        if type == "LATEX" || type == "MATH" || type == "EQUATION" {
+            if let raw = latexSource(ent["data"]) {
+                coverage.atomicRendered += 1
+                return renderLatex(raw)
+            }
+            if !math.isEmpty {
+                let block = math.removeFirst()
+                coverage.atomicRendered += 1
+                return mathFigure(block)
+            }
+            return droppedFigure(entity: "LATEX", detail: nil, coverage: &coverage)
         }
         // Quoted tweet: Draft.js TWEET atomic carries only `data.tweetId`.
         // `tweets` holds the resolved author/text; without it we still draw a
@@ -890,27 +940,146 @@ enum XArticleHTML {
         }
     }
 
-    private static func imageURL(from data: Any?, media: [String: String]) -> String? {
+    private static func mediaAsset(from data: Any?, media: [String: MediaAsset]) -> MediaAsset? {
+        var asset = MediaAsset()
         if let src = dictString(data, "src") ?? dictString(data, "url"), src.hasPrefix("http") {
-            return src
+            asset.still = src
         }
-        guard let d = data as? [String: Any] else { return nil }
-        if let info = d["media_info"] as? [String: Any],
+        if let d = data as? [String: Any],
+           let info = d["media_info"] as? [String: Any],
            let u = info["original_img_url"] as? String, u.hasPrefix("http") {
-            return u
+            asset.still = u
         }
-        let items = d["mediaItems"] as? [[String: Any]] ?? []
-        for item in items {
-            if let id = stringVal(item["mediaId"]) ?? stringVal(item["media_id"]),
-               let u = media[id] {
-                return u
+        for id in mediaIds(from: data) {
+            guard let hit = media[id] else { continue }
+            if asset.still.isEmpty { asset.still = hit.still }
+            if asset.video.isEmpty { asset.video = hit.video }
+        }
+        if asset.still.isEmpty, asset.video.isEmpty { return nil }
+        return asset
+    }
+
+    private static func mediaFigure(_ asset: MediaAsset) -> String {
+        if !asset.video.isEmpty {
+            var tag = "<video src=\"\(escape(asset.video))\" loop muted playsinline autoplay preload=\"metadata\""
+            if !asset.still.isEmpty {
+                tag += " poster=\"\(escape(asset.still))\""
+            }
+            tag += "></video>"
+            return "<figure class=\"cv-x-video\">\(tag)</figure>\n"
+        }
+        return "<figure><img src=\"\(escape(asset.still))\" alt=\"\"></figure>\n"
+    }
+
+    /// Block equations from a public status page. X repeats the article HTML,
+    /// so ABAB collapses to AB. Escaped JSON copies are not `<math` tags.
+    static func mathBlocks(in html: String) -> [String] {
+        guard let re = try? NSRegularExpression(
+            pattern: "<math\\b[^>]*>[\\s\\S]*?</math>",
+            options: [.caseInsensitive]
+        ) else { return [] }
+        let ns = html as NSString
+        var blocks: [String] = []
+        var keys: [String] = []
+        re.enumerateMatches(in: html, options: [], range: NSRange(location: 0, length: ns.length)) { m, _, _ in
+            guard let m else { return }
+            let block = ns.substring(with: m.range)
+            let lower = block.lowercased()
+            if lower.contains("<script") || lower.contains("javascript:") { return }
+            blocks.append(block)
+            keys.append(texAnnotation(block) ?? block)
+        }
+        return firstCycle(blocks, keys: keys)
+    }
+
+    private static func texAnnotation(_ math: String) -> String? {
+        guard let re = try? NSRegularExpression(
+            pattern: "application/x-tex\">([^<]+)</annotation>",
+            options: [.caseInsensitive]
+        ) else { return nil }
+        let ns = math as NSString
+        guard let m = re.firstMatch(in: math, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > 1 else { return nil }
+        let text = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    /// Smallest period that tiles `keys`. One formula repeated stays one block.
+    private static func firstCycle(_ blocks: [String], keys: [String]) -> [String] {
+        let n = keys.count
+        guard n > 0 else { return [] }
+        for period in 1...n where n % period == 0 {
+            var tiled = true
+            for i in 0..<n where keys[i] != keys[i % period] {
+                tiled = false
+                break
+            }
+            if tiled { return Array(blocks.prefix(period)) }
+        }
+        return blocks
+    }
+
+    private static func needsRemoteMath(_ article: [String: Any]) -> Bool {
+        let content = article["content"] as? [String: Any] ?? article
+        var need = false
+        eachEntity(content["entityMap"]) { ent in
+            let type = ((ent["type"] as? String) ?? "").uppercased()
+            guard type == "LATEX" || type == "MATH" || type == "EQUATION" else { return }
+            if latexSource(ent["data"]) == nil { need = true }
+        }
+        return need
+    }
+
+    private static func latexSource(_ data: Any?) -> String? {
+        for key in ["latex", "tex", "content", "markup", "formula"] {
+            if let s = dictString(data, key)?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+                return s
             }
         }
-        if let id = stringVal(d["mediaId"]) ?? stringVal(d["media_id"]),
-           let u = media[id] {
-            return u
-        }
         return nil
+    }
+
+    private static func renderLatex(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased().hasPrefix("<math"), let block = mathBlocks(in: trimmed).first {
+            return mathFigure(block)
+        }
+        return "<figure class=\"cv-x-math\"><pre><code>\(escape(trimmed))</code></pre></figure>\n"
+    }
+
+    private static func mathFigure(_ mathML: String) -> String {
+        "<figure class=\"cv-x-math\">\(mathML)</figure>\n"
+    }
+
+    private static func fetchStatusHTML(_ urlStr: String) -> String? {
+        guard let id = statusID(from: urlStr) else { return nil }
+        guard let data = getHTML("https://x.com/i/status/\(id)"),
+              let text = String(data: data, encoding: .utf8),
+              text.contains("<math") else { return nil }
+        return text
+    }
+
+    private static func getHTML(_ urlStr: String) -> Data? {
+        guard let url = URL(string: urlStr) else { return nil }
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
+        req.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+        req.setValue("text/html", forHTTPHeaderField: "Accept")
+        let sem = DispatchSemaphore(value: 0)
+        var out: Data?
+        fetchSession.dataTask(with: req) { data, resp, _ in
+            if let data,
+               let http = resp as? HTTPURLResponse,
+               (200..<300).contains(http.statusCode),
+               data.count > 2_000, data.count < 3_000_000 {
+                out = data
+            }
+            sem.signal()
+        }.resume()
+        _ = sem.wait(timeout: .now() + 14)
+        return out
     }
 
     static func renderFence(_ raw: String) -> String {
