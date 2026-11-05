@@ -1578,6 +1578,57 @@
     return false;
   }
 
+  // Medium stores code and ASCII diagrams with <br> and <p>, and Readability
+  // keeps that DOM. The archived document often has zero newline characters.
+  // textContent drops both, so box-drawing columns collapse onto one line.
+  var PRE_BLOCK = {
+    ADDRESS: 1, ARTICLE: 1, ASIDE: 1, BLOCKQUOTE: 1, DIV: 1, DL: 1, FIGCAPTION: 1,
+    FIGURE: 1, FOOTER: 1, FORM: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+    HEADER: 1, HR: 1, LI: 1, OL: 1, P: 1, SECTION: 1, TABLE: 1, TR: 1, UL: 1,
+  };
+
+  function plainPreText(el) {
+    var out = "";
+    var syntheticTail = false;
+    var skippedLeadBreak = false;
+    function boundary() {
+      if (!out || out.charAt(out.length - 1) === "\n") return;
+      out += "\n";
+      syntheticTail = true;
+    }
+    function walk(node) {
+      if (!node) return;
+      if (node.nodeType === 3) {
+        var v = node.nodeValue || "";
+        if (!v) return;
+        out += v;
+        syntheticTail = false;
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      var name = node.nodeName;
+      if (name === "BR") {
+        if (!skippedLeadBreak && out === "") {
+          skippedLeadBreak = true;
+          return;
+        }
+        out += "\n";
+        syntheticTail = false;
+        return;
+      }
+      if (name === "SCRIPT" || name === "STYLE") return;
+      var block = PRE_BLOCK[name] === 1;
+      if (block) boundary();
+      var kids = node.childNodes;
+      for (var i = 0; i < kids.length; i++) walk(kids[i]);
+      if (block) boundary();
+    }
+    var kids = el.childNodes;
+    for (var i = 0; i < kids.length; i++) walk(kids[i]);
+    if (syntheticTail) out = out.slice(0, -1);
+    return out;
+  }
+
   function wrapCodeBlocks(root) {
     var pres = root.querySelectorAll("pre");
     for (var i = 0; i < pres.length; i++) {
@@ -1595,9 +1646,10 @@
         while (pre.firstChild) code.appendChild(pre.firstChild);
         pre.appendChild(code);
       }
-      var raw = code.textContent || "";
+      var raw = plainPreText(code);
       code.textContent = raw;
-      var lang = langOf(code) || langOf(pre) || guessLang(raw);
+      var diagram = /[\u2500-\u257F]/.test(raw);
+      var lang = langOf(code) || langOf(pre) || (diagram ? "" : guessLang(raw));
       if (lang) code.setAttribute("data-lang", lang);
       var painted = "";
       var hlName = hljsName(lang);
@@ -1611,7 +1663,7 @@
       if (!painted && lang) painted = highlightSource(raw, lang);
       if (painted) code.innerHTML = painted;
       var wrap = document.createElement("div");
-      wrap.className = "cv-code";
+      wrap.className = diagram ? "cv-code is-diagram" : "cv-code";
       if (lang) wrap.setAttribute("data-lang", lang);
       var head = document.createElement("div");
       head.className = "cv-code-head";

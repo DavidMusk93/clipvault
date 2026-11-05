@@ -18,6 +18,21 @@ enum WeixinArticleHTMLTests {
         ok("direct-qpic", WeixinArticleHTML.prefersDirectHost("mmbiz.qpic.cn"))
         ok("socks-medium", !WeixinArticleHTML.prefersDirectHost("miro.medium.com"))
         ok("socks-x", !WeixinArticleHTML.prefersDirectHost("x.com"))
+        let imgTag = "<img decoding=\"async\" src=\"https://example.com/a.png\" alt=\"x\">"
+        if let re = WeixinArticleHTML.attributeRegex("src") {
+            let ns = imgTag as NSString
+            let whole = NSRange(location: 0, length: ns.length)
+            let matched = re.firstMatch(in: imgTag, range: whole).map { ns.substring(with: $0.range) } ?? ""
+            ok("src-match-closes", matched == "src=\"https://example.com/a.png\"")
+            let rewritten = re.stringByReplacingMatches(
+                in: imgTag,
+                range: whole,
+                withTemplate: "src=\"/api/archive/asset?sha=abc\""
+            )
+            ok("src-no-doubled-quote", rewritten == "<img decoding=\"async\" src=\"/api/archive/asset?sha=abc\" alt=\"x\">")
+        } else {
+            ok("src-regex", false)
+        }
 
         let fixture = """
         <html><head>

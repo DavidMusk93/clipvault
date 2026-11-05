@@ -18,6 +18,8 @@ test('weixin articles are fetched direct, not through the SOCKS web view', () =>
   assert.match(archiveSwift, /engine: "weixin-html"/);
   assert.match(archiveSwift, /prefersDirectHost/);
   assert.match(archiveSwift, /timeoutFired/);
+  assert.match(archiveSwift, /isAlternatePathFailure/);
+  assert.match(archiveSwift, /NSURLErrorSecureConnectionFailed/);
   assert.match(inlinerSwift, /prefersDirectHost\(url\.host\)/);
   assert.match(inlinerSwift, /WeixinArticleHTML\.attributeRegex\("src"\)/);
   assert.doesNotMatch(inlinerSwift, /\\bsrc\\s\*=/);
@@ -36,7 +38,11 @@ test('archive view restores mermaid sequence strokes dropped by Readability', ()
 
 test('archive view drops Pico gray wash and styles code/figures as their own medium', () => {
   assert.doesNotMatch(swift, /picocss/);
-  assert.match(swift, /archive-view\.css\?v=20261103a/);
+  assert.match(swift, /archive-view\.css\?v=20261105a/);
+  assert.match(swift, /archive-reader\.js\?v=20261105a/);
+  assert.match(viewCss, /\.cv-code\.is-diagram pre/);
+  assert.match(viewCss, /line-height: 1\.35/);
+  assert.match(readerJs, /function plainPreText/);
   assert.match(swift, /highlight\.min\.js\?v=11\.7\.0/);
   assert.match(swift, /style-src 'self' 'unsafe-inline'/);
   assert.match(viewCss, /background: #1d1d1f/);
@@ -177,6 +183,8 @@ test('public tunnel path /clipvault is stripped to local routes', () => {
 test('archive images are CAS assets, not publisher CDN', () => {
   const inliner = src('ArchiveImageInliner.swift');
   assert.match(inliner, /\/api\/archive\/asset\?sha=/);
+  assert.match(inliner, /image \\\(preferSocks \? "SOCKS" : "direct"\) failed/);
+  assert.match(inliner, /fetchOnce/);
   assert.match(swift, /sendArchiveAsset/);
   assert.match(swift, /img-src 'self' data: blob:/);
   assert.doesNotMatch(swift, /img-src \*/);
@@ -250,6 +258,55 @@ test('stripped language class still highlights sql and rust, not prose', async (
   assert.equal(plates[3].querySelector('.hljs-keyword, .cv-k'), null);
   assert.equal(label(plates[4]), 'Go');
   assert.match(plates[4].innerHTML, /hljs-keyword/);
+});
+
+test('medium pre keeps br and paragraph breaks so ascii diagrams align', async (t) => {
+  const { JSDOM } = await import('jsdom');
+  const flow = `<pre><span>Traditional epoll flow:<p> Your App                Kernel<br>    │                       │<br>    │── epoll_wait() ──────►│  (blocks until fd ready)<br>    │◄── "fd 5 is ready"  ──│<br>    │                       │<br>    │── read(fd, buf) ─────►│  (syscall #2 — data copy)<br>    │◄── data  ─────────────│<br>    │                       │<br>    │── write(fd, buf) ────►│  (syscall #3)<br>    │◄── done  ─────────────│</p><p>   "Ready" notification + actual I/O = always 2+ syscalls minimum.<br>   At 500k req/sec, that's millions of kernel crossings. Per second.</p></span></pre>`;
+  const table = `<pre><span>┌─────────────────┬──────────────────────────────────────────────────────┐<br>│      <strong>Mode </strong>      │  <strong>What It Does  </strong>                                      │<br>├─────────────────┼──────────────────────────────────────────────────────┤<br>│ Default         │  Normal async. One syscall per submit batch.         │<br>└─────────────────┴──────────────────────────────────────────────────────┘</span></pre>`;
+  const kept = '<pre><code>alpha\n  beta</code></pre>';
+  const commands = '<pre><span><br><span>sudo</span> apt install liburing-dev<p><br><span>sudo</span> dnf install liburing-devel</p></span></pre>';
+  const csrc = '<pre><span><span>#<span>include</span> <span>&lt;stdio.h&gt;</span></span><br><span>int</span> <span>main</span>() {<br>    <span>return</span> <span>0</span>;<br>}</span></pre>';
+  const dom = new JSDOM(
+    `<!DOCTYPE html><html data-cv-enhance><body><main class="cv-article">${flow}${table}${kept}${commands}${csrc}</main></body></html>`,
+    { runScripts: 'outside-only', url: 'http://127.0.0.1/api/archive/view' }
+  );
+  t.after(() => dom.window.close());
+  const hljsSrc = readFileSync(join(root, 'web/assets/highlight.min.js'), 'utf8');
+  dom.window.eval(hljsSrc);
+  dom.window.eval(readerJs);
+  if (dom.window.document.readyState === 'loading') {
+    dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+  }
+  const plates = [...dom.window.document.querySelectorAll('.cv-code')];
+  assert.equal(plates.length, 5);
+  const text = (plate) => plate.querySelector('code').textContent;
+  const lines = text(plates[0]).split('\n');
+  const bars = (line) => [...line.matchAll(/│/g)].map((m) => m.index);
+  assert.equal(lines[0], 'Traditional epoll flow:');
+  assert.equal(lines.length, 13);
+  assert.equal(lines[1].includes('Your App'), true);
+  assert.deepEqual(bars(lines[2]), bars(lines[3]));
+  assert.deepEqual(bars(lines[2]), bars(lines[4]));
+  assert.deepEqual(bars(lines[2]), bars(lines[5]));
+  assert.deepEqual(bars(lines[2]), bars(lines[6]));
+  assert.deepEqual(bars(lines[2]), bars(lines[9]));
+  assert.deepEqual(bars(lines[2]), bars(lines[10]));
+  assert.equal(lines[3].indexOf('►'), lines[6].indexOf('►'));
+  assert.equal(lines[3].indexOf('►'), lines[9].indexOf('►'));
+  assert.match(lines[11], /Ready/);
+  assert.equal(plates[0].classList.contains('is-diagram'), true);
+  assert.equal(plates[0].querySelector('.cv-code-lang').textContent, '代码');
+  const tableLines = text(plates[1]).split('\n');
+  assert.equal(tableLines.length, 5);
+  assert.equal(tableLines[0].indexOf('┬'), tableLines[2].indexOf('┼'));
+  assert.equal(tableLines[1].includes('Mode'), true);
+  assert.equal(plates[1].classList.contains('is-diagram'), true);
+  assert.equal(text(plates[2]), 'alpha\n  beta');
+  assert.equal(plates[2].classList.contains('is-diagram'), false);
+  assert.equal(text(plates[3]), 'sudo apt install liburing-dev\n\nsudo dnf install liburing-devel');
+  assert.equal(text(plates[4]), '#include <stdio.h>\nint main() {\n    return 0;\n}');
+  assert.equal(plates[4].classList.contains('is-diagram'), false);
 });
 
 test('archive HTML contract: asset sha is 64 hex and extractable', () => {
