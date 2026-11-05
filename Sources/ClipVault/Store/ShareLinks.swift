@@ -62,7 +62,7 @@ enum ShareLinks {
                 title: title,
                 kindLabel: "归档",
                 inner: "<main class=\"cv-article share-article\">\(body)</main>",
-                extraHead: "<link rel=\"stylesheet\" href=\"/assets/archive-view.css?v=20261103a\"/>",
+                extraHead: "<link rel=\"stylesheet\" href=\"/assets/archive-view.css?v=20261105c\"/>",
                 scripts: false
             )
         case "note":
