@@ -99,6 +99,111 @@ function boot() {
 
 const settle = async (dom, ms = 300) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function fakeScroll(window, y) {
+  Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: y });
+  window.scrollTo = (options, top) => {
+    window.scrollY = typeof options === 'object' ? options.top : top;
+    window.document.documentElement.scrollTop = window.scrollY;
+  };
+}
+
+function wheel(window, target, dy, dx = 0) {
+  const event = new window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: dy, deltaX: dx });
+  target.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+function touch(window, target, type, x, y) {
+  const event = new window.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'touches', { value: [{ clientX: x, clientY: y }] });
+  target.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+test('nested modals hold one fixed wall position until the last owner closes', { skip: skipJsdom }, async (t) => {
+  const { dom, errors } = boot();
+  t.after(() => dom.window.close());
+  await settle(dom, 50);
+  const w = dom.window;
+  fakeScroll(w, 900);
+  w.openEvalSheet(CLIPS.items[0]);
+  assert.equal(w.document.body.style.position, 'fixed');
+  assert.equal(w.document.body.style.top, '-900px');
+  // A real browser resets root scroll when the body becomes fixed.
+  w.scrollY = 0;
+  w.openLightbox('/test.png', CLIPS.items[1]);
+  w.closeLightbox();
+  w.closeLightbox(); // redundant Escape handlers must not release another modal
+  assert.equal(w.document.body.dataset.scrollLock, '1');
+  assert.equal(w.document.body.style.top, '-900px');
+  w.closeEvalSheet();
+  assert.equal(w.document.body.style.position, '');
+  assert.equal(w.document.body.dataset.scrollLock, '');
+  assert.equal(w.scrollY, 900);
+  assert.equal(w.document.documentElement.classList.contains('page-scroll-locked'), false);
+  assert.deepEqual(errors, []);
+});
+
+test('modal gestures scroll inside content and stop at either boundary, including touch', { skip: skipJsdom }, async (t) => {
+  const { dom, errors } = boot();
+  t.after(() => dom.window.close());
+  await settle(dom, 50);
+  const w = dom.window;
+  fakeScroll(w, 450);
+  w.openEvalSheet(CLIPS.items[0]);
+  const box = w.document.createElement('div');
+  box.style.overflowY = 'auto';
+  box.style.overflowX = 'auto';
+  Object.defineProperties(box, {
+    clientHeight: { value: 200 }, scrollHeight: { value: 600 },
+    clientWidth: { value: 200 }, scrollWidth: { value: 400 },
+  });
+  w.document.querySelector('#evalSheet .eval-sheet-card').append(box);
+  box.scrollTop = 100;
+  assert.equal(wheel(w, box, 50), false, 'inner content remains scrollable');
+  assert.equal(wheel(w, box, -50), false);
+  box.scrollTop = 0;
+  assert.equal(wheel(w, box, -50), true, 'top edge cannot pull the wall');
+  box.scrollTop = 400;
+  assert.equal(wheel(w, box, 50), true, 'bottom edge cannot push the wall');
+  box.scrollLeft = 50;
+  assert.equal(wheel(w, box, 0, 20), false, 'horizontal content remains scrollable');
+  box.scrollLeft = 200;
+  assert.equal(wheel(w, box, 0, 20), true);
+  assert.equal(wheel(w, w.document.getElementById('evalSheetScrim'), 50), true);
+  assert.equal(wheel(w, w.document.querySelector('main'), 50), true);
+  box.scrollTop = 100;
+  touch(w, box, 'touchstart', 100, 200);
+  assert.equal(touch(w, box, 'touchmove', 100, 150), false);
+  box.scrollTop = 400;
+  assert.equal(touch(w, box, 'touchmove', 100, 100), true);
+  w.closeEvalSheet();
+  assert.equal(wheel(w, w.document.querySelector('main'), 50), false);
+  assert.deepEqual(errors, []);
+});
+
+test('reader, repeat history, and link popovers all acquire and release the wall lock', { skip: skipJsdom }, async (t) => {
+  const { dom, errors } = boot();
+  t.after(() => dom.window.close());
+  await settle(dom, 50);
+  const w = dom.window;
+  fakeScroll(w, 700);
+  w.openArchiveReader(CLIPS.items[0]);
+  assert.equal(w.document.body.dataset.scrollLock, '1');
+  w.closeArchiveReader();
+  assert.equal(w.scrollY, 700);
+  const anchor = w.document.getElementById('notesOpenBtn');
+  await w.openEventToast(CLIPS.items[0].id, {}, anchor);
+  assert.equal(w.document.body.dataset.scrollLock, '1');
+  w.closeEventToast();
+  assert.equal(w.document.body.dataset.scrollLock, '');
+  await w.openLinkToast(CLIPS.items[0], anchor);
+  assert.equal(w.document.body.dataset.scrollLock, '1');
+  w.closeLinkToast();
+  assert.equal(w.document.body.dataset.scrollLock, '');
+  assert.deepEqual(errors, []);
+});
+
 test('wall-boot gate is registered in check-frontend.sh', () => {
   const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
   assert.match(check, /wall-boot\.test\.mjs/);

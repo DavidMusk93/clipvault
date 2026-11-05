@@ -224,6 +224,11 @@
       display: flex;
       flex-direction: column;
     }
+    html.page-scroll-locked { overscroll-behavior: none; }
+    body[data-scroll-lock="1"] { overscroll-behavior: none; }
+    body[data-scroll-lock="1"] :is(.event-toast-card, .eval-sheet-card, .archive-reader-card, .lightbox-stage, .backup-drawer, .ops-drawer, .debug-drawer) {
+      overscroll-behavior: contain;
+    }
     html.notes-open,
     html.sessions-open,
     body.notes-open,
@@ -4180,6 +4185,7 @@ window.ClipViewMasonry = Masonry;
       const root = document.getElementById('evalSheet');
       if (!root) return;
       root.classList.remove('open');
+      lockPageScroll(false, 'evaluation');
       root.setAttribute('aria-hidden', 'true');
       evalItemId = null;
       evalRating = 0;
@@ -4376,6 +4382,7 @@ window.ClipViewMasonry = Masonry;
       paintEvalStars();
       const root = document.getElementById('evalSheet');
       root?.classList.add('open');
+      lockPageScroll(true, 'evaluation');
       root?.setAttribute('aria-hidden', 'false');
       loadEvalHistory(item.id);
     }
@@ -5529,11 +5536,16 @@ window.ClipViewMasonry = Masonry;
     }
 
     let pageScrollLockY = 0;
-    function lockPageScroll(on) {
+    const pageScrollOwners = new Set();
+    function lockPageScroll(on, owner = 'wall-sheet') {
       const html = document.documentElement;
       const body = document.body;
       if (!body) return;
-      if (on) {
+      if (on) pageScrollOwners.add(owner);
+      else pageScrollOwners.delete(owner);
+      const locked = pageScrollOwners.size > 0;
+      html.classList.toggle('page-scroll-locked', locked);
+      if (locked) {
         if (body.dataset.scrollLock === '1') return;
         pageScrollLockY = window.scrollY || html.scrollTop || 0;
         body.dataset.scrollLock = '1';
@@ -5558,7 +5570,44 @@ window.ClipViewMasonry = Masonry;
       } catch (_) {
         window.scrollTo(0, y);
       }
+      requestAnimationFrame(() => {
+        if (pageScrollOwners.size) return;
+        const drift = Math.abs((window.scrollY || html.scrollTop || 0) - y);
+        nm('wall_scroll_drift', { value: drift, ok: drift <= 1, over: drift > 1, payload: { phase: 'close', kind: owner } });
+      });
     }
+
+    // A gesture may scroll a modal's own content, but never chain into the wall.
+    // Boundary checks also cover mobile Safari, where overflow:hidden alone is insufficient.
+    let modalTouch = null;
+    function preventBackgroundScroll(event, dx, dy) {
+      if (!pageScrollOwners.size || event.defaultPrevented) return;
+      const target = event.target?.nodeType === 1 ? event.target : event.target?.parentElement;
+      const modal = target?.closest('.notes-panel.open, .sessions-panel.open, .event-toast.open, .eval-sheet.open, .archive-reader.open, .lightbox.open, .backup-drawer.open, .ops-drawer.open, .debug-drawer.open');
+      if (modal) {
+        for (let el = target; el && el !== modal.parentElement; el = el.parentElement) {
+          const style = getComputedStyle(el);
+          if (Math.abs(dy) >= Math.abs(dx)) {
+            if (/(auto|scroll|overlay)/.test(style.overflowY) && el.scrollHeight > el.clientHeight
+              && ((dy < 0 && el.scrollTop > 0) || (dy > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1))) return;
+          } else if (/(auto|scroll|overlay)/.test(style.overflowX) && el.scrollWidth > el.clientWidth
+            && ((dx < 0 && el.scrollLeft > 0) || (dx > 0 && el.scrollLeft + el.clientWidth < el.scrollWidth - 1))) return;
+        }
+      }
+      if (event.cancelable) event.preventDefault();
+    }
+    document.addEventListener('touchstart', (event) => {
+      modalTouch = event.touches.length === 1 ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null;
+    }, { passive: true });
+    document.addEventListener('touchmove', (event) => {
+      if (!modalTouch || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      const dx = modalTouch.x - touch.clientX;
+      const dy = modalTouch.y - touch.clientY;
+      modalTouch = { x: touch.clientX, y: touch.clientY };
+      preventBackgroundScroll(event, dx, dy);
+    }, { passive: false });
+    document.addEventListener('wheel', (event) => preventBackgroundScroll(event, event.deltaX, event.deltaY), { passive: false });
 
     let sheetAnims = [];
     let sheetPanel = null;
@@ -7373,6 +7422,7 @@ window.ClipViewMasonry = Masonry;
       const host = document.getElementById('eventToast');
       if (!host) return;
       host.classList.remove('open');
+      lockPageScroll(false, 'events');
       host.setAttribute('aria-hidden', 'true');
     }
 
@@ -7427,6 +7477,7 @@ window.ClipViewMasonry = Masonry;
 
       list.innerHTML = '<li class="event-item"><div class="ev-sub">加载中…</div></li>';
       host.classList.add('open');
+      lockPageScroll(true, 'events');
       host.setAttribute('aria-hidden', 'false');
       // Position after open so size is measurable
       requestAnimationFrame(() => {
@@ -7491,6 +7542,7 @@ window.ClipViewMasonry = Masonry;
       const host = document.getElementById('linkToast');
       if (!host) return;
       host.classList.remove('open');
+      lockPageScroll(false, 'links');
       host.setAttribute('aria-hidden', 'true');
       linkFromId = null;
       linkAnchor = null;
@@ -7622,6 +7674,7 @@ window.ClipViewMasonry = Masonry;
         b.setAttribute('aria-selected', on ? 'true' : 'false');
       });
       host.classList.add('open');
+      lockPageScroll(true, 'links');
       host.setAttribute('aria-hidden', 'false');
       requestAnimationFrame(placeLinkToast);
       await refreshLinkToast();
@@ -8908,7 +8961,7 @@ window.ClipViewMasonry = Masonry;
       urlEl.title = src;
       sheet.classList.add('open');
       sheet.setAttribute('aria-hidden', 'false');
-      document.body.style.overflow = 'hidden';
+      lockPageScroll(true, 'archive-reader');
       // Real document URL — same engine as a standalone tab. Never srcdoc.
       frame.src = archiveViewHref(item.id, true);
       revealReaderSheet(sheet, originEl);
@@ -8934,7 +8987,7 @@ window.ClipViewMasonry = Masonry;
       archiveReaderHref = '';
       archiveReaderViewHref = '';
       archiveReaderItemId = '';
-      document.body.style.overflow = '';
+      lockPageScroll(false, 'archive-reader');
       // The iframe force-saves its checkpoint on pagehide; refresh once the
       // local POST has landed so the card label reflects the new position.
       if (itemId) setTimeout(() => refreshClipInPlace(itemId), 400);
@@ -11098,7 +11151,7 @@ window.ClipViewMasonry = Masonry;
       img.src = url;
       if (img.complete) applyShape();
       lb.classList.add('open');
-      document.body.style.overflow = 'hidden';
+      lockPageScroll(true, 'lightbox');
     }
     function closeLightbox() {
       clearLightboxVtNames();
@@ -11111,7 +11164,7 @@ window.ClipViewMasonry = Masonry;
       const hint = document.getElementById('lightboxHint');
       if (hint) hint.hidden = true;
       fullUrlForLightbox = null;
-      document.body.style.overflow = '';
+      lockPageScroll(false, 'lightbox');
     }
     document.getElementById('lightboxClose').onclick = closeLightbox;
     document.getElementById('lightboxCloseX').onclick = closeLightbox;
@@ -11884,11 +11937,13 @@ window.ClipViewMasonry = Masonry;
     let opsLoad = null;
 
     function openOps() {
+      lockPageScroll(true, 'operations');
       opsDrawer?.classList.add('open');
       opsScrim?.classList.add('open');
       loadOpsPanel().then((p) => p && p.open());
     }
     function closeOps() {
+      lockPageScroll(false, 'operations');
       opsDrawer?.classList.remove('open');
       opsScrim?.classList.remove('open');
     }
@@ -11991,6 +12046,7 @@ window.ClipViewMasonry = Masonry;
       note_new: { label: '新建笔记', unit: 'count', budget: null },
       sheet_morph: { label: '开合动画', unit: 'ms', budget: 600 },
       sheet_cls: { label: '开合偏移', unit: 'cls', budget: 0.1 },
+      wall_scroll_drift: { label: '弹层关闭滚动偏移', unit: 'px', budget: 1 },
       chrome_shift: { label: '顶栏位移', unit: 'cls', budget: 0.1 },
       wall_layout_drift: { label: '布局漂移', unit: 'px', budget: 0 },
       wall_head_drift: { label: '墙·头部漂移', unit: 'count', budget: 0 },
@@ -12230,6 +12286,7 @@ window.ClipViewMasonry = Masonry;
       } catch (_) {}
     }
     function openDebug() {
+      lockPageScroll(true, 'debug');
       debugDrawer?.classList.add('open');
       debugScrim?.classList.add('open');
       paintDebugPanel();
@@ -12237,6 +12294,7 @@ window.ClipViewMasonry = Masonry;
       try { if (parseAppHash().kind !== 'debug') history.replaceState(null, '', '#debug'); } catch (_) {}
     }
     function closeDebug() {
+      lockPageScroll(false, 'debug');
       debugDrawer?.classList.remove('open');
       debugScrim?.classList.remove('open');
       if (parseAppHash().kind === 'debug') {
@@ -12327,6 +12385,7 @@ window.ClipViewMasonry = Masonry;
       return backupPanelLoad;
     }
     async function openBackup() {
+      lockPageScroll(true, 'backup');
       bkDrawer.classList.add('open');
       bkScrim.classList.add('open');
       const panel = await loadBackupPanel();
@@ -12335,6 +12394,7 @@ window.ClipViewMasonry = Masonry;
       refreshSyncStatus();
     }
     function closeBackup() {
+      lockPageScroll(false, 'backup');
       bkDrawer.classList.remove('open');
       bkScrim.classList.remove('open');
       backupPanel?.close();
