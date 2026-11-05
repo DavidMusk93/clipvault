@@ -227,6 +227,8 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 | 归档后同槽按钮变「查看」 | 另塞一颗小查看；归档后仍可点归档 |
 
+**弹层滚动所有权：** 评价、重复历史、关联、阅读、图片、笔记、会话及抽屉统一调用 `lockPageScroll(on, owner)`；固定 body 并保留原滚动位。多个弹层叠加时，只在最后一个 owner 释放后恢复滚动。触摸/滚轮只允许弹层内部仍能滚动的容器消费，边缘与遮罩必须阻断滚动穿透。禁止单独设置 `body.style.overflow` 充当滚动锁。`wall_scroll_drift` 检查关闭后的恢复偏移（预算 1px）；回归用 `tests/wall-boot.test.mjs` 执行真实入口、嵌套关闭、触摸与边缘滚动。
+
 ### URL 双面（只在这里写一遍）
 
 | 面 | 行为 |
@@ -466,6 +468,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 时间线跳日 | `wall_day_jump` payload day/days（count） |
 | 墙插入 CLS | `wall_cls` kind=m3-card phase=wall；`wall_paint` kind=prepend phase=keep\|top |
 | 墙长任务 | `wall_longtask` phase=loaf\|longtask + kind/reason/host |
+| 弹层背景滚动 | `wall_scroll_drift`（最后一个弹层关闭后恢复偏移，budget 1px） |
 | 开合 sheet | `sheet_morph` `sheet_cls` `notes_cls` `trae_sessions_cls` |
 | 开合笔记顶栏跳 | `chrome_shift` phase=open\|close dy/reason；长周期 `wall_cls` |
 | 墙加载/补体 | `wall_load`（首屏 span）；`wall_hydrate`（?ids= 批量补体 n/bytes） |
