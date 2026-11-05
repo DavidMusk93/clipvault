@@ -287,6 +287,13 @@ main.cv-article {
   border-radius: 0;
   color: #f5f5f7;
 }
+/* U+2502 in JetBrains Mono is ~1.52em tall. 1.58 leaves a hairline gap; 1.35 overlaps enough to join. */
+.cv-code.is-diagram pre,
+.cv-code.is-diagram pre code {
+  line-height: 1.35;
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0, "liga" 0;
+}
 .cv-code .cv-k { color: #ff7ab2; font-weight: 500; } /* keyword — Xcode dark */
 .cv-code .cv-s { color: #ff8170; } /* string */
 .cv-code .cv-c { color: #8e8e93; } /* comment */

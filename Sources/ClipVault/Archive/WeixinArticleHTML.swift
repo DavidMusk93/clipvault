@@ -19,11 +19,11 @@ enum WeixinArticleHTML {
 
     /// `src` must not match the tail of `data-src`. `\b` is true between `-` and `s`.
     static func attributeRegex(_ name: String, capture: Bool = false) -> NSRegularExpression? {
-        let value = capture ? #"([^"]*)"# : #"[^"]*"#
-        let pat = #"(?i)(?<![A-Za-z0-9_-])"#
-            + NSRegularExpression.escapedPattern(for: name)
-            + #"\s*=\s*""#
-            + value
+        let esc = NSRegularExpression.escapedPattern(for: name)
+        // Closing quote belongs to the match. A raw string ends at `"#`, so the
+        // old `#"[^"]*"#` compiled as `[^"]*` and rewrites left `src="…""`.
+        let value = capture ? "\"([^\"]*)\"" : "\"[^\"]*\""
+        let pat = "(?i)(?<![A-Za-z0-9_-])" + esc + "\\s*=\\s*" + value
         return try? NSRegularExpression(pattern: pat)
     }
 

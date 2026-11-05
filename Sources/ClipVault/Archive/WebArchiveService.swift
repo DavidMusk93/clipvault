@@ -465,29 +465,34 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
         private func handleLoadFailure(_ error: Error, provisional: Bool) {
             let ns = error as NSError
             if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return }
-            let timedOut = ns.domain == NSURLErrorDomain && (
+            // TLS through v2raya :2080 is a path failure, not a dead site.
+            // www.modernescpp.com answers direct in ~2s and dies in the SOCKS handshake
+            // (NSURLError -1200). Timeout-only retry left that as a final error.
+            let pathFailed = ArchiveProxy.isAlternatePathFailure(ns)
+            let transient = ns.domain == NSURLErrorDomain && (
                 ns.code == NSURLErrorTimedOut || ns.code == NSURLErrorCannotConnectToHost
                     || ns.code == NSURLErrorNetworkConnectionLost
             )
             let socksUp = ArchiveProxy.localhostPortOpen(2080)
-            if timedOut && !triedSocks && socksUp {
-                print("[Archive] direct failed (\(ns.code)); retry via SOCKS 2080 \(url.host ?? "")")
+            if pathFailed && !triedSocks && socksUp {
+                print("[Archive] direct failed (\(ns.domain) \(ns.code)); retry via SOCKS 2080 \(url.host ?? "")")
                 loadAttempt = 0
                 beginLoad(socks: true)
                 return
             }
-            if timedOut && !triedDirect {
-                print("[Archive] SOCKS failed (\(ns.code)); retry direct \(url.host ?? "")")
+            if pathFailed && !triedDirect {
+                print("[Archive] SOCKS failed (\(ns.domain) \(ns.code)); retry direct \(url.host ?? "")")
                 loadAttempt = 0
                 beginLoad(socks: false)
                 return
             }
-            if timedOut && usingSocksProxy && loadAttempt < 2 {
+            if transient && usingSocksProxy && loadAttempt < 2 {
                 print("[Archive] SOCKS timeout retry \(url.host ?? "") attempt=\(loadAttempt)")
                 armTimeout()
                 startLoad()
                 return
             }
+            print("[Archive] load failed domain=\(ns.domain) code=\(ns.code) socks=\(usingSocksProxy) \(url.host ?? "")")
             let prefix = provisional ? "无法打开" : "加载失败"
             let hint = usingSocksProxy ? "" : "（浏览器能打开、归档不能：系统代理未开，归档走直连）"
             fail("\(prefix)：\(error.localizedDescription)\(hint)")
@@ -665,6 +670,44 @@ final class WebArchiveService: NSObject, WKNavigationDelegate {
 }
 
 enum ArchiveProxy {
+    /// True when the other path (direct ↔ SOCKS) might still load the page.
+    /// Includes the timeout family and TLS/cert failures. A SOCKS hop can reset
+    /// the handshake (`-1200` / "A TLS error caused the secure connection to fail")
+    /// while the same URL is fine direct — modernescpp.com, 2026-11-04.
+    static func isAlternatePathFailure(_ error: NSError) -> Bool {
+        if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled { return false }
+        if matchesPath(error) { return true }
+        if let under = error.userInfo[NSUnderlyingErrorKey] as? NSError, matchesPath(under) {
+            return true
+        }
+        return false
+    }
+
+    private static func matchesPath(_ error: NSError) -> Bool {
+        if error.domain == NSURLErrorDomain {
+            switch error.code {
+            case NSURLErrorTimedOut,
+                 NSURLErrorCannotFindHost,
+                 NSURLErrorCannotConnectToHost,
+                 NSURLErrorNetworkConnectionLost,
+                 NSURLErrorDNSLookupFailed,
+                 NSURLErrorNotConnectedToInternet,
+                 NSURLErrorSecureConnectionFailed,
+                 NSURLErrorServerCertificateHasBadDate,
+                 NSURLErrorServerCertificateUntrusted,
+                 NSURLErrorServerCertificateHasUnknownRoot,
+                 NSURLErrorServerCertificateNotYetValid,
+                 NSURLErrorClientCertificateRejected,
+                 NSURLErrorClientCertificateRequired:
+                return true
+            default:
+                break
+            }
+        }
+        let msg = error.localizedDescription.lowercased()
+        return msg.contains("tls error") || msg.contains("secure connection to fail")
+    }
+
     /// Direct document GET. Domestic hosts go direct first; everyone else tries
     /// SOCKS :2080 first when it is listening, then direct.
     static func fetchDocument(_ url: URL) -> String? {

@@ -19,7 +19,7 @@ enum ArchiveImageInliner {
         }
         let ns = html as NSString
         let matches = re.matches(in: html, range: NSRange(location: 0, length: ns.length))
-        guard !matches.isEmpty else { return html }
+        guard !matches.isEmpty else { return repairDoubledAssetQuotes(html) }
 
         var tags: [(NSRange, String, URL?)] = []
         var unique: [URL] = []
@@ -36,10 +36,10 @@ enum ArchiveImageInliner {
                 }
             }
         }
-        guard !unique.isEmpty else { return html }
+        guard !unique.isEmpty else { return repairDoubledAssetQuotes(html) }
 
         let fetched = fetchAll(unique, referer: pageURL, writeBlob: writeBlob)
-        guard !fetched.isEmpty else { return html }
+        guard !fetched.isEmpty else { return repairDoubledAssetQuotes(html) }
 
         var out = ""
         var cursor = 0
@@ -53,7 +53,19 @@ enum ArchiveImageInliner {
             cursor = range.location + range.length
         }
         if cursor < ns.length { out += ns.substring(from: cursor) }
-        return flattenPictures(out)
+        return repairDoubledAssetQuotes(flattenPictures(out))
+    }
+
+    /// Older rewrites matched `src="…` without the closing quote and left `""`.
+    static func repairDoubledAssetQuotes(_ html: String) -> String {
+        guard let re = try? NSRegularExpression(
+            pattern: "(/api/archive/asset\\?sha=[0-9a-f]{64})\"\""
+        ) else { return html }
+        return re.stringByReplacingMatches(
+            in: html,
+            range: NSRange(location: 0, length: (html as NSString).length),
+            withTemplate: "$1\""
+        )
     }
 
     /// Medium wraps figures in `<picture><source srcset="https://miro…">`.
@@ -155,7 +167,9 @@ enum ArchiveImageInliner {
                 lock.unlock()
             }
         }
-        _ = group.wait(timeout: .now() + 18)
+        // Two hops: SOCKS TLS can fail in a few seconds, then a direct GET
+        // still has to finish (modernescpp PNG is ~240KB).
+        _ = group.wait(timeout: .now() + 32)
         return map
     }
 
@@ -166,8 +180,8 @@ enum ArchiveImageInliner {
 
     private static func makeSession(socks: Bool) -> URLSession {
         let c = URLSessionConfiguration.ephemeral
-        c.timeoutIntervalForRequest = 8
-        c.timeoutIntervalForResource = 12
+        c.timeoutIntervalForRequest = 12
+        c.timeoutIntervalForResource = 16
         if socks, #available(macOS 14.0, *), ArchiveProxy.localhostPortOpen(2080) {
             c.proxyConfigurations = [
                 ProxyConfiguration(socksv5Proxy: NWEndpoint.hostPort(host: "127.0.0.1", port: 2080))
@@ -176,8 +190,23 @@ enum ArchiveImageInliner {
         return URLSession(configuration: c)
     }
 
+    /// SOCKS :2080 first for overseas CDNs (miro.medium.com). If that hop dies
+    /// in the TLS handshake, try direct. modernescpp.com images are that case:
+    /// SOCKS `SSL_ERROR_SYSCALL`, direct GET is a real PNG/JPEG. Leaving the
+    /// publisher URL in the HTML makes View paint a broken image — CSP is
+    /// `img-src 'self'`.
     private static func fetch(_ url: URL, referer: URL?) -> Data? {
-        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        let socksUp = ArchiveProxy.localhostPortOpen(2080)
+        let preferSocks = socksUp && !WeixinArticleHTML.prefersDirectHost(url.host)
+        if let data = fetchOnce(url, referer: referer, socks: preferSocks) { return data }
+        let otherIsSocks = !preferSocks && socksUp
+        if preferSocks == otherIsSocks { return nil }
+        print("[Archive] image \(preferSocks ? "SOCKS" : "direct") failed; retry \(otherIsSocks ? "SOCKS" : "direct") \(url.host ?? "")")
+        return fetchOnce(url, referer: referer, socks: otherIsSocks)
+    }
+
+    private static func fetchOnce(_ url: URL, referer: URL?, socks: Bool) -> Data? {
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
         if let referer {
             req.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
         }
@@ -185,7 +214,7 @@ enum ArchiveImageInliner {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
             forHTTPHeaderField: "User-Agent"
         )
-        let session = WeixinArticleHTML.prefersDirectHost(url.host) ? directSession : socksSession
+        let session = socks ? socksSession : directSession
         let sem = DispatchSemaphore(value: 0)
         var out: Data?
         session.dataTask(with: req) { data, resp, _ in
@@ -201,7 +230,7 @@ enum ArchiveImageInliner {
             }
             sem.signal()
         }.resume()
-        _ = sem.wait(timeout: .now() + 9)
+        _ = sem.wait(timeout: .now() + 14)
         return out
     }
 }
