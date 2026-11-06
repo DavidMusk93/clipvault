@@ -120,6 +120,68 @@ function touch(window, target, type, x, y) {
   return event.defaultPrevented;
 }
 
+test('note list edits recolor the same row while clipboard cards remain unchanged', { skip: skipJsdom }, async (t) => {
+  const { dom, errors } = boot();
+  t.after(() => dom.window.close());
+  await settle(dom);
+  const w = dom.window;
+  const card = w.document.querySelector(`[data-id="${CLIPS.items[0].id}"]`);
+  assert.ok(card);
+  assert.equal(card.dataset.editLevel, undefined);
+  assert.equal(card.querySelector('.note-edit-count'), null);
+
+  const note = { id: 'note', type: 'note', textContent: '# A note\n\nwriting', editCount: 1 };
+  const row = w.document.createElement('button');
+  row.className = 'note-row';
+  w.fillNoteRow(row, note, '');
+  const title = row.querySelector('.nt');
+  const pin = row.querySelector('.note-pin');
+  assert.equal(row.dataset.editLevel, '1');
+  w.fillNoteRow(row, { ...note, editCount: 6 }, '');
+  assert.equal(row.dataset.editLevel, '4');
+  assert.equal(row.querySelector('.note-edit-count').textContent, '编辑 6 次');
+  assert.strictEqual(row.querySelector('.nt'), title);
+  assert.strictEqual(row.querySelector('.note-pin'), pin);
+  w.fillNoteRow(row, { ...note, editCount: 0 }, '');
+  assert.equal(row.dataset.editLevel, '0');
+  assert.equal(row.querySelector('.note-edit-count'), null);
+  assert.deepEqual(errors, []);
+});
+
+test('note color scale previews all 16 steps without changing a note or replacing swatches', { skip: skipJsdom }, async (t) => {
+  const { dom, errors } = boot();
+  t.after(() => dom.window.close());
+  await settle(dom, 50);
+  const w = dom.window;
+  w.eval('notesState.items = [{ id: "selected", editCount: 200 }]; notesState.id = "selected"; paintNotesWarmthScale();');
+  const track = w.document.getElementById('notesWarmthTrack');
+  const sample = w.document.getElementById('notesWarmthSample');
+  const swatches = [...track.children];
+  assert.equal(swatches.length, 16);
+  assert.equal(track.querySelector('.is-current').dataset.editLevel, '13');
+  assert.equal(track.getAttribute('aria-valuenow'), '14');
+  track.focus();
+  track.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  assert.equal(sample.hidden, false);
+  assert.equal(sample.dataset.editLevel, '15');
+  assert.match(sample.textContent, /珊瑚.*≥450 次编辑/);
+  assert.equal(track.getAttribute('aria-valuenow'), '16');
+  track.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  assert.equal(sample.dataset.editLevel, '0');
+  track.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  assert.equal(sample.dataset.editLevel, '1');
+  track.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(sample.hidden, true);
+  assert.equal(track.getAttribute('aria-valuenow'), '14');
+  assert.equal(w.eval('notesState.items[0].editCount'), 200, 'preview never mutates note history');
+  assert.deepEqual([...track.children], swatches, 'scale keeps stable DOM identities');
+  w.showNoteWarmthPreview(999);
+  assert.equal(sample.dataset.editLevel, '15');
+  track.dispatchEvent(new w.Event('pointerleave'));
+  assert.equal(sample.hidden, true);
+  assert.deepEqual(errors, []);
+});
+
 test('nested modals hold one fixed wall position until the last owner closes', { skip: skipJsdom }, async (t) => {
   const { dom, errors } = boot();
   t.after(() => dom.window.close());

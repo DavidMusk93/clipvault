@@ -2271,12 +2271,56 @@
     .notes-new-plus::after {
       top: 0; bottom: 0; width: 1.5px; left: 50%; transform: translateX(-50%);
     }
+    /* 16 sunlit steps — the scale and note rows share these exact paper tokens. */
+    .note-warmth { --edit-paper: #FFFCF2; --edit-edge: color-mix(in srgb, var(--edit-paper) 72%, #9B6639); }
+    .note-warmth[data-edit-level="1"] { --edit-paper: #FFF8E4; }
+    .note-warmth[data-edit-level="2"] { --edit-paper: #FFF3D6; }
+    .note-warmth[data-edit-level="3"] { --edit-paper: #FFEFC8; }
+    .note-warmth[data-edit-level="4"] { --edit-paper: #FFE9B8; }
+    .note-warmth[data-edit-level="5"] { --edit-paper: #FFE2A8; }
+    .note-warmth[data-edit-level="6"] { --edit-paper: #FFDA98; }
+    .note-warmth[data-edit-level="7"] { --edit-paper: #FFD188; }
+    .note-warmth[data-edit-level="8"] { --edit-paper: #FFCA92; }
+    .note-warmth[data-edit-level="9"] { --edit-paper: #FFC29A; }
+    .note-warmth[data-edit-level="10"] { --edit-paper: #FFBBA1; }
+    .note-warmth[data-edit-level="11"] { --edit-paper: #FFB3A6; }
+    .note-warmth[data-edit-level="12"] { --edit-paper: #F8AEA3; }
+    .note-warmth[data-edit-level="13"] { --edit-paper: #F1A89F; }
+    .note-warmth[data-edit-level="14"] { --edit-paper: #EAA29B; }
+    .note-warmth[data-edit-level="15"] { --edit-paper: #E39C97; }
+    .notes-warmth { margin: 0 10px 9px; position: relative; flex: none; }
+    .notes-warmth-caption { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; line-height: 18px; color: var(--muted); }
+    .notes-warmth-track { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; padding: 3px 1px; cursor: crosshair; touch-action: pan-y; }
+    .notes-warmth-track:focus-visible { outline: 1.5px solid var(--accent-ink); outline-offset: 2px; border-radius: 3px; }
+    .notes-warmth-track > span { height: 13px; background: var(--edit-paper); box-shadow: inset 0 0 0 .5px var(--edit-edge); }
+    .notes-warmth-track > .is-current { outline: 1.5px solid var(--accent-ink); outline-offset: 1px; }
+    .notes-warmth-track > .is-preview { outline: 1.5px solid var(--ink); outline-offset: 1px; }
+    .notes-warmth-families { display: grid; grid-template-columns: repeat(4, 1fr); font-size: 9px; line-height: 16px; color: var(--muted); }
+    .notes-warmth-families span:last-child { text-align: right; }
+    .notes-warmth-sample {
+      position: absolute; top: calc(100% + 5px); left: 0; right: 0; z-index: 5;
+      padding: 11px 12px; border-radius: 12px; border: .5px solid var(--edit-edge);
+      background: var(--edit-paper); color: var(--ink); box-shadow: var(--elev-2); pointer-events: none;
+    }
+    .notes-warmth-sample[hidden] { display: none; }
+    .notes-warmth-sample strong { display: block; font-size: 13px; font-weight: 600; }
+    .notes-warmth-sample span { display: block; margin-top: 4px; color: #50382D; font-size: 11px; }
     .notes-list { flex: 1; overflow: auto; padding: 4px 8px 12px; }
     .note-row {
       width: 100%; text-align: left; border: 0; background: transparent;
       border-radius: 12px; padding: 10px 36px 11px 10px; cursor: pointer;
       display: block; color: inherit; position: relative;
     }
+    .note-row.note-warmth {
+      background: var(--edit-paper); margin-bottom: 4px;
+      box-shadow: inset 0 0 0 0.5px var(--edit-edge);
+    }
+    .note-row.note-warmth.is-on {
+      background: var(--edit-paper); outline: 1.5px solid var(--accent-ink); outline-offset: -1.5px;
+    }
+    .note-row:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+    .note-row.note-warmth .nx, .note-row.note-warmth .nm { color: #50382D; }
+    .note-row.note-warmth.is-pinned .note-pin { color: var(--accent-ink); }
     .note-row:active { transform: scale(0.99); }
     .note-row.is-on { background: rgba(0, 0, 0, 0.06); }
     .note-pin {
@@ -2297,9 +2341,10 @@
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
     .note-row .nm {
-      margin-top: 5px; font-size: 11px; color: var(--muted);
+      margin-top: 5px; font-size: 11px; line-height: 16px; color: var(--muted);
       font-variant-numeric: tabular-nums;
     }
+    .note-row .note-edit-count { color: #50382D; font-weight: 600; white-space: nowrap; }
     /* Apple Notes: #tag is gold ink in the title, not a chip under it. */
     .notes-tag {
       display: inline;
@@ -3092,6 +3137,12 @@
         <button type="button" class="notes-rail-close" id="notesRailClose" title="关闭" aria-label="关闭">
           <span class="material-symbols-outlined">close</span>
         </button>
+      </div>
+      <div class="notes-warmth" id="notesWarmth">
+        <div class="notes-warmth-caption"><span>编辑积累</span><output id="notesWarmthReadout">16 档 · 划读预览</output></div>
+        <div class="notes-warmth-track" id="notesWarmthTrack" role="slider" tabindex="0" aria-label="笔记编辑色阶预览" aria-valuemin="1" aria-valuemax="16" aria-valuenow="1" aria-valuetext="第 1 档，奶油，0 次编辑"></div>
+        <div class="notes-warmth-families" aria-hidden="true"><span>奶油</span><span>蜂蜜</span><span>暖杏</span><span>珊瑚</span></div>
+        <div class="notes-warmth-sample note-warmth" id="notesWarmthSample" hidden><strong></strong><span></span></div>
       </div>
       <div class="notes-list" id="notesList"></div>
     </aside>
@@ -4823,8 +4874,112 @@ window.ClipViewMasonry = Masonry;
         paintNotesList();
       }
     }
+    /** Editing accumulates across 16 steps: cream -> honey -> apricot -> coral. */
+    const NoteWarmth = {
+      steps: [0, 1, 2, 3, 5, 8, 12, 18, 27, 40, 60, 90, 135, 200, 300, 450],
+      families: ['奶油', '蜂蜜', '暖杏', '珊瑚'],
+      count(item) {
+        const n = Number(item && item.editCount);
+        return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+      },
+      level(item) {
+        const n = this.count(item);
+        for (let i = this.steps.length - 1; i > 0; i--) if (n >= this.steps[i]) return i;
+        return 0;
+      },
+      family(level) { return this.families[Math.floor(level / 4)]; },
+      range(level) {
+        const lo = this.steps[level];
+        const hi = this.steps[level + 1];
+        return hi == null ? `≥${lo} 次编辑` : hi - 1 === lo ? `${lo} 次编辑` : `${lo}–${hi - 1} 次编辑`;
+      },
+      label(item) { return `编辑 ${this.count(item)} 次`; },
+      apply(el, item) {
+        if (!el) return;
+        const level = this.level(item);
+        el.classList.add('note-warmth');
+        el.dataset.editLevel = String(level);
+        el.dataset.editCount = String(this.count(item));
+        el.title = `${this.label(item)} · 第 ${level + 1}/16 档 · ${this.family(level)} · 色彩随编辑积累进阶`;
+      },
+    };
+    window.ClipVaultNoteWarmth = NoteWarmth;
+
+    function paintNotesWarmthScale() {
+      const track = document.getElementById('notesWarmthTrack');
+      if (!track) return;
+      if (!track.children.length) {
+        NoteWarmth.steps.forEach((_, i) => {
+          const swatch = document.createElement('span');
+          swatch.className = 'note-warmth';
+          swatch.dataset.editLevel = String(i);
+          swatch.setAttribute('aria-hidden', 'true');
+          track.append(swatch);
+        });
+        const atPointer = (e) => {
+          const box = track.getBoundingClientRect();
+          showNoteWarmthPreview(Math.floor((e.clientX - box.left) / Math.max(1, box.width) * 16));
+        };
+        track.addEventListener('pointermove', atPointer);
+        track.addEventListener('pointerdown', (e) => { track.focus({ preventScroll: true }); atPointer(e); });
+        track.addEventListener('pointerleave', clearNoteWarmthPreview);
+        track.addEventListener('focus', () => showNoteWarmthPreview(Number(track.dataset.currentLevel) || 0));
+        track.addEventListener('blur', clearNoteWarmthPreview);
+        track.addEventListener('keydown', (e) => {
+          let level = Number(track.dataset.previewLevel ?? track.dataset.currentLevel) || 0;
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); clearNoteWarmthPreview(); return; }
+          if (e.key === 'Home') level = 0;
+          else if (e.key === 'End') level = 15;
+          else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') level++;
+          else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') level--;
+          else return;
+          e.preventDefault(); e.stopPropagation();
+          showNoteWarmthPreview(level);
+        });
+      }
+      const note = [...notesState.items, ...(notesState.results || [])].find(n => n.id === notesState.id);
+      const level = note ? NoteWarmth.level(note) : 0;
+      track.dataset.currentLevel = String(level);
+      [...track.children].forEach((swatch, i) => swatch.classList.toggle('is-current', !!note && i === level));
+      if (track.dataset.previewLevel != null) return;
+      track.setAttribute('aria-valuenow', String(level + 1));
+      track.setAttribute('aria-valuetext', `第 ${level + 1} 档，${NoteWarmth.family(level)}，${NoteWarmth.range(level)}`);
+      document.getElementById('notesWarmthReadout').textContent = note
+        ? `${level + 1}/16 · ${NoteWarmth.family(level)} · ${NoteWarmth.count(note)} 次`
+        : '16 档 · 划读预览';
+    }
+
+    function showNoteWarmthPreview(rawLevel) {
+      const level = Math.max(0, Math.min(15, Math.floor(Number(rawLevel) || 0)));
+      const track = document.getElementById('notesWarmthTrack');
+      const sample = document.getElementById('notesWarmthSample');
+      if (!track || !sample) return;
+      track.dataset.previewLevel = String(level);
+      [...track.children].forEach((swatch, i) => swatch.classList.toggle('is-preview', i === level));
+      const label = `第 ${level + 1}/16 档 · ${NoteWarmth.family(level)}`;
+      const range = NoteWarmth.range(level);
+      document.getElementById('notesWarmthReadout').textContent = label;
+      track.setAttribute('aria-valuenow', String(level + 1));
+      track.setAttribute('aria-valuetext', `${label}，${range}，条目色样预览`);
+      sample.dataset.editLevel = String(level);
+      sample.querySelector('strong').textContent = `${NoteWarmth.family(level)} · 笔记条目色样`;
+      sample.querySelector('span').textContent = `${range} · 第 ${level + 1}/16 档`;
+      sample.hidden = false;
+    }
+
+    function clearNoteWarmthPreview() {
+      const track = document.getElementById('notesWarmthTrack');
+      if (!track) return;
+      delete track.dataset.previewLevel;
+      [...track.children].forEach(swatch => swatch.classList.remove('is-preview'));
+      const sample = document.getElementById('notesWarmthSample');
+      if (sample) sample.hidden = true;
+      paintNotesWarmthScale();
+    }
+
     function fillNoteRow(btn, n, q) {
       btn.dataset.noteId = n.id;
+      NoteWarmth.apply(btn, n);
       btn.classList.toggle('is-on', n.id === notesState.id);
       btn.classList.toggle('is-pinned', noteIsPinned(n));
       let t = btn.querySelector('.nt');
@@ -4856,7 +5011,7 @@ window.ClipViewMasonry = Masonry;
       pin?.setAttribute('title', noteIsPinned(n) ? '取消置顶' : '置顶');
       pin?.setAttribute('aria-label', noteIsPinned(n) ? '取消置顶' : '置顶');
       const title = noteTitleOf(n) || '未命名';
-      const when = formatItemTime(n);
+      const when = formatItemTime(n) + (NoteWarmth.count(n) ? ' · ' + NoteWarmth.label(n) : '');
       const tKey = title + '\u0000' + (q || '');
       if (t.dataset.raw !== tKey) {
         t.dataset.raw = tKey;
@@ -4869,7 +5024,16 @@ window.ClipViewMasonry = Masonry;
         x.dataset.hl = xKey;
         x.innerHTML = q ? highlightEscaped(excerpt, q) : esc(excerpt);
       }
-      if (m.textContent !== when) m.textContent = when;
+      if (m.textContent !== when) {
+        m.textContent = formatItemTime(n);
+        if (NoteWarmth.count(n)) {
+          m.append(document.createTextNode(' · '));
+          const count = document.createElement('span');
+          count.className = 'note-edit-count';
+          count.textContent = NoteWarmth.label(n);
+          m.append(count);
+        }
+      }
     }
     function noteListRows(qRaw) {
       const q = qRaw.toLowerCase();
@@ -4921,6 +5085,7 @@ window.ClipViewMasonry = Masonry;
         fillNoteRow(btn, n, qRaw);
       });
       paintNotesFoot(root);
+      paintNotesWarmthScale();
       const M = globalThis.ClipNotesMetrics;
       if (M) M.emit('notes_paint_list', { dur_ms: performance.now() - t0, payload: { n: rows.length } });
     }

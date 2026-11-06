@@ -4120,6 +4120,25 @@ final class DatabaseManager: ObservableObject {
         "scroll_checkpoint", "highlight_add", "highlight_update", "highlight_delete", "comment",
     ]
 
+    /// One note-page query; no per-row history requests or mutable counters.
+    func noteEditCounts(ids: [UUID]) -> [String: Int] {
+        guard !ids.isEmpty else { return [:] }
+        var out: [String: Int] = [:]
+        performReadSync {
+            guard let db = self.readDB ?? self.db else { return }
+            let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, NoteEditActivity.countSQL(placeholders: placeholders), -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            for (i, id) in ids.enumerated() { self.bindText(stmt, Int32(i + 1), id.uuidString) }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) else { continue }
+                out[id] = max(0, Int(sqlite3_column_int64(stmt, 1)))
+            }
+        }
+        return out
+    }
+
     /// Wall resume affordance: last scroll position per item, read from the
     /// `reader_state` cache in one IN(...) query. Missing row = never opened in
     /// the View. Only returns entries worth resuming (3%–96%) so a card that was
