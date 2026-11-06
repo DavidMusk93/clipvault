@@ -148,6 +148,22 @@ test('note list edits recolor the same row while clipboard cards remain unchange
   assert.deepEqual(errors, []);
 });
 
+test('search hits inside note tags remain highlighted and clickable at the deepest edit level', { skip: skipJsdom }, async (t) => {
+  const { dom, errors } = boot();
+  t.after(() => dom.window.close());
+  await settle(dom, 50);
+  const w = dom.window;
+  const row = w.document.createElement('button');
+  row.className = 'note-row';
+  w.fillNoteRow(row, { id: 'tagged', type: 'note', textContent: '# #gateway Design\n\ngateway notes', editCount: 654 }, 'gateway');
+  assert.equal(row.dataset.editLevel, '15');
+  assert.equal(row.querySelector('.notes-tag mark.search-hit').textContent, 'gateway');
+  assert.ok(row.querySelector('.nx mark.search-hit'));
+  row.querySelector('.notes-tag mark.search-hit').click();
+  assert.equal(w.eval('notesState.tagFilter'), 'gateway', 'the highlight keeps the existing tag-filter action');
+  assert.deepEqual(errors, []);
+});
+
 test('note color scale previews all 16 steps without changing a note or replacing swatches', { skip: skipJsdom }, async (t) => {
   const { dom, errors } = boot();
   t.after(() => dom.window.close());
@@ -164,7 +180,7 @@ test('note color scale previews all 16 steps without changing a note or replacin
   track.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
   assert.equal(sample.hidden, false);
   assert.equal(sample.dataset.editLevel, '15');
-  assert.match(sample.textContent, /珊瑚.*≥450 次编辑/);
+  assert.match(sample.textContent, /雾紫.*≥450 次编辑/);
   assert.equal(track.getAttribute('aria-valuenow'), '16');
   track.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
   assert.equal(sample.dataset.editLevel, '0');

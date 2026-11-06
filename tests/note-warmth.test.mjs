@@ -23,7 +23,7 @@ test('note warmth follows edit boundaries and caps color, not the readout', () =
   assert.equal(warmth.range(0), '0 次编辑');
   assert.equal(warmth.range(3), '3–4 次编辑');
   assert.equal(warmth.range(15), '≥450 次编辑');
-  assert.deepEqual([0, 4, 8, 12].map(i => warmth.family(i)), ['奶油', '蜂蜜', '暖杏', '珊瑚']);
+  assert.deepEqual([0, 4, 8, 12].map(i => warmth.family(i)), ['素纸', '雾青', '雾蓝', '雾紫']);
   for (const editCount of [undefined, null, -2, NaN, Infinity, 'invalid']) {
     assert.equal(warmth.level({ editCount }), 0);
   }
@@ -43,7 +43,7 @@ test('warmth preserves note title, pin controls and focus through count changes'
   warmth.apply(row, { editCount: 450 });
   assert.equal(row.dataset.editLevel, '15');
   assert.equal(row.dataset.editCount, '450');
-  assert.match(row.title, /编辑 450 次 · 第 16\/16 档 · 珊瑚/);
+  assert.match(row.title, /编辑 450 次 · 第 16\/16 档 · 雾紫/);
   assert.strictEqual(row.querySelector('.nt'), title);
   assert.strictEqual(row.querySelector('.note-pin'), pin);
   assert.strictEqual(dom.window.document.activeElement, row);
@@ -58,7 +58,7 @@ function luminance(hex) {
   return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
 }
 
-test('note palette deepens monotonically and retains readable ink', () => {
+test('note surfaces stay pale and low-chroma while semantic text remains legible', () => {
   const papers = [...html.matchAll(/--edit-paper: (#[0-9A-F]{6});/g)].map(m => m[1]);
   assert.equal(papers.length, 16);
   assert.equal(new Set(papers).size, 16);
@@ -67,8 +67,14 @@ test('note palette deepens monotonically and retains readable ink', () => {
   for (const paper of papers) {
     assert.ok(luminance(paper) < previous, `paper must get deeper: ${paper}`);
     previous = luminance(paper);
-    assert.ok((previous + 0.05) / (luminance('#50382D') + 0.05) >= 4.5, 'readout and excerpt contrast >= 4.5:1');
+    const rgb = paper.slice(1).match(/../g).map(v => parseInt(v, 16));
+    assert.ok(Math.max(...rgb) - Math.min(...rgb) <= 16, 'large surfaces must remain low-chroma');
+    assert.ok(previous >= 0.77, 'long-edited notes must retain a pale surface');
+    for (const ink of ['#595D65', '#805200']) {
+      assert.ok((previous + 0.05) / (luminance(ink) + 0.05) >= 4.5, `secondary text / tag contrast: ${ink}`);
+    }
     assert.ok((previous + 0.05) / (luminance('#1D1D1F') + 0.05) >= 7, 'title contrast >= 7:1');
     assert.ok(taste.includes(paper));
   }
+  assert.ok((luminance('#F7E2A8') + 0.05) / (luminance('#3A2E0B') + 0.05) >= 7, 'search hits stay legible inside tags too');
 });
