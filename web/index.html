@@ -2271,28 +2271,29 @@
     .notes-new-plus::after {
       top: 0; bottom: 0; width: 1.5px; left: 50%; transform: translateX(-50%);
     }
-    /* 16 sunlit steps — the scale and note rows share these exact paper tokens. */
-    .note-warmth { --edit-paper: #FFFCF2; --edit-edge: color-mix(in srgb, var(--edit-paper) 72%, #9B6639); }
-    .note-warmth[data-edit-level="1"] { --edit-paper: #FFF8E4; }
-    .note-warmth[data-edit-level="2"] { --edit-paper: #FFF3D6; }
-    .note-warmth[data-edit-level="3"] { --edit-paper: #FFEFC8; }
-    .note-warmth[data-edit-level="4"] { --edit-paper: #FFE9B8; }
-    .note-warmth[data-edit-level="5"] { --edit-paper: #FFE2A8; }
-    .note-warmth[data-edit-level="6"] { --edit-paper: #FFDA98; }
-    .note-warmth[data-edit-level="7"] { --edit-paper: #FFD188; }
-    .note-warmth[data-edit-level="8"] { --edit-paper: #FFCA92; }
-    .note-warmth[data-edit-level="9"] { --edit-paper: #FFC29A; }
-    .note-warmth[data-edit-level="10"] { --edit-paper: #FFBBA1; }
-    .note-warmth[data-edit-level="11"] { --edit-paper: #FFB3A6; }
-    .note-warmth[data-edit-level="12"] { --edit-paper: #F8AEA3; }
-    .note-warmth[data-edit-level="13"] { --edit-paper: #F1A89F; }
-    .note-warmth[data-edit-level="14"] { --edit-paper: #EAA29B; }
-    .note-warmth[data-edit-level="15"] { --edit-paper: #E39C97; }
+    /* Quiet Paper: cool, low-chroma surfaces leave warm hues to tags and search. */
+    #notesPanel { --note-secondary: #595D65; --note-tag: #805200; }
+    .note-warmth { --edit-paper: #FAFBFC; --edit-edge: color-mix(in srgb, var(--edit-paper) 90%, #79828E); }
+    .note-warmth[data-edit-level="1"] { --edit-paper: #F8FAFB; }
+    .note-warmth[data-edit-level="2"] { --edit-paper: #F6F8F9; }
+    .note-warmth[data-edit-level="3"] { --edit-paper: #F3F6F6; }
+    .note-warmth[data-edit-level="4"] { --edit-paper: #F0F5F3; }
+    .note-warmth[data-edit-level="5"] { --edit-paper: #EDF3F1; }
+    .note-warmth[data-edit-level="6"] { --edit-paper: #EAF1F0; }
+    .note-warmth[data-edit-level="7"] { --edit-paper: #E7EFF0; }
+    .note-warmth[data-edit-level="8"] { --edit-paper: #E6EDF1; }
+    .note-warmth[data-edit-level="9"] { --edit-paper: #E5EBF2; }
+    .note-warmth[data-edit-level="10"] { --edit-paper: #E4E9F3; }
+    .note-warmth[data-edit-level="11"] { --edit-paper: #E3E7F3; }
+    .note-warmth[data-edit-level="12"] { --edit-paper: #E4E6F2; }
+    .note-warmth[data-edit-level="13"] { --edit-paper: #E4E5F0; }
+    .note-warmth[data-edit-level="14"] { --edit-paper: #E4E4EE; }
+    .note-warmth[data-edit-level="15"] { --edit-paper: #E3E3EC; }
     .notes-warmth { margin: 0 10px 9px; position: relative; flex: none; }
     .notes-warmth-caption { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; line-height: 18px; color: var(--muted); }
     .notes-warmth-track { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; padding: 3px 1px; cursor: crosshair; touch-action: pan-y; }
     .notes-warmth-track:focus-visible { outline: 1.5px solid var(--accent-ink); outline-offset: 2px; border-radius: 3px; }
-    .notes-warmth-track > span { height: 13px; background: var(--edit-paper); box-shadow: inset 0 0 0 .5px var(--edit-edge); }
+    .notes-warmth-track > span { height: 8px; background: var(--edit-paper); box-shadow: inset 0 0 0 .5px var(--edit-edge); }
     .notes-warmth-track > .is-current { outline: 1.5px solid var(--accent-ink); outline-offset: 1px; }
     .notes-warmth-track > .is-preview { outline: 1.5px solid var(--ink); outline-offset: 1px; }
     .notes-warmth-families { display: grid; grid-template-columns: repeat(4, 1fr); font-size: 9px; line-height: 16px; color: var(--muted); }
@@ -2304,7 +2305,7 @@
     }
     .notes-warmth-sample[hidden] { display: none; }
     .notes-warmth-sample strong { display: block; font-size: 13px; font-weight: 600; }
-    .notes-warmth-sample span { display: block; margin-top: 4px; color: #50382D; font-size: 11px; }
+    .notes-warmth-sample span { display: block; margin-top: 4px; color: var(--note-secondary); font-size: 11px; }
     .notes-list { flex: 1; overflow: auto; padding: 4px 8px 12px; }
     .note-row {
       width: 100%; text-align: left; border: 0; background: transparent;
@@ -2319,7 +2320,8 @@
       background: var(--edit-paper); outline: 1.5px solid var(--accent-ink); outline-offset: -1.5px;
     }
     .note-row:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
-    .note-row.note-warmth .nx, .note-row.note-warmth .nm { color: #50382D; }
+    .note-row.note-warmth .nx, .note-row.note-warmth .nm { color: var(--note-secondary); }
+    #notesPanel mark.search-hit { background: #F7E2A8; color: #3A2E0B; }
     .note-row.note-warmth.is-pinned .note-pin { color: var(--accent-ink); }
     .note-row:active { transform: scale(0.99); }
     .note-row.is-on { background: rgba(0, 0, 0, 0.06); }
@@ -2344,7 +2346,7 @@
       margin-top: 5px; font-size: 11px; line-height: 16px; color: var(--muted);
       font-variant-numeric: tabular-nums;
     }
-    .note-row .note-edit-count { color: #50382D; font-weight: 600; white-space: nowrap; }
+    .note-row .note-edit-count { color: inherit; font-weight: 400; white-space: nowrap; }
     /* Apple Notes: #tag is gold ink in the title, not a chip under it. */
     .notes-tag {
       display: inline;
@@ -2352,7 +2354,7 @@
       margin: 0;
       border: 0;
       background: none;
-      color: #f5a400;
+      color: var(--note-tag, #f5a400);
       font: inherit;
       font-weight: inherit;
       letter-spacing: inherit;
@@ -2362,7 +2364,7 @@
     }
     .notes-tag-filter {
       height: 26px; padding: 0 9px; border: 0; border-radius: 980px;
-      background: rgba(245, 164, 0, 0.16); color: #c47a00;
+      background: rgba(128, 82, 0, 0.09); color: var(--note-tag);
       font: 600 12px/26px var(--font-ui); letter-spacing: -0.01em;
       cursor: pointer; flex: none;
     }
@@ -2391,7 +2393,7 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .notes-title-view { pointer-events: none; }
-    .notes-title-view .notes-tag { color: #f5a400; cursor: pointer; pointer-events: auto; }
+    .notes-title-view .notes-tag { color: var(--note-tag); cursor: pointer; pointer-events: auto; }
     .notes-title-wrap.has-value:not(.is-editing) .notes-title {
       color: transparent;
       caret-color: var(--ink);
@@ -2402,7 +2404,7 @@
     }
     .notes-title-wrap.is-editing .notes-title-view { visibility: hidden; }
     .notes-title::placeholder { color: rgba(60,60,67,0.28); font-weight: 650; }
-    .note-row .nt .notes-tag { color: #f5a400; font-weight: 650; }
+    .note-row .nt .notes-tag { color: var(--note-tag); font-weight: 650; }
     .notes-chrome {
       flex: none; min-height: 36px; height: auto;
       display: flex; align-items: center; gap: 8px;
@@ -3140,8 +3142,8 @@
       </div>
       <div class="notes-warmth" id="notesWarmth">
         <div class="notes-warmth-caption"><span>编辑积累</span><output id="notesWarmthReadout">16 档 · 划读预览</output></div>
-        <div class="notes-warmth-track" id="notesWarmthTrack" role="slider" tabindex="0" aria-label="笔记编辑色阶预览" aria-valuemin="1" aria-valuemax="16" aria-valuenow="1" aria-valuetext="第 1 档，奶油，0 次编辑"></div>
-        <div class="notes-warmth-families" aria-hidden="true"><span>奶油</span><span>蜂蜜</span><span>暖杏</span><span>珊瑚</span></div>
+        <div class="notes-warmth-track" id="notesWarmthTrack" role="slider" tabindex="0" aria-label="笔记编辑色阶预览" aria-valuemin="1" aria-valuemax="16" aria-valuenow="1" aria-valuetext="第 1 档，素纸，0 次编辑"></div>
+        <div class="notes-warmth-families" aria-hidden="true"><span>素纸</span><span>雾青</span><span>雾蓝</span><span>雾紫</span></div>
         <div class="notes-warmth-sample note-warmth" id="notesWarmthSample" hidden><strong></strong><span></span></div>
       </div>
       <div class="notes-list" id="notesList"></div>
@@ -4601,7 +4603,7 @@ window.ClipViewMasonry = Masonry;
       while ((m = re.exec(raw))) {
         const hashAt = m.index + m[1].length;
         out += highlightEscaped(raw.slice(last, hashAt), q);
-        out += '<span class="notes-tag" data-tag="' + escAttr(m[2]) + '">#' + esc(m[2]) + '</span>';
+        out += '<span class="notes-tag" data-tag="' + escAttr(m[2]) + '">' + highlightEscaped('#' + m[2], q) + '</span>';
         last = hashAt + m[2].length + 1;
       }
       out += highlightEscaped(raw.slice(last), q);
@@ -4874,10 +4876,10 @@ window.ClipViewMasonry = Masonry;
         paintNotesList();
       }
     }
-    /** Editing accumulates across 16 steps: cream -> honey -> apricot -> coral. */
+    /** Sixteen quiet paper tones: neutral -> mist green -> blue -> lavender. */
     const NoteWarmth = {
       steps: [0, 1, 2, 3, 5, 8, 12, 18, 27, 40, 60, 90, 135, 200, 300, 450],
-      families: ['奶油', '蜂蜜', '暖杏', '珊瑚'],
+      families: ['素纸', '雾青', '雾蓝', '雾紫'],
       count(item) {
         const n = Number(item && item.editCount);
         return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
