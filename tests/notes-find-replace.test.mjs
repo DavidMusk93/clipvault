@@ -81,7 +81,7 @@ test('panel keyboard mirrors VS Code and never fights the panel', () => {
   assert.match(html, /notesState\.editor\?\.isFindOpen\?\.\(\)/);
   assert.match(html, /notesState\.editor\.closeFind\(\)/);
   assert.match(html, /notesState\.editor\.stepFind\(e\.shiftKey \? -1 : 1\)/);
-  assert.match(html, /notes-editor\.css\?v=n33/);
-  assert.match(html, /notes-editor\.js\?v=n33/);
+  assert.match(html, /notes-editor\.css\?v=n34/);
+  assert.match(html, /notes-editor\.js\?v=n34/);
   assert.match(taste, /\| 查找 \/ 替换 \|/);
 });
