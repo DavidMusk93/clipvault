@@ -378,12 +378,16 @@
   .notes-work[data-mode="preview"] .notes-preview-inner { width: 100%; }
 }
 
-/* Find-in-note: CSS Custom Highlight API (no DOM mutation, React-safe). */
+/* Find-in-note: CSS Custom Highlight API (no DOM mutation, React-safe).
+   Same cream as the sidebar hit and the wall's search mark; active gets the
+   accent underline only, so hits never borrow the tag's or the surface's hue. */
 ::highlight(cv-notes-find) {
-  background-color: rgba(255, 214, 10, 0.55);
+  background-color: #F7E2A8;
+  color: #3A2E0B;
 }
 ::highlight(cv-notes-find-active) {
-  background-color: rgba(255, 214, 10, 0.7);
+  background-color: #EFD08C;
+  color: #3A2E0B;
   text-decoration: underline;
   text-decoration-color: #0071e3;
   text-decoration-thickness: 1.5px;

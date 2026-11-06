@@ -433,8 +433,8 @@ test('split panes sync source and preview scroll', () => {
   assert.doesNotMatch(entry, /best\.offsetTop/);
   assert.doesNotMatch(entry, /mapLineToScrollTop/);
   assert.match(css, /\.notes-preview-inner \{[\s\S]{0,80}position:\s*relative/);
-  assert.match(html, /notes-editor\.js\?v=n33/);
-  assert.match(html, /notes-editor\.css\?v=n33/);
+  assert.match(html, /notes-editor\.js\?v=n34/);
+  assert.match(html, /notes-editor\.css\?v=n34/);
 });
 
 test('preview compiles blocks incrementally and React reconciles by hash', () => {
