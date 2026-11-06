@@ -1552,7 +1552,10 @@ class WebServer {
         """
     }
     
-    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false, headOnly: Bool = false, read: [String: Any]? = nil) -> [String: Any] {
+    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false, headOnly: Bool = false, read: [String: Any]? = nil, editCount: Int? = nil) -> [String: Any] {
+        let edits = item.type == .note
+            ? (editCount ?? database.noteEditCounts(ids: [item.id])[item.id.uuidString] ?? 0)
+            : 0
         if headOnly {
             var head: [String: Any] = [
                 "id": item.id.uuidString,
@@ -1569,7 +1572,10 @@ class WebServer {
                 head["pinned"] = false
                 head["pinnedAt"] = NSNull()
             }
-            if item.type == .note { head["isCompose"] = true }
+            if item.type == .note {
+                head["isCompose"] = true
+                head["editCount"] = edits
+            }
             return head
         }
         let ts = item.timestamp.timeIntervalSince1970
@@ -1655,6 +1661,7 @@ class WebServer {
         }
         if item.type == .note {
             dict["isCompose"] = true
+            dict["editCount"] = edits
             if let ref = ComposeNotes.refId(from: item.url) {
                 dict["composeRefId"] = ref
             }
@@ -2506,7 +2513,8 @@ class WebServer {
             database.fetchItems(ids: uuids) { [weak self] rows in
                 guard let self else { return }
                 let readMap = self.database.readerProgressMap(ids: uuids)
-                let arr = rows.map { self.itemToJSON($0, includeArchiveHTML: false, read: readMap[$0.id.uuidString]) }
+                let editCounts = self.database.noteEditCounts(ids: rows.filter { $0.type == .note }.map { $0.id })
+                let arr = rows.map { self.itemToJSON($0, includeArchiveHTML: false, read: readMap[$0.id.uuidString], editCount: editCounts[$0.id.uuidString] ?? 0) }
                 self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
             }
             return
@@ -2523,7 +2531,8 @@ class WebServer {
         database.fetchPage(limit: limit, cursor: cursor, query: q, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType, order: order) { [weak self] page in
             guard let self = self else { return }
             let readMap = self.database.readerProgressMap(ids: page.items.map { $0.id })
-            let jsonItems = page.items.map { self.itemToJSON($0, headOnly: headOnly, read: readMap[$0.id.uuidString]) }
+            let editCounts = self.database.noteEditCounts(ids: page.items.filter { $0.type == .note }.map { $0.id })
+            let jsonItems = page.items.map { self.itemToJSON($0, headOnly: headOnly, read: readMap[$0.id.uuidString], editCount: editCounts[$0.id.uuidString] ?? 0) }
             var payload: [String: Any] = [
                 "items": jsonItems,
                 "nextCursor": page.nextCursor?.encode() as Any
