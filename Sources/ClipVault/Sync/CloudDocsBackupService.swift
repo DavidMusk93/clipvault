@@ -69,6 +69,11 @@ final class CloudDocsBackupService {
         var blobFiles: [String]? = nil
         /// True only after local dest blob sizes were verified against source CAS.
         var blobsVerified: Bool? = nil
+        /// The inkstone note engine's vault, when the shadow/cutover produced one.
+        /// A backup that omits it would restore notes without their engine history.
+        var engineVaultBytes: Int? = nil
+        var engineVaultSha256: String? = nil
+        var engineVaultPresent: Bool? = nil
     }
 
     struct SnapshotInfo: Codable {
@@ -444,6 +449,7 @@ final class CloudDocsBackupService {
                         switch result {
                         case .success:
                             self.lastError = nil
+                            self.restoreEngineVaultIfAbsent(snapshotId: snapshotId)
                             self.lastPhase = "restore:ok"
                             self.lastSuccessUnix = Date().timeIntervalSince1970
                             self.dirty = false
@@ -673,6 +679,7 @@ final class CloudDocsBackupService {
                                     try self.publishFileFullCopy(from: artifact, to: latestDB)
 
                                     let blobNames = self.listBinNames(in: blobs)
+                                    let vault = self.publishEngineVault(into: latest)
                                     let manifest = Manifest(
                                         createdAt: iso,
                                         createdAtUnix: created.timeIntervalSince1970,
@@ -685,7 +692,10 @@ final class CloudDocsBackupService {
                                         blobCount: blobNames.count,
                                         blobBytes: cas.bytes,
                                         blobFiles: blobNames,
-                                        blobsVerified: true
+                                        blobsVerified: true,
+                                        engineVaultBytes: vault?.bytes,
+                                        engineVaultSha256: vault?.sha,
+                                        engineVaultPresent: vault != nil
                                     )
                                     try self.writeJSONAtomic(manifest, to: latestManifest)
                                     // fsync db + manifest so File Provider sees durable close
@@ -700,6 +710,15 @@ final class CloudDocsBackupService {
                                             try self.ensureCloudDir(snapDir)
                                             let snapDB = snapDir.appendingPathComponent("clipflow.db")
                                             try self.publishFileFullCopy(from: latestDB, to: snapDB, cloudSafe: (dest.type == "gdrive" || dest.type == "icloud"))
+                                            // Point-in-time restore must include the engine vault too.
+                                            let latestVault = latest.appendingPathComponent("inkstone.db")
+                                            if self.fm.fileExists(atPath: latestVault.path) {
+                                                try self.publishFileFullCopy(
+                                                    from: latestVault,
+                                                    to: snapDir.appendingPathComponent("inkstone.db"),
+                                                    cloudSafe: (dest.type == "gdrive" || dest.type == "icloud")
+                                                )
+                                            }
                                             try self.writeJSONAtomic(
                                                 manifest,
                                                 to: snapDir.appendingPathComponent("MANIFEST.json")
@@ -812,6 +831,48 @@ final class CloudDocsBackupService {
                     }
                 }
             }
+        }
+    }
+
+    /// Where the note engine keeps its vault, if the shadow/cutover is in use.
+    var engineVaultPath: URL? {
+        guard let home = ProcessInfo.processInfo.environment["CLIPVAULT_HOME"]
+            ?? Optional(NSHomeDirectory() + "/Library/Application Support/Keepsake") else { return nil }
+        let override = ProcessInfo.processInfo.environment["CLIPVAULT_INKSTONE_PATH"]
+        return URL(fileURLWithPath: override ?? (home + "/inkstone.db"))
+    }
+
+    /// Publish a consistent copy of the engine vault next to the database.
+    ///
+    /// Best effort on purpose: a shadow that fails to publish must not fail the
+    /// note backup. The vault is a SQLite file, so the same `VACUUM INTO` that
+    /// makes the db artifact also makes this one.
+    private func publishEngineVault(into latest: URL) -> (bytes: Int, sha: String)? {
+        guard let src = engineVaultPath, fm.fileExists(atPath: src.path) else { return nil }
+        let dest = latest.appendingPathComponent("inkstone.db")
+        guard compactBackupFile(from: src, to: dest) else {
+            print("[Backup] engine vault copy failed: \(src.path)")
+            return nil
+        }
+        fullFsync(dest)
+        let bytes = (try? fm.attributesOfItem(atPath: dest.path)[.size] as? Int).flatMap { $0 } ?? 0
+        let sha = (try? Self.sha256File(dest)) ?? ""
+        return (bytes, sha)
+    }
+
+    /// After a restore, put the engine vault back **only when the local one is
+    /// gone**. Restoring over a live vault would swap the file under an open
+    /// handle; the engine rebuilds from notes instead, which is cheaper and safe.
+    private func restoreEngineVaultIfAbsent(snapshotId: String) {
+        guard let dest = engineVaultPath, !fm.fileExists(atPath: dest.path) else { return }
+        guard let dir = resolveRestoreDB(snapshotId: snapshotId)?.deletingLastPathComponent() else { return }
+        let src = dir.appendingPathComponent("inkstone.db")
+        guard fm.fileExists(atPath: src.path) else { return }
+        do {
+            try fm.copyItem(at: src, to: dest)
+            print("[Backup] restored engine vault from \(src.path)")
+        } catch {
+            print("[Backup] engine vault restore skipped: \(error)")
         }
     }
 
@@ -1197,7 +1258,7 @@ final class CloudDocsBackupService {
             let name = f.lastPathComponent
             if name.hasPrefix(".tmp_") || name.hasSuffix("-shm") || name.hasSuffix("-wal") {
                 // Keep only final clipflow.db; drop interrupted temps.
-                if name != "clipflow.db" && name != "MANIFEST.json" {
+                if name != "clipflow.db" && name != "MANIFEST.json" && name != "inkstone.db" {
                     try? fm.removeItem(at: f)
                 }
             }
