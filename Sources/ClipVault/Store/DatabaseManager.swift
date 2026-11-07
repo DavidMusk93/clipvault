@@ -3141,11 +3141,13 @@ final class DatabaseManager: ObservableObject {
         case empty
         case notANote
         case missing
+        case engine
         var errorDescription: String? {
             switch self {
             case .empty: return "先写点什么"
             case .notANote: return "只能改自己写下的笔记"
             case .missing: return "笔记不存在"
+            case .engine: return "笔记引擎写入失败，本次保存已取消（旧内容仍在）"
             }
         }
     }
@@ -3187,6 +3189,19 @@ final class DatabaseManager: ObservableObject {
         )
         let body = plan.body
         let hash = plan.hash
+        let enginePrimary = InkstoneShadow.shared.isPrimary
+        if enginePrimary {
+            // Fail closed: the projection must never accept a body the engine
+            // did not take, or the two would drift with no way to tell which is
+            // right.
+            guard InkstoneShadow.shared.writePrimary(
+                id: id.uuidString,
+                markdown: body,
+                updatedAt: now
+            ) else {
+                throw ComposeError.engine
+            }
+        }
         let refURL = ComposeNotes.refURL(from: refId)
         let keys = ComposeNotes.blobKeys(in: body)
         let keysJSON = (try? JSONSerialization.data(withJSONObject: keys)).flatMap { String(data: $0, encoding: .utf8) }
@@ -3228,17 +3243,21 @@ final class DatabaseManager: ObservableObject {
             item: ClipboardItem(id: id, timestamp: now, type: .note, contentHash: hash, textContent: body)
         )
         upsertFTS(id: id.uuidString, text: body, ocr: nil, source: ComposeNotes.sourceApp, html: nil)
-        insertComposeOpLocked(
-            itemId: id.uuidString,
-            ts: now.timeIntervalSince1970,
-            title: title,
-            body: body,
-            refItemId: refId,
-            blobKeys: keysJSON,
-            source: source,
-            parentHash: plan.parentHash,
-            contentHash: hash
-        )
+        // With the engine primary, per-save whole-body history is exactly what
+        // the log+sessions replace; keep the table for legacy/rollback only.
+        if !enginePrimary {
+            insertComposeOpLocked(
+                itemId: id.uuidString,
+                ts: now.timeIntervalSince1970,
+                title: title,
+                body: body,
+                refItemId: refId,
+                blobKeys: keysJSON,
+                source: source,
+                parentHash: plan.parentHash,
+                contentHash: hash
+            )
+        }
         _ = recordClipboardEvent(
             itemId: id.uuidString,
             contentHash: hash,
@@ -4114,6 +4133,100 @@ final class DatabaseManager: ObservableObject {
         return nil
     }
 
+    struct InkstoneAuditRow {
+        /// Compare what the two sides *mean*, not how they print it.
+        ///
+        /// The engine renders markdown canonically: blank lines before lists and
+        /// fences come and go, and every ordered-list item prints as `1.`
+        /// (CommonMark). None of that is drift, so normalise it away — anything
+        /// left is a real difference in content.
+        static func equalIgnoringWhitespace(_ a: String, _ b: String) -> Bool {
+            func canonical(_ text: String) -> String {
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+                    let trimmed = line.drop { $0 == " " || $0 == "\t" }
+                    var body = String(trimmed)
+                    if let dot = body.firstIndex(of: "."), body[body.startIndex..<dot].allSatisfy({ $0.isNumber }),
+                       !body[body.startIndex..<dot].isEmpty {
+                        let after = body[body.index(after: dot)...]
+                        if after.first == " " { body = "- " + after.dropFirst() }
+                    }
+                    return body
+                }
+                return lines.joined(separator: " ")
+                    .split(whereSeparator: { $0.isWhitespace })
+                    .joined(separator: " ")
+            }
+            return canonical(a) == canonical(b)
+        }
+
+        var id: String
+        var matches: Bool
+        var projectionPrefix: String
+        var enginePrefix: String
+    }
+
+    /// Rewrite every note in the engine from the projection.
+    func inkstoneReconcile(completion: @escaping (Int, Int) -> Void) {
+        var bodies: [(String, String, TimeInterval)] = []
+        performReadSync {
+            guard let db = self.readDB ?? self.db else { return }
+            var stmt: OpaquePointer?
+            let sql = "SELECT id, COALESCE(text_content, ''), timestamp FROM clipboard_items WHERE type = 'note' AND deleted_at IS NULL;"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                let body = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                let ts = sqlite3_column_double(stmt, 2)
+                if !id.isEmpty { bodies.append((id, body, ts)) }
+            }
+        }
+        var written = 0
+        var failed = 0
+        for (id, body, ts) in bodies {
+            if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            if InkstoneShadow.shared.writePrimary(
+                id: id,
+                markdown: body,
+                updatedAt: Date(timeIntervalSince1970: ts)
+            ) {
+                written += 1
+            } else {
+                failed += 1
+            }
+        }
+        DispatchQueue.main.async { completion(written, failed) }
+    }
+
+    /// Walk notes and compare what ClipVault serves with what the engine holds.
+    func inkstoneAudit(limit: Int, completion: @escaping ([InkstoneAuditRow]) -> Void) {
+        var bodies: [(String, String)] = []
+        performReadSync {
+            guard let db = self.readDB ?? self.db else { return }
+            var stmt: OpaquePointer?
+            let sql = "SELECT id, COALESCE(text_content, '') FROM clipboard_items WHERE type = 'note' AND deleted_at IS NULL LIMIT ?;"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                let body = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                if !id.isEmpty { bodies.append((id, body)) }
+            }
+        }
+        let rows = bodies.map { (id, body) -> InkstoneAuditRow in
+            let engine = InkstoneShadow.shared.engineMarkdown(id: id) ?? ""
+            let matches = InkstoneAuditRow.equalIgnoringWhitespace(body, engine)
+            return InkstoneAuditRow(
+                id: id,
+                matches: matches,
+                projectionPrefix: String(body.prefix(80)),
+                enginePrefix: String(engine.prefix(80))
+            )
+        }
+        DispatchQueue.main.async { completion(rows) }
+    }
+
     // MARK: - Reader learning layer (personal, durable)
 
     private static let readerKinds: Set<String> = [
@@ -4121,7 +4234,30 @@ final class DatabaseManager: ObservableObject {
     ]
 
     /// One note-page query; no per-row history requests or mutable counters.
+    ///
+    /// With the engine primary the reading comes from the engine's edit-session
+    /// log, which survives compaction — the same 3-minute-session rule, kept
+    /// where the edits actually live.
     func noteEditCounts(ids: [UUID]) -> [String: Int] {
+        guard !ids.isEmpty else { return [:] }
+        if InkstoneShadow.shared.isPrimary {
+            var engineCounts: [String: Int] = [:]
+            for id in ids {
+                if let sessions = InkstoneShadow.shared.editSessions(id: id.uuidString) {
+                    engineCounts[id.uuidString] = sessions
+                }
+            }
+            if engineCounts.count == ids.count { return engineCounts }
+            var merged = engineCounts
+            for (key, value) in legacyNoteEditCounts(ids: ids.filter { merged[$0.uuidString] == nil }) {
+                merged[key] = value
+            }
+            return merged
+        }
+        return legacyNoteEditCounts(ids: ids)
+    }
+
+    private func legacyNoteEditCounts(ids: [UUID]) -> [String: Int] {
         guard !ids.isEmpty else { return [:] }
         var out: [String: Int] = [:]
         performReadSync {

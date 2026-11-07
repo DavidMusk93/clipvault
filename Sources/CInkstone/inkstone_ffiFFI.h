@@ -389,6 +389,11 @@ RustBuffer uniffi_inkstone_ffi_fn_method_vaulthandle_activity(uint64_t ptr, Rust
 int8_t uniffi_inkstone_ffi_fn_method_vaulthandle_apply_remote(uint64_t ptr, RustBuffer id, RustBuffer bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_BACKUP_TO
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_BACKUP_TO
+uint64_t uniffi_inkstone_ffi_fn_method_vaulthandle_backup_to(uint64_t ptr, RustBuffer path, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_COMPACT
 #define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_COMPACT
 uint64_t uniffi_inkstone_ffi_fn_method_vaulthandle_compact(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -859,6 +864,12 @@ uint16_t uniffi_inkstone_ffi_checksum_method_vaulthandle_activity(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_APPLY_REMOTE
 #define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_APPLY_REMOTE
 uint16_t uniffi_inkstone_ffi_checksum_method_vaulthandle_apply_remote(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_BACKUP_TO
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_BACKUP_TO
+uint16_t uniffi_inkstone_ffi_checksum_method_vaulthandle_backup_to(void
     
 );
 #endif

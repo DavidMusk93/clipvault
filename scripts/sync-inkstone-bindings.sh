@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-INKSTONE="${1:-../inkstone}"
+INKSTONE="${1:-$HOME/dev/inkstone}"
 OUT="$(mktemp -d)"
 "$INKSTONE/scripts/gen-bindings.sh" swift "$OUT" >/dev/null
 mkdir -p Sources/InkstoneFFI Sources/CInkstone
