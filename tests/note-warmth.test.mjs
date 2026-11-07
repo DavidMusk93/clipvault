@@ -98,7 +98,7 @@ test('the spine is the ordinal channel: one discrete tick per level', () => {
   for (let level = 0; level < 15; level++) {
     assert.ok(parseFloat(warmth.ratio(level)) < parseFloat(warmth.ratio(level + 1)));
   }
-  assert.match(html, /\.note-row\.note-warmth::after/);
+  assert.match(html, /\.note-row-clip::after/);
   assert.match(html, /width: calc\(\(100% - 20px\) \* var\(--edit-ratio, 0\)\)/);
   assert.match(html, /el\.style\.setProperty\('--edit-ratio', this\.ratio\(level\)\)/);
 });

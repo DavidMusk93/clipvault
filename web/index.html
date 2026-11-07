@@ -2135,6 +2135,14 @@
       -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
     }
     .snackbar.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .snackbar.show { pointer-events: auto; }
+    .snackbar-action {
+      border: 0; background: transparent; color: #64d2ff; cursor: pointer;
+      font: 600 14px/1 var(--font-ui); letter-spacing: -0.01em; padding: 2px 0 2px 10px;
+      border-left: 1px solid rgba(255, 255, 255, 0.18);
+    }
+    .snackbar-action[hidden] { display: none; }
+    .snackbar-action:active { opacity: 0.6; }
 
     @media (max-width: 720px) {
       :root { --chrome-pad-x: 14px; }
@@ -2316,31 +2324,64 @@
       width: calc(100% * var(--edit-ratio, 0)); background: var(--edit-spine);
     }
     .notes-list { flex: 1; overflow: auto; padding: 4px 8px 12px; }
+    /* Row = swipe track. The paper slides left to uncover one trailing action,
+       exactly like an Apple list row; a mouse reveals the same slot on hover. */
     .note-row {
       width: 100%; text-align: left; border: 0; background: transparent;
-      border-radius: 12px; padding: 10px 36px 11px 10px; cursor: pointer;
-      display: block; color: inherit; position: relative;
+      border-radius: 12px; padding: 0; margin-bottom: 4px; cursor: pointer;
+      display: block; color: inherit; position: relative; overflow: hidden;
+      touch-action: pan-y;
+    }
+    .note-row-clip {
+      position: relative; display: block; padding: 10px 36px 11px 10px;
+      border-radius: 12px; background: transparent; z-index: 1;
+      transition: transform 220ms var(--spring);
+    }
+    .note-row.note-warmth .note-row-clip {
+      background: var(--edit-paper); box-shadow: inset 0 0 0 0.5px var(--edit-edge);
     }
     /* Depth line: length is the level (16 lengths across the row), colour is the family.
        Nothing to compare, nothing to count — read it at a glance. */
-    .note-row.note-warmth::after {
+    .note-row-clip::after {
       content: ''; position: absolute; left: 10px; bottom: 0; height: 2px;
       width: calc((100% - 20px) * var(--edit-ratio, 0));
-      border-radius: 2px 2px 0 0; background: var(--edit-spine);
+      border-radius: 2px 2px 0 0; background: var(--edit-spine, transparent);
     }
-    .note-row.note-warmth {
-      background: var(--edit-paper); margin-bottom: 4px;
-      box-shadow: inset 0 0 0 0.5px var(--edit-edge);
-    }
-    .note-row.note-warmth.is-on {
-      background: var(--edit-paper); outline: 1.5px solid var(--accent-ink); outline-offset: -1.5px;
-    }
-    .note-row:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+    .note-row.note-warmth.is-on .note-row-clip { outline: 1.5px solid var(--accent-ink); outline-offset: -1.5px; }
+    .note-row:focus-visible .note-row-clip { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
     .note-row.note-warmth .nx, .note-row.note-warmth .nm { color: var(--note-secondary); }
     #notesPanel mark.search-hit { background: #F7E2A8; color: #3A2E0B; }
     .note-row.note-warmth.is-pinned .note-pin { color: var(--accent-ink); }
-    .note-row:active { transform: scale(0.99); }
-    .note-row.is-on { background: rgba(0, 0, 0, 0.06); }
+    .note-row:active .note-row-clip { transform: scale(0.99); }
+    /* The action slides in over the paper instead of dragging the paper's text
+       off the narrow sidebar; the note keeps its title while you decide. */
+    .note-row-actions {
+      position: absolute; top: 0; right: 0; bottom: 0; width: 84px; z-index: 2;
+      display: flex; align-items: stretch; justify-content: flex-end;
+      background: var(--danger); border-radius: 12px;
+      transform: translateX(calc(100% - var(--note-reveal, 0px)));
+      transition: transform 220ms var(--spring);
+    }
+    .note-del {
+      width: 84px; height: 100%; border: 0; background: transparent; color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+      font: 600 11px/1.1 var(--font-ui); letter-spacing: -0.01em; cursor: pointer;
+    }
+    .note-del .material-symbols-outlined { font-size: 20px; }
+    .note-del:active { background: rgba(0, 0, 0, 0.12); }
+    .note-row[data-swiped="1"] { --note-reveal: 84px; }
+    /* Keyboard: focusing the delete affordance reveals the slot it lives in. */
+    .note-row:focus-within:not(:focus) { --note-reveal: 84px; }
+    .note-row[data-swipe-live="1"] .note-row-actions { transition: none; }
+    @media (hover: hover) and (pointer: fine) {
+      .note-row:hover { --note-reveal: 84px; }
+      .note-row:hover .note-row-actions { transition-delay: 90ms; }
+      .note-row:hover .note-row-actions,
+      .note-row[data-swiped="1"] .note-row-actions { transition-delay: 0ms; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .note-row-clip, .note-row-actions { transition: none; }
+    }
     .note-pin {
       position: absolute; top: 8px; right: 6px;
       width: 28px; height: 28px; border: 0; border-radius: 8px;
@@ -3255,6 +3296,7 @@
   <div id="snackbar" class="snackbar">
     <span class="material-symbols-outlined" style="color:#64d2ff">check_circle</span>
     <span id="snackbarText">ok</span>
+    <button type="button" id="snackbarAction" class="snackbar-action" hidden></button>
   </div>
 
   <script>
@@ -4073,11 +4115,24 @@ window.ClipViewMasonry = Masonry;
     }
 
 
-    function toast(msg) {
+    let snackbarTimer = 0;
+    function toast(msg, action) {
       const el = document.getElementById('snackbar');
       document.getElementById('snackbarText').textContent = msg;
+      const btn = document.getElementById('snackbarAction');
+      clearTimeout(snackbarTimer);
+      if (btn) {
+        btn.hidden = !action;
+        btn.textContent = action ? action.label : '';
+        btn.onclick = action
+          ? (e) => { e.preventDefault(); e.stopPropagation(); el.classList.remove('show'); btn.hidden = true; action.onClick(); }
+          : null;
+      }
       el.classList.add('show');
-      setTimeout(() => el.classList.remove('show'), 2400);
+      snackbarTimer = setTimeout(() => {
+        el.classList.remove('show');
+        if (btn) btn.hidden = true;
+      }, action ? 6000 : 2400);
     }
 
     function normalizeContentHash(h) {
@@ -5001,6 +5056,163 @@ window.ClipViewMasonry = Masonry;
       paintNotesWarmthScale();
     }
 
+    /** Apple list semantics: travel decides delete / open / close. */
+    const NOTE_SWIPE_WIDTH = 84;
+    const NOTE_SWIPE_OPEN_AT = 30;
+    const NOTE_SWIPE_DELETE_AT = 130;
+    function noteSwipeDecision(offset) {
+      const dx = Number(offset) || 0;
+      if (dx <= -NOTE_SWIPE_DELETE_AT) return 'delete';
+      if (dx <= -NOTE_SWIPE_OPEN_AT) return 'open';
+      return 'close';
+    }
+
+    function setNoteRowSwiped(row, open) {
+      if (!row) return;
+      if (open) row.dataset.swiped = '1';
+      else delete row.dataset.swiped;
+      row.style.removeProperty('--note-reveal');
+      delete row.dataset.swipeLive;
+    }
+
+    function closeNoteSwipes(except) {
+      document.querySelectorAll('.note-row[data-swiped="1"]').forEach((row) => {
+        if (row !== except) setNoteRowSwiped(row, false);
+      });
+    }
+
+    /** Touch/pen only: 1:1 travel, then Apple thresholds. Mouse uses the hover slot. */
+    function bindNoteRowGestures(row) {
+      let pid = null;
+      let startX = 0;
+      let startY = 0;
+      let base = 0;
+      let offset = 0;
+      let decided = false;
+      let tracking = false;
+      row.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse') return;
+        if (e.target.closest && e.target.closest('[data-note-del]')) return;
+        closeNoteSwipes(row);
+        tracking = true;
+        decided = false;
+        pid = e.pointerId;
+        startX = e.clientX;
+        startY = e.clientY;
+        base = row.dataset.swiped === '1' ? -NOTE_SWIPE_WIDTH : 0;
+        offset = base;
+      });
+      row.addEventListener('pointermove', (e) => {
+        if (!tracking || e.pointerId !== pid) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        if (!decided) {
+          if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+          if (Math.abs(dy) > Math.abs(dx)) { tracking = false; return; }
+          decided = true;
+          row.dataset.swipeLive = '1';
+          try { row.setPointerCapture(pid); } catch (_) {}
+        }
+        offset = Math.max(-NOTE_SWIPE_WIDTH - 30, Math.min(0, base + dx));
+        row.style.setProperty('--note-reveal', Math.min(NOTE_SWIPE_WIDTH, -offset) + 'px');
+      });
+      const finish = (e) => {
+        if (!tracking || (e && e.pointerId !== pid)) return;
+        tracking = false;
+        if (!decided) {
+          delete row.dataset.swipeLive;
+          if (row.dataset.swiped === '1') {
+            row.dataset.suppressClick = '1';
+            setNoteRowSwiped(row, false);
+          }
+          return;
+        }
+        delete row.dataset.swipeLive;
+        row.style.removeProperty('--note-reveal');
+        const action = noteSwipeDecision(offset);
+        if (action === 'delete') {
+          setNoteRowSwiped(row, false);
+          if (row.dataset.noteId) deleteNote(row.dataset.noteId);
+        } else {
+          setNoteRowSwiped(row, action === 'open');
+        }
+      };
+      row.addEventListener('pointerup', finish);
+      row.addEventListener('pointercancel', finish);
+    }
+
+    document.addEventListener('pointerdown', (e) => {
+      if (!e.target.closest || !e.target.closest('.note-row')) closeNoteSwipes();
+    }, { passive: true });
+
+    function notesFind(id) {
+      return notesState.items.find((n) => n.id === id)
+        || (notesState.results || []).find((n) => n.id === id)
+        || null;
+    }
+
+    function removeNoteLocally(id) {
+      notesState.items = notesState.items.filter((n) => n.id !== id);
+      if (Array.isArray(notesState.results)) notesState.results = notesState.results.filter((n) => n.id !== id);
+    }
+
+    async function clearNotesSelection() {
+      notesState.id = null;
+      notesState.baseHash = '';
+      persistNotesId('');
+      const titleEl = document.getElementById('notesTitle');
+      if (titleEl) titleEl.value = '';
+      paintNotesTitleView();
+      paintNotesMergeHint('');
+      notesStatus('idle');
+      await ensureNotesEditor('', 'preview');
+      paintShareControls(null);
+      paintNotesLinkButton(null);
+      loadNotesRelated(null);
+    }
+
+    /** Soft delete to the 30-day recycle bin, with the Apple-style undo affordance. */
+    async function deleteNote(id) {
+      const note = notesFind(id);
+      if (!note || !id) return;
+      const title = noteTitleOf(note) || '未命名';
+      if (notesState.id === id && notesState.dirty) await saveNoteNow();
+      closeNoteSwipes();
+      try {
+        const res = await fetch(`${API}/api/clips?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!res.ok) { toast('删除失败'); return; }
+      } catch (_) {
+        toast('删除失败');
+        return;
+      }
+      const wasOpen = notesState.id === id;
+      const rest = notesState.items.filter((n) => n.id !== id);
+      removeNoteLocally(id);
+      paintNotesList();
+      if (wasOpen) {
+        if (rest[0]) await openNoteInPanel(rest[0].id);
+        else await clearNotesSelection();
+      }
+      toast(`已删除「${title}」`, { label: '撤销', onClick: () => undoDeleteNote(id) });
+    }
+
+    async function undoDeleteNote(id) {
+      try {
+        const res = await fetch(`${API}/api/clips/restore`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        if (!res.ok) { toast('撤销失败'); return; }
+      } catch (_) {
+        toast('撤销失败');
+        return;
+      }
+      await loadNotesList();
+      paintNotesList();
+      toast('已恢复');
+    }
+
     function fillNoteRow(btn, n, q) {
       btn.dataset.noteId = n.id;
       NoteWarmth.apply(btn, n);
@@ -5018,7 +5230,21 @@ window.ClipViewMasonry = Masonry;
         pin.className = 'note-pin';
         pin.setAttribute('role', 'button');
         pin.innerHTML = '<span class="material-symbols-outlined">keep</span>';
-        btn.replaceChildren(t, x, m, pin);
+        const clip = document.createElement('span');
+        clip.className = 'note-row-clip';
+        clip.append(t, x, m, pin);
+        const actions = document.createElement('span');
+        actions.className = 'note-row-actions';
+        const del = document.createElement('span');
+        del.className = 'note-del';
+        del.dataset.noteDel = '1';
+        del.setAttribute('role', 'button');
+        del.setAttribute('tabindex', '0');
+        del.setAttribute('aria-label', '删除笔记');
+        del.innerHTML = '<span class="material-symbols-outlined">delete</span><span>删除</span>';
+        actions.append(del);
+        btn.replaceChildren(actions, clip);
+        bindNoteRowGestures(btn);
         t.addEventListener('click', (e) => {
           const tag = e.target.closest && e.target.closest('.notes-tag');
           if (!tag) return;
@@ -5030,6 +5256,19 @@ window.ClipViewMasonry = Masonry;
           e.stopPropagation();
           const id = btn.dataset.noteId;
           if (id) toggleNotePin(id);
+        });
+        del.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const id = btn.dataset.noteId;
+          if (id) deleteNote(id);
+        });
+        del.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          e.stopPropagation();
+          const id = btn.dataset.noteId;
+          if (id) deleteNote(id);
         });
       }
       pin?.setAttribute('title', noteIsPinned(n) ? '取消置顶' : '置顶');
@@ -5101,7 +5340,20 @@ window.ClipViewMasonry = Masonry;
           btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'note-row';
-          btn.addEventListener('click', () => openNoteInPanel(n.id));
+          btn.addEventListener('click', () => {
+            if (btn.dataset.swiped === '1' || btn.dataset.suppressClick === '1') {
+              delete btn.dataset.suppressClick;
+              setNoteRowSwiped(btn, false);
+              return;
+            }
+            openNoteInPanel(btn.dataset.noteId);
+          });
+          btn.addEventListener('keydown', (e) => {
+            if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (btn.dataset.noteId) deleteNote(btn.dataset.noteId);
+          });
           root.insertBefore(btn, root.children[i] || null);
         } else if (btn !== root.children[i]) {
           root.insertBefore(btn, root.children[i] || null);
@@ -6455,9 +6707,10 @@ window.ClipViewMasonry = Masonry;
       if (searchQuery) params.set('q', searchQuery);
       if (currentView === 'trash') params.set('view', 'trash');
       // `clientFilter` never hides FTS hits, so a search is type-agnostic here too.
+      // The recycle bin keeps notes: soft-deleted notes must be restorable.
       if (!searchQuery) {
         if (currentFilter && currentFilter !== 'all') params.set('type', currentFilter);
-        else params.set('exclude', 'note');
+        else if (currentView !== 'trash') params.set('exclude', 'note');
       }
       if (DayStats.sig !== sig) {
         // Another filter set: the old days would silently answer for the new one.
@@ -7007,7 +7260,8 @@ window.ClipViewMasonry = Masonry;
       if (searchQuery) params.set('q', searchQuery);
       if (currentView === 'trash') params.set('view', 'trash');
       if (currentFilter && currentFilter !== 'all') params.set('type', currentFilter);
-      else params.set('exclude', 'note');
+      // Trash answers "what can I restore?"; notes belong there too.
+      else if (currentView !== 'trash') params.set('exclude', 'note');
     }
 
     async function fetchClipById(id) {
@@ -12091,6 +12345,19 @@ window.ClipViewMasonry = Masonry;
      */
     function applyRemoteClipRemoval(d) {
       const id = d && d.id ? String(d.id) : '';
+      // Notes live outside the wall model: a peer delete must clear the row and
+      // close the editor (without saving), a peer restore must bring the row back.
+      if (id && notesFind(id)) {
+        if (d.type === 'clip_restored') {
+          loadNotesList().then(() => paintNotesList()).catch(() => {});
+          return;
+        }
+        const wasOpen = notesState.id === id;
+        removeNoteLocally(id);
+        paintNotesList();
+        if (wasOpen) clearNotesSelection();
+        return;
+      }
       if (id && consumeLocalListMutation(id)) {
         // This tab already removed the card — keep scroll, do nothing.
         return;
