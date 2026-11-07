@@ -2358,7 +2358,7 @@
     .note-row.note-warmth .nx, .note-row.note-warmth .nm { color: var(--note-secondary); }
     #notesPanel mark.search-hit { background: #F7E2A8; color: #3A2E0B; }
     .note-row.note-warmth.is-pinned .note-pin { color: var(--accent-ink); }
-    .note-row:active .note-row-clip { transform: scale(0.99); }
+    .note-row:active .note-row-clip { transform: translateX(var(--note-swipe, 0px)) scale(0.99); }
     /* Apple's model: the paper moves, the action lives in the space it vacates. */
     .note-row-actions {
       position: absolute; top: 0; right: 0; bottom: 0; width: var(--note-action-w, 72px); z-index: 0;
@@ -5064,15 +5064,11 @@ window.ClipViewMasonry = Masonry;
       paintNotesWarmthScale();
     }
 
-    /** Apple list semantics: travel decides delete / open / close. */
+    /** A swipe only reveals the action. Deleting is always a separate, deliberate tap. */
     const NOTE_SWIPE_WIDTH = 72;
     const NOTE_SWIPE_OPEN_AT = 30;
-    const NOTE_SWIPE_DELETE_AT = NOTE_SWIPE_WIDTH + 54;
     function noteSwipeDecision(offset) {
-      const dx = Number(offset) || 0;
-      if (dx <= -NOTE_SWIPE_DELETE_AT) return 'delete';
-      if (dx <= -NOTE_SWIPE_OPEN_AT) return 'open';
-      return 'close';
+      return Number(offset) <= -NOTE_SWIPE_OPEN_AT ? 'open' : 'close';
     }
 
     function setNoteRowSwiped(row, open) {
@@ -5153,13 +5149,7 @@ window.ClipViewMasonry = Masonry;
         // The drag ends with a click on the row; swallow exactly that one.
         row.dataset.dragEnded = '1';
         setTimeout(() => { delete row.dataset.dragEnded; }, 400);
-        const action = noteSwipeDecision(travel);
-        if (action === 'delete') {
-          row.dataset.swiped = '1';
-          if (row.dataset.noteId) deleteNote(row.dataset.noteId);
-        } else {
-          setNoteRowSwiped(row, action === 'open');
-        }
+        setNoteRowSwiped(row, noteSwipeDecision(travel) === 'open');
       };
       row.addEventListener('pointerup', finish);
       row.addEventListener('pointercancel', finish);

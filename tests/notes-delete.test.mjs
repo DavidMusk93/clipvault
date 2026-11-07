@@ -42,19 +42,20 @@ function fnSource(name) {
 }
 
 const swipeDecision = new Function(
-  'const NOTE_SWIPE_WIDTH = 72; const NOTE_SWIPE_OPEN_AT = 30; const NOTE_SWIPE_DELETE_AT = 126;\n'
+  'const NOTE_SWIPE_WIDTH = 72; const NOTE_SWIPE_OPEN_AT = 30;\n'
   + fnSource('noteSwipeDecision') + '\nreturn noteSwipeDecision;',
 )();
 
-test('swipe travel decides delete / open / close on Apple thresholds', () => {
+test('a swipe only parks the row open; it never deletes by itself', () => {
   assert.equal(swipeDecision(0), 'close');
   assert.equal(swipeDecision(-29), 'close');
   assert.equal(swipeDecision(-30), 'open');
   assert.equal(swipeDecision(-72), 'open');
-  assert.equal(swipeDecision(-125), 'open');
-  assert.equal(swipeDecision(-126), 'delete');
-  assert.equal(swipeDecision(-220), 'delete');
+  assert.equal(swipeDecision(-400), 'open', 'dragging further must not destroy anything');
   assert.equal(swipeDecision(-10), 'close', 'dragging right from the open state closes');
+  const gestures = fnSource('bindNoteRowGestures');
+  assert.doesNotMatch(gestures, /deleteNote\(/, 'the gesture must not call the delete');
+  assert.doesNotMatch(gestures, /'delete'/);
 });
 
 test('the trailing action is drag-only: hover must never advertise deletion', () => {
