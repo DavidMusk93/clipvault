@@ -9199,8 +9199,13 @@ window.ClipViewMasonry = Masonry;
       ];
       for (const raw of candidates) {
         const s = String(raw || '').trim();
-        if (!s) continue;
-        try { return new URL(s).href; } catch (_) {}
+        // Only a single http(s) address. `new URL` accepts any scheme
+        // (`fdbd:…`) and deletes tab/newline before parsing, which glues lines.
+        if (!s || /[\s\u2028\u2029]/.test(s) || !/^https?:\/\//i.test(s)) continue;
+        try {
+          const u = new URL(s);
+          if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+        } catch (_) {}
       }
       return '';
     }

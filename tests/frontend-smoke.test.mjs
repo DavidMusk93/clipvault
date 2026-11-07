@@ -603,6 +603,21 @@ test('type=text URL clips still get archive/view toolbar', () => {
   assert.match(indexHtml, /archived: itemIsArchived\(item\)/, 'text path forwards archived');
 });
 
+test('itemUrlHref keeps newlines and spaces unless the whole text is one http(s) URL', () => {
+  const itemUrlHref = new Function(
+    `${extractFunctionSource(indexHtml, 'itemUrlHref')}\nreturn itemUrlHref;`,
+  )();
+  const ips = 'fdbd:dc05:11:636::23\nfdbd:dc05:11:636::41';
+  assert.equal(itemUrlHref({ type: 'text', textContent: ips }), '');
+  assert.equal(itemUrlHref({ type: 'text', textContent: ips.replace('\n', '\t') }), '');
+  assert.equal(itemUrlHref({ type: 'text', textContent: ips.replace('\n', ' ') }), '');
+  assert.equal(itemUrlHref({ type: 'text', textContent: 'fdbd:dc05:11:636::23' }), '');
+  assert.equal(itemUrlHref({ type: 'text', textContent: 'http://example.com/a\nb' }), '');
+  assert.equal(itemUrlHref({ type: 'text', textContent: 'mailto:a@b.com' }), '');
+  assert.equal(itemUrlHref({ type: 'text', textContent: '  https://example.com/a?x=1  ' }), 'https://example.com/a?x=1');
+  assert.equal(itemUrlHref({ type: 'text', preview: 'https://example.com' }), 'https://example.com/');
+});
+
 test('archived URL uses View sheet — no inline HTML in cards', () => {
   assert.match(indexHtml, /data-view-archive/, 'View button after archive');
   assert.match(indexHtml, /id="archiveReader"/, 'ClipVault reader sheet');
