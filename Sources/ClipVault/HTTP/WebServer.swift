@@ -486,6 +486,10 @@ class WebServer {
             sendWebFile("notes.html", connection: connection)
         } else if pathOnly == "/api/items" || pathOnly == "/api/clips" {
             sendItemsJSON(path: path, connection: connection)
+        } else if pathOnly == "/api/inkstone/probe" {
+            sendInkstoneProbe(path: path, connection: connection)
+        } else if pathOnly == "/api/inkstone/stats" {
+            sendInkstoneStats(connection: connection)
         } else if pathOnly == "/api/clips/days" {
             sendDayIndexJSON(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/image") {
@@ -963,6 +967,27 @@ class WebServer {
         pb.setData(payload, forType: type)
     }
 
+    /// Shadow-vault probe: proves the engine is indexing real notes. Disabled
+    /// (404) unless CLIPVAULT_INKSTONE_SHADOW=1.
+    private func sendInkstoneProbe(path: String, connection: HTTPByteSink) {
+        guard InkstoneShadow.shared.enabled else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        let query = URLComponents(string: "http://localhost\(path)")?
+            .queryItems?.first(where: { $0.name == "q" })?.value ?? ""
+        let hits = InkstoneShadow.shared.probe(query: query) ?? []
+        sendJSON(["ok": true, "query": query, "count": hits.count, "hits": hits], connection: connection)
+    }
+
+    private func sendInkstoneStats(connection: HTTPByteSink) {
+        guard InkstoneShadow.shared.enabled, let stats = InkstoneShadow.shared.stats() else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        sendJSON(["ok": true, "stats": stats], connection: connection)
+    }
+
     private func handleDeleteClip(path: String, connection: HTTPByteSink) {
         guard let comps = URLComponents(string: "http://localhost\(path)"),
               let idValue = comps.queryItems?.first(where: { $0.name == "id" })?.value,
@@ -974,6 +999,7 @@ class WebServer {
             guard let self = self else { return }
             if success {
                 // Soft-delete only — do not tombstone peers (row still exists for TTL).
+                InkstoneShadow.shared.forget(id: uuid.uuidString)
                 self.broadcastSSE(event: "clip_deleted", id: uuid.uuidString)
                 self.sendJSON(["status": "deleted", "soft": true], connection: connection)
             } else {
@@ -1746,6 +1772,11 @@ class WebServer {
                 return
             }
             CloudDocsSyncService.shared?.recordLocalCompose(item: result.item, parentHash: result.parentHash)
+            InkstoneShadow.shared.mirror(
+                id: result.item.id.uuidString,
+                markdown: result.item.textContent ?? "",
+                updatedAt: result.item.timestamp
+            )
             self.broadcastSSE(event: "compose_saved", id: result.item.id.uuidString)
             self.sendJSON([
                 "ok": true,

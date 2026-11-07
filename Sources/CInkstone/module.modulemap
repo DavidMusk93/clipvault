@@ -1,0 +1,4 @@
+module inkstone_ffiFFI {
+    header "inkstone_ffiFFI.h"
+    export *
+}
