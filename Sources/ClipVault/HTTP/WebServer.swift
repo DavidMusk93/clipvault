@@ -323,6 +323,8 @@ class WebServer {
                 return
             }
             handleBackupRun(connection: connection)
+        } else if method == "POST" && pathOnly == "/api/inkstone/reconcile" {
+            handleInkstoneReconcile(connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/run" {
             handleBackupRun(connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/restore" {
@@ -488,6 +490,8 @@ class WebServer {
             sendItemsJSON(path: path, connection: connection)
         } else if pathOnly == "/api/inkstone/probe" {
             sendInkstoneProbe(path: path, connection: connection)
+        } else if pathOnly == "/api/inkstone/audit" {
+            sendInkstoneAudit(path: path, connection: connection)
         } else if pathOnly == "/api/inkstone/stats" {
             sendInkstoneStats(connection: connection)
         } else if pathOnly == "/api/clips/days" {
@@ -978,6 +982,47 @@ class WebServer {
             .queryItems?.first(where: { $0.name == "q" })?.value ?? ""
         let hits = InkstoneShadow.shared.probe(query: query) ?? []
         sendJSON(["ok": true, "query": query, "count": hits.count, "hits": hits], connection: connection)
+    }
+
+    /// Re-mirror every note from the projection into the engine. Used after a
+    /// renderer fix: the projection is authoritative for text, so the engine can
+    /// always be rebuilt from it.
+    private func handleInkstoneReconcile(connection: HTTPByteSink) {
+        guard InkstoneShadow.shared.enabled else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        database.inkstoneReconcile { written, failed in
+            self.sendJSON([
+                "ok": failed == 0,
+                "written": written,
+                "failed": failed,
+            ], connection: connection)
+        }
+    }
+
+    /// Compare the engine's copy with the projection ClipVault serves, so drift
+    /// is a number and not a feeling. Whitespace-only differences are ignored:
+    /// the engine renders markdown, the host stores what the editor submitted.
+    private func sendInkstoneAudit(path: String, connection: HTTPByteSink) {
+        guard InkstoneShadow.shared.enabled else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        let limit = max(1, min(2000, Int(
+            URLComponents(string: "http://localhost\(path)")?
+                .queryItems?.first(where: { $0.name == "limit" })?.value ?? "200"
+        ) ?? 200))
+        database.inkstoneAudit(limit: limit) { rows in
+            let drift = rows.filter { !$0.matches }
+            self.sendJSON([
+                "ok": true,
+                "checked": rows.count,
+                "drift": drift.count,
+                "enginePrimary": InkstoneShadow.shared.isPrimary,
+                "samples": drift.prefix(5).map { ["id": $0.id, "projection": $0.projectionPrefix, "engine": $0.enginePrefix] },
+            ], connection: connection)
+        }
     }
 
     private func sendInkstoneStats(connection: HTTPByteSink) {

@@ -21,6 +21,11 @@ final class InkstoneShadow {
     /// Vault file, or nil when the shadow is disabled.
     let path: String?
 
+    /// `CLIPVAULT_INKSTONE_PRIMARY=1` moves the note write path into the engine:
+    /// a note is written to the vault **first**, and only then projected into
+    /// ClipVault's own tables. Off means the old path stays authoritative.
+    let isPrimary: Bool
+
     private let queue = DispatchQueue(label: "clipvault.inkstone.shadow", qos: .utility)
     private var vault: AnyObject?
     private var openFailed = false
@@ -29,7 +34,8 @@ final class InkstoneShadow {
 
     private init() {
         let env = ProcessInfo.processInfo.environment
-        guard env["CLIPVAULT_INKSTONE_SHADOW"] == "1" else {
+        isPrimary = env["CLIPVAULT_INKSTONE_PRIMARY"] == "1"
+        guard isPrimary || env["CLIPVAULT_INKSTONE_SHADOW"] == "1" else {
             path = nil
             return
         }
@@ -66,6 +72,71 @@ final class InkstoneShadow {
         }
         #else
         _ = (id, markdown, updatedAt)
+        #endif
+    }
+
+    /// Engine-first write. Returns false when the engine refused, and the caller
+    /// must then fail the save instead of letting the projection drift.
+    func writePrimary(id: String, markdown: String, updatedAt: Date) -> Bool {
+        #if INKSTONE
+        guard isPrimary, let path, let vault = openVault(path) else { return false }
+        let ms = Int64(updatedAt.timeIntervalSince1970 * 1000)
+        do {
+            if let existing = try vault.load(id: id) {
+                try existing.setMarkdown(markdown: markdown)
+                _ = try vault.saveAndIndex(note: existing)
+            } else {
+                _ = try vault.importMarkdown(
+                    markdown: markdown,
+                    id: id,
+                    createdAt: ms,
+                    updatedAt: ms
+                )
+            }
+            return true
+        } catch {
+            record(error)
+            return false
+        }
+        #else
+        _ = (id, markdown, updatedAt)
+        return false
+        #endif
+    }
+
+    /// The engine's markdown for a note (audit / repair).
+    func engineMarkdown(id: String) -> String? {
+        #if INKSTONE
+        guard let path, let vault = openVault(path) else { return nil }
+        guard let note = try? vault.load(id: id) else { return nil }
+        return note.markdown()
+        #else
+        _ = id
+        return nil
+        #endif
+    }
+
+    /// Writing sessions the engine recorded — the warmth reading once the engine
+    /// owns the write path.
+    func editSessions(id: String) -> Int? {
+        #if INKSTONE
+        guard let path, let vault = openVault(path) else { return nil }
+        guard let activity = try? vault.activity(id: id) else { return nil }
+        return Int(activity.sessions) + (activity.inProgress ? 1 : 0)
+        #else
+        _ = id
+        return nil
+        #endif
+    }
+
+    /// Consistent copy of the vault, for the snapshot taken before a flip.
+    func backup(to path: String) -> UInt64? {
+        #if INKSTONE
+        guard let vaultPath = self.path, let vault = openVault(vaultPath) else { return nil }
+        return try? vault.backupTo(path: path)
+        #else
+        _ = path
+        return nil
         #endif
     }
 

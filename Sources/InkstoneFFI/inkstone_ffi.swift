@@ -1008,6 +1008,12 @@ public protocol VaultHandleProtocol: AnyObject, Sendable {
     func applyRemote(id: String, bytes: Data) throws  -> Bool
     
     /**
+     * Consistent single-file copy of the vault (`VACUUM INTO`). Safe while the
+     * app is writing; this is what a pre-cutover safety snapshot should use.
+     */
+    func backupTo(path: String) throws  -> UInt64
+    
+    /**
      * Fold the oplog and reclaim space. Returns the number of notes compacted.
      */
     func compact() throws  -> UInt64
@@ -1153,6 +1159,20 @@ open func applyRemote(id: String, bytes: Data)throws  -> Bool  {
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterData.lower(bytes),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Consistent single-file copy of the vault (`VACUUM INTO`). Safe while the
+     * app is writing; this is what a pre-cutover safety snapshot should use.
+     */
+open func backupTo(path: String)throws  -> UInt64  {
+    return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
+        uniffiCallStatus in
+    uniffi_inkstone_ffi_fn_method_vaulthandle_backup_to(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(path),uniffiCallStatus
     )
 })
 }
@@ -1911,6 +1931,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_inkstone_ffi_checksum_method_vaulthandle_apply_remote() != 3059) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_backup_to() != 7874) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_inkstone_ffi_checksum_method_vaulthandle_compact() != 14087) {
