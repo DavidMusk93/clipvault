@@ -4131,6 +4131,8 @@ final class DatabaseManager: ObservableObject {
             guard sqlite3_prepare_v2(db, NoteEditActivity.countSQL(placeholders: placeholders), -1, &stmt, nil) == SQLITE_OK else { return }
             defer { sqlite3_finalize(stmt) }
             for (i, id) in ids.enumerated() { self.bindText(stmt, Int32(i + 1), id.uuidString) }
+            // Trailing `?`: a save burst only becomes an edit after it goes quiet.
+            sqlite3_bind_double(stmt, Int32(ids.count + 1), Date().timeIntervalSince1970)
             while sqlite3_step(stmt) == SQLITE_ROW {
                 guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) else { continue }
                 out[id] = max(0, Int(sqlite3_column_int64(stmt, 1)))
