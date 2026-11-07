@@ -57,16 +57,22 @@ test('swipe travel decides delete / open / close on Apple thresholds', () => {
   assert.equal(swipeDecision(-10), 'close', 'dragging right from the open state closes');
 });
 
-test('the row ships one trailing action, not a second mouse-only affordance', () => {
+test('the trailing action is drag-only: hover must never advertise deletion', () => {
   assert.match(html, /\.note-row-actions \{/);
   assert.match(html, /\.note-del \{/);
   assert.match(html, /\.note-row\[data-swiped="1"\] \{ --note-reveal: 84px; \}/);
   assert.match(html, /transform: translateX\(calc\(100% - var\(--note-reveal, 0px\)\)\)/);
-  assert.match(html, /@media \(hover: hover\) and \(pointer: fine\) \{[\s\S]{0,200}\.note-row:hover \{ --note-reveal: 84px; \}/);
   assert.match(html, /touch-action: pan-y/);
   assert.match(html, /prefers-reduced-motion: reduce\) \{\s*\.note-row-clip, \.note-row-actions \{ transition: none; \}/);
   assert.match(html, /data-note-del/);
-  assert.match(html, /aria-label', '删除笔记'|aria-label">删除笔记|'aria-label', '删除笔记'/);
+  assert.doesNotMatch(html, /\.note-row:hover \{ --note-reveal/, 'hover reveal turns the list into a delete surface');
+  assert.doesNotMatch(html, /:focus-within:not\(:focus\)/, 'focus must not pop the action either');
+  const gestures = fnSource('bindNoteRowGestures');
+  assert.doesNotMatch(gestures, /pointerType === 'mouse'/, 'a mouse drag must reveal the same action as a finger');
+  assert.match(gestures, /setPointerCapture/);
+  const swiped = fnSource('setNoteRowSwiped');
+  assert.match(swiped, /tabindex/, 'the action only joins the tab order while it is revealed');
+  assert.match(html, /key === 'Escape' && btn\.dataset\.swiped === '1'/);
 });
 
 test('the recycle bin keeps notes so a delete is recoverable', () => {

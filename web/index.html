@@ -2369,16 +2369,10 @@
     }
     .note-del .material-symbols-outlined { font-size: 20px; }
     .note-del:active { background: rgba(0, 0, 0, 0.12); }
+    /* Only a left drag reveals the action. Hover never does: the list must not
+       advertise deletion as its main interaction. */
     .note-row[data-swiped="1"] { --note-reveal: 84px; }
-    /* Keyboard: focusing the delete affordance reveals the slot it lives in. */
-    .note-row:focus-within:not(:focus) { --note-reveal: 84px; }
     .note-row[data-swipe-live="1"] .note-row-actions { transition: none; }
-    @media (hover: hover) and (pointer: fine) {
-      .note-row:hover { --note-reveal: 84px; }
-      .note-row:hover .note-row-actions { transition-delay: 90ms; }
-      .note-row:hover .note-row-actions,
-      .note-row[data-swiped="1"] .note-row-actions { transition-delay: 0ms; }
-    }
     @media (prefers-reduced-motion: reduce) {
       .note-row-clip, .note-row-actions { transition: none; }
     }
@@ -5071,6 +5065,8 @@ window.ClipViewMasonry = Masonry;
       if (!row) return;
       if (open) row.dataset.swiped = '1';
       else delete row.dataset.swiped;
+      const del = row.querySelector('[data-note-del]');
+      if (del) del.setAttribute('tabindex', open ? '0' : '-1');
       row.style.removeProperty('--note-reveal');
       delete row.dataset.swipeLive;
     }
@@ -5091,8 +5087,8 @@ window.ClipViewMasonry = Masonry;
       let decided = false;
       let tracking = false;
       row.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'mouse') return;
         if (e.target.closest && e.target.closest('[data-note-del]')) return;
+        if (e.button != null && e.button !== 0) return;
         closeNoteSwipes(row);
         tracking = true;
         decided = false;
@@ -5129,6 +5125,9 @@ window.ClipViewMasonry = Masonry;
         }
         delete row.dataset.swipeLive;
         row.style.removeProperty('--note-reveal');
+        // The drag ends with a click on the row; swallow exactly that one.
+        row.dataset.dragEnded = '1';
+        setTimeout(() => { delete row.dataset.dragEnded; }, 400);
         const action = noteSwipeDecision(offset);
         if (action === 'delete') {
           setNoteRowSwiped(row, false);
@@ -5239,7 +5238,7 @@ window.ClipViewMasonry = Masonry;
         del.className = 'note-del';
         del.dataset.noteDel = '1';
         del.setAttribute('role', 'button');
-        del.setAttribute('tabindex', '0');
+        del.setAttribute('tabindex', '-1');
         del.setAttribute('aria-label', '删除笔记');
         del.innerHTML = '<span class="material-symbols-outlined">delete</span><span>删除</span>';
         actions.append(del);
@@ -5341,6 +5340,10 @@ window.ClipViewMasonry = Masonry;
           btn.type = 'button';
           btn.className = 'note-row';
           btn.addEventListener('click', () => {
+            if (btn.dataset.dragEnded === '1') {
+              delete btn.dataset.dragEnded;
+              return;
+            }
             if (btn.dataset.swiped === '1' || btn.dataset.suppressClick === '1') {
               delete btn.dataset.suppressClick;
               setNoteRowSwiped(btn, false);
@@ -5349,6 +5352,12 @@ window.ClipViewMasonry = Masonry;
             openNoteInPanel(btn.dataset.noteId);
           });
           btn.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && btn.dataset.swiped === '1') {
+              e.preventDefault();
+              e.stopPropagation();
+              setNoteRowSwiped(btn, false);
+              return;
+            }
             if (e.key !== 'Delete' && e.key !== 'Backspace') return;
             e.preventDefault();
             e.stopPropagation();
