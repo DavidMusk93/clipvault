@@ -2331,12 +2331,18 @@
       border-radius: 12px; padding: 0; margin-bottom: 4px; cursor: pointer;
       display: block; color: inherit; position: relative; overflow: hidden;
       touch-action: pan-y;
+      /* The row's leading edge dissolves as the paper slides under it, so a
+         clipped title never reads as a torn word. Tied to the drag progress. */
+      -webkit-mask-image: linear-gradient(to right, transparent 0, #000 calc(var(--note-progress, 0) * 20px));
+      mask-image: linear-gradient(to right, transparent 0, #000 calc(var(--note-progress, 0) * 20px));
     }
     .note-row-clip {
       position: relative; display: block; padding: 10px 36px 11px 10px;
       border-radius: 12px; background: transparent; z-index: 1;
-      transition: transform 220ms var(--spring);
+      transform: translateX(var(--note-swipe, 0px));
+      transition: transform 340ms cubic-bezier(0.22, 1.14, 0.36, 1);
     }
+    .note-row[data-swiping="1"] .note-row-clip { transition: none; }
     .note-row.note-warmth .note-row-clip {
       background: var(--edit-paper); box-shadow: inset 0 0 0 0.5px var(--edit-edge);
     }
@@ -2353,26 +2359,32 @@
     #notesPanel mark.search-hit { background: #F7E2A8; color: #3A2E0B; }
     .note-row.note-warmth.is-pinned .note-pin { color: var(--accent-ink); }
     .note-row:active .note-row-clip { transform: scale(0.99); }
-    /* The action slides in over the paper instead of dragging the paper's text
-       off the narrow sidebar; the note keeps its title while you decide. */
+    /* Apple's model: the paper moves, the action lives in the space it vacates. */
     .note-row-actions {
-      position: absolute; top: 0; right: 0; bottom: 0; width: 84px; z-index: 2;
+      position: absolute; top: 0; right: 0; bottom: 0; width: var(--note-action-w, 72px); z-index: 0;
       display: flex; align-items: stretch; justify-content: flex-end;
-      background: var(--danger); border-radius: 12px;
-      transform: translateX(calc(100% - var(--note-reveal, 0px)));
-      transition: transform 220ms var(--spring);
+      background: var(--danger); border-radius: 0 12px 12px 0; overflow: hidden;
     }
     .note-del {
-      width: 84px; height: 100%; border: 0; background: transparent; color: #fff;
+      width: 100%; height: 100%; border: 0; background: transparent; color: #fff;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
       font: 600 11px/1.1 var(--font-ui); letter-spacing: -0.01em; cursor: pointer;
+      opacity: calc(0.35 + 0.65 * var(--note-progress, 0));
+      transform: scale(calc(0.86 + 0.14 * var(--note-progress, 0)));
+      transition: opacity 120ms linear, transform 120ms linear;
     }
+    .note-row[data-swiping="1"] .note-del { transition: none; }
     .note-del .material-symbols-outlined { font-size: 20px; }
     .note-del:active { background: rgba(0, 0, 0, 0.12); }
     /* Only a left drag reveals the action. Hover never does: the list must not
        advertise deletion as its main interaction. */
-    .note-row[data-swiped="1"] { --note-reveal: 84px; }
-    .note-row[data-swipe-live="1"] .note-row-actions { transition: none; }
+    .note-row[data-swiped="1"] { --note-swipe: calc(-1 * var(--note-action-w, 72px)); --note-progress: 1; }
+    /* Full-swipe / confirmed delete: the row leaves the same way it moved. */
+    .note-row.is-leaving { pointer-events: none; }
+    .note-row.is-leaving .note-row-clip {
+      transform: translateX(-108%); opacity: 0;
+      transition: transform 220ms cubic-bezier(0.4, 0, 1, 1), opacity 180ms ease-out;
+    }
     @media (prefers-reduced-motion: reduce) {
       .note-row-clip, .note-row-actions { transition: none; }
     }
@@ -2383,6 +2395,8 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .note-pin .material-symbols-outlined { font-size: 16px; }
+    .note-pin { transition: opacity 160ms ease-out; }
+    .note-row[data-swiped="1"] .note-pin { opacity: 0; }
     .note-row.is-pinned .note-pin { color: var(--accent); }
     .note-pin:active { transform: scale(0.94); }
     .note-row .nt {
@@ -5051,9 +5065,9 @@ window.ClipViewMasonry = Masonry;
     }
 
     /** Apple list semantics: travel decides delete / open / close. */
-    const NOTE_SWIPE_WIDTH = 84;
+    const NOTE_SWIPE_WIDTH = 72;
     const NOTE_SWIPE_OPEN_AT = 30;
-    const NOTE_SWIPE_DELETE_AT = 130;
+    const NOTE_SWIPE_DELETE_AT = NOTE_SWIPE_WIDTH + 54;
     function noteSwipeDecision(offset) {
       const dx = Number(offset) || 0;
       if (dx <= -NOTE_SWIPE_DELETE_AT) return 'delete';
@@ -5067,7 +5081,9 @@ window.ClipViewMasonry = Masonry;
       else delete row.dataset.swiped;
       const del = row.querySelector('[data-note-del]');
       if (del) del.setAttribute('tabindex', open ? '0' : '-1');
-      row.style.removeProperty('--note-reveal');
+      row.style.removeProperty('--note-swipe');
+      row.style.removeProperty('--note-progress');
+      delete row.dataset.swiping;
       delete row.dataset.swipeLive;
     }
 
@@ -5084,6 +5100,7 @@ window.ClipViewMasonry = Masonry;
       let startY = 0;
       let base = 0;
       let offset = 0;
+      let travel = 0;
       let decided = false;
       let tracking = false;
       row.addEventListener('pointerdown', (e) => {
@@ -5097,6 +5114,7 @@ window.ClipViewMasonry = Masonry;
         startY = e.clientY;
         base = row.dataset.swiped === '1' ? -NOTE_SWIPE_WIDTH : 0;
         offset = base;
+        travel = base;
       });
       row.addEventListener('pointermove', (e) => {
         if (!tracking || e.pointerId !== pid) return;
@@ -5107,10 +5125,15 @@ window.ClipViewMasonry = Masonry;
           if (Math.abs(dy) > Math.abs(dx)) { tracking = false; return; }
           decided = true;
           row.dataset.swipeLive = '1';
+          row.dataset.swiping = '1';
           try { row.setPointerCapture(pid); } catch (_) {}
         }
-        offset = Math.max(-NOTE_SWIPE_WIDTH - 30, Math.min(0, base + dx));
-        row.style.setProperty('--note-reveal', Math.min(NOTE_SWIPE_WIDTH, -offset) + 'px');
+        travel = base + dx;
+        // Past the open position the row resists, like an iOS cell at its stop.
+        const over = Math.max(0, -travel - NOTE_SWIPE_WIDTH);
+        offset = -Math.min(NOTE_SWIPE_WIDTH + 26, Math.max(0, -travel) + over * 0.35);
+        row.style.setProperty('--note-swipe', offset + 'px');
+        row.style.setProperty('--note-progress', String(Math.min(1, Math.max(0, -offset / NOTE_SWIPE_WIDTH))));
       });
       const finish = (e) => {
         if (!tracking || (e && e.pointerId !== pid)) return;
@@ -5124,13 +5147,15 @@ window.ClipViewMasonry = Masonry;
           return;
         }
         delete row.dataset.swipeLive;
-        row.style.removeProperty('--note-reveal');
+        delete row.dataset.swiping;
+        row.style.removeProperty('--note-swipe');
+        row.style.removeProperty('--note-progress');
         // The drag ends with a click on the row; swallow exactly that one.
         row.dataset.dragEnded = '1';
         setTimeout(() => { delete row.dataset.dragEnded; }, 400);
-        const action = noteSwipeDecision(offset);
+        const action = noteSwipeDecision(travel);
         if (action === 'delete') {
-          setNoteRowSwiped(row, false);
+          row.dataset.swiped = '1';
           if (row.dataset.noteId) deleteNote(row.dataset.noteId);
         } else {
           setNoteRowSwiped(row, action === 'open');
@@ -5170,20 +5195,36 @@ window.ClipViewMasonry = Masonry;
       loadNotesRelated(null);
     }
 
+    function noteRowEl(id) {
+      return [...document.querySelectorAll('.note-row')].find((row) => row.dataset.noteId === id) || null;
+    }
+
+    /** The row leaves the way it was moved; reduced motion just drops it. */
+    function exitNoteRow(row) {
+      if (!row) return Promise.resolve();
+      row.classList.add('is-leaving');
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduce) return Promise.resolve();
+      return new Promise((resolve) => setTimeout(resolve, 210));
+    }
+
     /** Soft delete to the 30-day recycle bin, with the Apple-style undo affordance. */
     async function deleteNote(id) {
       const note = notesFind(id);
       if (!note || !id) return;
       const title = noteTitleOf(note) || '未命名';
       if (notesState.id === id && notesState.dirty) await saveNoteNow();
-      closeNoteSwipes();
+      const row = noteRowEl(id);
+      closeNoteSwipes(row);
       try {
         const res = await fetch(`${API}/api/clips?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-        if (!res.ok) { toast('删除失败'); return; }
+        if (!res.ok) { row?.classList.remove('is-leaving'); toast('删除失败'); return; }
       } catch (_) {
+        row?.classList.remove('is-leaving');
         toast('删除失败');
         return;
       }
+      await exitNoteRow(row);
       const wasOpen = notesState.id === id;
       const rest = notesState.items.filter((n) => n.id !== id);
       removeNoteLocally(id);

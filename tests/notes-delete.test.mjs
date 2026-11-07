@@ -42,7 +42,7 @@ function fnSource(name) {
 }
 
 const swipeDecision = new Function(
-  'const NOTE_SWIPE_WIDTH = 84; const NOTE_SWIPE_OPEN_AT = 30; const NOTE_SWIPE_DELETE_AT = 130;\n'
+  'const NOTE_SWIPE_WIDTH = 72; const NOTE_SWIPE_OPEN_AT = 30; const NOTE_SWIPE_DELETE_AT = 126;\n'
   + fnSource('noteSwipeDecision') + '\nreturn noteSwipeDecision;',
 )();
 
@@ -50,9 +50,9 @@ test('swipe travel decides delete / open / close on Apple thresholds', () => {
   assert.equal(swipeDecision(0), 'close');
   assert.equal(swipeDecision(-29), 'close');
   assert.equal(swipeDecision(-30), 'open');
-  assert.equal(swipeDecision(-84), 'open');
-  assert.equal(swipeDecision(-129), 'open');
-  assert.equal(swipeDecision(-130), 'delete');
+  assert.equal(swipeDecision(-72), 'open');
+  assert.equal(swipeDecision(-125), 'open');
+  assert.equal(swipeDecision(-126), 'delete');
   assert.equal(swipeDecision(-220), 'delete');
   assert.equal(swipeDecision(-10), 'close', 'dragging right from the open state closes');
 });
@@ -60,12 +60,17 @@ test('swipe travel decides delete / open / close on Apple thresholds', () => {
 test('the trailing action is drag-only: hover must never advertise deletion', () => {
   assert.match(html, /\.note-row-actions \{/);
   assert.match(html, /\.note-del \{/);
-  assert.match(html, /\.note-row\[data-swiped="1"\] \{ --note-reveal: 84px; \}/);
-  assert.match(html, /transform: translateX\(calc\(100% - var\(--note-reveal, 0px\)\)\)/);
+  assert.match(html, /\.note-row\[data-swiped="1"\] \{ --note-swipe: calc\(-1 \* var\(--note-action-w, 72px\)\); --note-progress: 1; \}/);
+  assert.match(html, /--note-progress, 0\) \* 20px/);
+  assert.match(html, /border-radius: 0 12px 12px 0/);
+  assert.match(html, /transform: translateX\(var\(--note-swipe, 0px\)\)/);
+  assert.match(html, /transform 340ms cubic-bezier\(0\.22, 1\.14, 0\.36, 1\)/);
+  assert.match(html, /\.note-row\.is-leaving \.note-row-clip/);
+  assert.match(html, /--note-progress/);
   assert.match(html, /touch-action: pan-y/);
   assert.match(html, /prefers-reduced-motion: reduce\) \{\s*\.note-row-clip, \.note-row-actions \{ transition: none; \}/);
   assert.match(html, /data-note-del/);
-  assert.doesNotMatch(html, /\.note-row:hover \{ --note-reveal/, 'hover reveal turns the list into a delete surface');
+  assert.doesNotMatch(html, /\.note-row:hover \{ --note-swipe/, 'hover reveal turns the list into a delete surface');
   assert.doesNotMatch(html, /:focus-within:not\(:focus\)/, 'focus must not pop the action either');
   const gestures = fnSource('bindNoteRowGestures');
   assert.doesNotMatch(gestures, /pointerType === 'mouse'/, 'a mouse drag must reveal the same action as a finger');
@@ -156,7 +161,7 @@ test('deleting a note removes the row, offers undo, and undo restores it', { ski
   const id = first.dataset.noteId;
   assert.ok(first.querySelector('.note-del'), 'each row carries the trailing action');
   first.querySelector('.note-del').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
-  await settle(300);
+  await settle(500);
   assert.equal(w.document.querySelectorAll('.note-row').length, 1, 'the deleted row leaves the list');
   assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.includes(id)), 'soft delete hits the API');
   const snack = w.document.getElementById('snackbar');
@@ -179,7 +184,7 @@ test('deleting the open note opens the next one instead of a stale paper', { ski
   await settle(300);
   assert.equal(w.eval('notesState.id'), 'note-1');
   await w.deleteNote('note-1');
-  await settle(300);
+  await settle(500);
   assert.equal(w.eval('notesState.id'), 'note-2', 'selection moves on');
   assert.match(w.document.getElementById('notesTitle').value, /乙/);
 });
@@ -191,7 +196,7 @@ test('keyboard Delete on a focused row deletes it', { skip: skipJsdom }, async (
   const row = w.document.querySelector('.note-row');
   const id = row.dataset.noteId;
   row.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
-  await settle(300);
+  await settle(500);
   assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.includes(id)));
   assert.equal(w.document.querySelectorAll('.note-row').length, 1);
 });
