@@ -152,11 +152,25 @@ final class InkstoneShadow {
         #endif
     }
 
-    /// Feed one opaque peer message; returns the messages to hand back.
-    func syncReceive(note: String, message: Data) -> [Data]? {
+    /// One step of a sync exchange. `changed` means the engine already holds
+    /// new content that the host must project into its own tables.
+    struct SyncOutcome {
+        var outbound: [Data]
+        var changed: Bool
+        var markdown: String
+        var title: String
+    }
+
+    func syncReceive(note: String, message: Data) -> SyncOutcome? {
         #if INKSTONE
         guard enabled, let session = self.session(note) else { return nil }
-        return try? session.receive(message: message)
+        guard let step = try? session.receiveStep(message: message) else { return nil }
+        return SyncOutcome(
+            outbound: step.outbound,
+            changed: step.changed,
+            markdown: step.markdown,
+            title: step.title
+        )
         #else
         _ = (note, message)
         return nil

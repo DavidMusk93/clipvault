@@ -1009,9 +1009,10 @@ public protocol SyncHandleProtocol: AnyObject, Sendable {
     func note()  -> String
     
     /**
-     * Feed one opaque message; returns the messages to hand back to the peer.
+     * Feed one opaque message. The engine has already persisted whatever it
+     * accepted; `markdown` is what the host should project into its own tables.
      */
-    func receive(message: Data) throws  -> [Data]
+    func receiveStep(message: Data) throws  -> SyncStepFfi
     
     /**
      * Payload for a pull-style transport.
@@ -1098,12 +1099,13 @@ open func note() -> String  {
 }
     
     /**
-     * Feed one opaque message; returns the messages to hand back to the peer.
+     * Feed one opaque message. The engine has already persisted whatever it
+     * accepted; `markdown` is what the host should project into its own tables.
      */
-open func receive(message: Data)throws  -> [Data]  {
-    return try  FfiConverterSequenceData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
+open func receiveStep(message: Data)throws  -> SyncStepFfi  {
+    return try  FfiConverterTypeSyncStepFfi_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_synchandle_receive(
+    uniffi_inkstone_ffi_fn_method_synchandle_receive_step(
             self.uniffiCloneHandle(),
         FfiConverterData.lower(message),uniffiCallStatus
     )
@@ -1850,6 +1852,99 @@ public func FfiConverterTypeSearchHitFfi_lower(_ value: SearchHitFfi) -> RustBuf
 }
 
 
+/**
+ * One step of a sync exchange, in host terms.
+ */
+public struct SyncStepFfi: Equatable, Hashable {
+    /**
+     * Messages to hand back to the peer, already encoded.
+     */
+    public var outbound: [Data]
+    /**
+     * The engine's note changed (it has already been saved by then).
+     */
+    public var changed: Bool
+    /**
+     * The peer's version is covered by this note.
+     */
+    public var converged: Bool
+    /**
+     * Current markdown, for the host to project into its own storage.
+     */
+    public var markdown: String
+    public var title: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Messages to hand back to the peer, already encoded.
+         */outbound: [Data], 
+        /**
+         * The engine's note changed (it has already been saved by then).
+         */changed: Bool, 
+        /**
+         * The peer's version is covered by this note.
+         */converged: Bool, 
+        /**
+         * Current markdown, for the host to project into its own storage.
+         */markdown: String, title: String) {
+        self.outbound = outbound
+        self.changed = changed
+        self.converged = converged
+        self.markdown = markdown
+        self.title = title
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SyncStepFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSyncStepFfi: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncStepFfi {
+        return
+            try SyncStepFfi(
+                outbound: FfiConverterSequenceData.read(from: &buf), 
+                changed: FfiConverterBool.read(from: &buf), 
+                converged: FfiConverterBool.read(from: &buf), 
+                markdown: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SyncStepFfi, into buf: inout [UInt8]) {
+        FfiConverterSequenceData.write(value.outbound, into: &buf)
+        FfiConverterBool.write(value.changed, into: &buf)
+        FfiConverterBool.write(value.converged, into: &buf)
+        FfiConverterString.write(value.markdown, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncStepFfi_lift(_ buf: RustBuffer) throws -> SyncStepFfi {
+    return try FfiConverterTypeSyncStepFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncStepFfi_lower(_ value: SyncStepFfi) -> RustBuffer {
+    return FfiConverterTypeSyncStepFfi.lower(value)
+}
+
+
 public 
 enum InkError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
@@ -2155,7 +2250,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_inkstone_ffi_checksum_method_synchandle_note() != 18678) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_synchandle_receive() != 8770) {
+    if (uniffi_inkstone_ffi_checksum_method_synchandle_receive_step() != 10487) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_inkstone_ffi_checksum_method_synchandle_updates_for_peer() != 1133) {
