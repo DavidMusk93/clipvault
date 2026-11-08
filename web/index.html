@@ -2391,8 +2391,9 @@
        the paper families answer edit volume, amber answers tags, cream answers
        search hits, accent answers selection. A tinted pin glyph therefore reads
        as one more warm/cool patch on an already tinted row — which is exactly
-       why pinning did not show. Spend shape and ink weight instead: hairline
-       grey = free, solid ink chip = pinned, legible on all 16 papers. */
+       why pinning did not show. Spend shape, not area: hairline grey = free,
+       solid ink glyph = pinned. No chip, no plate — the 置顶 header already
+       names the block, so the row only has to mark itself. */
     .note-pin {
       position: absolute; top: 8px; right: 6px;
       width: 28px; height: 28px; border: 0; border-radius: 8px;
@@ -2403,8 +2404,7 @@
     .note-pin .material-symbols-outlined { font-size: 16px; }
     .note-pin:hover { color: var(--ink); background: rgba(60, 60, 67, 0.07); }
     .note-row[data-swiped="1"] .note-pin { opacity: 0; }
-    .note-row.is-pinned .note-pin { color: #fff; background: var(--ink); }
-    .note-row.is-pinned .note-pin:hover { background: #3A3A3D; }
+    .note-row.is-pinned .note-pin { color: var(--ink); }
     .note-row.is-pinned .note-pin .material-symbols-outlined {
       font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 20;
     }
