@@ -2357,7 +2357,6 @@
     .note-row:focus-visible .note-row-clip { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
     .note-row.note-warmth .nx, .note-row.note-warmth .nm { color: var(--note-secondary); }
     #notesPanel mark.search-hit { background: #F7E2A8; color: #3A2E0B; }
-    .note-row.note-warmth.is-pinned .note-pin { color: var(--accent-ink); }
     .note-row:active .note-row-clip { transform: translateX(var(--note-swipe, 0px)) scale(0.99); }
     /* Apple's model: the paper moves, the action lives in the space it vacates. */
     .note-row-actions {
@@ -2388,17 +2387,37 @@
     @media (prefers-reduced-motion: reduce) {
       .note-row-clip, .note-row-actions { transition: none; }
     }
+    /* Pin is a state, not a magnitude. Every hue on this list is already spent:
+       the paper families answer edit volume, amber answers tags, cream answers
+       search hits, accent answers selection. A tinted pin glyph therefore reads
+       as one more warm/cool patch on an already tinted row — which is exactly
+       why pinning did not show. Spend shape and ink weight instead: hairline
+       grey = free, solid ink chip = pinned, legible on all 16 papers. */
     .note-pin {
       position: absolute; top: 8px; right: 6px;
       width: 28px; height: 28px; border: 0; border-radius: 8px;
       background: transparent; color: var(--muted); cursor: pointer;
       display: inline-flex; align-items: center; justify-content: center;
+      transition: opacity 160ms ease-out, color 160ms ease-out, background 160ms ease-out;
     }
     .note-pin .material-symbols-outlined { font-size: 16px; }
-    .note-pin { transition: opacity 160ms ease-out; }
+    .note-pin:hover { color: var(--ink); background: rgba(60, 60, 67, 0.07); }
     .note-row[data-swiped="1"] .note-pin { opacity: 0; }
-    .note-row.is-pinned .note-pin { color: var(--accent); }
+    .note-row.is-pinned .note-pin { color: #fff; background: var(--ink); }
+    .note-row.is-pinned .note-pin:hover { background: #3A3A3D; }
+    .note-row.is-pinned .note-pin .material-symbols-outlined {
+      font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 20;
+    }
     .note-pin:active { transform: scale(0.94); }
+    /* The pinned block is structure, not colour. A labelled hairline above it
+       says what the block is; each pinned row's ink chip says where it ends, so
+       nothing on the paper itself is repainted (paper = edit volume). */
+    .notes-pin-head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 6px 5px; margin: 0;
+      font: 600 11px/1.2 var(--font-ui); letter-spacing: 0.01em; color: var(--muted);
+    }
+    .notes-pin-head::after { content: ''; flex: 1 1 auto; height: 0.5px; background: rgba(60, 60, 67, 0.16); }
     .note-row .nt {
       font-size: 15px; font-weight: 620; letter-spacing: -0.02em;
       line-height: 1.25;
@@ -5249,7 +5268,8 @@ window.ClipViewMasonry = Masonry;
       btn.dataset.noteId = n.id;
       NoteWarmth.apply(btn, n);
       btn.classList.toggle('is-on', n.id === notesState.id);
-      btn.classList.toggle('is-pinned', noteIsPinned(n));
+      const pinned = noteIsPinned(n);
+      btn.classList.toggle('is-pinned', pinned);
       let t = btn.querySelector('.nt');
       let x = btn.querySelector('.nx');
       let m = btn.querySelector('.nm');
@@ -5303,8 +5323,12 @@ window.ClipViewMasonry = Masonry;
           if (id) deleteNote(id);
         });
       }
-      pin?.setAttribute('title', noteIsPinned(n) ? '取消置顶' : '置顶');
-      pin?.setAttribute('aria-label', noteIsPinned(n) ? '取消置顶' : '置顶');
+      if (pin) {
+        const label = pinned ? '取消置顶' : '置顶';
+        pin.title = label;
+        pin.setAttribute('aria-label', label);
+        pin.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+      }
       const title = noteTitleOf(n) || '未命名';
       const when = formatItemTime(n) + (NoteWarmth.count(n) ? ' · ' + NoteWarmth.label(n) : '');
       const tKey = title + '\u0000' + (q || '');
@@ -5363,10 +5387,32 @@ window.ClipViewMasonry = Masonry;
       const rows = noteListRows(qRaw);
       const keep = new Set(rows.map(n => n.id));
       [...root.children].forEach(el => {
-        if (el.classList.contains('notes-list-foot')) return;
+        if (el.classList.contains('notes-list-foot') || el.classList.contains('notes-pin-head')) return;
         if (!keep.has(el.dataset.noteId)) el.remove();
       });
-      rows.forEach((n, i) => {
+      // The header is only honest when every pinned note actually sits at the
+      // head of the list. A relevance-ranked search interleaves them, and there
+      // the ink chip on the row carries the state on its own.
+      const pinnedCount = rows.filter(noteIsPinned).length;
+      const headWanted = pinnedCount > 0 && rows.slice(0, pinnedCount).every(noteIsPinned);
+      let pinHead = root.querySelector('.notes-pin-head');
+      if (!headWanted) {
+        pinHead?.remove();
+        pinHead = null;
+      } else if (!pinHead) {
+        pinHead = document.createElement('div');
+        pinHead.className = 'notes-pin-head';
+        pinHead.textContent = '置顶';
+      }
+      // Place by an explicit cursor, not by `root.children[i]`: the pinned
+      // header now sits above the rows and the foot below them, so an index
+      // into children no longer equals the row index.
+      let prev = null;
+      if (pinHead) {
+        if (root.firstElementChild !== pinHead) root.insertBefore(pinHead, root.firstElementChild);
+        prev = pinHead;
+      }
+      rows.forEach((n) => {
         let btn = root.querySelector(`[data-note-id="${n.id}"]`);
         if (!btn) {
           btn = document.createElement('button');
@@ -5396,11 +5442,12 @@ window.ClipViewMasonry = Masonry;
             e.stopPropagation();
             if (btn.dataset.noteId) deleteNote(btn.dataset.noteId);
           });
-          root.insertBefore(btn, root.children[i] || null);
-        } else if (btn !== root.children[i]) {
-          root.insertBefore(btn, root.children[i] || null);
+          root.insertBefore(btn, root.firstElementChild || null);
         }
+        const anchor = prev ? prev.nextElementSibling : root.firstElementChild;
+        if (btn !== anchor) root.insertBefore(btn, anchor);
         fillNoteRow(btn, n, qRaw);
+        prev = btn;
       });
       paintNotesFoot(root);
       paintNotesWarmthScale();
