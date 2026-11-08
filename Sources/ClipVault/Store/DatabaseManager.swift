@@ -4165,7 +4165,91 @@ final class DatabaseManager: ObservableObject {
         var enginePrefix: String
     }
 
-    /// Rewrite every note in the engine from the projection.
+    /// Write an engine-side change back into ClipVault's own tables — the
+    /// entry point for notes that changed on another device.
+    ///
+    /// The projection is derived from the engine here, so the row is upserted:
+    /// a note that arrives from a peer for the first time has to appear in the
+    /// list, not vanish because "we do not have that id".
+    func applyEngineUpdate(
+        id: UUID,
+        markdown: String,
+        completion: @escaping (Bool) -> Void
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            let body = ComposeNotes.normalizedBody(title: nil, body: markdown)
+            guard !body.isEmpty else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            let hash = ComposeNotes.contentHash(id: id, body: body)
+            let now = Date()
+            var existing: ClipboardItem?
+            existing = self.fetchItemByIdLocked(id.uuidString, on: db)
+            if let existing, existing.textContent == body, existing.contentHash == hash {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            let ok: Bool
+            if existing != nil {
+                let sql = """
+                UPDATE clipboard_items SET
+                    content_hash = ?, text_content = ?, timestamp = ?, source_app = ?
+                WHERE id = ? AND type = 'note';
+                """
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                    DispatchQueue.main.async { completion(false) }
+                    return
+                }
+                self.bindText(stmt, 1, hash)
+                self.bindText(stmt, 2, body)
+                sqlite3_bind_double(stmt, 3, now.timeIntervalSince1970)
+                self.bindText(stmt, 4, ComposeNotes.sourceApp)
+                self.bindText(stmt, 5, id.uuidString)
+                ok = sqlite3_step(stmt) == SQLITE_DONE
+                sqlite3_finalize(stmt)
+            } else {
+                let item = ClipboardItem(
+                    id: id,
+                    timestamp: now,
+                    type: .note,
+                    contentHash: hash,
+                    textContent: body,
+                    url: nil,
+                    sourceApp: ComposeNotes.sourceApp,
+                    firstSeenAt: now
+                )
+                ok = self.insertNewItem(item, db: db)
+            }
+            if ok {
+                self.persistTextHash(id: id.uuidString, item: ClipboardItem(
+                    id: id,
+                    timestamp: now,
+                    type: .note,
+                    contentHash: hash,
+                    textContent: body
+                ))
+                self.upsertFTS(id: id.uuidString, text: body, ocr: nil, source: ComposeNotes.sourceApp, html: nil)
+                _ = self.recordClipboardEvent(
+                    itemId: id.uuidString,
+                    contentHash: hash,
+                    eventTs: now,
+                    type: ClipboardType.note.rawValue,
+                    sourceApp: ComposeNotes.sourceApp,
+                    kind: existing == nil ? "compose" : "compose_edit",
+                    detail: existing == nil ? "create" : "sync_in"
+                )
+            }
+            DispatchQueue.main.async { completion(ok) }
+        }
+    }
+
+    /// Rewrite every note in the projection from the engine.
     func inkstoneReconcile(completion: @escaping (Int, Int) -> Void) {
         var bodies: [(String, String, TimeInterval)] = []
         performReadSync {

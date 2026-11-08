@@ -1021,15 +1021,30 @@ class WebServer {
             sendErrorResponse(connection: connection, status: 400, message: "expected {note, message}")
             return
         }
-        guard let outbound = InkstoneShadow.shared.syncReceive(note: note, message: message) else {
+        guard let outcome = InkstoneShadow.shared.syncReceive(note: note, message: message) else {
             sendErrorResponse(connection: connection, status: 409, message: "sync rejected")
             return
         }
-        sendJSON([
+        let reply: [String: Any] = [
             "ok": true,
             "note": note,
-            "outbound": outbound.map { $0.base64EncodedString() },
-        ], connection: connection)
+            "outbound": outcome.outbound.map { $0.base64EncodedString() },
+            "changed": outcome.changed,
+        ]
+        guard outcome.changed, let uuid = UUID(uuidString: note) else {
+            sendJSON(reply, connection: connection)
+            return
+        }
+        // Ingress: the engine took a remote edit, so ClipVault's own row and
+        // index must follow it, or the change exists and nobody can see it.
+        self.database.applyEngineUpdate(id: uuid, markdown: outcome.markdown) { applied in
+            if applied {
+                self.broadcastSSE(event: "compose_saved", id: uuid.uuidString)
+            }
+            var payload = reply
+            payload["projected"] = applied
+            self.sendJSON(payload, connection: connection)
+        }
     }
 
     /// Re-mirror every note from the projection into the engine. Used after a

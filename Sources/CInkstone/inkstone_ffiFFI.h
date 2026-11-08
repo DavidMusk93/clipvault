@@ -378,9 +378,9 @@ RustBuffer uniffi_inkstone_ffi_fn_method_synchandle_hello(uint64_t ptr, RustCall
 RustBuffer uniffi_inkstone_ffi_fn_method_synchandle_note(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_RECEIVE
-#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_RECEIVE
-RustBuffer uniffi_inkstone_ffi_fn_method_synchandle_receive(uint64_t ptr, RustBuffer message, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_RECEIVE_STEP
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_RECEIVE_STEP
+RustBuffer uniffi_inkstone_ffi_fn_method_synchandle_receive_step(uint64_t ptr, RustBuffer message, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_UPDATES_FOR_PEER
@@ -902,9 +902,9 @@ uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_note(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_RECEIVE
-#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_RECEIVE
-uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_receive(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_RECEIVE_STEP
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_RECEIVE_STEP
+uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_receive_step(void
     
 );
 #endif
