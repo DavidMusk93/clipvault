@@ -25,12 +25,12 @@ try {
   skipJsdom = 'jsdom not installed — run `npm ci`';
 }
 
-test('the pin spends shape and ink, never a hue the list already uses', () => {
+test('the pin spends shape, never a hue or a filled plate the list already uses', () => {
   const pinned = html.match(/\.note-row\.is-pinned \.note-pin \{[^}]*\}/);
   assert.ok(pinned, 'pinned pin rule missing');
-  assert.match(pinned[0], /color: #fff/);
-  assert.match(pinned[0], /background: var\(--ink\)/);
+  assert.match(pinned[0], /color: var\(--ink\)/);
   assert.doesNotMatch(pinned[0], /--accent/, 'accent is the selection channel and the blue family spine');
+  assert.doesNotMatch(pinned[0], /background: var\(--ink\)/, 'a solid plate is heavier than a state needs to be');
   assert.match(
     html,
     /\.note-row\.is-pinned \.note-pin \.material-symbols-outlined \{\s*font-variation-settings: 'FILL' 1/,
