@@ -69,7 +69,7 @@ final class CloudDocsBackupService {
         var blobFiles: [String]? = nil
         /// True only after local dest blob sizes were verified against source CAS.
         var blobsVerified: Bool? = nil
-        /// The inkstone note engine's vault, when the shadow/cutover produced one.
+        /// The notebase note engine's vault, when the shadow/cutover produced one.
         /// A backup that omits it would restore notes without their engine history.
         var engineVaultBytes: Int? = nil
         var engineVaultSha256: String? = nil
@@ -711,11 +711,11 @@ final class CloudDocsBackupService {
                                             let snapDB = snapDir.appendingPathComponent("clipflow.db")
                                             try self.publishFileFullCopy(from: latestDB, to: snapDB, cloudSafe: (dest.type == "gdrive" || dest.type == "icloud"))
                                             // Point-in-time restore must include the engine vault too.
-                                            let latestVault = latest.appendingPathComponent("inkstone.db")
+                                            let latestVault = latest.appendingPathComponent("notebase.db")
                                             if self.fm.fileExists(atPath: latestVault.path) {
                                                 try self.publishFileFullCopy(
                                                     from: latestVault,
-                                                    to: snapDir.appendingPathComponent("inkstone.db"),
+                                                    to: snapDir.appendingPathComponent("notebase.db"),
                                                     cloudSafe: (dest.type == "gdrive" || dest.type == "icloud")
                                                 )
                                             }
@@ -838,8 +838,8 @@ final class CloudDocsBackupService {
     var engineVaultPath: URL? {
         guard let home = ProcessInfo.processInfo.environment["CLIPVAULT_HOME"]
             ?? Optional(NSHomeDirectory() + "/Library/Application Support/Keepsake") else { return nil }
-        let override = ProcessInfo.processInfo.environment["CLIPVAULT_INKSTONE_PATH"]
-        return URL(fileURLWithPath: override ?? (home + "/inkstone.db"))
+        let override = ProcessInfo.processInfo.environment["CLIPVAULT_NOTEBASE_PATH"]
+        return URL(fileURLWithPath: override ?? (home + "/notebase.db"))
     }
 
     /// Publish a consistent copy of the engine vault next to the database.
@@ -849,7 +849,7 @@ final class CloudDocsBackupService {
     /// makes the db artifact also makes this one.
     private func publishEngineVault(into latest: URL) -> (bytes: Int, sha: String)? {
         guard let src = engineVaultPath, fm.fileExists(atPath: src.path) else { return nil }
-        let dest = latest.appendingPathComponent("inkstone.db")
+        let dest = latest.appendingPathComponent("notebase.db")
         guard compactBackupFile(from: src, to: dest) else {
             print("[Backup] engine vault copy failed: \(src.path)")
             return nil
@@ -866,7 +866,7 @@ final class CloudDocsBackupService {
     private func restoreEngineVaultIfAbsent(snapshotId: String) {
         guard let dest = engineVaultPath, !fm.fileExists(atPath: dest.path) else { return }
         guard let dir = resolveRestoreDB(snapshotId: snapshotId)?.deletingLastPathComponent() else { return }
-        let src = dir.appendingPathComponent("inkstone.db")
+        let src = dir.appendingPathComponent("notebase.db")
         guard fm.fileExists(atPath: src.path) else { return }
         do {
             try fm.copyItem(at: src, to: dest)
@@ -1258,7 +1258,7 @@ final class CloudDocsBackupService {
             let name = f.lastPathComponent
             if name.hasPrefix(".tmp_") || name.hasSuffix("-shm") || name.hasSuffix("-wal") {
                 // Keep only final clipflow.db; drop interrupted temps.
-                if name != "clipflow.db" && name != "MANIFEST.json" && name != "inkstone.db" {
+                if name != "clipflow.db" && name != "MANIFEST.json" && name != "notebase.db" {
                     try? fm.removeItem(at: f)
                 }
             }

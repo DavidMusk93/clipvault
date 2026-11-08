@@ -323,10 +323,10 @@ class WebServer {
                 return
             }
             handleBackupRun(connection: connection)
-        } else if method == "POST" && pathOnly == "/api/inkstone/sync" {
-            handleInkstoneSyncMessage(data: data, connection: connection)
-        } else if method == "POST" && pathOnly == "/api/inkstone/reconcile" {
-            handleInkstoneReconcile(connection: connection)
+        } else if method == "POST" && pathOnly == "/api/notebase/sync" {
+            handleNotebaseSyncMessage(data: data, connection: connection)
+        } else if method == "POST" && pathOnly == "/api/notebase/reconcile" {
+            handleNotebaseReconcile(connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/run" {
             handleBackupRun(connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/restore" {
@@ -490,14 +490,14 @@ class WebServer {
             sendWebFile("notes.html", connection: connection)
         } else if pathOnly == "/api/items" || pathOnly == "/api/clips" {
             sendItemsJSON(path: path, connection: connection)
-        } else if pathOnly == "/api/inkstone/probe" {
-            sendInkstoneProbe(path: path, connection: connection)
-        } else if pathOnly == "/api/inkstone/sync/hello" {
-            sendInkstoneSyncHello(path: path, connection: connection)
-        } else if pathOnly == "/api/inkstone/audit" {
-            sendInkstoneAudit(path: path, connection: connection)
-        } else if pathOnly == "/api/inkstone/stats" {
-            sendInkstoneStats(connection: connection)
+        } else if pathOnly == "/api/notebase/probe" {
+            sendNotebaseProbe(path: path, connection: connection)
+        } else if pathOnly == "/api/notebase/sync/hello" {
+            sendNotebaseSyncHello(path: path, connection: connection)
+        } else if pathOnly == "/api/notebase/audit" {
+            sendNotebaseAudit(path: path, connection: connection)
+        } else if pathOnly == "/api/notebase/stats" {
+            sendNotebaseStats(connection: connection)
         } else if pathOnly == "/api/clips/days" {
             sendDayIndexJSON(path: path, connection: connection)
         } else if pathOnly.hasPrefix("/api/image") {
@@ -976,29 +976,29 @@ class WebServer {
     }
 
     /// Shadow-vault probe: proves the engine is indexing real notes. Disabled
-    /// (404) unless CLIPVAULT_INKSTONE_SHADOW=1.
-    private func sendInkstoneProbe(path: String, connection: HTTPByteSink) {
-        guard InkstoneShadow.shared.enabled else {
+    /// (404) unless CLIPVAULT_NOTEBASE_SHADOW=1.
+    private func sendNotebaseProbe(path: String, connection: HTTPByteSink) {
+        guard NotebaseShadow.shared.enabled else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
         }
         let query = URLComponents(string: "http://localhost\(path)")?
             .queryItems?.first(where: { $0.name == "q" })?.value ?? ""
-        let hits = InkstoneShadow.shared.probe(query: query) ?? []
+        let hits = NotebaseShadow.shared.probe(query: query) ?? []
         sendJSON(["ok": true, "query": query, "count": hits.count, "hits": hits], connection: connection)
     }
 
-    /// Note sync, transport side: opaque `inkstone-sync` messages in, messages
+    /// Note sync, transport side: opaque `notebase-sync` messages in, messages
     /// out. The caller owns the transport (HTTP here, iCloud/ostore later); the
     /// engine owns convergence and durability.
-    private func sendInkstoneSyncHello(path: String, connection: HTTPByteSink) {
-        guard InkstoneShadow.shared.enabled else {
+    private func sendNotebaseSyncHello(path: String, connection: HTTPByteSink) {
+        guard NotebaseShadow.shared.enabled else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
         }
         let note = URLComponents(string: "http://localhost\(path)")?
             .queryItems?.first(where: { $0.name == "note" })?.value ?? ""
-        guard !note.isEmpty, let hello = InkstoneShadow.shared.syncHello(note: note) else {
+        guard !note.isEmpty, let hello = NotebaseShadow.shared.syncHello(note: note) else {
             sendErrorResponse(connection: connection, status: 404, message: "No such note")
             return
         }
@@ -1009,8 +1009,8 @@ class WebServer {
         ], connection: connection)
     }
 
-    private func handleInkstoneSyncMessage(data: Data, connection: HTTPByteSink) {
-        guard InkstoneShadow.shared.enabled else {
+    private func handleNotebaseSyncMessage(data: Data, connection: HTTPByteSink) {
+        guard NotebaseShadow.shared.enabled else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
         }
@@ -1021,7 +1021,7 @@ class WebServer {
             sendErrorResponse(connection: connection, status: 400, message: "expected {note, message}")
             return
         }
-        guard let outcome = InkstoneShadow.shared.syncReceive(note: note, message: message) else {
+        guard let outcome = NotebaseShadow.shared.syncReceive(note: note, message: message) else {
             sendErrorResponse(connection: connection, status: 409, message: "sync rejected")
             return
         }
@@ -1050,12 +1050,12 @@ class WebServer {
     /// Re-mirror every note from the projection into the engine. Used after a
     /// renderer fix: the projection is authoritative for text, so the engine can
     /// always be rebuilt from it.
-    private func handleInkstoneReconcile(connection: HTTPByteSink) {
-        guard InkstoneShadow.shared.enabled else {
+    private func handleNotebaseReconcile(connection: HTTPByteSink) {
+        guard NotebaseShadow.shared.enabled else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
         }
-        database.inkstoneReconcile { written, failed in
+        database.notebaseReconcile { written, failed in
             self.sendJSON([
                 "ok": failed == 0,
                 "written": written,
@@ -1067,8 +1067,8 @@ class WebServer {
     /// Compare the engine's copy with the projection ClipVault serves, so drift
     /// is a number and not a feeling. Whitespace-only differences are ignored:
     /// the engine renders markdown, the host stores what the editor submitted.
-    private func sendInkstoneAudit(path: String, connection: HTTPByteSink) {
-        guard InkstoneShadow.shared.enabled else {
+    private func sendNotebaseAudit(path: String, connection: HTTPByteSink) {
+        guard NotebaseShadow.shared.enabled else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
         }
@@ -1076,20 +1076,20 @@ class WebServer {
             URLComponents(string: "http://localhost\(path)")?
                 .queryItems?.first(where: { $0.name == "limit" })?.value ?? "200"
         ) ?? 200))
-        database.inkstoneAudit(limit: limit) { rows in
+        database.notebaseAudit(limit: limit) { rows in
             let drift = rows.filter { !$0.matches }
             self.sendJSON([
                 "ok": true,
                 "checked": rows.count,
                 "drift": drift.count,
-                "enginePrimary": InkstoneShadow.shared.isPrimary,
+                "enginePrimary": NotebaseShadow.shared.isPrimary,
                 "samples": drift.prefix(5).map { ["id": $0.id, "projection": $0.projectionPrefix, "engine": $0.enginePrefix] },
             ], connection: connection)
         }
     }
 
-    private func sendInkstoneStats(connection: HTTPByteSink) {
-        guard InkstoneShadow.shared.enabled, let stats = InkstoneShadow.shared.stats() else {
+    private func sendNotebaseStats(connection: HTTPByteSink) {
+        guard NotebaseShadow.shared.enabled, let stats = NotebaseShadow.shared.stats() else {
             sendErrorResponse(connection: connection, status: 404, message: "Not Found")
             return
         }
@@ -1107,7 +1107,7 @@ class WebServer {
             guard let self = self else { return }
             if success {
                 // Soft-delete only — do not tombstone peers (row still exists for TTL).
-                InkstoneShadow.shared.forget(id: uuid.uuidString)
+                NotebaseShadow.shared.forget(id: uuid.uuidString)
                 self.broadcastSSE(event: "clip_deleted", id: uuid.uuidString)
                 self.sendJSON(["status": "deleted", "soft": true], connection: connection)
             } else {
@@ -1888,7 +1888,7 @@ class WebServer {
                 return
             }
             CloudDocsSyncService.shared?.recordLocalCompose(item: result.item, parentHash: result.parentHash)
-            InkstoneShadow.shared.mirror(
+            NotebaseShadow.shared.mirror(
                 id: result.item.id.uuidString,
                 markdown: result.item.textContent ?? "",
                 updatedAt: result.item.timestamp
@@ -2642,8 +2642,8 @@ class WebServer {
                 guard let self else { return }
                 // View document is GET /api/archive/view — never ship article HTML in clip JSON.
                 let readMap = self.database.readerProgressMap(ids: [uuid])
-                let activity = InkstoneShadow.shared.isPrimary
-                    ? InkstoneShadow.shared.activities(notes: item.map { [$0.id.uuidString] } ?? [])
+                let activity = NotebaseShadow.shared.isPrimary
+                    ? NotebaseShadow.shared.activities(notes: item.map { [$0.id.uuidString] } ?? [])
                     : [:]
                 let arr = item.map {
                     [self.itemToJSON(
@@ -2672,8 +2672,8 @@ class WebServer {
                 let readMap = self.database.readerProgressMap(ids: uuids)
                 let noteIds = rows.filter { $0.type == .note }.map { $0.id }
                 let editCounts = self.database.noteEditCounts(ids: noteIds)
-                let activity = InkstoneShadow.shared.isPrimary
-                    ? InkstoneShadow.shared.activities(notes: noteIds.map { $0.uuidString })
+                let activity = NotebaseShadow.shared.isPrimary
+                    ? NotebaseShadow.shared.activities(notes: noteIds.map { $0.uuidString })
                     : [:]
                 let arr = rows.map {
                     self.itemToJSON(
@@ -2701,8 +2701,8 @@ class WebServer {
             guard let self = self else { return }
             let readMap = self.database.readerProgressMap(ids: page.items.map { $0.id })
             let editCounts = self.database.noteEditCounts(ids: page.items.filter { $0.type == .note }.map { $0.id })
-            let pageActivity = InkstoneShadow.shared.isPrimary
-                ? InkstoneShadow.shared.activities(notes: page.items.filter { $0.type == .note }.map { $0.id.uuidString })
+            let pageActivity = NotebaseShadow.shared.isPrimary
+                ? NotebaseShadow.shared.activities(notes: page.items.filter { $0.type == .note }.map { $0.id.uuidString })
                 : [:]
             let jsonItems = page.items.map {
                 self.itemToJSON(

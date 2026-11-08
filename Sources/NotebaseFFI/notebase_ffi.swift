@@ -7,8 +7,8 @@ import Foundation
 // Depending on the consumer's build setup, the low-level FFI code
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
-#if canImport(inkstone_ffiFFI)
-import inkstone_ffiFFI
+#if canImport(notebase_ffiFFI)
+import notebase_ffiFFI
 #endif
 
 fileprivate extension RustBuffer {
@@ -25,13 +25,13 @@ fileprivate extension RustBuffer {
     }
 
     static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
-        try! rustCall { ffi_inkstone_ffi_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
+        try! rustCall { ffi_notebase_ffi_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
     // Frees the buffer in place.
     // The buffer must not be used after this is called.
     func deallocate() {
-        try! rustCall { ffi_inkstone_ffi_rustbuffer_free(self, $0) }
+        try! rustCall { ffi_notebase_ffi_rustbuffer_free(self, $0) }
     }
 }
 
@@ -327,7 +327,7 @@ private func makeRustCall<T, E: Swift.Error>(
     _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
-    uniffiEnsureInkstoneFfiInitialized()
+    uniffiEnsureNotebaseFfiInitialized()
     var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
@@ -706,7 +706,7 @@ open class NoteHandle: NoteHandleProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_inkstone_ffi_fn_clone_notehandle(self.handle, $0) }
+        return try! rustCall { uniffi_notebase_ffi_fn_clone_notehandle(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -716,7 +716,7 @@ open class NoteHandle: NoteHandleProtocol, @unchecked Sendable {
             return
         }
 
-        try! rustCall { uniffi_inkstone_ffi_fn_free_notehandle(handle, $0) }
+        try! rustCall { uniffi_notebase_ffi_fn_free_notehandle(handle, $0) }
     }
 
     
@@ -729,7 +729,7 @@ open class NoteHandle: NoteHandleProtocol, @unchecked Sendable {
 open func appendBlock(parent: String?, kind: String, text: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_append_block(
+    uniffi_notebase_ffi_fn_method_notehandle_append_block(
             self.uniffiCloneHandle(),
         FfiConverterOptionString.lower(parent),
         FfiConverterString.lower(kind),
@@ -744,7 +744,7 @@ open func appendBlock(parent: String?, kind: String, text: String)throws  -> Str
 open func blocksJson() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_blocks_json(
+    uniffi_notebase_ffi_fn_method_notehandle_blocks_json(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -753,7 +753,7 @@ open func blocksJson() -> String  {
 open func createdAt() -> Int64  {
     return try!  FfiConverterInt64.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_created_at(
+    uniffi_notebase_ffi_fn_method_notehandle_created_at(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -761,7 +761,7 @@ open func createdAt() -> Int64  {
     
 open func deleteBlock(blockId: String)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_delete_block(
+    uniffi_notebase_ffi_fn_method_notehandle_delete_block(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(blockId),uniffiCallStatus
     )
@@ -770,7 +770,7 @@ open func deleteBlock(blockId: String)throws   {try rustCallWithError(FfiConvert
     
 open func deleteText(blockId: String, pos: UInt32, len: UInt32)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_delete_text(
+    uniffi_notebase_ffi_fn_method_notehandle_delete_text(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(blockId),
         FfiConverterUInt32.lower(pos),
@@ -782,7 +782,7 @@ open func deleteText(blockId: String, pos: UInt32, len: UInt32)throws   {try rus
 open func id() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_id(
+    uniffi_notebase_ffi_fn_method_notehandle_id(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -791,7 +791,7 @@ open func id() -> String  {
 open func `import`(bytes: Data)throws  -> Bool  {
     return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_import(
+    uniffi_notebase_ffi_fn_method_notehandle_import(
             self.uniffiCloneHandle(),
         FfiConverterData.lower(bytes),uniffiCallStatus
     )
@@ -803,7 +803,7 @@ open func `import`(bytes: Data)throws  -> Bool  {
      */
 open func insertText(blockId: String, pos: UInt32, text: String)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_insert_text(
+    uniffi_notebase_ffi_fn_method_notehandle_insert_text(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(blockId),
         FfiConverterUInt32.lower(pos),
@@ -818,7 +818,7 @@ open func insertText(blockId: String, pos: UInt32, text: String)throws   {try ru
      */
 open func markText(blockId: String, start: UInt32, end: UInt32, mark: String, value: String?)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_mark_text(
+    uniffi_notebase_ffi_fn_method_notehandle_mark_text(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(blockId),
         FfiConverterUInt32.lower(start),
@@ -832,7 +832,7 @@ open func markText(blockId: String, start: UInt32, end: UInt32, mark: String, va
 open func markdown() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_markdown(
+    uniffi_notebase_ffi_fn_method_notehandle_markdown(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -840,7 +840,7 @@ open func markdown() -> String  {
     
 open func moveBlock(blockId: String, parent: String?, index: UInt32)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_move_block(
+    uniffi_notebase_ffi_fn_method_notehandle_move_block(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(blockId),
         FfiConverterOptionString.lower(parent),
@@ -852,7 +852,7 @@ open func moveBlock(blockId: String, parent: String?, index: UInt32)throws   {tr
 open func plainText() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_plain_text(
+    uniffi_notebase_ffi_fn_method_notehandle_plain_text(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -860,7 +860,7 @@ open func plainText() -> String  {
     
 open func setBlockText(blockId: String, text: String)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_set_block_text(
+    uniffi_notebase_ffi_fn_method_notehandle_set_block_text(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(blockId),
         FfiConverterString.lower(text),uniffiCallStatus
@@ -870,7 +870,7 @@ open func setBlockText(blockId: String, text: String)throws   {try rustCallWithE
     
 open func setChecked(blockId: String, checked: Bool)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_set_checked(
+    uniffi_notebase_ffi_fn_method_notehandle_set_checked(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(blockId),
         FfiConverterBool.lower(checked),uniffiCallStatus
@@ -880,7 +880,7 @@ open func setChecked(blockId: String, checked: Bool)throws   {try rustCallWithEr
     
 open func setMarkdown(markdown: String)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_set_markdown(
+    uniffi_notebase_ffi_fn_method_notehandle_set_markdown(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(markdown),uniffiCallStatus
     )
@@ -889,7 +889,7 @@ open func setMarkdown(markdown: String)throws   {try rustCallWithError(FfiConver
     
 open func setTitle(title: String)  {try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_set_title(
+    uniffi_notebase_ffi_fn_method_notehandle_set_title(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(title),uniffiCallStatus
     )
@@ -899,7 +899,7 @@ open func setTitle(title: String)  {try! rustCall() {
 open func snapshot()throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_snapshot(
+    uniffi_notebase_ffi_fn_method_notehandle_snapshot(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -908,7 +908,7 @@ open func snapshot()throws  -> Data  {
 open func title() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_title(
+    uniffi_notebase_ffi_fn_method_notehandle_title(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -917,7 +917,7 @@ open func title() -> String  {
 open func updatedAt() -> Int64  {
     return try!  FfiConverterInt64.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_updated_at(
+    uniffi_notebase_ffi_fn_method_notehandle_updated_at(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -926,7 +926,7 @@ open func updatedAt() -> Int64  {
 open func updatesSince(vv: Data)throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_updates_since(
+    uniffi_notebase_ffi_fn_method_notehandle_updates_since(
             self.uniffiCloneHandle(),
         FfiConverterData.lower(vv),uniffiCallStatus
     )
@@ -939,7 +939,7 @@ open func updatesSince(vv: Data)throws  -> Data  {
 open func vv() -> Data  {
     return try!  FfiConverterData.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_notehandle_vv(
+    uniffi_notebase_ffi_fn_method_notehandle_vv(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1061,7 +1061,7 @@ open class SyncHandle: SyncHandleProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_inkstone_ffi_fn_clone_synchandle(self.handle, $0) }
+        return try! rustCall { uniffi_notebase_ffi_fn_clone_synchandle(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -1071,7 +1071,7 @@ open class SyncHandle: SyncHandleProtocol, @unchecked Sendable {
             return
         }
 
-        try! rustCall { uniffi_inkstone_ffi_fn_free_synchandle(handle, $0) }
+        try! rustCall { uniffi_notebase_ffi_fn_free_synchandle(handle, $0) }
     }
 
     
@@ -1083,7 +1083,7 @@ open class SyncHandle: SyncHandleProtocol, @unchecked Sendable {
 open func hello()throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_synchandle_hello(
+    uniffi_notebase_ffi_fn_method_synchandle_hello(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1092,7 +1092,7 @@ open func hello()throws  -> Data  {
 open func note() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_synchandle_note(
+    uniffi_notebase_ffi_fn_method_synchandle_note(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1105,7 +1105,7 @@ open func note() -> String  {
 open func receiveStep(message: Data)throws  -> SyncStepFfi  {
     return try  FfiConverterTypeSyncStepFfi_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_synchandle_receive_step(
+    uniffi_notebase_ffi_fn_method_synchandle_receive_step(
             self.uniffiCloneHandle(),
         FfiConverterData.lower(message),uniffiCallStatus
     )
@@ -1118,7 +1118,7 @@ open func receiveStep(message: Data)throws  -> SyncStepFfi  {
 open func updatesForPeer()throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_synchandle_updates_for_peer(
+    uniffi_notebase_ffi_fn_method_synchandle_updates_for_peer(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1296,7 +1296,7 @@ open class VaultHandle: VaultHandleProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_inkstone_ffi_fn_clone_vaulthandle(self.handle, $0) }
+        return try! rustCall { uniffi_notebase_ffi_fn_clone_vaulthandle(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -1306,14 +1306,14 @@ open class VaultHandle: VaultHandleProtocol, @unchecked Sendable {
             return
         }
 
-        try! rustCall { uniffi_inkstone_ffi_fn_free_vaulthandle(handle, $0) }
+        try! rustCall { uniffi_notebase_ffi_fn_free_vaulthandle(handle, $0) }
     }
 
     
 public static func inMemory()throws  -> VaultHandle  {
     return try  FfiConverterTypeVaultHandle_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_constructor_vaulthandle_in_memory(uniffiCallStatus
+    uniffi_notebase_ffi_fn_constructor_vaulthandle_in_memory(uniffiCallStatus
     )
 })
 }
@@ -1321,7 +1321,7 @@ public static func inMemory()throws  -> VaultHandle  {
 public static func `open`(path: String)throws  -> VaultHandle  {
     return try  FfiConverterTypeVaultHandle_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_constructor_vaulthandle_open(
+    uniffi_notebase_ffi_fn_constructor_vaulthandle_open(
         FfiConverterString.lower(path),uniffiCallStatus
     )
 })
@@ -1335,7 +1335,7 @@ public static func `open`(path: String)throws  -> VaultHandle  {
 open func activities(notes: [String])throws  -> [NoteActivityFfi]  {
     return try  FfiConverterSequenceTypeNoteActivityFfi.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_activities(
+    uniffi_notebase_ffi_fn_method_vaulthandle_activities(
             self.uniffiCloneHandle(),
         FfiConverterSequenceString.lower(notes),uniffiCallStatus
     )
@@ -1345,7 +1345,7 @@ open func activities(notes: [String])throws  -> [NoteActivityFfi]  {
 open func activity(id: String)throws  -> ActivityFfi  {
     return try  FfiConverterTypeActivityFfi_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_activity(
+    uniffi_notebase_ffi_fn_method_vaulthandle_activity(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),uniffiCallStatus
     )
@@ -1358,7 +1358,7 @@ open func activity(id: String)throws  -> ActivityFfi  {
 open func applyRemote(id: String, bytes: Data)throws  -> Bool  {
     return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_apply_remote(
+    uniffi_notebase_ffi_fn_method_vaulthandle_apply_remote(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterData.lower(bytes),uniffiCallStatus
@@ -1373,7 +1373,7 @@ open func applyRemote(id: String, bytes: Data)throws  -> Bool  {
 open func backupTo(path: String)throws  -> UInt64  {
     return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_backup_to(
+    uniffi_notebase_ffi_fn_method_vaulthandle_backup_to(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(path),uniffiCallStatus
     )
@@ -1386,7 +1386,7 @@ open func backupTo(path: String)throws  -> UInt64  {
 open func compact()throws  -> UInt64  {
     return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_compact(
+    uniffi_notebase_ffi_fn_method_vaulthandle_compact(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1395,7 +1395,7 @@ open func compact()throws  -> UInt64  {
 open func create(title: String)throws  -> NoteHandle  {
     return try  FfiConverterTypeNoteHandle_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_create(
+    uniffi_notebase_ffi_fn_method_vaulthandle_create(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(title),uniffiCallStatus
     )
@@ -1405,7 +1405,7 @@ open func create(title: String)throws  -> NoteHandle  {
 open func delete(id: String)throws  -> Bool  {
     return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_delete(
+    uniffi_notebase_ffi_fn_method_vaulthandle_delete(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),uniffiCallStatus
     )
@@ -1415,7 +1415,7 @@ open func delete(id: String)throws  -> Bool  {
 open func getBlob(hash: String)throws  -> Data?  {
     return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_get_blob(
+    uniffi_notebase_ffi_fn_method_vaulthandle_get_blob(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(hash),uniffiCallStatus
     )
@@ -1429,7 +1429,7 @@ open func getBlob(hash: String)throws  -> Data?  {
 open func importMarkdown(markdown: String, id: String?, createdAt: Int64, updatedAt: Int64)throws  -> NoteHandle?  {
     return try  FfiConverterOptionTypeNoteHandle.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_import_markdown(
+    uniffi_notebase_ffi_fn_method_vaulthandle_import_markdown(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(markdown),
         FfiConverterOptionString.lower(id),
@@ -1444,7 +1444,7 @@ open func importMarkdown(markdown: String, id: String?, createdAt: Int64, update
      */
 open func index(note: NoteHandle)throws   {try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_index(
+    uniffi_notebase_ffi_fn_method_vaulthandle_index(
             self.uniffiCloneHandle(),
         FfiConverterTypeNoteHandle_lower(note),uniffiCallStatus
     )
@@ -1454,7 +1454,7 @@ open func index(note: NoteHandle)throws   {try rustCallWithError(FfiConverterTyp
 open func list(limit: UInt32, offset: UInt32)throws  -> [NoteSummaryFfi]  {
     return try  FfiConverterSequenceTypeNoteSummaryFfi.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_list(
+    uniffi_notebase_ffi_fn_method_vaulthandle_list(
             self.uniffiCloneHandle(),
         FfiConverterUInt32.lower(limit),
         FfiConverterUInt32.lower(offset),uniffiCallStatus
@@ -1465,7 +1465,7 @@ open func list(limit: UInt32, offset: UInt32)throws  -> [NoteSummaryFfi]  {
 open func load(id: String)throws  -> NoteHandle?  {
     return try  FfiConverterOptionTypeNoteHandle.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_load(
+    uniffi_notebase_ffi_fn_method_vaulthandle_load(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),uniffiCallStatus
     )
@@ -1478,7 +1478,7 @@ open func load(id: String)throws  -> NoteHandle?  {
 open func peerId() -> UInt64  {
     return try!  FfiConverterUInt64.lift(try! rustCall() {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_peer_id(
+    uniffi_notebase_ffi_fn_method_vaulthandle_peer_id(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1487,7 +1487,7 @@ open func peerId() -> UInt64  {
 open func putBlob(bytes: Data)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_put_blob(
+    uniffi_notebase_ffi_fn_method_vaulthandle_put_blob(
             self.uniffiCloneHandle(),
         FfiConverterData.lower(bytes),uniffiCallStatus
     )
@@ -1500,7 +1500,7 @@ open func putBlob(bytes: Data)throws  -> String  {
 open func save(note: NoteHandle)throws  -> SaveStatsFfi  {
     return try  FfiConverterTypeSaveStatsFfi_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_save(
+    uniffi_notebase_ffi_fn_method_vaulthandle_save(
             self.uniffiCloneHandle(),
         FfiConverterTypeNoteHandle_lower(note),uniffiCallStatus
     )
@@ -1513,7 +1513,7 @@ open func save(note: NoteHandle)throws  -> SaveStatsFfi  {
 open func saveAndIndex(note: NoteHandle)throws  -> SaveStatsFfi  {
     return try  FfiConverterTypeSaveStatsFfi_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_save_and_index(
+    uniffi_notebase_ffi_fn_method_vaulthandle_save_and_index(
             self.uniffiCloneHandle(),
         FfiConverterTypeNoteHandle_lower(note),uniffiCallStatus
     )
@@ -1523,7 +1523,7 @@ open func saveAndIndex(note: NoteHandle)throws  -> SaveStatsFfi  {
 open func search(query: String, limit: UInt32)throws  -> [SearchHitFfi]  {
     return try  FfiConverterSequenceTypeSearchHitFfi.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_search(
+    uniffi_notebase_ffi_fn_method_vaulthandle_search(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(query),
         FfiConverterUInt32.lower(limit),uniffiCallStatus
@@ -1534,7 +1534,7 @@ open func search(query: String, limit: UInt32)throws  -> [SearchHitFfi]  {
 open func statsJson()throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_stats_json(
+    uniffi_notebase_ffi_fn_method_vaulthandle_stats_json(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1547,7 +1547,7 @@ open func statsJson()throws  -> String  {
 open func syncHandle(note: String)throws  -> SyncHandle  {
     return try  FfiConverterTypeSyncHandle_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_sync_handle(
+    uniffi_notebase_ffi_fn_method_vaulthandle_sync_handle(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(note),uniffiCallStatus
     )
@@ -1560,7 +1560,7 @@ open func syncHandle(note: String)throws  -> SyncHandle  {
 open func updatesFor(id: String, peerVv: Data)throws  -> Data  {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
         uniffiCallStatus in
-    uniffi_inkstone_ffi_fn_method_vaulthandle_updates_for(
+    uniffi_notebase_ffi_fn_method_vaulthandle_updates_for(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(id),
         FfiConverterData.lower(peerVv),uniffiCallStatus
@@ -2302,149 +2302,149 @@ private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
     let bindings_contract_version = 30
     // Get the scaffolding contract version by calling the into the dylib
-    let scaffolding_contract_version = ffi_inkstone_ffi_uniffi_contract_version()
+    let scaffolding_contract_version = ffi_notebase_ffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_append_block() != 30523) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_append_block() != 56606) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_blocks_json() != 3023) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_blocks_json() != 2081) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_created_at() != 48169) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_created_at() != 37852) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_delete_block() != 7445) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_delete_block() != 28790) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_delete_text() != 55919) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_delete_text() != 41507) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_id() != 19844) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_id() != 57749) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_import() != 50077) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_import() != 25527) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_insert_text() != 9502) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_insert_text() != 30143) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_mark_text() != 46277) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_mark_text() != 21424) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_markdown() != 28063) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_markdown() != 16471) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_move_block() != 12301) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_move_block() != 55254) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_plain_text() != 19125) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_plain_text() != 33071) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_set_block_text() != 47725) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_set_block_text() != 3754) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_set_checked() != 54807) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_set_checked() != 59694) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_set_markdown() != 50195) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_set_markdown() != 38622) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_set_title() != 24665) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_set_title() != 26277) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_snapshot() != 6838) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_snapshot() != 64213) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_title() != 8661) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_title() != 62186) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_updated_at() != 5329) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_updated_at() != 7515) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_updates_since() != 14508) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_updates_since() != 8885) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_notehandle_vv() != 8968) {
+    if (uniffi_notebase_ffi_checksum_method_notehandle_vv() != 10017) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_synchandle_hello() != 64636) {
+    if (uniffi_notebase_ffi_checksum_method_synchandle_hello() != 39030) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_synchandle_note() != 18678) {
+    if (uniffi_notebase_ffi_checksum_method_synchandle_note() != 1638) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_synchandle_receive_step() != 10487) {
+    if (uniffi_notebase_ffi_checksum_method_synchandle_receive_step() != 11823) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_synchandle_updates_for_peer() != 1133) {
+    if (uniffi_notebase_ffi_checksum_method_synchandle_updates_for_peer() != 6500) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_activities() != 25483) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_activities() != 25299) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_activity() != 27752) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_activity() != 26031) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_apply_remote() != 3059) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_apply_remote() != 6044) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_backup_to() != 7874) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_backup_to() != 45268) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_compact() != 14087) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_compact() != 20537) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_create() != 49904) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_create() != 53523) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_delete() != 45149) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_delete() != 36743) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_get_blob() != 19817) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_get_blob() != 48224) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_import_markdown() != 28456) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_import_markdown() != 5760) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_index() != 60604) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_index() != 48091) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_list() != 6282) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_list() != 34896) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_load() != 17987) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_load() != 61227) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_peer_id() != 50384) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_peer_id() != 21497) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_put_blob() != 2498) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_put_blob() != 53808) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_save() != 65232) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_save() != 41197) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_save_and_index() != 22819) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_save_and_index() != 9214) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_search() != 13984) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_search() != 52893) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_stats_json() != 30878) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_stats_json() != 56546) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_sync_handle() != 44075) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_sync_handle() != 21647) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_updates_for() != 22337) {
+    if (uniffi_notebase_ffi_checksum_method_vaulthandle_updates_for() != 34411) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_constructor_vaulthandle_in_memory() != 52543) {
+    if (uniffi_notebase_ffi_checksum_constructor_vaulthandle_in_memory() != 5572) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_inkstone_ffi_checksum_constructor_vaulthandle_open() != 50194) {
+    if (uniffi_notebase_ffi_checksum_constructor_vaulthandle_open() != 12057) {
         return InitializationResult.apiChecksumMismatch
     }
 
@@ -2453,7 +2453,7 @@ private let initializationResult: InitializationResult = {
 
 // Make the ensure init function public so that other modules which have external type references to
 // our types can call it.
-public func uniffiEnsureInkstoneFfiInitialized() {
+public func uniffiEnsureNotebaseFfiInitialized() {
     switch initializationResult {
     case .ok:
         break

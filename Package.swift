@@ -2,34 +2,34 @@
 import Foundation
 import PackageDescription
 
-// The inkstone engine is a sibling checkout. Its static library is linked in
+// The notebase engine is a sibling checkout. Its static library is linked in
 // only when it exists, so a machine without the engine still builds ClipVault
 // (the shadow path is compiled out).
-let envLibDir: String? = ProcessInfo.processInfo.environment["INKSTONE_LIB_DIR"]
-let homeDevLibDir = NSHomeDirectory() + "/dev/inkstone/target/release"
-let siblingLibDir = NSHomeDirectory() + "/Documents/projects/inkstone/target/release"
+let envLibDir: String? = ProcessInfo.processInfo.environment["NOTEBASE_LIB_DIR"]
+let homeDevLibDir = NSHomeDirectory() + "/dev/notebase/target/release"
+let siblingLibDir = NSHomeDirectory() + "/Documents/projects/notebase/target/release"
 
-var inkstoneLibDir = ""
+var notebaseLibDir = ""
 for candidate in [envLibDir, homeDevLibDir, siblingLibDir] {
     guard let candidate else { continue }
-    if FileManager.default.fileExists(atPath: candidate + "/libinkstone_ffi.a") {
-        inkstoneLibDir = candidate
+    if FileManager.default.fileExists(atPath: candidate + "/libnotebase_ffi.a") {
+        notebaseLibDir = candidate
         break
     }
 }
-if inkstoneLibDir.isEmpty { inkstoneLibDir = envLibDir ?? homeDevLibDir }
-let hasInkstone = FileManager.default.fileExists(atPath: inkstoneLibDir + "/libinkstone_ffi.a")
+if notebaseLibDir.isEmpty { notebaseLibDir = envLibDir ?? homeDevLibDir }
+let hasNotebase = FileManager.default.fileExists(atPath: notebaseLibDir + "/libnotebase_ffi.a")
 
 var serverSwiftSettings: [SwiftSetting] = []
 var ffiLinkerSettings: [LinkerSetting] = []
-if hasInkstone {
-    serverSwiftSettings.append(.define("INKSTONE"))
-    // Link the archive by explicit path: `-linkstone_ffi` resolves to the
+if hasNotebase {
+    serverSwiftSettings.append(.define("NOTEBASE"))
+    // Link the archive by explicit path: `-lnotebase_ffi` resolves to the
     // .dylib and bakes a build-directory path into the app, which breaks a
     // launchd-started binary and hangs dyld when the library is rebuilt.
     ffiLinkerSettings.append(.unsafeFlags([
-        "-L\(inkstoneLibDir)",
-        "\(inkstoneLibDir)/libinkstone_ffi.a",
+        "-L\(notebaseLibDir)",
+        "\(notebaseLibDir)/libnotebase_ffi.a",
     ]))
 }
 
@@ -48,20 +48,20 @@ let package = Package(
     targets: [
         // C shim for the UniFFI-generated header.
         .systemLibrary(
-            name: "CInkstone",
-            path: "Sources/CInkstone"
+            name: "CNotebase",
+            path: "Sources/CNotebase"
         ),
         // UniFFI-generated Swift bindings (regenerate with
-        // ./scripts/sync-inkstone-bindings.sh).
+        // ./scripts/sync-notebase-bindings.sh).
         .target(
-            name: "InkstoneFFI",
-            dependencies: ["CInkstone"],
-            path: "Sources/InkstoneFFI",
+            name: "NotebaseFFI",
+            dependencies: ["CNotebase"],
+            path: "Sources/NotebaseFFI",
             linkerSettings: ffiLinkerSettings
         ),
         .executableTarget(
             name: "ClipVaultServer",
-            dependencies: ["InkstoneFFI"],
+            dependencies: ["NotebaseFFI"],
             path: "Sources/ClipVault",
             exclude: [],
             resources: [
