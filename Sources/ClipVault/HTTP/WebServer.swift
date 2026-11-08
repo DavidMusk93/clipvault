@@ -323,6 +323,8 @@ class WebServer {
                 return
             }
             handleBackupRun(connection: connection)
+        } else if method == "POST" && pathOnly == "/api/inkstone/sync" {
+            handleInkstoneSyncMessage(data: data, connection: connection)
         } else if method == "POST" && pathOnly == "/api/inkstone/reconcile" {
             handleInkstoneReconcile(connection: connection)
         } else if method == "POST" && pathOnly == "/api/backup/run" {
@@ -490,6 +492,8 @@ class WebServer {
             sendItemsJSON(path: path, connection: connection)
         } else if pathOnly == "/api/inkstone/probe" {
             sendInkstoneProbe(path: path, connection: connection)
+        } else if pathOnly == "/api/inkstone/sync/hello" {
+            sendInkstoneSyncHello(path: path, connection: connection)
         } else if pathOnly == "/api/inkstone/audit" {
             sendInkstoneAudit(path: path, connection: connection)
         } else if pathOnly == "/api/inkstone/stats" {
@@ -982,6 +986,50 @@ class WebServer {
             .queryItems?.first(where: { $0.name == "q" })?.value ?? ""
         let hits = InkstoneShadow.shared.probe(query: query) ?? []
         sendJSON(["ok": true, "query": query, "count": hits.count, "hits": hits], connection: connection)
+    }
+
+    /// Note sync, transport side: opaque `inkstone-sync` messages in, messages
+    /// out. The caller owns the transport (HTTP here, iCloud/ostore later); the
+    /// engine owns convergence and durability.
+    private func sendInkstoneSyncHello(path: String, connection: HTTPByteSink) {
+        guard InkstoneShadow.shared.enabled else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        let note = URLComponents(string: "http://localhost\(path)")?
+            .queryItems?.first(where: { $0.name == "note" })?.value ?? ""
+        guard !note.isEmpty, let hello = InkstoneShadow.shared.syncHello(note: note) else {
+            sendErrorResponse(connection: connection, status: 404, message: "No such note")
+            return
+        }
+        sendJSON([
+            "ok": true,
+            "note": note,
+            "message": hello.base64EncodedString(),
+        ], connection: connection)
+    }
+
+    private func handleInkstoneSyncMessage(data: Data, connection: HTTPByteSink) {
+        guard InkstoneShadow.shared.enabled else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        guard let obj = jsonBody(from: data),
+              let note = obj["note"] as? String,
+              let encoded = obj["message"] as? String,
+              let message = Data(base64Encoded: encoded) else {
+            sendErrorResponse(connection: connection, status: 400, message: "expected {note, message}")
+            return
+        }
+        guard let outbound = InkstoneShadow.shared.syncReceive(note: note, message: message) else {
+            sendErrorResponse(connection: connection, status: 409, message: "sync rejected")
+            return
+        }
+        sendJSON([
+            "ok": true,
+            "note": note,
+            "outbound": outbound.map { $0.base64EncodedString() },
+        ], connection: connection)
     }
 
     /// Re-mirror every note from the projection into the engine. Used after a

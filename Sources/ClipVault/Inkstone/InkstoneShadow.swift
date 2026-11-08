@@ -31,6 +31,7 @@ final class InkstoneShadow {
     private var openFailed = false
     private var lastError: String?
     private var errorCount = 0
+    private var syncSessions: [String: AnyObject] = [:]
 
     private init() {
         let env = ProcessInfo.processInfo.environment
@@ -140,6 +141,28 @@ final class InkstoneShadow {
         #endif
     }
 
+    /// First message of a note sync ("here is what this vault has").
+    func syncHello(note: String) -> Data? {
+        #if INKSTONE
+        guard enabled, let session = self.session(note) else { return nil }
+        return try? session.hello()
+        #else
+        _ = note
+        return nil
+        #endif
+    }
+
+    /// Feed one opaque peer message; returns the messages to hand back.
+    func syncReceive(note: String, message: Data) -> [Data]? {
+        #if INKSTONE
+        guard enabled, let session = self.session(note) else { return nil }
+        return try? session.receive(message: message)
+        #else
+        _ = (note, message)
+        return nil
+        #endif
+    }
+
     /// Drop a note from the shadow copy.
     func forget(id: String) {
         #if INKSTONE
@@ -191,6 +214,15 @@ final class InkstoneShadow {
     }
 
     #if INKSTONE
+    /// Sessions live per note; a transport may open, use and drop one per request.
+    private func session(_ note: String) -> SyncHandle? {
+        if let existing = syncSessions[note] as? SyncHandle { return existing }
+        guard let path, let vault = openVault(path) else { return nil }
+        guard let handle = try? vault.syncHandle(note: note) else { return nil }
+        syncSessions[note] = handle as AnyObject
+        return handle
+    }
+
     private func openVault(_ path: String) -> VaultHandle? {
         if let vault = self.vault as? VaultHandle { return vault }
         if openFailed { return nil }

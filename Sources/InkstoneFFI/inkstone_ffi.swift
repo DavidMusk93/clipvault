@@ -996,6 +996,183 @@ public func FfiConverterTypeNoteHandle_lower(_ value: NoteHandle) -> UInt64 {
 
 
 /**
+ * A sync session bound to a stored note. Every accepted message is persisted
+ * before `receive` returns, so the host never has to remember to save.
+ */
+public protocol SyncHandleProtocol: AnyObject, Sendable {
+    
+    /**
+     * First message of an exchange ("here is what I have").
+     */
+    func hello() throws  -> Data
+    
+    func note()  -> String
+    
+    /**
+     * Feed one opaque message; returns the messages to hand back to the peer.
+     */
+    func receive(message: Data) throws  -> [Data]
+    
+    /**
+     * Payload for a pull-style transport.
+     */
+    func updatesForPeer() throws  -> Data
+    
+}
+/**
+ * A sync session bound to a stored note. Every accepted message is persisted
+ * before `receive` returns, so the host never has to remember to save.
+ */
+open class SyncHandle: SyncHandleProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_inkstone_ffi_fn_clone_synchandle(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_inkstone_ffi_fn_free_synchandle(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * First message of an exchange ("here is what I have").
+     */
+open func hello()throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
+        uniffiCallStatus in
+    uniffi_inkstone_ffi_fn_method_synchandle_hello(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+open func note() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_inkstone_ffi_fn_method_synchandle_note(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Feed one opaque message; returns the messages to hand back to the peer.
+     */
+open func receive(message: Data)throws  -> [Data]  {
+    return try  FfiConverterSequenceData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
+        uniffiCallStatus in
+    uniffi_inkstone_ffi_fn_method_synchandle_receive(
+            self.uniffiCloneHandle(),
+        FfiConverterData.lower(message),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Payload for a pull-style transport.
+     */
+open func updatesForPeer()throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
+        uniffiCallStatus in
+    uniffi_inkstone_ffi_fn_method_synchandle_updates_for_peer(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSyncHandle: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = SyncHandle
+
+    public static func lift(_ handle: UInt64) throws -> SyncHandle {
+        return SyncHandle(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: SyncHandle) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncHandle {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: SyncHandle, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncHandle_lift(_ handle: UInt64) throws -> SyncHandle {
+    return try FfiConverterTypeSyncHandle.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncHandle_lower(_ value: SyncHandle) -> UInt64 {
+    return FfiConverterTypeSyncHandle.lower(value)
+}
+
+
+
+
+
+
+/**
  * A vault, opened on a file or in memory.
  */
 public protocol VaultHandleProtocol: AnyObject, Sendable {
@@ -1059,6 +1236,12 @@ public protocol VaultHandleProtocol: AnyObject, Sendable {
     func search(query: String, limit: UInt32) throws  -> [SearchHitFfi]
     
     func statsJson() throws  -> String
+    
+    /**
+     * Open a sync session for one note. Transport-agnostic: the host moves the
+     * opaque bytes however it likes (HTTP, WebSocket, a file in iCloud).
+     */
+    func syncHandle(note: String) throws  -> SyncHandle
     
     /**
      * Updates a peer holding `peer_vv` is missing. Empty means "you are current".
@@ -1333,6 +1516,20 @@ open func statsJson()throws  -> String  {
         uniffiCallStatus in
     uniffi_inkstone_ffi_fn_method_vaulthandle_stats_json(
             self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Open a sync session for one note. Transport-agnostic: the host moves the
+     * opaque bytes however it likes (HTTP, WebSocket, a file in iCloud).
+     */
+open func syncHandle(note: String)throws  -> SyncHandle  {
+    return try  FfiConverterTypeSyncHandle_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
+        uniffiCallStatus in
+    uniffi_inkstone_ffi_fn_method_vaulthandle_sync_handle(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(note),uniffiCallStatus
     )
 })
 }
@@ -1802,6 +1999,31 @@ fileprivate struct FfiConverterOptionTypeNoteHandle: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
+    typealias SwiftType = [Data]
+
+    public static func write(_ value: [Data], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterData.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Data] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Data]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterData.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeNoteSummaryFfi: FfiConverterRustBuffer {
     typealias SwiftType = [NoteSummaryFfi]
 
@@ -1927,6 +2149,18 @@ private let initializationResult: InitializationResult = {
     if (uniffi_inkstone_ffi_checksum_method_notehandle_vv() != 8968) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_inkstone_ffi_checksum_method_synchandle_hello() != 64636) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_inkstone_ffi_checksum_method_synchandle_note() != 18678) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_inkstone_ffi_checksum_method_synchandle_receive() != 8770) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_inkstone_ffi_checksum_method_synchandle_updates_for_peer() != 1133) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_inkstone_ffi_checksum_method_vaulthandle_activity() != 27752) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1976,6 +2210,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_inkstone_ffi_checksum_method_vaulthandle_stats_json() != 30878) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_sync_handle() != 44075) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_inkstone_ffi_checksum_method_vaulthandle_updates_for() != 22337) {
