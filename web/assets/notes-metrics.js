@@ -15,6 +15,9 @@
     'cause', 'ms_since_last',
     'applied', 'got', 'pass', 'queued',
     'day', 'days', 'cols',
+    // Late-drift heal attribution: which host re-packed, and whether the card-presence
+    // heal actually ran (`healed: 0` = cooldown, so a stuck wall is distinguishable).
+    'healed', 'hosts', 'rail',
   ]);
   const NAME = /^[a-z][a-z0-9_]{1,63}$/;
   const SESSION_KEY = 'clipvault.metrics.session';

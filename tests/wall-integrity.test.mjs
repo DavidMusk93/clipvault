@@ -123,7 +123,26 @@ test('replacing a card keeps its column box and always re-packs', () => {
   assert.match(rep, /repackCardHost\(next\)/);
   assert.doesNotMatch(rep, /Math\.abs\(delta\)/);
   const pack = htmlFn('repackCardHost');
-  assert.match(pack, /relayoutDays/);
+  assert.match(pack, /repackDriftedHosts/);
+});
+
+test('late height drift heals the host the card lives in — including the pinned rail', () => {
+  // 2026-11 live samples: wall_layout_drift 14/14 over budget (271–727px, kind=image),
+  // every one with `days: 0` — rail cards belong to no day, so the days-only heal was
+  // a no-op and the wall stayed jumbled until a reload.
+  const heal = htmlFn('repackDriftedHosts');
+  assert.match(heal, /driftedHostOf\(card\)/);
+  assert.match(heal, /querySelectorAll\(':scope > \.m3-card'\)/);
+  assert.match(heal, /captureWallAnchor\(\)/);
+  assert.equal((heal.match(/restoreWallAnchor/g) || []).length, 1, 'one anchor for all hosts');
+  const hostOf = htmlFn('driftedHostOf');
+  assert.match(hostOf, /closest\('\.day-group'\)/);
+  assert.match(hostOf, /gridPinned/);
+  const obs = htmlFn('ensureCardResizeObserver');
+  assert.match(obs, /repackDriftedHosts\(cards/);
+  assert.doesNotMatch(obs, /relayoutDays\(days/, 'days-only heal skips the rail');
+  assert.match(html, /payload: \{ n: acc\.n, kind: acc\.kind, days: days\.size, rail, hosts \}/);
+  assert.match(htmlFn('repackCardHost'), /repackDriftedHosts\(\[card\]/);
 });
 
 test('card media is height-locked and late growth is reconciled, not rebuilt', () => {

@@ -699,7 +699,23 @@ test('pin placement is measured on the DOM, both directions', { skip: skipJsdom 
   ], rail, cache);
   assert.deepEqual(b.rail, ['lost-pin'], 'a pinned card painted into the feed');
   assert.deepEqual(b.feed, ['stray'], 'an unpinned card left in the rail');
+  assert.deepEqual(b.missing, ['unpainted'], 'a model row with no card is absent, not "fine"');
   assert.match(fnSource('notePinPlacement'), /nm\('wall_pin_misplaced'/);
   assert.match(fnSource('mergeHead'), /notePinPlacement\('head'\)/);
   assert.match(html, /wall_pin_misplaced: \{ label: '[^']+', unit: 'count', budget: 0 \}/);
+});
+
+test('a model row with no card in the DOM is reported and healed, never skipped', () => {
+  // The wall can hold a correct model (wall_head_drift 0) and still show nothing new:
+  // the placement sweep skipped absent cards, so "the wall stopped updating" had no
+  // metric and no heal. Presence is now its own count, with a cooldown so a row that
+  // cannot be painted does not rebuild in a loop.
+  const placement = fnSource('notePinPlacement');
+  assert.match(placement, /if \(!n\) return noteCardPresence\(b, source\)/);
+  const presence = fnSource('noteCardPresence');
+  assert.match(presence, /nm\('wall_card_missing'/);
+  assert.match(presence, /MISSING_HEAL_COOLDOWN_MS/);
+  assert.match(presence, /rebuildFromData\(\{ preserveScroll: true \}\)/);
+  assert.match(presence, /wallBootInflight/);
+  assert.match(html, /wall_card_missing: \{ label: '[^']+', unit: 'count', budget: 0 \}/);
 });
