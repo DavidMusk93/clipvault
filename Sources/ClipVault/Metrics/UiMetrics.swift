@@ -19,7 +19,7 @@ final class UiMetrics {
     ])
     private static let allowedPayload = Set([
         "mode", "ratio", "chars", "bytes", "n", "value", "interaction", "q_len",
-        "kind", "phase", "reason", "lag", "host",
+        "kind", "phase", "reason", "lag", "host", "wire",
         "w", "h", "nodes", "dy",
         "fds", "rss", "unix", "sse", "rlim",
         "route", "proto", "status",

@@ -25,9 +25,14 @@ test('this file is in the deploy frontend gate', () => {
 
 test('sync capture posts ClipVaultItemAdded with itemId', () => {
   const sync = src('CloudDocsSyncService.swift');
-  const slice = sliceFrom(sync, 'if changed {', 600);
+  // One notification shape for every wire (iCloud + ostore): a capture carries the
+  // item id so the wall can ingest a single card; judgment kinds stay id-less.
+  const slice = sliceFrom(sync, 'private func notifyIngested(_ op: SyncOp)', 600);
   assert.match(slice, /object: capture \? op\.itemId : nil/);
   assert.match(slice, /kind == "upsert"/);
+  assert.match(slice, /kind == "compose"/);
+  // Both pull paths must go through it.
+  assert.ok(sync.split('notifyIngested(op)').length - 1 >= 2, 'each wire must notify through notifyIngested');
 });
 
 test('OCR follow-up upsert is packed into trx after capture', () => {

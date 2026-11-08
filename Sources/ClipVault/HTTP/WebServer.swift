@@ -1239,6 +1239,11 @@ class WebServer {
                 "peers": peers,
                 "pollIntervalSeconds": st.pollIntervalSeconds,
                 "scheme": st.scheme,
+                "transport": st.transport,
+                "ostorePrefix": st.ostorePrefix as Any,
+                "ostoreBaseHost": st.ostoreBaseHost as Any,
+                "ostoreConnected": st.ostoreConnected,
+                "ostoreLastEventUnix": st.ostoreLastEventUnix as Any,
                 "policy": st.policy
             ]
             self.sendJSON(dict, connection: connection)
@@ -1264,14 +1269,30 @@ class WebServer {
         // Body may include headers; take last JSON object if present.
         let raw = String(data: data, encoding: .utf8) ?? ""
         var enabled: Bool?
+        var transport: String?
+        var ostorePrefix: String?
         if let brace = raw.range(of: "{", options: .backwards),
            let jsonData = raw[brace.lowerBound...].data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-           let e = obj["enabled"] as? Bool {
-            enabled = e
+           let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+            enabled = obj["enabled"] as? Bool
+            transport = obj["transport"] as? String
+            ostorePrefix = obj["ostorePrefix"] as? String
+        }
+        if let transport {
+            // Wire switch: `clouddocs` | `ostore` | `both`. Rebinds and resubscribes.
+            sync.setTransport(transport, prefix: ostorePrefix) { [weak self] _ in
+                if let enabled {
+                    sync.setEnabled(enabled) { [weak self] _ in
+                        self?.sendSyncStatus(connection: connection)
+                    }
+                    return
+                }
+                self?.sendSyncStatus(connection: connection)
+            }
+            return
         }
         guard let enabled = enabled else {
-            sendErrorResponse(connection: connection, status: 400, message: "expected {\"enabled\":bool}")
+            sendErrorResponse(connection: connection, status: 400, message: "expected {\"enabled\":bool} or {\"transport\":\"clouddocs\"|\"ostore\"|\"both\"}")
             return
         }
         sync.setEnabled(enabled) { [weak self] _ in

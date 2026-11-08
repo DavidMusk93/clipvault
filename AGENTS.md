@@ -339,13 +339,23 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 ## 同步
 
+**不变式：一份 per-host trx 日志，多个 wire。** 事务格式、序号、游标（`sync.applied.{host}`）与合并规则与运输方式无关；`transport` 只决定这些字节走哪条腿。
+
 ```text
   本机事件
     → CloudDocsSyncService.recordLocal*
     → outbox → trx/{host}/{seq}.json
-    → blob_keys 点名的对象 → live/attach/{key}.bin
-    → iCloud Drive 运输
+    → blob_keys 点名的对象 → attach/{key}.bin
+    → wire（config/sync.json 的 transport）
+         ├─ clouddocs  iCloud Drive（45s 轮询，File Provider 决定延迟）
+         ├─ ostore     HTTP PUT + POST /api/batch，SSE ?prefix= 通知 → 150ms 内 pull
+         └─ both       两边都发、两边都拉；iCloud 在事件驱动的 cycle 里限速 5s 一次
     → 对端 pull apply（grow-only 字段：ocr_text 更长才写）
+
+  ostore 布局 {ostorePrefix}（默认 clipvault/sync/v1）
+    trx/{host}/{016d}.json   attach/{key}.bin   heads/{host}.json
+  附件先于 trx 可见；对端只因 trx 事件动作（事件只触发 cycle，真相来自 list + 游标）
+  冷备 clipvault/backup/** 与同步无关，禁止互相借用
 
   blob_keys = 64 hex  |  {sha}.rtf  |  {sha}.pdf
   本地文件   blobs/{key}.bin     （RTF 是 {sha}.rtf.bin，不是 {sha}.bin）
@@ -361,9 +371,9 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   墙            ORDER BY timestamp DESC, id DESC
 ```
 
-策略真源：`WallClockPolicy.swift`。回归：`tests/daily-capture.test.mjs`（按日哈希匹配、跨日保留、去重边界与同步计数）+ `tests/wall_clock_main.swift`（午夜/DST、策略 + 440 团块 keyset 必须翻到更早 text；类型 chip 走同一 keyset，禁止只滤第 1 页）。
+策略真源：`WallClockPolicy.swift`。ostore wire 设计与排查：`docs/ostore-sync.md`（凭据 `config/ostore-backup.json` 0600；`GET /api/sync/status` 的 `ostoreConnected` 决定是事件驱动还是 2s 轮询兜底）。回归：`tests/daily-capture.test.mjs`（按日哈希匹配、跨日保留、去重边界与同步计数）+ `tests/wall_clock_main.swift`（午夜/DST、策略 + 440 团块 keyset 必须翻到更早 text；类型 chip 走同一 keyset，禁止只滤第 1 页）+ `tests/ostore-sync.test.mjs`（附件先于 trx、一次 list 做发现、事件只触发 cycle、游标按 host、备份切片绝不当总线）。
 
-禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite；OCR/hydrate 拨捕获钟；把 440 张图合成一张卡；`readBlobFile` 用 `count == 64` 丢掉 `{sha}.rtf`/`{sha}.pdf`。
+禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite；OCR/hydrate 拨捕获钟；把 440 张图合成一张卡；`readBlobFile` 用 `count == 64` 丢掉 `{sha}.rtf`/`{sha}.pdf`；给同步再加第三条私有日志（只有 `trx/` 一份真源）；在 ostore 事件里做业务判断；拿 `list.sha256` 当对象校验（cc ostore 该字段历史上装的是 MD5）。
 
 ---
 
@@ -605,6 +615,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | --- | --- |
 | 视觉 token | `docs/design-taste.md` |
 | 归档闭包 | nmem `clipvault_archive_closure_sync_20260817` |
+| ostore 实时同步（wire/凭据/时延预算） | `docs/ostore-sync.md`；`tests/ostore-sync.test.mjs` |
 | 分层哲学 | nmem `clipvault_design_philosophy_layered_memory_20260814` |
 | 阅读态 SQLite | nmem `clipvault_reader_learning_layer_sqlite_20260814` |
 | Compose | nmem `c2c20497-bc52-4204-99fc-34191bb98a99` |
