@@ -58,8 +58,9 @@ final class CloudDocsSyncService {
         var ostorePrefix: String = "clipvault/sync/v1"
         /// Safety-net cadence while the ostore event stream is up (events do the work).
         var ostoreOnlinePollSeconds: Double = 30
-        /// Safety-net cadence while it is down: the 3 s realtime budget is held by polling.
-        var ostoreOfflinePollSeconds: Double = 2
+        /// Safety-net cadence while the event stream is down. 1.5 s keeps a poll-driven
+        /// cycle inside the 3 s budget too (a cycle costs ~0.5–1.2 s on its own).
+        var ostoreOfflinePollSeconds: Double = 1.5
         static let `default` = Config()
 
         /// Synthesized `Decodable` ignores property defaults, so an existing
@@ -72,7 +73,7 @@ final class CloudDocsSyncService {
             transport = (try? c.decodeIfPresent(String.self, forKey: .transport)) ?? "clouddocs"
             ostorePrefix = (try? c.decodeIfPresent(String.self, forKey: .ostorePrefix)) ?? "clipvault/sync/v1"
             ostoreOnlinePollSeconds = (try? c.decodeIfPresent(Double.self, forKey: .ostoreOnlinePollSeconds)) ?? 30
-            ostoreOfflinePollSeconds = (try? c.decodeIfPresent(Double.self, forKey: .ostoreOfflinePollSeconds)) ?? 2
+            ostoreOfflinePollSeconds = (try? c.decodeIfPresent(Double.self, forKey: .ostoreOfflinePollSeconds)) ?? 1.5
         }
         init() {}
 
@@ -211,6 +212,10 @@ final class CloudDocsSyncService {
     private var lastCloudCycleUnix: Double = 0
     /// Idle head rewrites are throttled: on `both` they would churn the File Provider.
     private var lastHeadWriteUnix: Double = 0
+    /// iCloud peer scan cache. `buildStatus()` runs after every cycle, and on `both`
+    /// an event cycle must not pay for reading the File Provider's heads each time.
+    private var cloudPeers: [PeerStatus] = []
+    private var lastCloudPeerScanUnix: Double = 0
 
     private init(database: DatabaseManager) {
         self.database = database
@@ -732,7 +737,12 @@ final class CloudDocsSyncService {
         // 1) ostore push runs first and never consumes the outbox: on `both` the
         //    iCloud push deletes op files on success, and the fast wire must not wait
         //    behind a dataless File Provider materialization.
-        if config.usesOstore {
+        //
+        //    An event-driven cycle is here to *pull* what a peer just published; it
+        //    only pays for a push when local work is actually waiting.
+        let eventDriven = (reason == "ostore-event" || reason == "ostore-blob")
+        let pushDue = !eventDriven || outboxPendingCount() > 0
+        if config.usesOstore && pushDue {
             lastPhase = "push:ostore"
             let tPush = Date().timeIntervalSince1970
             let pushed = ostorePush()
@@ -754,9 +764,14 @@ final class CloudDocsSyncService {
         // and the File Provider does not need that. An event-driven drain still gives
         // iCloud a 5 s slice, and any non-event reason (poll / manual / startup) always
         // runs it.
+        // On `both`, iCloud is the compatibility wire: it must not steal the realtime
+        // path. A File Provider cycle can spend seconds on a dataless head, and it
+        // shares this serial queue with the ostore pull, so it only runs on its own
+        // cadence (poll / startup / manual switches), never on a capture or an event.
+        // A `clouddocs`-only install keeps the old behaviour exactly.
         let nowUnix = Date().timeIntervalSince1970
-        let isOstoreDrain = (reason == "ostore-event" || reason == "ostore-blob")
-        let cloudDue = config.usesCloudDocs && (!isOstoreDrain || nowUnix - lastCloudCycleUnix >= 5)
+        let cloudReason: Set<String> = ["poll", "startup", "manual", "enable", "transport", "ostore-reset"]
+        let cloudDue = config.usesCloudDocs && (!config.usesOstore || cloudReason.contains(reason))
         if cloudDue { lastCloudCycleUnix = nowUnix }
         if cloudDue {
             lastPhase = "push"
@@ -1234,9 +1249,15 @@ final class CloudDocsSyncService {
             return StepResult(ok: false, message: "push:ostore upload_fail")
         }
         for (op, _) in ops { for key in op.blobKeys ?? [] { publishedAttachments.insert(key) } }
+        // The head is a liveness/seq hint, not part of the protocol: peers learn the
+        // seq from the trx event itself. Rewriting it after every push would add a
+        // whole round trip to the capture path for nothing.
         let highest = max(ops.map(\.op.seq).max() ?? 0, max(0, nextSeq - 1))
-        lastHeadWriteUnix = Date().timeIntervalSince1970
-        writeOstoreHead(wire: wire, seq: highest, lastOpId: ops.last?.op.opId)
+        let nowUnix = Date().timeIntervalSince1970
+        if nowUnix - lastHeadWriteUnix >= 10 {
+            lastHeadWriteUnix = nowUnix
+            writeOstoreHead(wire: wire, seq: highest, lastOpId: ops.last?.op.opId)
+        }
         // On `both` the iCloud push owns outbox deletion; alone, we retire the files.
         if !config.usesCloudDocs {
             for (_, file) in ops { try? fm.removeItem(at: file) }
@@ -1379,6 +1400,14 @@ final class CloudDocsSyncService {
                 if let keys = op.blobKeys, !keys.isEmpty {
                     var missing = false
                     for key in keys {
+                        // A prefetch is already pulling these bytes: wait for it instead
+                        // of buying a second round trip. Bounded, so a stuck download
+                        // falls through to the blob-wait retry.
+                        if prefetching.contains(key) {
+                            for _ in 0..<100 where database.readBlobFile(hash: key) == nil {
+                                Thread.sleep(forTimeInterval: 0.02)
+                            }
+                        }
                         if database.readBlobFile(hash: key) != nil { continue }
                         guard needsBlob(op: op, key: key) else { continue }
                         do {
@@ -2149,7 +2178,10 @@ final class CloudDocsSyncService {
     private func buildStatus() -> Status {
         let root = syncRootURL()
         var peers: [PeerStatus] = []
-        if config.usesCloudDocs, let root {
+        let nowUnix = Date().timeIntervalSince1970
+        if config.usesCloudDocs, let root,
+           cloudPeers.isEmpty || nowUnix - lastCloudPeerScanUnix >= 15 {
+            var scanned: [PeerStatus] = []
             let heads = headsDir(in: root)
             let files = ((try? fm.contentsOfDirectory(at: heads, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
                 .filter { $0.pathExtension == "json" }
@@ -2160,14 +2192,17 @@ final class CloudDocsSyncService {
                       head.host != hostId else { continue }
                 let applied = appliedSeq(for: head.host)
                 let diskMax = discoverMaxOpSeq(host: head.host, root: root)
-                peers.append(PeerStatus(
+                scanned.append(PeerStatus(
                     host: head.host,
                     remoteSeq: max(head.seq, diskMax),
                     appliedSeq: applied,
                     lag: max(0, head.seq - applied)
                 ))
             }
+            cloudPeers = scanned
+            lastCloudPeerScanUnix = nowUnix
         }
+        if config.usesCloudDocs { peers.append(contentsOf: cloudPeers) }
         if config.usesOstore {
             for (host, remote) in ostorePeerRemote where host != hostId {
                 let applied = appliedSeq(for: host)
