@@ -358,6 +358,36 @@ RustBuffer uniffi_inkstone_ffi_fn_method_notehandle_updates_since(uint64_t ptr, 
 RustBuffer uniffi_inkstone_ffi_fn_method_notehandle_vv(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_CLONE_SYNCHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_CLONE_SYNCHANDLE
+uint64_t uniffi_inkstone_ffi_fn_clone_synchandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_FREE_SYNCHANDLE
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_FREE_SYNCHANDLE
+void uniffi_inkstone_ffi_fn_free_synchandle(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_HELLO
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_HELLO
+RustBuffer uniffi_inkstone_ffi_fn_method_synchandle_hello(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_NOTE
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_NOTE
+RustBuffer uniffi_inkstone_ffi_fn_method_synchandle_note(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_RECEIVE
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_RECEIVE
+RustBuffer uniffi_inkstone_ffi_fn_method_synchandle_receive(uint64_t ptr, RustBuffer message, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_UPDATES_FOR_PEER
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_SYNCHANDLE_UPDATES_FOR_PEER
+RustBuffer uniffi_inkstone_ffi_fn_method_synchandle_updates_for_peer(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_CLONE_VAULTHANDLE
 #define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_CLONE_VAULTHANDLE
 uint64_t uniffi_inkstone_ffi_fn_clone_vaulthandle(uint64_t handle, RustCallStatus *_Nonnull out_status
@@ -462,6 +492,11 @@ RustBuffer uniffi_inkstone_ffi_fn_method_vaulthandle_search(uint64_t ptr, RustBu
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_STATS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_STATS_JSON
 RustBuffer uniffi_inkstone_ffi_fn_method_vaulthandle_stats_json(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_SYNC_HANDLE
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_SYNC_HANDLE
+uint64_t uniffi_inkstone_ffi_fn_method_vaulthandle_sync_handle(uint64_t ptr, RustBuffer note, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_UPDATES_FOR
@@ -855,6 +890,30 @@ uint16_t uniffi_inkstone_ffi_checksum_method_notehandle_vv(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_HELLO
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_HELLO
+uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_hello(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_NOTE
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_NOTE
+uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_note(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_RECEIVE
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_RECEIVE
+uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_receive(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_UPDATES_FOR_PEER
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_UPDATES_FOR_PEER
+uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_updates_for_peer(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_ACTIVITY
 #define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_ACTIVITY
 uint16_t uniffi_inkstone_ffi_checksum_method_vaulthandle_activity(void
@@ -954,6 +1013,12 @@ uint16_t uniffi_inkstone_ffi_checksum_method_vaulthandle_search(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_STATS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_STATS_JSON
 uint16_t uniffi_inkstone_ffi_checksum_method_vaulthandle_stats_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_SYNC_HANDLE
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_SYNC_HANDLE
+uint16_t uniffi_inkstone_ffi_checksum_method_vaulthandle_sync_handle(void
     
 );
 #endif
