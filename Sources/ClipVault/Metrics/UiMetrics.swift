@@ -32,6 +32,10 @@ final class UiMetrics {
         "cause", "ms_since_last",
         "applied", "got", "pass", "queued",
         "day", "days",
+        // Late-drift heal + DOM presence: without these the wall can report a 700px
+        // layout drift or a missing card and still not say which host or whether the
+        // heal ran (2026-11-08 "瀑布流乱 / 不更新" investigation).
+        "healed", "hosts", "rail",
     ])
 
     private let queue = DispatchQueue(label: "clipvault.ui-metrics")

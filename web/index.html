@@ -7242,11 +7242,14 @@ window.ClipViewMasonry = Masonry;
      * rebuild. Budget 0.
      */
     function pinPlacementBreakdown(model, pinHost, cache) {
-      const out = { rail: [], feed: [] };
+      const out = { rail: [], feed: [], missing: [] };
       if (!pinHost || !cache) return out;
       for (const c of model || []) {
         const card = cache.get(c.id);
-        if (!card || !card.isConnected) continue;
+        // A row the model knows but the DOM never received (or lost) is the invisible
+        // half of "the wall stopped updating". It is not misplaced, it is **absent**, so
+        // the placement check used to skip it (`continue`) and no metric ever fired.
+        if (!card || !card.isConnected) { out.missing.push(c.id); continue; }
         const inRail = pinHost.contains(card);
         const pinned = itemIsPinned(c);
         if (pinned && !inRail) out.rail.push(c.id);
@@ -7255,11 +7258,39 @@ window.ClipViewMasonry = Masonry;
       return out;
     }
 
+    /** One heal per cooldown: a row that cannot be painted must not rebuild in a loop. */
+    let lastMissingHealAt = 0;
+    const MISSING_HEAL_COOLDOWN_MS = 5000;
+
+    function noteCardPresence(breakdown, source) {
+      const missing = (breakdown && breakdown.missing) || [];
+      if (!missing.length || wallBootInflight || document.hidden) return 0;
+      const now = Date.now();
+      const heal = now - lastMissingHealAt > MISSING_HEAL_COOLDOWN_MS;
+      if (heal) lastMissingHealAt = now;
+      nm('wall_card_missing', {
+        value: missing.length,
+        ok: false,
+        over: true,
+        payload: {
+          kind: String(source || 'head'),
+          n: missing.length,
+          healed: heal ? 1 : 0,
+          id0: String(missing[0] || '').slice(0, 8),
+        },
+      });
+      if (heal) {
+        colHeights = null;
+        rebuildFromData({ preserveScroll: true });
+      }
+      return missing.length;
+    }
+
     function notePinPlacement(source) {
       if (wallParked || currentView === 'trash') return 0;
       const b = pinPlacementBreakdown(clientFilter(clips), document.getElementById('gridPinned'), cardCache);
       const n = b.rail.length + b.feed.length;
-      if (!n) return 0;
+      if (!n) return noteCardPresence(b, source);
       nm('wall_pin_misplaced', {
         value: n,
         ok: false,
@@ -9563,16 +9594,7 @@ window.ClipViewMasonry = Masonry;
     }
 
     function repackCardHost(card) {
-      if (!card) return;
-      const sec = card.closest ? card.closest('.day-group') : null;
-      if (sec && sec.dataset.day) {
-        relayoutDays(new Set([sec.dataset.day]), { preserveScroll: true });
-        return;
-      }
-      const pinHost = document.getElementById('gridPinned');
-      if (pinHost && card.parentNode === pinHost) {
-        layoutMasonry(pinHost, [...pinHost.querySelectorAll(':scope > .m3-card')], { preserveScroll: true });
-      }
+      return repackDriftedHosts([card], { preserveScroll: true }) > 0;
     }
 
     function replaceCardInPlace(item) {
@@ -11244,6 +11266,45 @@ window.ClipViewMasonry = Masonry;
     let driftTimer = 0;
     let driftAcc = { n: 0, max: 0, kind: '' };
     let driftDays = new Set();
+    let driftCards = new Set();
+    const DRIFT_CARDS_MAX = 64;
+
+    /** The canvas a card is packed into: its day masonry, or the pinned rail. */
+    function driftedHostOf(card) {
+      if (!card || !card.isConnected) return null;
+      const sec = card.closest ? card.closest('.day-group') : null;
+      if (sec) return dayHostOf(sec);
+      const pinHost = document.getElementById('gridPinned');
+      return pinHost && card.parentNode === pinHost ? pinHost : null;
+    }
+
+    /**
+     * Re-pack every host that drifted, once each, under one scroll anchor.
+     *
+     * The pinned rail sits **above** the feed in normal flow, and its cards are absolutely
+     * positioned (measured height, `left/top`) while the rail's own `height` is whatever
+     * the last pack wrote. A rail card that grows 700px after that pack therefore spills
+     * over the day sections below and the rail's box stays short — the wall looks jumbled
+     * *and* looks like it stopped updating, until a reload rebuilds everything. The old
+     * heal only called `relayoutDays(days)`, and rail cards belong to no day (their metric
+     * samples read `days: 0`), so the no-op left it broken forever.
+     */
+    function repackDriftedHosts(cards, { preserveScroll = true } = {}) {
+      if (wallParked) { parkedPaintDirty = true; return 0; }
+      const hosts = [];
+      for (const card of cards || []) {
+        const host = driftedHostOf(card);
+        if (host && !hosts.includes(host)) hosts.push(host);
+      }
+      if (!hosts.length) return 0;
+      const anchor = preserveScroll ? captureWallAnchor() : null;
+      for (const host of hosts) {
+        layoutMasonry(host, [...host.querySelectorAll(':scope > .m3-card')], { preserveScroll: false });
+      }
+      if (anchor) restoreWallAnchor(anchor);
+      return hosts.length;
+    }
+
     function ensureCardResizeObserver() {
       if (cardResizeObs || typeof ResizeObserver === 'undefined') return;
       cardResizeObs = new ResizeObserver((entries) => {
@@ -11261,6 +11322,7 @@ window.ClipViewMasonry = Masonry;
           if (Math.abs(delta) > Math.abs(driftAcc.max)) driftAcc.max = delta;
           const sec = el.closest ? el.closest('.day-group') : null;
           if (sec && sec.dataset.day) driftDays.add(sec.dataset.day);
+          if (driftCards.size < DRIFT_CARDS_MAX) driftCards.add(el);
           if (!driftAcc.kind) {
             driftAcc.kind = el.querySelector('.thumb-wrap img, .md-preview img, img') ? 'image'
               : (el.querySelector('table') ? 'table' : 'content');
@@ -11271,16 +11333,23 @@ window.ClipViewMasonry = Masonry;
             driftTimer = 0;
             const acc = driftAcc;
             const days = driftDays;
+            const cards = driftCards;
             driftAcc = { n: 0, max: 0, kind: '' };
             driftDays = new Set();
+            driftCards = new Set();
+            // Re-pack only the hosts that actually drifted, never the whole wall — but a
+            // host can be the pinned rail, so `days` alone is not the answer.
+            const hosts = repackDriftedHosts(cards, { preserveScroll: true });
+            // "rail" is the attribution the old payload could not give: `days: 0` with a
+            // 700px drift is a pinned-rail card, not a healthy no-op.
+            let rail = 0;
+            for (const c of cards) if (!(c.closest && c.closest('.day-group'))) rail += 1;
             nm('wall_layout_drift', {
               value: Math.abs(Math.round(acc.max)),
               ok: false,
               over: true,
-              payload: { n: acc.n, kind: acc.kind, days: days.size },
+              payload: { n: acc.n, kind: acc.kind, days: days.size, rail, hosts },
             });
-            // Re-pack only the days that actually drifted, never the whole wall.
-            relayoutDays(days, { preserveScroll: true });
           }, 120);
         }
       });
@@ -12601,6 +12670,7 @@ window.ClipViewMasonry = Masonry;
       wall_layout_drift: { label: '布局漂移', unit: 'px', budget: 0 },
       wall_head_drift: { label: '墙·头部漂移', unit: 'count', budget: 0 },
       wall_pin_misplaced: { label: '墙·置顶错位', unit: 'count', budget: 0 },
+      wall_card_missing: { label: '墙·卡片缺失', unit: 'count', budget: 0 },
       sse_churn: { label: 'SSE·换主(瞬时)', unit: 'count', budget: 0 },
       sse_socket_churn: { label: 'SSE·socket 抖动(5min)', unit: 'count', budget: 3 },
       capture_gap: { label: '捕获·静默窗口丢弃', unit: 'count', budget: 0 },
