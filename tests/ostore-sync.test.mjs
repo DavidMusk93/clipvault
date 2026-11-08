@@ -135,12 +135,15 @@ test('realtime budget: fast local drain, event-driven, 2s poll fallback', () => 
   assert.match(drain, /delay \?\? \(config\.usesOstore \? 0\.15 : 1\.5\)/);
   const poll = slice(sync, 'private func pollInterval() -> Double', 700);
   assert.match(poll, /config\.ostoreOfflinePollSeconds/);
-  assert.match(sync, /var ostoreOfflinePollSeconds: Double = 2/);
+  assert.match(sync, /var ostoreOfflinePollSeconds: Double = 1.5/);
   assert.match(sync, /var ostoreOnlinePollSeconds: Double = 30/);
-  // iCloud keeps its own slower cadence during an event storm.
-  assert.match(sync, /let isOstoreDrain = \(reason == "ostore-event" \|\| reason == "ostore-blob"\)/);
-  assert.match(sync, /nowUnix - lastCloudCycleUnix >= 5/);
+  // On `both`, iCloud is the compatibility wire: it must never run on a capture or an
+  // event (a File Provider cycle would delay the ostore pull on the same queue).
+  assert.match(sync, /let cloudReason: Set<String> = \["poll", "startup", "manual", "enable", "transport", "ostore-reset"\]/);
+  assert.match(sync, /let cloudDue = config\.usesCloudDocs && \(!config\.usesOstore \|\| cloudReason\.contains\(reason\)\)/);
   assert.match(doc, /≤ 3s|3s/);
+  // An event-driven cycle skips the push half unless the outbox has work.
+  assert.match(sync, /let pushDue = !eventDriven \|\| outboxPendingCount\(\) > 0/);
 });
 
 test('the transport can be switched at runtime and reports its state', () => {
