@@ -3189,12 +3189,12 @@ final class DatabaseManager: ObservableObject {
         )
         let body = plan.body
         let hash = plan.hash
-        let enginePrimary = InkstoneShadow.shared.isPrimary
+        let enginePrimary = NotebaseShadow.shared.isPrimary
         if enginePrimary {
             // Fail closed: the projection must never accept a body the engine
             // did not take, or the two would drift with no way to tell which is
             // right.
-            guard InkstoneShadow.shared.writePrimary(
+            guard NotebaseShadow.shared.writePrimary(
                 id: id.uuidString,
                 markdown: body,
                 updatedAt: now
@@ -4133,7 +4133,7 @@ final class DatabaseManager: ObservableObject {
         return nil
     }
 
-    struct InkstoneAuditRow {
+    struct NotebaseAuditRow {
         /// Compare what the two sides *mean*, not how they print it.
         ///
         /// The engine renders markdown canonically: blank lines before lists and
@@ -4250,7 +4250,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Rewrite every note in the projection from the engine.
-    func inkstoneReconcile(completion: @escaping (Int, Int) -> Void) {
+    func notebaseReconcile(completion: @escaping (Int, Int) -> Void) {
         var bodies: [(String, String, TimeInterval)] = []
         performReadSync {
             guard let db = self.readDB ?? self.db else { return }
@@ -4269,7 +4269,7 @@ final class DatabaseManager: ObservableObject {
         var failed = 0
         for (id, body, ts) in bodies {
             if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
-            if InkstoneShadow.shared.writePrimary(
+            if NotebaseShadow.shared.writePrimary(
                 id: id,
                 markdown: body,
                 updatedAt: Date(timeIntervalSince1970: ts)
@@ -4283,7 +4283,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Walk notes and compare what ClipVault serves with what the engine holds.
-    func inkstoneAudit(limit: Int, completion: @escaping ([InkstoneAuditRow]) -> Void) {
+    func notebaseAudit(limit: Int, completion: @escaping ([NotebaseAuditRow]) -> Void) {
         var bodies: [(String, String)] = []
         performReadSync {
             guard let db = self.readDB ?? self.db else { return }
@@ -4298,10 +4298,10 @@ final class DatabaseManager: ObservableObject {
                 if !id.isEmpty { bodies.append((id, body)) }
             }
         }
-        let rows = bodies.map { (id, body) -> InkstoneAuditRow in
-            let engine = InkstoneShadow.shared.engineMarkdown(id: id) ?? ""
-            let matches = InkstoneAuditRow.equalIgnoringWhitespace(body, engine)
-            return InkstoneAuditRow(
+        let rows = bodies.map { (id, body) -> NotebaseAuditRow in
+            let engine = NotebaseShadow.shared.engineMarkdown(id: id) ?? ""
+            let matches = NotebaseAuditRow.equalIgnoringWhitespace(body, engine)
+            return NotebaseAuditRow(
                 id: id,
                 matches: matches,
                 projectionPrefix: String(body.prefix(80)),
@@ -4324,9 +4324,9 @@ final class DatabaseManager: ObservableObject {
     /// where the edits actually live.
     func noteEditCounts(ids: [UUID]) -> [String: Int] {
         guard !ids.isEmpty else { return [:] }
-        if InkstoneShadow.shared.isPrimary {
+        if NotebaseShadow.shared.isPrimary {
             // One query for the page, not one document load per note.
-            let page = InkstoneShadow.shared.activities(notes: ids.map { $0.uuidString })
+            let page = NotebaseShadow.shared.activities(notes: ids.map { $0.uuidString })
             var engineCounts: [String: Int] = [:]
             for (note, activity) in page {
                 let sessions = activity["sessions"] as? Int ?? 0

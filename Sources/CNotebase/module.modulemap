@@ -1,0 +1,4 @@
+module notebase_ffiFFI {
+    header "notebase_ffiFFI.h"
+    export *
+}

@@ -4,8 +4,8 @@
 #   ./scripts/reclaim-compose-ops.sh [--dry-run]
 #
 # Safety gates (all must hold, else nothing is deleted):
-#   1. the engine is primary (CLIPVAULT_INKSTONE_PRIMARY=1) and enabled;
-#   2. every live note exists in the engine (`/api/inkstone/audit` checked == live);
+#   1. the engine is primary (CLIPVAULT_NOTEBASE_PRIMARY=1) and enabled;
+#   2. every live note exists in the engine (`/api/notebase/audit` checked == live);
 #   3. audit drift is small (<= 2% — markdown rendering differences are expected).
 #
 # Artifacts written before touching anything:
@@ -20,15 +20,15 @@ export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 HOME_DIR="${CLIPVAULT_HOME:-$HOME/Library/Application Support/Keepsake}"
 DB="$HOME_DIR/clipflow.db"
-VAULT="${CLIPVAULT_INKSTONE_PATH:-$HOME_DIR/inkstone.db}"
-INKSTONE="${INKSTONE_REPO:-$HOME/dev/inkstone}"
+VAULT="${CLIPVAULT_NOTEBASE_PATH:-$HOME_DIR/notebase.db}"
+NOTEBASE="${NOTEBASE_REPO:-$HOME/dev/notebase}"
 API="http://127.0.0.1:8080"
 TS="$(date +%Y%m%d-%H%M%S)"
 DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
 
 echo "[1/4] gates"
-curl -s "$API/api/inkstone/audit?limit=2000" > /tmp/reclaim-audit.json
+curl -s "$API/api/notebase/audit?limit=2000" > /tmp/reclaim-audit.json
 python3 - "$DB" <<'PY'
 import json, sqlite3, sys
 db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
@@ -37,7 +37,7 @@ a = json.load(open('/tmp/reclaim-audit.json'))
 checked, drift, primary = a['checked'], a['drift'], a['enginePrimary']
 print(f"      live={live} engine_checked={checked} drift={drift} primary={primary}")
 if not primary:
-    sys.exit("FAIL: engine is not primary; run scripts/cutover-inkstone.sh on")
+    sys.exit("FAIL: engine is not primary; run scripts/cutover-notebase.sh on")
 if checked < live:
     sys.exit(f"FAIL: only {checked}/{live} notes are in the engine")
 if drift > max(2, live * 2 // 100):
@@ -46,8 +46,8 @@ PY
 
 echo "[2/4] artifacts"
 EXPORT="$HOME_DIR/markdown-export-$TS"
-( cd "$INKSTONE" && ./target/release/examples/export-markdown --vault "$VAULT" --out "$EXPORT" ) \
-  || ( cd "$INKSTONE" && cargo run --release -q -p inkstone-store --example export-markdown -- --vault "$VAULT" --out "$EXPORT" )
+( cd "$NOTEBASE" && ./target/release/examples/export-markdown --vault "$VAULT" --out "$EXPORT" ) \
+  || ( cd "$NOTEBASE" && cargo run --release -q -p notebase-store --example export-markdown -- --vault "$VAULT" --out "$EXPORT" )
 BACKUP="$HOME_DIR/clipflow-before-reclaim-$TS.db"
 sqlite3 "$DB" "VACUUM INTO '$BACKUP';"
 echo "      $EXPORT"
@@ -81,5 +81,5 @@ echo "[4/4] result"
 printf "      compose_ops rows   %s -> %s\n" "$BEFORE_ROWS" "$AFTER_ROWS"
 printf "      compose_ops bytes  %s -> %s\n" "$BEFORE_BYTES" "$(sqlite3 "$DB" "SELECT COALESCE(SUM(LENGTH(body)),0) FROM compose_ops;")"
 printf "      database file      %.1f MB -> %.1f MB\n" "$(echo "$BEFORE_DB/1048576" | bc -l)" "$(echo "$AFTER_DB/1048576" | bc -l)"
-curl -s "$API/api/inkstone/audit?limit=2000" | python3 -c 'import json,sys;d=json.load(sys.stdin);print("      audit after: checked=%s drift=%s" % (d["checked"], d["drift"]))'
+curl -s "$API/api/notebase/audit?limit=2000" | python3 -c 'import json,sys;d=json.load(sys.stdin);print("      audit after: checked=%s drift=%s" % (d["checked"], d["drift"]))'
 sqlite3 "$DB" "SELECT '      notes: ' || COUNT(*) FROM clipboard_items WHERE type='note' AND deleted_at IS NULL;"

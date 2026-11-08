@@ -1,32 +1,32 @@
 import Foundation
 
-#if INKSTONE
-import InkstoneFFI
+#if NOTEBASE
+import NotebaseFFI
 #endif
 
-/// Shadow copy of the note set in the inkstone engine.
+/// Shadow copy of the note set in the notebase engine.
 ///
 /// The authoritative path stays ClipVault's own storage: this mirrors every
-/// saved note into an inkstone vault so the engine can be exercised on real
+/// saved note into an notebase vault so the engine can be exercised on real
 /// data (search, warmth, backup) before it becomes the writer. It is:
 ///
-/// * **opt-in** — `CLIPVAULT_INKSTONE_SHADOW=1`, otherwise every call is a no-op;
+/// * **opt-in** — `CLIPVAULT_NOTEBASE_SHADOW=1`, otherwise every call is a no-op;
 /// * **off the request path** — work happens on its own serial queue, and a
 ///   failure is logged once, never surfaced to the editor;
 /// * **projection-only** — it writes the markdown ClipVault already stores, so a
 ///   shadow vault can be thrown away and rebuilt at any time.
-final class InkstoneShadow {
-    static let shared = InkstoneShadow()
+final class NotebaseShadow {
+    static let shared = NotebaseShadow()
 
     /// Vault file, or nil when the shadow is disabled.
     let path: String?
 
-    /// `CLIPVAULT_INKSTONE_PRIMARY=1` moves the note write path into the engine:
+    /// `CLIPVAULT_NOTEBASE_PRIMARY=1` moves the note write path into the engine:
     /// a note is written to the vault **first**, and only then projected into
     /// ClipVault's own tables. Off means the old path stays authoritative.
     let isPrimary: Bool
 
-    private let queue = DispatchQueue(label: "clipvault.inkstone.shadow", qos: .utility)
+    private let queue = DispatchQueue(label: "clipvault.notebase.shadow", qos: .utility)
     private var vault: AnyObject?
     private var openFailed = false
     private var lastError: String?
@@ -35,14 +35,14 @@ final class InkstoneShadow {
 
     private init() {
         let env = ProcessInfo.processInfo.environment
-        isPrimary = env["CLIPVAULT_INKSTONE_PRIMARY"] == "1"
-        guard isPrimary || env["CLIPVAULT_INKSTONE_SHADOW"] == "1" else {
+        isPrimary = env["CLIPVAULT_NOTEBASE_PRIMARY"] == "1"
+        guard isPrimary || env["CLIPVAULT_NOTEBASE_SHADOW"] == "1" else {
             path = nil
             return
         }
         let home = env["CLIPVAULT_HOME"]
             ?? (NSHomeDirectory() + "/Library/Application Support/Keepsake")
-        path = env["CLIPVAULT_INKSTONE_PATH"] ?? (home + "/inkstone.db")
+        path = env["CLIPVAULT_NOTEBASE_PATH"] ?? (home + "/notebase.db")
     }
 
     var enabled: Bool { path != nil }
@@ -50,7 +50,7 @@ final class InkstoneShadow {
     /// Mirror one note. `markdown` is ClipVault's stored body, `updatedAt` its
     /// timestamp.
     func mirror(id: String, markdown: String, updatedAt: Date) {
-        #if INKSTONE
+        #if NOTEBASE
         guard enabled, let path else { return }
         let ms = Int64(updatedAt.timeIntervalSince1970 * 1000)
         queue.async { [weak self] in
@@ -79,7 +79,7 @@ final class InkstoneShadow {
     /// Engine-first write. Returns false when the engine refused, and the caller
     /// must then fail the save instead of letting the projection drift.
     func writePrimary(id: String, markdown: String, updatedAt: Date) -> Bool {
-        #if INKSTONE
+        #if NOTEBASE
         guard isPrimary, let path, let vault = openVault(path) else { return false }
         let ms = Int64(updatedAt.timeIntervalSince1970 * 1000)
         do {
@@ -107,7 +107,7 @@ final class InkstoneShadow {
 
     /// The engine's markdown for a note (audit / repair).
     func engineMarkdown(id: String) -> String? {
-        #if INKSTONE
+        #if NOTEBASE
         guard let path, let vault = openVault(path) else { return nil }
         guard let note = try? vault.load(id: id) else { return nil }
         return note.markdown()
@@ -120,7 +120,7 @@ final class InkstoneShadow {
     /// Writing sessions the engine recorded — the warmth reading once the engine
     /// owns the write path.
     func editSessions(id: String) -> Int? {
-        #if INKSTONE
+        #if NOTEBASE
         guard let path, let vault = openVault(path) else { return nil }
         guard let activity = try? vault.activity(id: id) else { return nil }
         return Int(activity.sessions) + (activity.inProgress ? 1 : 0)
@@ -132,7 +132,7 @@ final class InkstoneShadow {
 
     /// Consistent copy of the vault, for the snapshot taken before a flip.
     func backup(to path: String) -> UInt64? {
-        #if INKSTONE
+        #if NOTEBASE
         guard let vaultPath = self.path, let vault = openVault(vaultPath) else { return nil }
         return try? vault.backupTo(path: path)
         #else
@@ -143,7 +143,7 @@ final class InkstoneShadow {
 
     /// First message of a note sync ("here is what this vault has").
     func syncHello(note: String) -> Data? {
-        #if INKSTONE
+        #if NOTEBASE
         guard enabled, let session = self.session(note) else { return nil }
         return try? session.hello()
         #else
@@ -162,7 +162,7 @@ final class InkstoneShadow {
     }
 
     func syncReceive(note: String, message: Data) -> SyncOutcome? {
-        #if INKSTONE
+        #if NOTEBASE
         guard enabled, let session = self.session(note) else { return nil }
         guard let step = try? session.receiveStep(message: message) else { return nil }
         return SyncOutcome(
@@ -180,7 +180,7 @@ final class InkstoneShadow {
     /// Activity for a page of notes, in one engine query. Returns saves,
     /// sessions, in-progress flag and the newest edit time.
     func activities(notes: [String]) -> [String: [String: Any]] {
-        #if INKSTONE
+        #if NOTEBASE
         guard !notes.isEmpty, let path, let vault = openVault(path) else { return [:] }
         guard let rows = try? vault.activities(notes: notes) else { return [:] }
         var out: [String: [String: Any]] = [:]
@@ -201,7 +201,7 @@ final class InkstoneShadow {
 
     /// Drop a note from the shadow copy.
     func forget(id: String) {
-        #if INKSTONE
+        #if NOTEBASE
         guard enabled, let path else { return }
         queue.async { [weak self] in
             guard let self, let vault = self.openVault(path) else { return }
@@ -214,7 +214,7 @@ final class InkstoneShadow {
 
     /// Notes whose body contains `query`, straight from the engine's index.
     func probe(query: String, limit: UInt32 = 10) -> [[String: Any]]? {
-        #if INKSTONE
+        #if NOTEBASE
         guard enabled, let path else { return nil }
         var out: [[String: Any]] = []
         queue.sync {
@@ -230,7 +230,7 @@ final class InkstoneShadow {
     }
 
     func stats() -> [String: Any]? {
-        #if INKSTONE
+        #if NOTEBASE
         guard enabled, let path else { return nil }
         var out: [String: Any]?
         queue.sync {
@@ -249,7 +249,7 @@ final class InkstoneShadow {
         #endif
     }
 
-    #if INKSTONE
+    #if NOTEBASE
     /// Sessions live per note; a transport may open, use and drop one per request.
     private func session(_ note: String) -> SyncHandle? {
         if let existing = syncSessions[note] as? SyncHandle { return existing }
@@ -268,7 +268,7 @@ final class InkstoneShadow {
             return handle
         } catch {
             openFailed = true
-            fputs("[inkstone-shadow] open failed (\(path)): \(error)\n", stderr)
+            fputs("[notebase-shadow] open failed (\(path)): \(error)\n", stderr)
             return nil
         }
     }
@@ -277,7 +277,7 @@ final class InkstoneShadow {
         errorCount += 1
         if lastError == nil {
             lastError = String(describing: error)
-            fputs("[inkstone-shadow] mirror failed: \(error)\n", stderr)
+            fputs("[notebase-shadow] mirror failed: \(error)\n", stderr)
         }
     }
     #endif
