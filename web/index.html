@@ -4989,7 +4989,9 @@ window.ClipViewMasonry = Masonry;
         el.dataset.editLevel = String(level);
         el.dataset.editCount = String(this.count(item));
         el.style.setProperty('--edit-ratio', this.ratio(level));
-        el.title = `${this.label(item)} · 第 ${level + 1}/16 档 · ${this.family(level)} · 色彩随编辑积累进阶`;
+        const saves = Number(item && item.editSaves);
+        const savesNote = Number.isFinite(saves) && saves > 0 ? ` · 保存 ${saves} 次` : '';
+        el.title = `${this.label(item)}${savesNote} · 第 ${level + 1}/16 档 · ${this.family(level)} · 色彩随编辑积累进阶`;
       },
     };
     window.ClipVaultNoteWarmth = NoteWarmth;

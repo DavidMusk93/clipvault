@@ -409,6 +409,11 @@ uint64_t uniffi_inkstone_ffi_fn_constructor_vaulthandle_in_memory(RustCallStatus
 uint64_t uniffi_inkstone_ffi_fn_constructor_vaulthandle_open(RustBuffer path, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_ACTIVITIES
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_ACTIVITIES
+RustBuffer uniffi_inkstone_ffi_fn_method_vaulthandle_activities(uint64_t ptr, RustBuffer notes, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_ACTIVITY
 #define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_FN_METHOD_VAULTHANDLE_ACTIVITY
 RustBuffer uniffi_inkstone_ffi_fn_method_vaulthandle_activity(uint64_t ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
@@ -911,6 +916,12 @@ uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_receive_step(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_UPDATES_FOR_PEER
 #define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_SYNCHANDLE_UPDATES_FOR_PEER
 uint16_t uniffi_inkstone_ffi_checksum_method_synchandle_updates_for_peer(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_ACTIVITIES
+#define UNIFFI_FFIDEF_UNIFFI_INKSTONE_FFI_CHECKSUM_METHOD_VAULTHANDLE_ACTIVITIES
+uint16_t uniffi_inkstone_ffi_checksum_method_vaulthandle_activities(void
     
 );
 #endif

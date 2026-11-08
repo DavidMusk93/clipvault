@@ -4325,11 +4325,13 @@ final class DatabaseManager: ObservableObject {
     func noteEditCounts(ids: [UUID]) -> [String: Int] {
         guard !ids.isEmpty else { return [:] }
         if InkstoneShadow.shared.isPrimary {
+            // One query for the page, not one document load per note.
+            let page = InkstoneShadow.shared.activities(notes: ids.map { $0.uuidString })
             var engineCounts: [String: Int] = [:]
-            for id in ids {
-                if let sessions = InkstoneShadow.shared.editSessions(id: id.uuidString) {
-                    engineCounts[id.uuidString] = sessions
-                }
+            for (note, activity) in page {
+                let sessions = activity["sessions"] as? Int ?? 0
+                let inProgress = activity["inProgress"] as? Bool ?? false
+                engineCounts[note] = sessions + (inProgress ? 1 : 0)
             }
             if engineCounts.count == ids.count { return engineCounts }
             var merged = engineCounts

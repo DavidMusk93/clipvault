@@ -1686,7 +1686,7 @@ class WebServer {
         """
     }
     
-    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false, headOnly: Bool = false, read: [String: Any]? = nil, editCount: Int? = nil) -> [String: Any] {
+    private func itemToJSON(_ item: ClipboardItem, includeArchiveHTML: Bool = false, headOnly: Bool = false, read: [String: Any]? = nil, editCount: Int? = nil, activity: [String: Any]? = nil) -> [String: Any] {
         let edits = item.type == .note
             ? (editCount ?? database.noteEditCounts(ids: [item.id])[item.id.uuidString] ?? 0)
             : 0
@@ -1796,6 +1796,14 @@ class WebServer {
         if item.type == .note {
             dict["isCompose"] = true
             dict["editCount"] = edits
+            // The engine keeps the edit log; show its raw saves and recency next
+            // to the debounced session count so "编辑 N 次" is explainable.
+            if let activity {
+                dict["editSaves"] = activity["saves"]
+                if let last = activity["lastEditAt"] as? Int64, last > 0 {
+                    dict["lastEditAt"] = Double(last) / 1000.0
+                }
+            }
             if let ref = ComposeNotes.refId(from: item.url) {
                 dict["composeRefId"] = ref
             }
@@ -2634,7 +2642,17 @@ class WebServer {
                 guard let self else { return }
                 // View document is GET /api/archive/view — never ship article HTML in clip JSON.
                 let readMap = self.database.readerProgressMap(ids: [uuid])
-                let arr = item.map { [self.itemToJSON($0, includeArchiveHTML: false, read: readMap[$0.id.uuidString])] } ?? []
+                let activity = InkstoneShadow.shared.isPrimary
+                    ? InkstoneShadow.shared.activities(notes: item.map { [$0.id.uuidString] } ?? [])
+                    : [:]
+                let arr = item.map {
+                    [self.itemToJSON(
+                        $0,
+                        includeArchiveHTML: false,
+                        read: readMap[$0.id.uuidString],
+                        activity: activity[$0.id.uuidString]
+                    )]
+                } ?? []
                 self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
             }
             return
@@ -2652,8 +2670,20 @@ class WebServer {
             database.fetchItems(ids: uuids) { [weak self] rows in
                 guard let self else { return }
                 let readMap = self.database.readerProgressMap(ids: uuids)
-                let editCounts = self.database.noteEditCounts(ids: rows.filter { $0.type == .note }.map { $0.id })
-                let arr = rows.map { self.itemToJSON($0, includeArchiveHTML: false, read: readMap[$0.id.uuidString], editCount: editCounts[$0.id.uuidString] ?? 0) }
+                let noteIds = rows.filter { $0.type == .note }.map { $0.id }
+                let editCounts = self.database.noteEditCounts(ids: noteIds)
+                let activity = InkstoneShadow.shared.isPrimary
+                    ? InkstoneShadow.shared.activities(notes: noteIds.map { $0.uuidString })
+                    : [:]
+                let arr = rows.map {
+                    self.itemToJSON(
+                        $0,
+                        includeArchiveHTML: false,
+                        read: readMap[$0.id.uuidString],
+                        editCount: editCounts[$0.id.uuidString] ?? 0,
+                        activity: activity[$0.id.uuidString]
+                    )
+                }
                 self.sendJSON(["items": arr, "count": arr.count, "nextCursor": NSNull()], connection: connection)
             }
             return
@@ -2671,7 +2701,18 @@ class WebServer {
             guard let self = self else { return }
             let readMap = self.database.readerProgressMap(ids: page.items.map { $0.id })
             let editCounts = self.database.noteEditCounts(ids: page.items.filter { $0.type == .note }.map { $0.id })
-            let jsonItems = page.items.map { self.itemToJSON($0, headOnly: headOnly, read: readMap[$0.id.uuidString], editCount: editCounts[$0.id.uuidString] ?? 0) }
+            let pageActivity = InkstoneShadow.shared.isPrimary
+                ? InkstoneShadow.shared.activities(notes: page.items.filter { $0.type == .note }.map { $0.id.uuidString })
+                : [:]
+            let jsonItems = page.items.map {
+                self.itemToJSON(
+                    $0,
+                    headOnly: headOnly,
+                    read: readMap[$0.id.uuidString],
+                    editCount: editCounts[$0.id.uuidString] ?? 0,
+                    activity: pageActivity[$0.id.uuidString]
+                )
+            }
             var payload: [String: Any] = [
                 "items": jsonItems,
                 "nextCursor": page.nextCursor?.encode() as Any
