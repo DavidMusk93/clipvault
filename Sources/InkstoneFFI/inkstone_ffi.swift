@@ -1179,6 +1179,11 @@ public func FfiConverterTypeSyncHandle_lower(_ value: SyncHandle) -> UInt64 {
  */
 public protocol VaultHandleProtocol: AnyObject, Sendable {
     
+    /**
+     * Activity for a whole page in one query — what a list view needs.
+     */
+    func activities(notes: [String]) throws  -> [NoteActivityFfi]
+    
     func activity(id: String) throws  -> ActivityFfi
     
     /**
@@ -1323,6 +1328,19 @@ public static func `open`(path: String)throws  -> VaultHandle  {
 }
     
 
+    
+    /**
+     * Activity for a whole page in one query — what a list view needs.
+     */
+open func activities(notes: [String])throws  -> [NoteActivityFfi]  {
+    return try  FfiConverterSequenceTypeNoteActivityFfi.lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
+        uniffiCallStatus in
+    uniffi_inkstone_ffi_fn_method_vaulthandle_activities(
+            self.uniffiCloneHandle(),
+        FfiConverterSequenceString.lower(notes),uniffiCallStatus
+    )
+})
+}
     
 open func activity(id: String)throws  -> ActivityFfi  {
     return try  FfiConverterTypeActivityFfi_lift(try rustCallWithError(FfiConverterTypeInkError_lift) {
@@ -1663,6 +1681,63 @@ public func FfiConverterTypeActivityFfi_lift(_ buf: RustBuffer) throws -> Activi
 #endif
 public func FfiConverterTypeActivityFfi_lower(_ value: ActivityFfi) -> RustBuffer {
     return FfiConverterTypeActivityFfi.lower(value)
+}
+
+
+/**
+ * Edit activity for one note inside a page.
+ */
+public struct NoteActivityFfi: Equatable, Hashable {
+    public var note: String
+    public var activity: ActivityFfi
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(note: String, activity: ActivityFfi) {
+        self.note = note
+        self.activity = activity
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension NoteActivityFfi: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNoteActivityFfi: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NoteActivityFfi {
+        return
+            try NoteActivityFfi(
+                note: FfiConverterString.read(from: &buf), 
+                activity: FfiConverterTypeActivityFfi.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NoteActivityFfi, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.note, into: &buf)
+        FfiConverterTypeActivityFfi.write(value.activity, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNoteActivityFfi_lift(_ buf: RustBuffer) throws -> NoteActivityFfi {
+    return try FfiConverterTypeNoteActivityFfi.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNoteActivityFfi_lower(_ value: NoteActivityFfi) -> RustBuffer {
+    return FfiConverterTypeNoteActivityFfi.lower(value)
 }
 
 
@@ -2094,6 +2169,31 @@ fileprivate struct FfiConverterOptionTypeNoteHandle: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
     typealias SwiftType = [Data]
 
@@ -2111,6 +2211,31 @@ fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterData.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeNoteActivityFfi: FfiConverterRustBuffer {
+    typealias SwiftType = [NoteActivityFfi]
+
+    public static func write(_ value: [NoteActivityFfi], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeNoteActivityFfi.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [NoteActivityFfi] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [NoteActivityFfi]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeNoteActivityFfi.read(from: &buf))
         }
         return seq
     }
@@ -2254,6 +2379,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_inkstone_ffi_checksum_method_synchandle_updates_for_peer() != 1133) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_inkstone_ffi_checksum_method_vaulthandle_activities() != 25483) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_inkstone_ffi_checksum_method_vaulthandle_activity() != 27752) {

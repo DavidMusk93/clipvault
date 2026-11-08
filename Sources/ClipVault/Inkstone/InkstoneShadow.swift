@@ -177,6 +177,28 @@ final class InkstoneShadow {
         #endif
     }
 
+    /// Activity for a page of notes, in one engine query. Returns saves,
+    /// sessions, in-progress flag and the newest edit time.
+    func activities(notes: [String]) -> [String: [String: Any]] {
+        #if INKSTONE
+        guard !notes.isEmpty, let path, let vault = openVault(path) else { return [:] }
+        guard let rows = try? vault.activities(notes: notes) else { return [:] }
+        var out: [String: [String: Any]] = [:]
+        for row in rows {
+            out[row.note] = [
+                "saves": Int(row.activity.saves),
+                "sessions": Int(row.activity.sessions),
+                "inProgress": row.activity.inProgress,
+                "lastEditAt": row.activity.lastEditAt,
+            ]
+        }
+        return out
+        #else
+        _ = notes
+        return [:]
+        #endif
+    }
+
     /// Drop a note from the shadow copy.
     func forget(id: String) {
         #if INKSTONE
