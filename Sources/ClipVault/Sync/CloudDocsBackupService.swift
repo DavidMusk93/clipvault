@@ -1433,15 +1433,12 @@ final class CloudDocsBackupService {
         }
         .sorted { $0.lastPathComponent > $1.lastPathComponent }
 
-        // Drop legacy fat snapshots (pre blob-externalization full-db copies > 5MB).
-        for dir in dirs {
-            let db = dir.appendingPathComponent("clipflow.db")
-            let sz = fileSize(db) ?? 0
-            if sz > 5 * 1024 * 1024 {
-                try? fm.removeItem(at: dir)
-                print("[Backup] pruned fat legacy snapshot \(dir.lastPathComponent) (\(sz) bytes)")
-            }
-        }
+        // Snapshots are point-in-time database copies; being large is the point.
+        // A size rule here (the old "> 5 MB is a legacy fat snapshot" cleanup)
+        // deleted every snapshot the moment it was written, so point-in-time
+        // restore silently had nothing to restore. Retention is `keep`, the disk
+        // budget is the operator's call.
+        _ = dirs
 
         let dirs2 = ((try? fm.contentsOfDirectory(
             at: snaps,
