@@ -96,18 +96,41 @@ enum BackupDestinationResolver {
         for root in driveRoots.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             for name in myDriveNames {
                 let candidate = root.appendingPathComponent(name, isDirectory: true)
-                var isDir: ObjCBool = false
-                if fm.fileExists(atPath: candidate.path, isDirectory: &isDir), isDir.boolValue {
-                    return candidate.standardizedFileURL
-                }
+                if isLiveCloudRoot(candidate) { return candidate.standardizedFileURL }
             }
             // Some installs expose files directly under GoogleDrive-*
-            var isDir: ObjCBool = false
-            if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue {
-                return root.standardizedFileURL
-            }
+            if isLiveCloudRoot(root) { return root.standardizedFileURL }
         }
         return nil
+    }
+
+    /// A `CloudStorage` path can survive after the provider is uninstalled: the
+    /// directory shell (and its TCC-protected siblings) stay behind, unreadable
+    /// and un-removable, so a bare `fileExists` keeps reporting Drive as
+    /// available and the UI offers a destination that can never complete.
+    ///
+    /// Treat it as live only if it holds real content — not just Drive's own
+    /// bookkeeping dirs, and not an unreadable shell (an unmounted provider
+    /// answers with EPERM/ETIMEDOUT, so `contentsOfDirectory` throws).
+    private static func isLiveCloudRoot(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return false }
+        guard let entries = try? fm.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        ) else { return false }
+        // Directories do not prove a mount: an uninstalled Drive leaves its own
+        // bookkeeping dirs (`.tmp`, `.Trash`, `.Encrypted`, and the "My Drive"
+        // shell) behind, all unreadable. Only an actual readable **file** does.
+        for entry in entries {
+            let name = entry.lastPathComponent
+            if name.hasPrefix(".") || name == "lost+found" { continue }
+            let isEntryDir = (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if isEntryDir { continue }
+            if (try? Data(contentsOf: entry, options: .mappedIfSafe)) != nil { return true }
+        }
+        return false
     }
 
 

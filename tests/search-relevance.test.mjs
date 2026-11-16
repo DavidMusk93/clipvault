@@ -84,3 +84,15 @@ test('HTTP parses order; notes rail requests relevance', () => {
   assert.match(html, /type=note&limit=50&q=' \+ encodeURIComponent\(qRaw\) \+ '&order=relevance'/);
   assert.match(html, /'&q=' \+ encodeURIComponent\(notesState\.query\) \+ '&order=relevance'/);
 });
+
+test('an uninstalled Google Drive is not reported as available', () => {
+  // Removing Drive leaves its CloudStorage shell (and `.tmp`/`.Trash`/
+  // `.Encrypted`) behind, unreadable. `fileExists` alone keeps advertising a
+  // destination that can never complete; only a readable file proves a mount.
+  const src = readFileSync(join(root, 'Sources/ClipVault/Store/BackupDestinations.swift'), 'utf8');
+  assert.match(src, /private static func isLiveCloudRoot\(_ url: URL\) -> Bool/);
+  assert.match(src, /Data\(contentsOf: entry, options: \.mappedIfSafe\)/);
+  assert.match(src, /if isLiveCloudRoot\(candidate\) \{ return candidate\.standardizedFileURL \}/);
+  assert.match(src, /if isLiveCloudRoot\(root\) \{ return root\.standardizedFileURL \}/);
+  assert.doesNotMatch(src, /if fm\.fileExists\(atPath: candidate\.path, isDirectory: &isDir\), isDir\.boolValue \{\n\s*return candidate\.standardizedFileURL/);
+});
