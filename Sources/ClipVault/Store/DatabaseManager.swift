@@ -1124,6 +1124,11 @@ final class DatabaseManager: ObservableObject {
             if ftsCount == 0 && baseCount > 0 {
                 backfillFTS()
             }
+            // Not only on rebuild: a DB built before `repairArchiveFTS` existed (or
+            // one whose FTS was rebuilt by an older binary) still has archived pages
+            // with an empty html column, so they are unsearchable until re-indexed.
+            // Cheap and idempotent — the query only matches rows that need healing.
+            repairArchiveFTS()
         }
     }
 
@@ -1147,6 +1152,68 @@ final class DatabaseManager: ObservableObject {
             let n = scalarInt64("SELECT COUNT(*) FROM clipboard_fts;") ?? 0
             print("[DatabaseManager] FTS5 backfill: \(n) rows tokenizer=\(ftsTokenizer)")
         }
+        repairArchiveFTS()
+    }
+
+    /// Restore archived-page bodies into FTS after a table rebuild.
+    ///
+    /// `applyWebArchive` keeps archive HTML in CAS and only a pointer
+    /// (`archive_html_sha`) in the row — `clipboard_items.html_content` is NULL.
+    /// A plain `backfillFTS` therefore rebuilds an archive row with an *empty*
+    /// html column, silently dropping the article body from search until it is
+    /// re-archived. Re-read the blob for any archived row whose FTS html is
+    /// missing, so the index is self-healing rather than quietly lossy.
+    ///
+    /// Idempotent and cheap: only rows with a non-empty `archive_html_sha` and a
+    /// too-short indexed body are touched (single digits in practice).
+    @discardableResult
+    func repairArchiveFTS() -> Int {
+        guard let db = db else { return 0 }
+        var stmt: OpaquePointer?
+        let sql = """
+        SELECT c.id, c.archive_html_sha, c.text_content, c.ocr_text, c.source_app, c.url
+        FROM clipboard_items c
+        LEFT JOIN clipboard_fts f ON f.id = c.id
+        WHERE c.deleted_at IS NULL
+          AND c.archive_html_sha IS NOT NULL
+          AND TRIM(c.archive_html_sha) != ''
+          AND IFNULL(length(f.html_content), 0) <= 200;
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        var pending: [(id: String, sha: String, text: String?, ocr: String?, source: String?, url: String?)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                  let sha = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) else { continue }
+            pending.append((
+                id: id,
+                sha: sha,
+                text: sqlite3_column_text(stmt, 2).map { String(cString: $0) },
+                ocr: sqlite3_column_text(stmt, 3).map { String(cString: $0) },
+                source: sqlite3_column_text(stmt, 4).map { String(cString: $0) },
+                url: sqlite3_column_text(stmt, 5).map { String(cString: $0) }
+            ))
+        }
+        sqlite3_finalize(stmt)
+        guard !pending.isEmpty else { return 0 }
+
+        var healed = 0
+        for row in pending {
+            guard let data = readBlobFile(hash: row.sha),
+                  let html = String(data: data, encoding: .utf8),
+                  html.count > 40 else { continue }
+            // Mirror `applyWebArchive`: title (the URL row's text) and the source
+            // URL front the body so a title-only search still lands on the page.
+            let title = (row.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let url = (row.url ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            var head = title
+            if !url.isEmpty && url != title { head = head.isEmpty ? url : head + "\n" + url }
+            upsertFTS(id: row.id, text: head, ocr: row.ocr, source: row.source, html: html)
+            healed += 1
+        }
+        if healed > 0 {
+            print("[DatabaseManager] FTS5 archive repair: \(healed) rows re-indexed from CAS")
+        }
+        return healed
     }
 
     private func runAnalyze() { execQuiet("ANALYZE;") }
@@ -2317,7 +2384,7 @@ final class DatabaseManager: ObservableObject {
                     items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, narrowFields: narrow, typeFilter: typeEq, excludeType: excludeEq)
                 }
             } else if hasQuery, let q = q {
-                // Short query (<3) with trigram: LIKE path (no html_content).
+                // Short query (<3) with trigram: LIKE path (see `runSearchLike`).
                 items = self.runSearchLike(db: db, q: q, cursor: cursor, fetchLimit: fetchLimit, typeFilter: typeEq, excludeType: excludeEq)
             } else {
                 items = self.runList(db: db, cursor: cursor, fetchLimit: fetchLimit, trashOnly: trashOnly, typeFilter: typeEq, excludeType: excludeEq)
@@ -2386,10 +2453,12 @@ final class DatabaseManager: ObservableObject {
                 if rows.isEmpty {
                     // Same rule as the page path: FTS empty → LIKE over non-html fields.
                     let narrow = self.ftsTokenizer == "trigram" && (q?.count ?? 0) >= 3
-                    rows = self.runDayIndexSQL(db: db, match: nil, trashOnly: false, typeFilter: typeFilter, excludeType: excludeType, like: "%\(q!)%", likeSlots: narrow ? 3 : 7)
+                    rows = self.runDayIndexSQL(db: db, match: nil, trashOnly: false, typeFilter: typeFilter, excludeType: excludeType, like: "%\(q!)%", likeSlots: narrow ? 3 : 8)
                 }
             } else if hasQuery {
-                rows = self.runDayIndexSQL(db: db, match: nil, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType, like: "%\(q!)%", likeSlots: 7)
+                // No FTS match possible (short / trigram-unfriendly): broad LIKE.
+                let narrow = self.ftsTokenizer == "trigram" && (q?.count ?? 0) >= 3
+                rows = self.runDayIndexSQL(db: db, match: nil, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType, like: "%\(q!)%", likeSlots: narrow ? 3 : 8)
             } else {
                 rows = self.runDayIndexSQL(db: db, match: nil, trashOnly: trashOnly, typeFilter: typeFilter, excludeType: excludeType, like: nil, likeSlots: 0)
             }
@@ -2418,19 +2487,23 @@ final class DatabaseManager: ObservableObject {
             sql = "SELECT c.timestamp, c.type FROM clipboard_fts f JOIN clipboard_items c ON c.id = f.id WHERE clipboard_fts MATCH ? AND c.deleted_at IS NULL"
             sql += Self.typePredicateSQL(alias: "c", typeFilter: typeFilter, excludeType: excludeType)
         } else {
-            sql = "SELECT timestamp, type FROM clipboard_items WHERE "
+            // No LEFT JOIN on clipboard_fts (FTS5 join shifts column affinity).
+            // Archived page bodies live only in FTS, reached via EXISTS.
+            sql = "SELECT c.timestamp, c.type FROM clipboard_items c WHERE "
             if trashOnly {
-                sql += "deleted_at IS NOT NULL"
+                sql += "c.deleted_at IS NOT NULL"
             } else {
                 // Wall view = the day sections: pinned rows live in the pin rail.
-                sql += "deleted_at IS NULL AND pinned_at IS NULL"
+                sql += "c.deleted_at IS NULL AND c.pinned_at IS NULL"
             }
-            sql += Self.typePredicateSQL(typeFilter: typeFilter, excludeType: excludeType)
+            sql += Self.typePredicateSQL(alias: "c", typeFilter: typeFilter, excludeType: excludeType)
             if like != nil {
                 if likeSlots <= 3 {
-                    sql += " AND (IFNULL(judgment_text,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
+                    sql += " AND (IFNULL(c.judgment_text,'') LIKE ? OR IFNULL(c.user_stage,'') LIKE ? OR IFNULL(c.url,'') LIKE ?)"
                 } else {
-                    sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ? OR IFNULL(judgment_text,'') LIKE ?)"
+                    // Must mirror `runSearchLike`'s broad set, html mirror included.
+                    sql += " AND (IFNULL(c.text_content,'') LIKE ? OR IFNULL(c.ocr_text,'') LIKE ? OR IFNULL(c.source_app,'') LIKE ? OR IFNULL(c.user_note,'') LIKE ? OR IFNULL(c.user_stage,'') LIKE ? OR IFNULL(c.url,'') LIKE ? OR IFNULL(c.judgment_text,'') LIKE ?"
+                    sql += " OR c.id IN \(Self.ftsHtmlMatchSQL))"
                 }
             }
         }
@@ -2480,6 +2553,16 @@ final class DatabaseManager: ObservableObject {
         bindText(stmt, Int32(bind), cursor.id); bind += 1
         return bind
     }
+
+    /// FTS-mirror html probe used by the LIKE fallback.
+    ///
+    /// A **non-correlated** subquery on purpose: `EXISTS(SELECT 1 FROM
+    /// clipboard_fts f WHERE f.id = c.id ...)` re-scans the FTS body per row
+    /// (measured ~9.5 s on 7.3k rows), while `IN (SELECT ...)` materialises once
+    /// (~14 ms). Also never a `LEFT JOIN clipboard_fts`: joining the FTS5 table
+    /// shifts the tail columns' affinity and the read dies with
+    /// `datatype mismatch`.
+    private static let ftsHtmlMatchSQL = "(SELECT id FROM clipboard_fts WHERE IFNULL(html_content,'') LIKE ?)"
 
     private static let keysetSQL =
         "(timestamp < ? OR (timestamp = ? AND id < ?)) AND id != ?"
@@ -2599,37 +2682,55 @@ final class DatabaseManager: ObservableObject {
         excludeType: String? = nil,
         offset: Int? = nil
     ) -> [ClipboardItem] {
-        var sql = "SELECT id, timestamp, type, content_hash, text_content, file_urls, url, \(Self.listHtmlSQL), source_app, ocr_text, \(Self.listTailSQL), \(Self.listHtmlOmittedSQL) FROM clipboard_items WHERE "
+        // No LEFT JOIN on clipboard_fts: an FTS5 virtual table cannot be joined
+        // without the column affinity shifting (`datatype mismatch` on the tail
+        // columns). The archive body is reached with an EXISTS subquery instead.
+        var sql = "SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, \(Self.listHtmlSQLAliased), c.source_app, c.ocr_text, \(Self.listTailSQLAliased), \(Self.listHtmlOmittedSQLAliased) FROM clipboard_items c WHERE "
         if trashOnly {
-            sql += "deleted_at IS NOT NULL"
+            sql += "c.deleted_at IS NOT NULL"
         } else {
-            sql += "deleted_at IS NULL"
+            sql += "c.deleted_at IS NULL"
         }
-        sql += Self.typePredicateSQL(typeFilter: typeFilter, excludeType: excludeType)
-        // skill §5/§7: no unindexed LIKE on html_content. FTS covers text/ocr/html/judgment.
+        sql += Self.typePredicateSQL(alias: "c", typeFilter: typeFilter, excludeType: excludeType)
+        // `narrowFields` runs when the trigram tokenizer cannot answer the query
+        // (short strings). trigram needs >=3 chars, so a 2-glyph CJK word like
+        // 「楔子」never matches FTS — the only way to reach an archived article body
+        // is this LIKE. The body lives only in `clipboard_fts.html_content` (the
+        // row keeps a CAS pointer), so it is matched through an EXISTS subquery;
+        // a LEFT JOIN on the FTS5 table corrupts the tail columns' affinity.
         if narrowFields {
-            sql += " AND (IFNULL(judgment_text,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ?)"
+            sql += " AND (IFNULL(c.judgment_text,'') LIKE ? OR IFNULL(c.user_stage,'') LIKE ? OR IFNULL(c.url,'') LIKE ?"
+            sql += " OR IFNULL(c.text_content,'') LIKE ?"
+            sql += " OR c.id IN \(Self.ftsHtmlMatchSQL))"
         } else {
-            sql += " AND (IFNULL(text_content,'') LIKE ? OR IFNULL(ocr_text,'') LIKE ? OR IFNULL(source_app,'') LIKE ? OR IFNULL(user_note,'') LIKE ? OR IFNULL(user_stage,'') LIKE ? OR IFNULL(url,'') LIKE ? OR IFNULL(judgment_text,'') LIKE ?)"
+            sql += " AND (IFNULL(c.text_content,'') LIKE ? OR IFNULL(c.ocr_text,'') LIKE ? OR IFNULL(c.source_app,'') LIKE ? OR IFNULL(c.user_note,'') LIKE ? OR IFNULL(c.user_stage,'') LIKE ? OR IFNULL(c.url,'') LIKE ? OR IFNULL(c.judgment_text,'') LIKE ?"
+            sql += " OR c.id IN \(Self.ftsHtmlMatchSQL))"
         }
         if offset == nil && cursor != nil {
-            sql += " AND " + Self.keysetSQL
+            sql += " AND " + Self.keysetSQLAliased
         }
         if offset != nil {
-            sql += " ORDER BY (pinned_at IS NOT NULL) DESC, timestamp DESC, id DESC LIMIT ? OFFSET ?;"
+            sql += " ORDER BY (c.pinned_at IS NOT NULL) DESC, c.timestamp DESC, c.id DESC LIMIT ? OFFSET ?;"
         } else if trashOnly {
-            sql += " ORDER BY deleted_at DESC, id DESC LIMIT ?;"
+            sql += " ORDER BY c.deleted_at DESC, c.id DESC LIMIT ?;"
         } else {
-            sql += " ORDER BY timestamp DESC, id DESC LIMIT ?;"
+            sql += " ORDER BY c.timestamp DESC, c.id DESC LIMIT ?;"
         }
 
         var stmt: OpaquePointer?
         var items: [ClipboardItem] = []
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            print("[DatabaseManager] LIKE search prepare failed: \(String(cString: sqlite3_errmsg(db))) sql=\(sql)")
+            return []
+        }
         var bind = 1
         bindTypePredicate(stmt, bind: &bind, typeFilter: typeFilter, excludeType: excludeType)
         let like = "%\(q)%"
-        let likeSlots = narrowFields ? 3 : 7
+        // narrow = FTS already covered text/ocr/html, so only the non-indexed
+        // columns need LIKE (5, incl. text/html for the trigram-short case).
+        // broad = FTS could not answer at all, so the FTS html mirror joins the
+        // set (8). The counts MUST match the placeholder counts above.
+        let likeSlots = narrowFields ? 5 : 8
         for _ in 0..<likeSlots {
             bindText(stmt, Int32(bind), like); bind += 1
         }
@@ -2640,8 +2741,14 @@ final class DatabaseManager: ObservableObject {
         if let offset = offset {
             sqlite3_bind_int(stmt, Int32(bind), Int32(max(0, offset)))
         }
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var rc: Int32 = SQLITE_OK
+        while true {
+            rc = sqlite3_step(stmt)
+            if rc != SQLITE_ROW { break }
             if let item = rowToItem(stmt: stmt) { items.append(item) }
+        }
+        if rc != SQLITE_DONE {
+            print("[DatabaseManager] LIKE search step failed rc=\(rc): \(String(cString: sqlite3_errmsg(db)))")
         }
         sqlite3_finalize(stmt)
         return items

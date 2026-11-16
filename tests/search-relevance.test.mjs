@@ -51,7 +51,31 @@ test('fetchPage relevance path skips pinThenRecency and emits an offset cursor',
 test('like fallback honors offset for ranked short queries', () => {
   const body = fn(db, 'runSearchLike');
   assert.match(body, /offset: Int\? = nil/);
-  assert.match(body, /\(pinned_at IS NOT NULL\) DESC, timestamp DESC, id DESC LIMIT \? OFFSET \?/);
+  // Columns are `c.`-qualified because the query LEFT JOINs clipboard_fts.
+  assert.match(body, /\(c\.pinned_at IS NOT NULL\) DESC, c\.timestamp DESC, c\.id DESC LIMIT \? OFFSET \?/);
+});
+
+test('broad LIKE reaches archived page bodies (FTS html mirror)', () => {
+  // Archived pages keep only a CAS pointer in the row; their body lives in FTS.
+  // Never a LEFT JOIN on the FTS5 table: it shifts the tail columns' affinity
+  // and the read dies with `datatype mismatch`.
+  const body = fn(db, 'runSearchLike');
+  assert.doesNotMatch(body, /LEFT JOIN clipboard_fts/);
+  assert.ok(body.includes('c.id IN \\(Self.ftsHtmlMatchSQL)'), 'body must probe the FTS html mirror');
+  assert.match(body, /let likeSlots = narrowFields \? 5 : 8/);
+  // Never a correlated EXISTS: it re-scans the FTS body per row (~9.5 s vs 14 ms).
+  assert.match(db, /ftsHtmlMatchSQL = "\(SELECT id FROM clipboard_fts/);
+  assert.doesNotMatch(db, /EXISTS\(SELECT 1 FROM clipboard_fts/);
+});
+
+test('archive rows are re-indexed from CAS after an FTS rebuild', () => {
+  assert.match(db, /repairArchiveFTS\(\)/);
+  const body = fn(db, 'repairArchiveFTS');
+  assert.match(body, /archive_html_sha IS NOT NULL/);
+  assert.match(body, /IFNULL\(length\(f\.html_content\), 0\) <= 200/);
+  assert.match(body, /readBlobFile\(hash: row\.sha\)/);
+  // The plain backfill must call it, otherwise a rebuild stays silently lossy.
+  assert.match(fn(db, 'backfillFTS'), /repairArchiveFTS\(\)/);
 });
 
 test('HTTP parses order; notes rail requests relevance', () => {
