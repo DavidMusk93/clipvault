@@ -2,12 +2,12 @@ import Foundation
 
 /// Content-addressed blob filenames under `blobs/` and `live/attach/`.
 ///
-/// Bare SHA-256 is 64 hex. RTF/PDF are stored as `{sha}.rtf.bin` / `{sha}.pdf.bin`
+/// Bare SHA-256 is 64 hex. RTF/PDF/raw are stored as typed `{sha}.{type}.bin` keys.
 /// because `writeBlobFile(hash: contentHash + ".rtf")` appends `.bin`.
 /// Pull must accept those typed keys; a `count == 64` reject stalls the seq
 /// cursor and every later compose trx never applies.
 enum BlobCAS {
-    static let typedSuffixes = [".rtf", ".pdf"]
+    static let typedSuffixes = [".rtf", ".pdf", ".raw"]
 
     /// Stem written to disk (no `.bin`). Nil if the key is not a CAS object.
     static func storageKey(_ hash: String) -> String? {

@@ -1666,8 +1666,8 @@ final class CloudDocsSyncService {
         // Text-only upserts may list empty blobKeys; if key listed, require it for image/rtf/pdf types.
         guard let t = op.type else { return true }
         switch t {
-        case "image", "rtf", "pdf": return true
-        default: return key.hasSuffix(".rtf") || key.hasSuffix(".pdf")
+        case "image", "rtf", "pdf", "other": return true
+        default: return key.hasSuffix(".rtf") || key.hasSuffix(".pdf") || key.hasSuffix(".raw")
         }
     }
 

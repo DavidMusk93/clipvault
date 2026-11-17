@@ -44,6 +44,9 @@ swiftc -parse-as-library -O tests/day_index_main.swift "$SRC/Store/DayIndex.swif
 echo "[check-frontend] swiftc ops analytics (buckets / percentiles / signal budgets)"
 swiftc -parse-as-library -O tests/oplog_analytics_main.swift "$SRC/Store/OpsAnalytics.swift" "$SRC/Identity/ClipTimeFormat.swift" -o /tmp/clipvault-oplog-analytics-test
 /tmp/clipvault-oplog-analytics-test
+echo "[check-frontend] swiftc clipboard capture"
+swiftc -parse-as-library -O tests/clipboard_capture_main.swift "$SRC/Capture/ClipboardCapturePolicy.swift" "$SRC/Store/BlobCAS.swift" -o /tmp/clipvault-clipboard-capture-test
+/tmp/clipvault-clipboard-capture-test
 echo "[check-frontend] swiftc blob CAS keys"
 swiftc -parse-as-library -O tests/blob_cas_main.swift "$SRC/Store/BlobCAS.swift" -o /tmp/clipvault-blob-cas-test
 /tmp/clipvault-blob-cas-test

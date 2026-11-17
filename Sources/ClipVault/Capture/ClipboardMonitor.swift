@@ -108,7 +108,10 @@ class ClipboardMonitor: ObservableObject {
         lastChangeCount = currentChangeCount
         
         monitorQueue.async { [weak self] in
-            guard let self = self, let item = self.createClipboardItem() else {
+            guard let self = self,
+                  let item = ClipboardCapturePolicy.stable(expected: currentChangeCount,
+                      current: { self.pasteboard.changeCount },
+                      read: { self.createClipboardItem() }) else {
                 return
             }
             
@@ -401,7 +404,7 @@ class ClipboardMonitor: ObservableObject {
     }
 
     private func createTextItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
-        guard let text = getText() else { return nil }
+        guard let text = getText(), !text.isEmpty else { return nil }
         let hash = computeHash(for: text)
         return ClipboardItem(
             timestamp: timestamp, type: .text, contentHash: hash,
@@ -410,11 +413,16 @@ class ClipboardMonitor: ObservableObject {
     }
 
     private func createRawItem(timestamp: Date, sourceApp: String?) -> ClipboardItem? {
-        guard let rawData = getRawData() else { return nil }
-        let hash = computeHash(for: rawData)
+        guard let (rawType, rawData) = getRawData() else { return nil }
+        // The flavor is part of the payload: identical bytes in distinct formats
+        // must not coalesce into one card or overwrite each other's CAS envelope.
+        var identity = Data(rawType.utf8)
+        identity.append(0)
+        identity.append(rawData)
+        let hash = computeHash(for: identity)
         return ClipboardItem(
             timestamp: timestamp, type: .other, contentHash: hash,
-            rawData: rawData, sourceApp: sourceApp
+            rawData: rawData, rawType: rawType, sourceApp: sourceApp
         )
     }
     
@@ -452,14 +460,10 @@ class ClipboardMonitor: ObservableObject {
         pasteboard.readObjects(forClasses: [NSImage.self], options: nil)?.first as? NSImage
     }
     
-    private func getRawData() -> Data? {
-        guard let types = pasteboard.types else { return nil }
-        for type in types {
-            if let data = pasteboard.data(forType: type) {
-                return data
-            }
-        }
-        return nil
+    private func getRawData() -> (String, Data)? {
+        guard let types = pasteboard.types,
+              let (type, data) = ClipboardCapturePolicy.firstNonempty(types, read: { pasteboard.data(forType: $0) }) else { return nil }
+        return (type.rawValue, data)
     }
     
     private func computeHash(for data: Data) -> String {

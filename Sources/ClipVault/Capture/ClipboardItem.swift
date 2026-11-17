@@ -28,6 +28,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
     let pdfData: Data?
     let htmlContent: String?
     let rawData: Data?
+    let rawType: String?
     
     // OCR 识别出的文本
     let ocrText: String?
@@ -74,6 +75,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
          pdfData: Data? = nil,
          htmlContent: String? = nil,
          rawData: Data? = nil,
+         rawType: String? = nil,
          ocrText: String? = nil,
          sourceApp: String? = nil,
          copyCount: Int = 1,
@@ -100,6 +102,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Hashable {
         self.pdfData = pdfData
         self.htmlContent = htmlContent
         self.rawData = rawData
+        self.rawType = rawType
         self.ocrText = ocrText
         self.sourceApp = sourceApp
         self.copyCount = max(1, copyCount)

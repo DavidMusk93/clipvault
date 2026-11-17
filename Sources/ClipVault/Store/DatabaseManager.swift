@@ -1784,6 +1784,16 @@ final class DatabaseManager: ObservableObject {
     }
 
     func saveItemDetailed(_ item: ClipboardItem, completion: ((ItemSaveResult) -> Void)? = nil) {
+        // Unknown formats are kept as a typed envelope in CAS and shipped with the op.
+        // Never create an apparently valid card if its only payload could not be saved.
+        if item.type == .other {
+            guard let data = item.rawData, !data.isEmpty, let type = item.rawType, !type.isEmpty,
+                  let encoded = try? JSONEncoder().encode(RawClipboardPayload(type: type, data: data)),
+                  writeBlobFile(hash: item.contentHash + ".raw", data: encoded) else {
+                DispatchQueue.main.async { completion?(.failed) }
+                return
+            }
+        }
         // File I/O first, off dbQueue, so the writer only does SQLite work.
         persistItemBlobs(item)
         dbQueue.async { [weak self] in
@@ -1850,7 +1860,7 @@ final class DatabaseManager: ObservableObject {
     /// Blob keys present locally for a content hash (image / rtf / pdf suffixes).
     func existingBlobKeys(for contentHash: String) -> [String] {
         var keys: [String] = []
-        let candidates = [contentHash, contentHash + ".rtf", contentHash + ".pdf"]
+        let candidates = [contentHash, contentHash + ".rtf", contentHash + ".pdf", contentHash + ".raw"]
         for k in candidates {
             if fm.fileExists(atPath: blobFileURL(hash: k).path) {
                 keys.append(k)
@@ -5658,6 +5668,7 @@ final class DatabaseManager: ObservableObject {
         try? fm.removeItem(at: blobFileURL(hash: hash))
         try? fm.removeItem(at: blobFileURL(hash: hash + ".rtf"))
         try? fm.removeItem(at: blobFileURL(hash: hash + ".pdf"))
+        try? fm.removeItem(at: blobFileURL(hash: hash + ".raw"))
     }
 
     func searchItems(query: String, limit: Int = 100, completion: @escaping ([ClipboardItem]) -> Void) {
