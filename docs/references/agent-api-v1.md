@@ -91,6 +91,21 @@ POST /api/v1/notes {body, opId?}
 | 413 | body 超 512KB（cc 公网面） | 拆分 |
 | 429 | 限流（每 IP burst 30 / 1 rps） | 按 `Retry-After` 退避 |
 
+## 8.5 同步通道（mac ⇄ cc）
+
+```text
+trx wire：compose / tombstone / clip_link / blob relay
+  mac → cc：SSE 事件驱动（断流 30s 兜底）+ blob 从 attach 拉
+  cc → mac：发布即事件（幂等/CAS 语义同源）；图片 blob 经 attach 对齐
+限流与延迟：公网面受 CF；两机数据面为事件驱动（秒级）
+```
+
+| relay 项 | 行为 |
+| --- | --- |
+| 图片 blob（pull） | `blob_keys` 的 hex64 从 ostore attach 拉入 cc blobs.db（SHA256 域） |
+| 图片 blob（publish） | 只发**可当场从 attach 取到**的 key；缺的不发（绝不 blob_wait 卡 mac 游标） |
+| 出图 | `GET /api/v1/blobs/{sha}`（+`/api/image`、`/api/archive/asset` 别名），immutable 缓存 |
+
 ## 5. kind 词汇表（封闭谓词；未知值 400）
 
 | kind | 语义 |
@@ -107,8 +122,8 @@ POST /api/v1/notes {body, opId?}
 | 项 | mac | cc |
 | --- | --- | --- |
 | 开关 | `CLIPVAULT_AGENT_API=1`（关 = 404，其余端点逐字节不变） | 常开（服务本体即 agent 面） |
-| token | `CLIPVAULT_AGENT_TOKEN` env 或 `$CLIPVAULT_HOME/config/agent-token`（0600） | `<home>/notes/token`（0600）；与 mac **不同**，勿混用 |
-| 归因 | `X-ClipVault-Agent` / JSON `agent` → `source="agent:<name>"` | 同 |
+| token | `CLIPVAULT_AGENT_TOKEN` env 或 `$CLIPVAULT_HOME/config/agent-token`（0600） | 多 token：`<home>/notes/tokens.json` = `[{"name","token"}]`（`CLIPVAULT_NOTES_TOKENS_FILE` 指向；改文件即生效，无需重启）；回落单 token `<home>/notes/token`。与 mac **不同**，勿混用 |
+| 归因 | `X-ClipVault-Agent` / JSON `agent` → `source="agent:<name>"` | token 名即身份（tokens.json 的 `name`）；显式 `agent` 字段可覆盖 |
 | token 纪律 | 永不进日志 / nmem / commit；泄漏即轮换 | 同 |
 
 ## 7. 不变量
