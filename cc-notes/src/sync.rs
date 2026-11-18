@@ -85,10 +85,10 @@ struct ListEntry {
 #[derive(serde::Deserialize)]
 #[allow(dead_code)]
 struct SyncOp {
-    #[allow(dead_code)]
     host: String,
-    #[allow(dead_code)]
     seq: u64,
+    #[serde(rename = "hlc")]
+    hlc: String,
     kind: String,
     #[serde(rename = "item_id")]
     item_id: String,
@@ -319,6 +319,7 @@ async fn apply_op(app: &Arc<App>, op: &SyncOp) -> Result<(usize, usize), String>
                 vault.delete(&id).map_err(|e| e.to_string())?;
                 app.tag_store.clear(&id);
             }
+            app.link_store.purge_item(&id);
             Ok::<_, String>((existed as usize, (!existed) as usize))
         })
         .await
@@ -360,6 +361,26 @@ async fn apply_op(app: &Arc<App>, op: &SyncOp) -> Result<(usize, usize), String>
         })
         .await
         .map_err(|e| e.to_string())?
+    } else if op.kind == "clip_link" {
+        // mac 的链接 op → cc 投影（不校验 from 在 cc：cc 未必有该 clip 行）。
+        let app = app.clone();
+        let note = op.text_content.clone().unwrap_or_default();
+        let fallback_from = op.item_id.clone();
+        let ts = op.wall_ts;
+        let op_id = op.hlc.clone();
+        let source = format!("sync:{}", op.host);
+        tokio::task::spawn_blocking(move || {
+            if let Some(link_op) =
+                crate::links::parse_trx_payload(&note, &fallback_from, ts, &op_id, &source)
+            {
+                app.link_store.record(&link_op);
+                Ok::<_, String>((1, 0))
+            } else {
+                Ok((0, 1))
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())?
     } else {
         Ok((0, 1))
     }
@@ -378,6 +399,28 @@ pub fn publish(cfg: &SyncConfig, path: &str, op: &Value) {
         Ok(_) => {}
         Err(e) => eprintln!("[sync] publish {path}: {e}"),
     }
+}
+
+/// 通用 trx 骨架（kind/item 可变；note/content 由调用方填）。
+pub fn compose_like_op(cfg: &Option<SyncConfig>, seq: u64, kind: &str, item_id: &str) -> Value {
+    let (host, _token, _base, _prefix, _poll) = match cfg {
+        Some(c) => (c.host_id.clone(), c.token.clone(), c.base.clone(), c.prefix.clone(), c.poll_secs),
+        None => ("cc".into(), String::new(), String::new(), String::new(), 2),
+    };
+    let wall_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    json!({
+        "v": 1,
+        "op_id": uuid::Uuid::new_v4().to_string(),
+        "host": host,
+        "seq": seq,
+        "kind": kind,
+        "item_id": item_id,
+        "wall_ts": wall_ms as f64 / 1000.0,
+        "hlc": format!("{}-{}-{}", wall_ms, host, seq),
+    })
 }
 
 pub fn build_compose_op(host_id: &str, seq: u64, item_id: &str, body: &str, wall_ms: i64) -> Value {

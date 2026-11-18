@@ -5,6 +5,7 @@
 //! 写入 = notebase delta oplog（无整篇副本堆积）；幂等台账走 vault_meta
 //! `opid:<id>`（重启不丢）。trx 双向同步属 D2，不在本骨架。
 
+mod links;
 mod sync;
 mod tags;
 
@@ -31,6 +32,7 @@ struct App {
     token: String,
     sync: Option<sync::SyncConfig>,
     tag_store: tags::TagStore,
+    link_store: links::LinkStore,
     rate: RateLimiter,
 }
 
@@ -68,6 +70,7 @@ struct ListQuery {
     offset: Option<usize>,
     tag: Option<String>,
     since: Option<f64>,
+    kind: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -459,6 +462,266 @@ async fn delete_note(
     Ok(Json(json!({ "ok": true, "soft": false, "id": id })))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkCreateBody {
+    to_id: Option<String>,
+    to_hash: Option<String>,
+    kind: Option<String>,
+    linked: Option<bool>,
+}
+
+/// POST /api/notes/{id}/links { toId?|toHash?, kind?, linked? } — cc 侧建链，
+/// 走 trx 发布到 mac 真源（payload 与 mac recordLocalClipLink 逐键对齐）。
+async fn agent_note_link_create(
+    State(state): State<Arc<App>>,
+    Path(id): Path<String>,
+    Json(body): Json<LinkCreateBody>,
+) -> AppResult<Json<Value>> {
+    let from_id = links::norm_id(&id);
+    let linked = body.linked.unwrap_or(true);
+    let kind = body
+        .kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(str::to_lowercase);
+    if let Some(k) = &kind {
+        if !links::LINK_KINDS.contains(&k.as_str()) {
+            return Err(AppError::bad(format!(
+                "kind 仅支持: {}",
+                links::LINK_KINDS.join("|")
+            )));
+        }
+    }
+    let kind = kind.unwrap_or_else(|| "related".into());
+    let to_id = body.to_id.as_deref().map(links::norm_id);
+    let to_hash = links::normalize_hash(body.to_hash.as_deref());
+    if to_id.is_none() && to_hash.is_none() {
+        return Err(AppError::bad("expected {toId?|toHash?}"));
+    }
+    if to_id.as_deref() == Some(from_id.as_str()) {
+        return Err(AppError::bad("不能关联自己"));
+    }
+    let to_is_note = to_id.is_some();
+
+    // from 必须是 cc 引擎里的活笔记。
+    let from_exists = with_vault(state.clone(), {
+        let from_id = from_id.clone();
+        move |vault| vault.load(&from_id).map(|o| o.is_some())
+    })
+    .await?;
+    if !from_exists {
+        return Err(AppError::not_found("笔记不存在"));
+    }
+
+    // pair_key：mac 语义（nn 大写排序 / nh noteId+capHash）。
+    let pair_key = match (&to_id, &to_hash) {
+        (Some(to), _) if to_is_note => {
+            let (a, b) = if from_id.as_str() < to.as_str() {
+                (from_id.as_str(), to.as_str())
+            } else {
+                (to.as_str(), from_id.as_str())
+            };
+            format!("nn:{a}:{b}")
+        }
+        (_, Some(hash)) => format!("nh:{from_id}:{hash}"),
+        _ => return Err(AppError::bad("expected {toId?|toHash?}")),
+    };
+
+    // 度数上限（双向 32，与 mac 一致）。
+    if linked && state.link_store.degree(&from_id) >= links::DEGREE_CAP {
+        return Err(AppError::bad("最多 32 条关联"));
+    }
+    if linked {
+        if let Some(to) = &to_id {
+            if state.link_store.degree(to) >= links::DEGREE_CAP {
+                return Err(AppError::bad("最多 32 条关联"));
+            }
+        }
+    }
+
+    // 幂等：已生效的同向 link → changed:false；无可回退的 unlink → changed:false。
+    if linked && state.link_store.pair_linked(&pair_key) {
+        return Ok(Json(json!({ "ok": true, "changed": false, "link": Value::Null })));
+    }
+    if !linked && !state.link_store.has_ops_for_pair(&pair_key) {
+        return Ok(Json(json!({ "ok": true, "changed": false, "link": Value::Null })));
+    }
+
+    let op = links::LinkOp {
+        op_id: uuid::Uuid::new_v4().to_string(),
+        ts: now_ms() as f64 / 1000.0,
+        action: if linked { "link" } else { "unlink" }.into(),
+        from_item_id: from_id.clone(),
+        to_item_id: to_id.clone(),
+        to_content_hash: if to_is_note { None } else { to_hash.clone() },
+        to_is_note,
+        kind: kind.clone(),
+        pair_key: pair_key.clone(),
+        source: "cc".into(),
+    };
+    state.link_store.record(&op);
+
+    // 发布 trx（与 mac 契约一致）；序号在 vault 锁内推进。
+    let mut sync_op: Option<Value> = None;
+    if state.sync.is_some() {
+        let seq = with_vault(state.clone(), move |vault| {
+            let seq = vault
+                .store()
+                .vault_meta("sync.seq")
+                .map(|v| v.and_then(|s| s.parse::<u64>().ok()).unwrap_or(0))
+                .unwrap_or(0)
+                + 1;
+            vault.store().set_vault_meta("sync.seq", &seq.to_string())?;
+            Ok::<_, notebase_store::Error>(seq)
+        })
+        .await?;
+        let mut trx = sync::compose_like_op(&state.sync, seq, "clip_link", &from_id);
+        trx["content_hash"] = json!(if to_is_note { None } else { to_hash.clone() });
+        trx["note"] = json!(links::trx_note_payload(&op).to_string());
+        sync_op = Some(trx);
+    }
+    if let (Some(cfg), Some(op)) = (&state.sync, sync_op) {
+        let cfg = cfg.clone();
+        let path = format!(
+            "{}/trx/{}/{:016}.json",
+            cfg.prefix, cfg.host_id,
+            op["seq"].as_u64().unwrap_or(0)
+        );
+        tokio::task::spawn_blocking(move || sync::publish(&cfg, &path, &op))
+            .await
+            .ok();
+    }
+
+    Ok(Json(json!({
+        "ok": true,
+        "changed": true,
+        "link": { "pairKey": pair_key, "kind": kind, "linked": linked },
+    })))
+}
+
+async fn agent_note_links(
+    State(state): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(q): Query<ListQuery>,
+) -> AppResult<Json<Value>> {
+    links_view(state, &id, "out", q.kind).await
+}
+
+async fn agent_note_backlinks(
+    State(state): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(q): Query<ListQuery>,
+) -> AppResult<Json<Value>> {
+    links_view(state, &id, "back", q.kind).await
+}
+
+async fn links_view(
+    state: Arc<App>,
+    id: &str,
+    direction: &str,
+    kind: Option<String>,
+) -> AppResult<Json<Value>> {
+    let item_id = links::norm_id(id);
+    if let Some(k) = &kind {
+        let k = k.trim().to_lowercase();
+        if !links::LINK_KINDS.contains(&k.as_str()) {
+            return Err(AppError::bad(format!(
+                "kind 仅支持: {}",
+                links::LINK_KINDS.join("|")
+            )));
+        }
+        return build_links_view(state, item_id, direction, Some(k)).await;
+    }
+    build_links_view(state, item_id, direction, None).await
+}
+
+async fn build_links_view(
+    state: Arc<App>,
+    item_id: String,
+    direction: &str,
+    kind: Option<String>,
+) -> AppResult<Json<Value>> {
+    let edges = state.link_store.edges(direction, &item_id, kind.as_deref());
+    let mut links: Vec<Value> = Vec::new();
+    for e in edges {
+        let mut peer = json!({
+            "id": if e.to_is_note { Value::String(e.peer_id.clone()) } else { Value::Null },
+            "type": if e.to_is_note { "note" } else { "clip" },
+            "preview": Value::Null,
+        });
+        if e.to_is_note && !e.peer_id.is_empty() {
+            if let Ok(Some(meta)) = with_vault(state.clone(), {
+                let pid = e.peer_id.clone();
+                move |vault| vault.store().note(&pid)
+            })
+            .await
+            {
+                peer["title"] = json!(meta.title);
+                peer["preview"] = json!(meta.plain.chars().take(200).collect::<String>());
+                peer["id"] = json!(meta.id);
+            }
+        } else if let Some(h) = &e.peer_hash {
+            peer["hash"] = json!(h);
+        }
+        links.push(json!({
+            "kind": e.kind,
+            "pairKey": e.pair_key,
+            "peer": peer,
+        }));
+    }
+    Ok(Json(json!({ "ok": true, "count": links.len(), "links": links })))
+}
+
+/// GET /api/notes/{id}/related — tags 作 FTS 词，排除自身与已链接对端。
+async fn agent_note_related(
+    State(state): State<Arc<App>>,
+    Path(id): Path<String>,
+    Query(q): Query<ListQuery>,
+) -> AppResult<Json<Value>> {
+    let item_id = links::norm_id(&id);
+    let limit = q.limit.unwrap_or(10).min(50);
+    let row = with_vault(state.clone(), {
+        let item_id = item_id.clone();
+        move |vault| vault.store().note(&item_id)
+    })
+    .await?;
+    let (note_id, _title) = match row {
+        Some(meta) => (meta.id, meta.title),
+        None => return Err(AppError::not_found("笔记不存在")),
+    };
+    let tags = state.tag_store.for_note(&note_id);
+    if tags.is_empty() {
+        return Ok(Json(json!({ "ok": true, "basedOn": [], "count": 0, "items": [] })));
+    }
+    let linked_peers: Vec<String> = state.link_store.peer_ids(&note_id);
+    let qstr = tags.join(" ");
+    let limit_q = limit + linked_peers.len() + 5;
+    let mut hits = with_vault(state.clone(), move |vault| {
+        vault.search(&qstr, limit_q).map(|hits| {
+            hits.into_iter()
+                .map(|h| (h.note_id, h.title, h.snippet))
+                .collect::<Vec<_>>()
+        })
+    })
+    .await?;
+    let mut items: Vec<Value> = Vec::new();
+    for (hid, title, snippet) in hits.drain(..) {
+        if hid == note_id || linked_peers.iter().any(|p| p.eq_ignore_ascii_case(&hid)) {
+            continue;
+        }
+        let tags = state.tag_store.for_note(&hid);
+        items.push(json!({
+            "id": hid, "title": title, "preview": snippet, "tags": tags,
+        }));
+        if items.len() >= limit {
+            break;
+        }
+    }
+    Ok(Json(json!({ "ok": true, "basedOn": tags, "count": items.len(), "items": items })))
+}
+
 async fn usage_doc() -> Response {
     (
         StatusCode::OK,
@@ -575,6 +838,7 @@ async fn main() {
     let vault = Vault::open(std::path::Path::new(&home).join("notes.vault"))
         .expect("open notebase vault");
     let tag_store = tags::TagStore::open(&std::path::Path::new(&home).join("tags.db"));
+    let link_store = links::LinkStore::open(&std::path::Path::new(&home).join("links.db"));
     let port: u16 = std::env::var("CLIPVAULT_NOTES_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -584,6 +848,7 @@ async fn main() {
         token,
         sync: sync::SyncConfig::from_env(),
         tag_store,
+        link_store,
         rate: RateLimiter::new(),
     });
     if let Some(cfg) = &state.sync {
@@ -599,6 +864,9 @@ async fn main() {
     let app = Router::new()
         .route("/api/notes/_doc", get(usage_doc))
         .route("/api/notes/_backfill", post(backfill_notes))
+        .route("/api/notes/{id}/links", post(agent_note_link_create).get(agent_note_links))
+        .route("/api/notes/{id}/backlinks", get(agent_note_backlinks))
+        .route("/api/notes/{id}/related", get(agent_note_related))
         .route("/api/notes/_meta", get(meta))
         .route("/api/notes", get(list_notes).post(save_note))
         .route("/api/notes/{id}", get(show_note).delete(delete_note))
