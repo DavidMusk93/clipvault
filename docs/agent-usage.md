@@ -80,7 +80,11 @@ DELETE /api/notes/{id}
 幂等台账折叠：同一篇只保留最近 32 条 op（agent 高频写不无限堆账）。
 ```
 
-### P3a · 链接（有向读，复用 clip_link 真源）
+### P3a · 链接（cc 与 mac 同源：trx 对等 peer）
+
+cc 与 mac 共享 `clip_link_ops` 真源：cc 建链发 trx（payload 与 mac 逐键对齐，
+mac 吸收后用户 UI 可见）；mac 建链 cc 也镜像。id 在 pair_key 中大写归一。
+（cc 端点形状与 mac 一致，`?kind=` 同词汇表。）
 
 ```text
 POST /api/notes/{id}/links   { toId?|toHash?, kind?, linked?默认true }
