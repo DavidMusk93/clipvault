@@ -2050,14 +2050,14 @@ class WebServer {
             "version": "p3a",
             "endpoints": [
                 "POST /api/notes": "create/update a note (body required; id to update; opId idempotent; merge=false strict CAS)",
-                "GET /api/notes": "list notes (?q= fts, ?tag=, ?since= unix ts, ?limit= default 50 max 200)",
-                "GET /api/notes/{id}": "single note + tags",
-                "DELETE /api/notes/{id}": "soft-delete into trash (undoable, ttl 30d)",
+                "GET /api/v1/notes": "list notes (?q= fts, ?tag=, ?since= unix ts, ?limit= default 50 max 200)",
+                "GET /api/v1/notes/{id}": "single note + tags",
+                "DELETE /api/v1/notes/{id}": "soft-delete into trash (undoable, ttl 30d)",
                 "POST /api/notes/{id}/links": "link this note to a clip/note {toId?|toHash?, linked?} (kind=related)",
                 "GET /api/notes/{id}/links": "outgoing links (peer head + kind)",
-                "GET /api/notes/{id}/backlinks": "incoming links",
-                "GET /api/notes/tags": "tag counts",
-                "GET /api/notes/_meta": "this capability list",
+                "GET /api/v1/notes/{id}/backlinks": "incoming links",
+                "GET /api/v1/notes/tags": "tag counts",
+                "GET /api/v1/notes/_meta": "this capability list",
             ],
         ]
     }

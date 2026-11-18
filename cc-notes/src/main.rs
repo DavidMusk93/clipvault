@@ -131,7 +131,7 @@ async fn meta(State(_state): State<Arc<App>>) -> Json<Value> {
         "api": "clipvault-notes",
         "host": "cc",
         "version": "v1",
-        "docs": "/api/notes/_doc (agent usage, markdown)",
+        "docs": "/api/v1/notes/_doc (agent usage, markdown)",
         "endpoints": {
             "POST /api/notes": "create/update a note (body required; id to update; opId idempotent)",
             "GET /api/notes": "list notes (?q= fts, ?limit=, ?offset=)",
