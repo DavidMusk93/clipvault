@@ -125,6 +125,7 @@ async fn meta(State(_state): State<Arc<App>>) -> Json<Value> {
         "api": "clipvault-notes",
         "host": "cc",
         "version": "d3",
+        "docs": "/api/notes/_doc (agent usage, markdown)",
         "endpoints": {
             "POST /api/notes": "create/update a note (body required; id to update; opId idempotent)",
             "GET /api/notes": "list notes (?q= fts, ?limit=, ?offset=)",
@@ -485,6 +486,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind 127.0.0.1 notes port");
-    println!("[clipvault-notes] listening on {addr} (d1)");
+    println!("[clipvault-notes] listening on {addr}");
     axum::serve(listener, app).await.expect("serve");
 }
