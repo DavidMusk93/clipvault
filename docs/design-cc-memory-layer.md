@@ -1,6 +1,6 @@
 # design-cc-memory-layer — ClipVault 笔记/记忆层上 cc（设计稿 v1）
 
-状态：**设计，未实施**。Owner 裁决点见 §9。真源上下文：nmem `da49996f`（cc 事实）、`a2bb4239`（agent API 规划）、`deb7a3bc`（ostore 单实例架构）。
+状态：**D0–D2 + D3-lite 已实施并生产验证**（见下「实施进度」）；剩余项见 §10。Owner 裁决点见 §9。真源上下文：nmem `da49996f`（cc 事实）、`a2bb4239`（agent API 规划）、`deb7a3bc`（ostore 单实例架构）。
 
 ## 一句话结论
 
@@ -85,6 +85,23 @@ mac 侧：`CLIPVAULT_NOTEBASE_PRIMARY=1` 已生效（notebase 已是 mac 的笔�
 | ostore `list.sha256` 历史上是 MD5 | 沿用 AGENTS 禁令：不拿它当对象校验 |
 | agent 高频写打爆 SSE 通知 | cc 侧 cycle coalesce（mac 已是 150ms），事件只触发 pull |
 | token 泄漏 | 0600 文件 + 不进日志/nmem/commit；泄漏即轮换 |
+
+## 实施进度（2026-11-18）
+
+| 阶段 | 状态 | commit |
+| --- | --- | --- |
+| D0 设计 | done | `736def9` |
+| D1 骨架（notebase 引擎 + 同形状 API + token + 持久幂等台账） | done，mac loopback 活体 8 步 | `5c7a178` |
+| D2a cc 部署（systemd :9490 + token） | done，生产活体 | —（`clipvault-notes.service` active） |
+| D2b trx 双向（peer host "cc"） | done，生产双向 ≤4s | `fdba385` |
+| D3-lite tags 投影 + ?tag/?since + /tags | done，生产跨机验证 | `9c87c30`（含 mac sync-apply tags 补齐） |
+
+## §10 剩余项（后续 goal）
+
+- cc 侧 links/backlinks/related：链接真源在 mac `clip_link_ops`；cc 侧镜像属跨 host 投影，等 agent 使用反馈再立项。
+- mac→cc 存量 backfill（~34k trx，skip 已记日志）。
+- cc SSE 事件驱动（现 2s 轮询，端到端 ≤4s 已达标）。
+- 图片附件（blobKeys）relay。
 
 ## Owner 裁决点（§9）
 

@@ -141,6 +141,8 @@ EOF
 ```
 
 远程服务：`--base` / `$CLIPVAULT_BASE`（默认本机 :8080）。
+cc 记忆层：`ssh -L 9491:127.0.0.1:9490 cc` 后 `cv-notes --base http://127.0.0.1:9491 --token <cc token>`；
+cc 与 mac 双向 trx 同步（≤4s），详见 `docs/design-cc-memory-layer.md`。
 
 ## 不变量（agent 必须遵守）
 
