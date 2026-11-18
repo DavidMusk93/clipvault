@@ -2025,18 +2025,55 @@ final class DatabaseManager: ObservableObject {
     }
 
     @discardableResult
-    func applySyncTombstoneLocked(id: UUID) -> Bool {
+    /// Sync tombstone：capture 行硬删（去重/折叠契约）；**note 行软删**（回收箱可撤销）
+    /// —— note 是创作内容，硬消失违反「记忆不可丢」，且曾让 agent 侧删除后
+    /// 用户墙留幽灵卡（2026-11-18）。两种都广播 ClipVaultItemRemoved 给 SSE。
+    func applySyncTombstoneLocked(id: UUID, source: String = "sync") -> Bool {
         guard let db = db else { return false }
         let idStr = id.uuidString
         var hash: String?
+        var typeRaw: String?
         var hStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT content_hash FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, "SELECT content_hash, type FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
             bindText(hStmt, 1, idStr)
             if sqlite3_step(hStmt) == SQLITE_ROW {
                 hash = sqlite3_column_text(hStmt, 0).map { String(cString: $0) }
+                typeRaw = sqlite3_column_text(hStmt, 1).map { String(cString: $0) }
             }
         }
         sqlite3_finalize(hStmt)
+
+        let isNote = typeRaw == ClipboardType.note.rawValue
+        if isNote {
+            // 软删：与用户 deleteItem 同语义（deleted_at + FTS 摘除 + oplog + 链接计数）。
+            let now = Date().timeIntervalSince1970
+            let sql = "UPDATE clipboard_items SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            sqlite3_bind_double(stmt, 1, now)
+            bindText(stmt, 2, idStr)
+            let rc = sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+            guard rc == SQLITE_DONE else { return false }
+            let changed = sqlite3_changes(db) > 0
+            if changed {
+                deleteFTS(id: idStr)
+                _ = appendOperationLogSync(
+                    action: "soft_delete",
+                    itemId: idStr,
+                    contentHash: hash,
+                    detail: "ttl_days=30 via sync tombstone",
+                    source: source
+                )
+                touchLinkCountsForItem(id: idStr, hash: hash)
+            }
+            NotificationCenter.default.post(
+                name: CloudDocsBackupService.itemRemovedNotification,
+                object: nil,
+                userInfo: ["itemId": idStr]
+            )
+            return true
+        }
 
         let sql = "DELETE FROM clipboard_items WHERE id = ?;"
         var stmt: OpaquePointer?

@@ -23,6 +23,8 @@ final class CloudDocsBackupService {
     private(set) static var shared: CloudDocsBackupService?
 
     static let itemAddedNotification = Notification.Name("ClipVaultItemAdded")
+    /// tombstone apply（sync 对端删除）广播给 SSE：墙即时摘卡，不留幽灵。
+    static let itemRemovedNotification = Notification.Name("ClipVaultItemRemoved")
     static let statusChangedNotification = Notification.Name("ClipFlowBackupStatusChanged")
 
     @discardableResult

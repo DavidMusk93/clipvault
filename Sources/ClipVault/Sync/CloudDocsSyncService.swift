@@ -1684,6 +1684,8 @@ final class CloudDocsSyncService {
             sem.signal()
         }
         sem.wait()
+        // 逐 op 应用日志（排查生命线）：kind/host/seq/id8/结果，禁止盲猜。
+        print("[Sync] apply host=\(host) seq=\(seq) kind=\(op.kind) id=\(op.itemId.prefix(8)) -> \(appliedOk ? "ok" : "retry") changed=\(changed)")
         return (appliedOk, changed)
     }
 
@@ -1701,7 +1703,7 @@ final class CloudDocsSyncService {
         guard let uuid = UUID(uuidString: op.itemId) else { return false }
         switch op.kind {
         case "tombstone":
-            return database.applySyncTombstoneLocked(id: uuid)
+            return database.applySyncTombstoneLocked(id: uuid, source: "sync:\(op.host)")
         case "user_context", "user_evaluation":
             // Each peer evaluation is one history row (idempotent by op_id / evaluation id).
             let evalId = UUID(uuidString: op.opId)

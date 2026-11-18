@@ -180,6 +180,14 @@ class WebServer {
             self?.broadcastSSE(event: "update", id: id)
         }
         NotificationCenter.default.addObserver(
+            forName: CloudDocsBackupService.itemRemovedNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            let id = (note.userInfo?["itemId"] as? String) ?? nil
+            self?.broadcastSSE(event: "clip_deleted", id: id)
+        }
+        NotificationCenter.default.addObserver(
             forName: .clipFlowOCRReady,
             object: nil,
             queue: nil
