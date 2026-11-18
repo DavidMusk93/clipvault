@@ -18,6 +18,7 @@ ureq = { version = "2", features = ["json"] }
 base64 = "0.22"
 rusqlite = { version = "0.41", features = ["bundled"] }
 regex = "1"
+urlencoding = "2"
 
 [profile.release]
 lto = "thin"

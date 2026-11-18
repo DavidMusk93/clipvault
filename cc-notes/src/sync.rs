@@ -12,6 +12,7 @@
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use serde_json::{json, Value};
+use std::io::BufRead;
 use std::sync::Arc;
 
 use crate::App;
@@ -456,12 +457,78 @@ pub fn build_tombstone_op(host_id: &str, seq: u64, item_id: &str, wall_ms: i64) 
     })
 }
 
+/// SSE 事件驱动（ostore `/api/events?prefix=`）：阻塞线程逐帧读，
+/// 任何事件（object.created / stream.reset）→ notify 拉取循环。
+/// 断流自愈：2s 重连；拉取侧回落 30s 轮询兜底（连接态由 connected 原子位反映）。
+pub fn sse_thread(app: Arc<App>, notify: Arc<tokio::sync::Notify>, connected: Arc<std::sync::atomic::AtomicBool>) {
+    let cfg = match &app.sync {
+        Some(c) => c.clone(),
+        None => return,
+    };
+    std::thread::spawn(move || {
+        loop {
+            let url = format!(
+                "{}/api/events?prefix={}&replay=0",
+                cfg.base,
+                urlencoding::encode(&format!("{}/trx", cfg.prefix))
+            );
+            let resp = ureq::get(&url)
+                .set("Authorization", &format!("Bearer {}", cfg.token))
+                .set("Accept", "text/event-stream")
+                // 压缩代理会攒小帧，读起来像死流 —— 与 mac 同一条教训。
+                .set("Accept-Encoding", "identity")
+                .timeout(std::time::Duration::from_secs(0))
+                .call();
+            match resp {
+                Ok(resp) => {
+                    connected.store(true, std::sync::atomic::Ordering::Relaxed);
+                    println!("[sync] sse open · {}trx", cfg.base);
+                    let reader = resp.into_reader();
+                    let mut frame = String::new();
+                    for line in std::io::BufReader::new(reader).lines() {
+                        match line {
+                            Ok(l) => {
+                                if l.is_empty() {
+                                    // 空行 = 帧边界；data 行存在即触发拉取。
+                                    if frame.contains("data:") {
+                                        notify.notify_one();
+                                    }
+                                    frame.clear();
+                                } else {
+                                    frame.push_str(&l);
+                                    frame.push('\n');
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[sync] sse connect: {e}");
+                }
+            }
+            connected.store(false, std::sync::atomic::Ordering::Relaxed);
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    });
+}
+
 pub async fn pull_loop(app: Arc<App>) {
-    let poll = app.sync.as_ref().map(|c| c.poll_secs).unwrap_or(2);
-    let mut tick = tokio::time::interval(std::time::Duration::from_secs(poll));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    sse_thread(app.clone(), notify.clone(), connected.clone());
+    let mut fallback = tokio::time::interval(std::time::Duration::from_secs(30));
+    fallback.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        tick.tick().await;
+        // 事件驱动：SSE 帧即拉；断流时 30s 轮询兜底（2s 太吵，mac 语义一致）。
+        tokio::select! {
+            _ = notify.notified() => {},
+            _ = fallback.tick() => {
+                if connected.load(std::sync::atomic::Ordering::Relaxed) {
+                    continue; // 流活着：兜底轮询让位给事件（SSE 自身有 ping 保活）
+                }
+            },
+        }
         match pull_once(app.clone()).await {
             Ok((a, s, _)) if a > 0 || s > 0 => {
                 println!("[sync] pull applied={a} skipped={s}");
