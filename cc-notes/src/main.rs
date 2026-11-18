@@ -505,10 +505,10 @@ async fn agent_note_link_create(
     }
     let to_is_note = to_id.is_some();
 
-    // from 必须是 cc 引擎里的活笔记。
+    // from 必须是 cc 引擎里的活笔记（大小写候选）。
     let from_exists = with_vault(state.clone(), {
-        let from_id = from_id.clone();
-        move |vault| vault.load(&from_id).map(|o| o.is_some())
+        let raw = id.clone();
+        move |vault| vault_load_any(vault, &raw).map(|o| o.is_some())
     })
     .await?;
     if !from_exists {
@@ -654,7 +654,14 @@ async fn build_links_view(
         if e.to_is_note && !e.peer_id.is_empty() {
             if let Ok(Some(meta)) = with_vault(state.clone(), {
                 let pid = e.peer_id.clone();
-                move |vault| vault.store().note(&pid)
+                move |vault| {
+                    for cand in id_candidates(&pid) {
+                        if let Some(m) = vault.store().note(&cand)? {
+                            return Ok(Some(m));
+                        }
+                    }
+                    Ok(None)
+                }
             })
             .await
             {
@@ -682,16 +689,16 @@ async fn agent_note_related(
 ) -> AppResult<Json<Value>> {
     let item_id = links::norm_id(&id);
     let limit = q.limit.unwrap_or(10).min(50);
-    let row = with_vault(state.clone(), {
-        let item_id = item_id.clone();
-        move |vault| vault.store().note(&item_id)
-    })
-    .await?;
-    let (note_id, _title) = match row {
-        Some(meta) => (meta.id, meta.title),
-        None => return Err(AppError::not_found("笔记不存在")),
-    };
-    let tags = state.tag_store.for_note(&note_id);
+    // 笔记本体按原始 id 查（大小写候选）；tags 也按原始 id（tags.db 存的是写入时的 id）。
+    let raw_id = id.clone();
+    let row = with_vault(state.clone(), move |vault| vault_load_any(vault, &raw_id)).await?;
+    let note_doc = row.ok_or_else(|| AppError::not_found("笔记不存在"))?;
+    let note_id = note_doc.id();
+    let tags = id_candidates(&note_id)
+        .iter()
+        .map(|c| state.tag_store.for_note(c))
+        .find(|t| !t.is_empty())
+        .unwrap_or_default();
     if tags.is_empty() {
         return Ok(Json(json!({ "ok": true, "basedOn": [], "count": 0, "items": [] })));
     }
@@ -711,7 +718,11 @@ async fn agent_note_related(
         if hid == note_id || linked_peers.iter().any(|p| p.eq_ignore_ascii_case(&hid)) {
             continue;
         }
-        let tags = state.tag_store.for_note(&hid);
+        let tags = id_candidates(&hid)
+            .iter()
+            .map(|c| state.tag_store.for_note(c))
+            .find(|t| !t.is_empty())
+            .unwrap_or_default();
         items.push(json!({
             "id": hid, "title": title, "preview": snippet, "tags": tags,
         }));
@@ -720,6 +731,22 @@ async fn agent_note_related(
         }
     }
     Ok(Json(json!({ "ok": true, "basedOn": tags, "count": items.len(), "items": items })))
+}
+
+
+/// cc 引擎内 id 大小写不敏感查找候选（cc 自建 = 小写，mac 回填 = 大写）。
+/// pair_key/trx 面仍一律大写归一（mac 契约），存储查找面例外。
+fn id_candidates(id: &str) -> [String; 3] {
+    [id.to_string(), id.to_uppercase(), id.to_lowercase()]
+}
+
+fn vault_load_any(vault: &Vault, id: &str) -> notebase_store::Result<Option<notebase::NoteDoc>> {
+    for cand in id_candidates(id) {
+        if let Some(doc) = vault.load(&cand)? {
+            return Ok(Some(doc));
+        }
+    }
+    Ok(None)
 }
 
 async fn usage_doc() -> Response {
