@@ -37,8 +37,25 @@ POST /api/notes
 
 ```text
 GET /api/notes/_meta
-→ { ok, api:"clipvault-notes", version:"p0", endpoints:{...} }
+→ { ok, api:"clipvault-notes", version:"p1", endpoints:{...} }
 ```
+
+### P1 · 读
+
+```text
+GET /api/notes?q=<fts>&tag=<tag>&since=<unix 秒>&limit=<1..200，默认 50>
+  → { ok, count, notes:[ itemToJSON + tags:[".."] ] }   按更新时间倒序
+  q   走既有 clipboard_fts（trigram/unicode61 自适应，bm25 语义与墙一致）
+  tag 小写精确匹配（note_tags 投影，服务端提取，同前端 #tag 语义）
+  since  只回 timestamp > since 的行（笔记更新时间；保存即推进）——增量拉取用
+GET /api/notes/{id}
+  → { ok, item(json), tags:[..] }
+GET /api/notes/tags
+  → { ok, tags:[ {tag, count} ] }   count 倒序，只数未删除笔记
+```
+
+`note_tags` 是新增投影：保存时服务端从 markdown 提取（围栏外 `#tag`，
+同前端 `extractNoteTags` 语义），首次启动回填存量笔记。前端 `#tag` 交互不动。
 
 ## 示例
 

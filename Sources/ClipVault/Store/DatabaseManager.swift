@@ -758,6 +758,21 @@ final class DatabaseManager: ObservableObject {
         execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_from ON clip_links(from_item_id);")
         execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_to_hash ON clip_links(to_content_hash) WHERE to_content_hash IS NOT NULL;")
         execQuiet("CREATE INDEX IF NOT EXISTS idx_clip_links_to_item ON clip_links(to_item_id) WHERE to_item_id IS NOT NULL;")
+        // Agent notes API (P1): server-side tag projection over notes.
+        // Lowercase tags; display case stays the web panel's business.
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS note_tags (
+            item_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            ts REAL NOT NULL,
+            PRIMARY KEY (item_id, tag)
+        );
+        """)
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_note_tags_tag ON note_tags(tag, item_id);")
+        if metaGet("note_tags_backfill") != "1" {
+            backfillNoteTags()
+            metaSet("note_tags_backfill", "1")
+        }
         execQuiet("""
         CREATE TABLE IF NOT EXISTS share_links (
             token TEXT PRIMARY KEY,
@@ -3360,6 +3375,8 @@ final class DatabaseManager: ObservableObject {
             item: ClipboardItem(id: id, timestamp: now, type: .note, contentHash: hash, textContent: body)
         )
         upsertFTS(id: id.uuidString, text: body, ocr: nil, source: ComposeNotes.sourceApp, html: nil)
+        // Tag projection (P1): same semantics as the web panel's extractNoteTags.
+        refreshNoteTagsLocked(itemId: id.uuidString, body: body, ts: now.timeIntervalSince1970, on: db)
         // With the engine primary, per-save whole-body history is exactly what
         // the log+sessions replace; keep the table for legacy/rollback only.
         if !enginePrimary {
@@ -3407,6 +3424,233 @@ final class DatabaseManager: ObservableObject {
         var parentHash: String?
         var conflict: Bool
         var merged: Bool
+    }
+
+    // MARK: - note tags (agent notes API, P1)
+
+    struct AgentNoteRow {
+        let item: ClipboardItem
+        let tags: [String]
+    }
+
+    /// One-time backfill of note_tags from existing notes.
+    private func backfillNoteTags() {
+        guard let db = db else { return }
+        execQuiet("DELETE FROM note_tags;")
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT id, text_content, timestamp FROM clipboard_items WHERE type = 'note' AND deleted_at IS NULL;",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return }
+        var rows: [(id: String, body: String, ts: Double)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let idText = sqlite3_column_text(stmt, 0) else { continue }
+            let id = String(cString: idText)
+            let body = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            rows.append((id, body, sqlite3_column_double(stmt, 2)))
+        }
+        sqlite3_finalize(stmt)
+        var insert: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT OR IGNORE INTO note_tags (item_id, tag, ts) VALUES (?, ?, ?);",
+            -1, &insert, nil
+        ) == SQLITE_OK else { return }
+        var tagged = 0
+        for row in rows {
+            for tag in NoteTags.extract(from: row.body) {
+                bindText(insert, 1, row.id)
+                bindText(insert, 2, tag.lowercased())
+                sqlite3_bind_double(insert, 3, row.ts)
+                if sqlite3_step(insert) == SQLITE_DONE { tagged += 1 }
+                sqlite3_reset(insert)
+                sqlite3_clear_bindings(insert)
+            }
+        }
+        sqlite3_finalize(insert)
+        print("[DatabaseManager] note_tags backfill: \(tagged) tags over \(rows.count) notes")
+    }
+
+    /// Save-time projection refresh. Lowercase; empty body clears all tags.
+    @discardableResult
+    func refreshNoteTagsLocked(itemId: String, body: String?, ts: Double, on handle: OpaquePointer?) -> Bool {
+        guard let db = handle else { return false }
+        var del: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM note_tags WHERE item_id = ?;", -1, &del, nil) == SQLITE_OK else { return false }
+        bindText(del, 1, itemId)
+        sqlite3_step(del)
+        sqlite3_finalize(del)
+        guard let body, !body.isEmpty else { return true }
+        var insert: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "INSERT OR IGNORE INTO note_tags (item_id, tag, ts) VALUES (?, ?, ?);", -1, &insert, nil
+        ) == SQLITE_OK else { return false }
+        for tag in NoteTags.extract(from: body) {
+            bindText(insert, 1, itemId)
+            bindText(insert, 2, tag.lowercased())
+            sqlite3_bind_double(insert, 3, ts)
+            sqlite3_step(insert)
+            sqlite3_reset(insert)
+            sqlite3_clear_bindings(insert)
+        }
+        sqlite3_finalize(insert)
+        return true
+    }
+
+    private func noteTagsLocked(itemId: String, on handle: OpaquePointer?) -> [String] {
+        guard let db = handle else { return [] }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT tag FROM note_tags WHERE item_id = ? ORDER BY tag;", -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        bindText(stmt, 1, itemId)
+        var tags: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            tags.append(String(cString: sqlite3_column_text(stmt, 0)))
+        }
+        sqlite3_finalize(stmt)
+        return tags
+    }
+
+    /// Same SELECT shape as the FTS list (rowToItem-compatible), without FTS.
+    private func agentNoteSelectSQL(where clauses: [String]) -> String {
+        """
+        SELECT c.id, c.timestamp, c.type, c.content_hash, c.text_content, c.file_urls, c.url, \(Self.listHtmlSQLAliased), c.source_app, c.ocr_text,
+               \(Self.listTailSQLAliased), \(Self.listHtmlOmittedSQLAliased)
+        FROM clipboard_items c
+        WHERE \(clauses.joined(separator: " AND "))
+        """
+    }
+
+    /// GET /api/notes — agent note list. q → FTS (note rows only), tag → note_tags,
+    /// since → strictly newer than the unix ts. Newest first.
+    func fetchAgentNotes(
+        q: String?,
+        tag: String?,
+        since: Double?,
+        limit: Int,
+        completion: @escaping ([AgentNoteRow]?, String?) -> Void
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion(nil, "internal") }
+                return
+            }
+            var clauses = ["c.type = 'note'", "c.deleted_at IS NULL"]
+            var binds: [(OpaquePointer?, Int32) -> Void] = []
+            if let tag = tag?.trimmingCharacters(in: .whitespaces), !tag.isEmpty {
+                clauses.append("EXISTS (SELECT 1 FROM note_tags t WHERE t.item_id = c.id AND t.tag = ?)")
+                binds.append { stmt, idx in self.bindText(stmt, idx, tag.lowercased()) }
+            }
+            if let since {
+                clauses.append("c.timestamp > ?")
+                binds.append { stmt, idx in sqlite3_bind_double(stmt, idx, since) }
+            }
+            var match: String?
+            if let q = q?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
+                match = self.ftsMatchQuery(from: q)
+                if match != nil {
+                    clauses.append("c.id IN (SELECT id FROM clipboard_fts WHERE clipboard_fts MATCH ?)")
+                }
+            }
+            var sql = self.agentNoteSelectSQL(where: clauses)
+            sql += " ORDER BY c.timestamp DESC, c.id DESC LIMIT ?;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion(nil, String(cString: sqlite3_errmsg(db))) }
+                return
+            }
+            var idx: Int32 = 1
+            for bind in binds { bind(stmt, idx); idx += 1 }
+            if let match {
+                bindText(stmt, idx, match)
+                idx += 1
+            }
+            sqlite3_bind_int(stmt, idx, Int32(min(max(limit, 1), 200)))
+            var rows: [AgentNoteRow] = []
+            var ids: [String] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let item = self.rowToItem(stmt: stmt) {
+                    rows.append(AgentNoteRow(item: item, tags: []))
+                    ids.append(item.id.uuidString)
+                }
+            }
+            sqlite3_finalize(stmt)
+            // One grouped tag lookup keeps this off the per-row query path.
+            var tagsByItem: [String: [String]] = [:]
+            if !ids.isEmpty {
+                let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+                let tagSQL = "SELECT item_id, tag FROM note_tags WHERE item_id IN (\(placeholders)) ORDER BY item_id, tag;"
+                var tstmt: OpaquePointer?
+                if sqlite3_prepare_v2(db, tagSQL, -1, &tstmt, nil) == SQLITE_OK {
+                    for (i, id) in ids.enumerated() { bindText(tstmt, Int32(i + 1), id) }
+                    while sqlite3_step(tstmt) == SQLITE_ROW {
+                        let itemId = String(cString: sqlite3_column_text(tstmt, 0))
+                        tagsByItem[itemId, default: []].append(String(cString: sqlite3_column_text(tstmt, 1)))
+                    }
+                    sqlite3_finalize(tstmt)
+                }
+            }
+            let out = rows.map { row in AgentNoteRow(item: row.item, tags: tagsByItem[row.item.id.uuidString] ?? []) }
+            DispatchQueue.main.async { completion(out, nil) }
+        }
+    }
+
+    /// GET /api/notes/{id} — single note + tags.
+    func fetchAgentNote(id: UUID, completion: @escaping (AgentNoteRow?, String?) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion(nil, "internal") }
+                return
+            }
+            let clauses = ["c.type = 'note'", "c.deleted_at IS NULL", "c.id = ?"]
+            var sql = self.agentNoteSelectSQL(where: clauses)
+            sql += " LIMIT 1;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion(nil, "笔记不存在") }
+                return
+            }
+            bindText(stmt, 1, id.uuidString)
+            var row: AgentNoteRow?
+            if sqlite3_step(stmt) == SQLITE_ROW, let item = self.rowToItem(stmt: stmt) {
+                row = AgentNoteRow(item: item, tags: self.noteTagsLocked(itemId: id.uuidString, on: db))
+            }
+            sqlite3_finalize(stmt)
+            DispatchQueue.main.async {
+                completion(row, row == nil ? "笔记不存在" : nil)
+            }
+        }
+    }
+
+    /// GET /api/notes/tags — counts over live notes.
+    func fetchAgentNoteTags(completion: @escaping ([[String: Any]]?, String?) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion(nil, "internal") }
+                return
+            }
+            let sql = """
+            SELECT t.tag, COUNT(*) AS n
+            FROM note_tags t
+            JOIN clipboard_items c ON c.id = t.item_id AND c.deleted_at IS NULL
+            GROUP BY t.tag
+            ORDER BY n DESC, t.tag ASC
+            LIMIT 200;
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion(nil, String(cString: sqlite3_errmsg(db))) }
+                return
+            }
+            var tags: [[String: Any]] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                tags.append(["tag": String(cString: sqlite3_column_text(stmt, 0)), "count": Int(sqlite3_column_int(stmt, 1))])
+            }
+            sqlite3_finalize(stmt)
+            DispatchQueue.main.async { completion(tags, nil) }
+        }
     }
 
     private func planComposeWrite(

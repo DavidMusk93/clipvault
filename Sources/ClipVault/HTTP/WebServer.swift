@@ -289,7 +289,7 @@ class WebServer {
             // evaluated before the public gate so the browser auth surface is untouched.
             handleAgentNotes(
                 method: method,
-                path: pathOnly,
+                path: path,
                 headers: headers,
                 data: data,
                 connection: connection
@@ -1969,10 +1969,17 @@ class WebServer {
             sendUnauthorized(connection: connection, path: path)
             return
         }
-        if method == "GET" && path == "/api/notes/_meta" {
+        let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
+        if method == "GET" && pathOnly == "/api/notes/_meta" {
             sendJSON(agentNotesMeta(), connection: connection)
-        } else if method == "POST" && path == "/api/notes" {
+        } else if method == "POST" && pathOnly == "/api/notes" {
             handleAgentNoteSave(data: data, headers: headers, connection: connection)
+        } else if method == "GET" && pathOnly == "/api/notes" {
+            handleAgentNotesList(path: path, connection: connection)
+        } else if method == "GET" && pathOnly == "/api/notes/tags" {
+            handleAgentNotesTags(connection: connection)
+        } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") {
+            handleAgentNoteShow(idStr: String(pathOnly.dropFirst("/api/notes/".count)), connection: connection)
         } else {
             sendErrorResponse(connection: connection, status: 405, message: "Method Not Allowed")
         }
@@ -1982,12 +1989,70 @@ class WebServer {
         [
             "ok": true,
             "api": "clipvault-notes",
-            "version": "p0",
+            "version": "p1",
             "endpoints": [
                 "POST /api/notes": "create/update a note (body required; id to update)",
+                "GET /api/notes": "list notes (?q= fts, ?tag=, ?since= unix ts, ?limit= default 50 max 200)",
+                "GET /api/notes/{id}": "single note + tags",
+                "GET /api/notes/tags": "tag counts",
                 "GET /api/notes/_meta": "this capability list",
             ],
         ]
+    }
+
+    /// GET /api/notes?q=&tag=&since=&limit=
+    private func handleAgentNotesList(path: String, connection: HTTPByteSink) {
+        let q = Self.formQueryValue(path: path, name: "q")
+        let tag = Self.formQueryValue(path: path, name: "tag")
+        let since = Self.formQueryValue(path: path, name: "since").flatMap { Double($0) }
+        let limit = min(max(Self.formQueryValue(path: path, name: "limit").flatMap { Int($0) } ?? 50, 1), 200)
+        database.fetchAgentNotes(q: q, tag: tag, since: since, limit: limit) { [weak self] rows, err in
+            guard let self else { return }
+            guard let rows else {
+                self.sendJSON(["ok": false, "message": err ?? "读取失败"], connection: connection)
+                return
+            }
+            self.sendJSON([
+                "ok": true,
+                "count": rows.count,
+                "notes": rows.map { row -> [String: Any] in
+                    var payload = self.itemToJSON(row.item)
+                    payload["tags"] = row.tags
+                    return payload
+                },
+            ], connection: connection)
+        }
+    }
+
+    /// GET /api/notes/{id}
+    private func handleAgentNoteShow(idStr: String, connection: HTTPByteSink) {
+        guard let id = UUID(uuidString: idStr.trimmingCharacters(in: .whitespaces)) else {
+            sendJSON(["ok": false, "message": "expected a note id"], connection: connection)
+            return
+        }
+        database.fetchAgentNote(id: id) { [weak self] row, err in
+            guard let self else { return }
+            guard let row else {
+                self.sendJSON(["ok": false, "message": err ?? "笔记不存在"], connection: connection)
+                return
+            }
+            var payload = self.itemToJSON(row.item)
+            payload["ok"] = true
+            payload["tags"] = row.tags
+            self.sendJSON(payload, connection: connection)
+        }
+    }
+
+    /// GET /api/notes/tags
+    private func handleAgentNotesTags(connection: HTTPByteSink) {
+        database.fetchAgentNoteTags { [weak self] tags, err in
+            guard let self else { return }
+            guard let tags else {
+                self.sendJSON(["ok": false, "message": err ?? "读取失败"], connection: connection)
+                return
+            }
+            self.sendJSON(["ok": true, "tags": tags], connection: connection)
+        }
     }
 
     /// POST /api/notes  { body, title?, id?, refId?, parentHash?, agent? }

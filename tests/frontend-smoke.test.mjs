@@ -196,11 +196,11 @@ test('htmlOmitted is explicit: trimmed body vs empty row', () => {
   assert.match(db, /private static let listHtmlOmittedSQLAliased =/);
   // Every list-producing query must append the omitted flag, in either the plain
   // (runList/runPinned) or the `c.`-aliased form (runSearchLike/runSearchFTS/
-  // runSearchFTSRanked — those join clipboard_fts, so they must alias).
+  // runSearchFTSRanked/agentNoteSelectSQL — those join or alias, so they must alias).
   const plainUses = (db.match(/\\\(Self\.listTailSQL\), \\\(Self\.listHtmlOmittedSQL\)/g) || []).length;
   const aliasUses = (db.match(/\\\(Self\.listTailSQLAliased\), \\\(Self\.listHtmlOmittedSQLAliased\)/g) || []).length;
-  assert.equal(plainUses + aliasUses, 5, 'every list query must append the omitted flag');
-  assert.ok(aliasUses >= 3, 'FTS-joining queries must use the aliased tail');
+  assert.equal(plainUses + aliasUses, 6, 'every list query must append the omitted flag');
+  assert.ok(aliasUses >= 4, 'FTS-joining queries must use the aliased tail');
   assert.match(db, /listTailSQLAliased\), \\\(Self\.listHtmlOmittedSQLAliased\)/);
   assert.match(db, /if colCount >= 22 \{\s*htmlOmitted = sqlite3_column_int\(stmt, 21\) != 0/);
   const item = fs.readFileSync(path.join(root, 'Sources/ClipVault/Capture/ClipboardItem.swift'), 'utf8');
