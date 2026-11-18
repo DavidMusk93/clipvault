@@ -5,6 +5,8 @@
 //! 写入 = notebase delta oplog（无整篇副本堆积）；幂等台账走 vault_meta
 //! `opid:<id>`（重启不丢）。trx 双向同步属 D2，不在本骨架。
 
+mod sync;
+
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, Query, State};
@@ -21,6 +23,7 @@ use notebase_store::Vault;
 struct App {
     vault: Mutex<Vault>,
     token: String,
+    sync: Option<sync::SyncConfig>,
 }
 
 #[derive(Debug)]
@@ -207,7 +210,7 @@ async fn save_note(
             vault
                 .store()
                 .vault_meta(&format!("opid:{op_id}"))
-                .map(|opt| opt.map(|item_id| item_id))
+                .map(|opt| opt)
         })
         .await?;
         if let Some(item_id) = existing {
@@ -224,6 +227,8 @@ async fn save_note(
         }
     }
 
+    let sync_cfg = state.sync.clone();
+    let sync_cfg2 = sync_cfg.clone();
     let out = with_vault(state.clone(), move |vault| {
         let now = now_ms();
         let (id, title, created, updated, created_new) = match body.id.as_deref() {
@@ -262,15 +267,90 @@ async fn save_note(
         if let Some(op_id) = body.op_id.as_deref().filter(|s| !s.is_empty()) {
             vault.store().set_vault_meta(&format!("opid:{op_id}"), id.as_str())?;
         }
-        notebase_store::Result::Ok((id, title, created, updated, created_new))
+        // 同步发布：序号与 op 在 vault 锁内落账，HTTP 发布在锁外。
+        let sync_op = match &sync_cfg2 {
+            Some(cfg) => {
+                let seq = vault
+                    .store()
+                    .vault_meta("sync.seq")
+                    .map(|v| v.and_then(|s| s.parse::<u64>().ok()).unwrap_or(0))
+                    .unwrap_or(0)
+                    + 1;
+                vault.store().set_vault_meta("sync.seq", &seq.to_string())?;
+                Some(sync::build_compose_op(
+                    &cfg.host_id,
+                    seq,
+                    id.as_str(),
+                    &body.body,
+                    updated,
+                ))
+            }
+            None => None,
+        };
+        notebase_store::Result::Ok((id, title, created, updated, created_new, sync_op))
     })
     .await?;
-    let (id, title, created, updated, created_new) = out;
+    let (id, title, created, updated, created_new, sync_op) = out;
+    if let (Some(cfg), Some(op)) = (sync_cfg.as_ref(), sync_op) {
+        let cfg = cfg.clone();
+        let path = format!(
+            "{}/trx/{}/{:016}.json",
+            cfg.prefix, cfg.host_id,
+            op["seq"].as_u64().unwrap_or(0)
+        );
+        tokio::task::spawn_blocking(move || sync::publish(&cfg, &path, &op))
+            .await
+            .ok();
+    }
     Ok(Json(json!({
         "ok": true,
         "created": created_new,
         "item": item_json(&id, &title, created, updated, None),
     })))
+}
+
+async fn delete_note(
+    State(state): State<Arc<App>>,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let sync_cfg = state.sync.clone();
+    let sync_cfg2 = sync_cfg.clone();
+    let id_for_op = id.clone();
+    let out = with_vault(state.clone(), move |vault| {
+        let existed = vault.store().note(&id_for_op)?.is_some();
+        let mut tomb = None;
+        if existed {
+            vault.delete(&id_for_op)?;
+            if let Some(cfg) = &sync_cfg2 {
+                let seq = vault
+                    .store()
+                    .vault_meta("sync.seq")
+                    .map(|v| v.and_then(|s| s.parse::<u64>().ok()).unwrap_or(0))
+                    .unwrap_or(0)
+                    + 1;
+                vault.store().set_vault_meta("sync.seq", &seq.to_string())?;
+                tomb = Some(sync::build_tombstone_op(&cfg.host_id, seq, &id_for_op, now_ms()));
+            }
+        }
+        notebase_store::Result::Ok((existed, tomb))
+    })
+    .await?;
+    let (existed, tomb) = out;
+    if !existed {
+        return Err(AppError::not_found("笔记不存在"));
+    }
+    if let (Some(cfg), Some(op)) = (sync_cfg.as_ref(), tomb) {
+        let cfg = cfg.clone();
+        let path = format!(
+            "{}/trx/{}/{:016}.json",
+            cfg.prefix, cfg.host_id,
+            op["seq"].as_u64().unwrap_or(0)
+        );
+        tokio::task::spawn_blocking(move || sync::publish(&cfg, &path, &op))
+            .await
+            .ok();
+    }
+    Ok(Json(json!({ "ok": true, "soft": false, "id": id })))
 }
 
 async fn auth(
@@ -326,12 +406,22 @@ async fn main() {
     let state = Arc::new(App {
         vault: Mutex::new(vault),
         token,
+        sync: sync::SyncConfig::from_env(),
     });
+    if let Some(cfg) = &state.sync {
+        println!(
+            "[clipvault-notes] sync wire on: prefix={} host={} poll={}s",
+            cfg.prefix, cfg.host_id, cfg.poll_secs
+        );
+        tokio::spawn(sync::pull_loop(state.clone()));
+    } else {
+        println!("[clipvault-notes] sync wire off (no ostore token env /etc/ostore.env)");
+    }
 
     let app = Router::new()
         .route("/api/notes/_meta", get(meta))
         .route("/api/notes", get(list_notes).post(save_note))
-        .route("/api/notes/{id}", get(show_note))
+        .route("/api/notes/{id}", get(show_note).delete(delete_note))
         .layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state);
 
