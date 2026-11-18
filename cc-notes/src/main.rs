@@ -14,8 +14,9 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use axum::extract::DefaultBodyLimit;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -30,6 +31,7 @@ struct App {
     token: String,
     sync: Option<sync::SyncConfig>,
     tag_store: tags::TagStore,
+    rate: RateLimiter,
 }
 
 #[derive(Debug)]
@@ -103,12 +105,13 @@ where
 
 /// mac `/api/notes*` 同形状的 item head（textContent 只在单篇读取时给全文）。
 fn item_json(id: &str, title: &str, created_at: i64, updated_at: i64, markdown: Option<String>) -> Value {
+    // 对齐 mac 形状：应答层用 unix 秒（notebase 内部是 ms）。
     let mut item = json!({
         "id": id,
         "type": "note",
         "title": title,
-        "timestamp": updated_at as f64,
-        "createdAt": created_at as f64,
+        "timestamp": updated_at as f64 / 1000.0,
+        "createdAt": created_at as f64 / 1000.0,
         "editCount": 0,
         "pinnedAt": Value::Null,
         "inTrash": false,
@@ -180,8 +183,8 @@ async fn list_notes(
                     json!({
                         "id": n.id,
                         "title": n.title,
-                        "createdAt": n.created_at,
-                        "updatedAt": n.updated_at,
+                        "createdAt": n.created_at as f64 / 1000.0,
+                        "updatedAt": n.updated_at as f64 / 1000.0,
                         "saves": n.saves,
                     })
                 })
@@ -225,6 +228,65 @@ async fn show_note(
             })))
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackfillNote {
+    id: String,
+    body: String,
+    created_at: f64,
+    updated_at: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackfillBody {
+    notes: Vec<BackfillNote>,
+}
+
+/// POST /api/notes/_backfill — operator 一次性迁移：把既有笔记导入 cc 引擎。
+/// 只落本机（import + tags），**不发 trx**（mac 已是真源，发布会造成 wallTs 噪声）。
+/// 已存在的 id 幂等跳过。token 鉴权同其它端点。
+async fn backfill_notes(
+    State(state): State<Arc<App>>,
+    Json(body): Json<BackfillBody>,
+) -> AppResult<Json<Value>> {
+    if body.notes.len() > 500 {
+        return Err(AppError::bad("max 500 notes per batch"));
+    }
+    let out = with_vault(state.clone(), move |vault| {
+        let mut imported = 0usize;
+        let mut skipped = 0usize;
+        for n in &body.notes {
+            if n.body.trim().is_empty() {
+                skipped += 1;
+                continue;
+            }
+            let created = (n.created_at * 1000.0) as i64;
+            let updated = (n.updated_at * 1000.0) as i64;
+            match vault
+                .import_markdown_as(&n.id, &n.body, created, updated)
+                .map_err(|e| e.to_string())
+            {
+                Ok(Some(_)) => {
+                    state.tag_store.refresh(&n.id, &n.body);
+                    imported += 1;
+                }
+                Ok(None) => skipped += 1, // id 已存在
+                Err(_) => skipped += 1,
+            }
+        }
+        Ok::<_, notebase_store::Error>((imported, skipped))
+    })
+    .await?;
+    let (imported, skipped) = out;
+    Ok(Json(json!({
+        "ok": true,
+        "imported": imported,
+        "skippedExisting": skipped,
+        "published": 0,
+    })))
 }
 
 async fn note_tags_counts(State(state): State<Arc<App>>) -> Json<Value> {
@@ -406,6 +468,66 @@ async fn usage_doc() -> Response {
         .into_response()
 }
 
+/// 每“客户端 IP”令牌桶（CF-Connecting-IP 优先，直连/隧道回落 direct）。
+/// 公网入口的唯一防滥用闸（token 之外的带宽防线）；内存态，重启即清零。
+struct RateLimiter {
+    buckets: std::sync::Mutex<std::collections::HashMap<String, (f64, std::time::Instant)>>,
+    burst: f64,
+    per_sec: f64,
+}
+
+impl RateLimiter {
+    fn new() -> Self {
+        // burst 30, sustained 1 req/s per IP（agent 轮询 + 偶发批量足够）。
+        RateLimiter {
+            buckets: std::sync::Mutex::new(Default::default()),
+            burst: 30.0,
+            per_sec: 1.0,
+        }
+    }
+
+    fn take(&self, key: &str) -> bool {
+        let mut m = self.buckets.lock().unwrap();
+        let now = std::time::Instant::now();
+        let (tokens, last) = m.entry(key.to_string()).or_insert((self.burst, now));
+        let elapsed = now.duration_since(*last).as_secs_f64();
+        *tokens = (self.burst).min(*tokens + elapsed * self.per_sec);
+        *last = now;
+        if *tokens >= 1.0 {
+            *tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+async fn rate_limit(
+    State(state): State<Arc<App>>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let ip = req
+        .headers()
+        .get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .unwrap_or_else(|| "direct".into());
+    if !state.rate.take(&ip) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [("Retry-After", "3")],
+            Json(json!({ "ok": false, "message": "rate limited" })),
+        )
+            .into_response();
+    }
+    // 内存护栏：IP 桶数量封顶，防伪造头把表撑爆。
+    if state.rate.buckets.lock().unwrap().len() > 10_000 {
+        state.rate.buckets.lock().unwrap().clear();
+    }
+    next.run(req).await
+}
+
 async fn auth(
     State(state): State<Arc<App>>,
     req: axum::extract::Request,
@@ -462,6 +584,7 @@ async fn main() {
         token,
         sync: sync::SyncConfig::from_env(),
         tag_store,
+        rate: RateLimiter::new(),
     });
     if let Some(cfg) = &state.sync {
         println!(
@@ -475,10 +598,13 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/notes/_doc", get(usage_doc))
+        .route("/api/notes/_backfill", post(backfill_notes))
         .route("/api/notes/_meta", get(meta))
         .route("/api/notes", get(list_notes).post(save_note))
         .route("/api/notes/{id}", get(show_note).delete(delete_note))
         .route("/api/notes/tags", get(note_tags_counts))
+        .layer(DefaultBodyLimit::max(512 * 1024))
+        .layer(middleware::from_fn_with_state(state.clone(), rate_limit))
         .layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state);
 
