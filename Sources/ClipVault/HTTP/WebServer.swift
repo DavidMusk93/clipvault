@@ -2047,7 +2047,7 @@ class WebServer {
         [
             "ok": true,
             "api": "clipvault-notes",
-            "version": "p3a",
+            "version": "v1",
             "endpoints": [
                 "POST /api/notes": "create/update a note (body required; id to update; opId idempotent; merge=false strict CAS)",
                 "GET /api/v1/notes": "list notes (?q= fts, ?tag=, ?since= unix ts, ?limit= default 50 max 200)",
