@@ -11,7 +11,7 @@
  *                       the row expands in place, ostore carries live progress.
  *   4. 恢复            — restore points, newest first; diagnostics stay folded.
  *
- * Rules (docs/design-taste.md · 备份面板):
+ * Rules (docs/designs/design-taste.md · 备份面板):
  *   - colour is information: green ok, red failure, blue running; never decoration;
  *   - numbers always next to marks; no chart without the count it draws;
  *   - SSE drives repaints (`backup_status` → `paint(status)`); nothing polls the API.

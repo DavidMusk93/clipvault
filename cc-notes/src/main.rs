@@ -1,6 +1,6 @@
 //! clipvault-notes — cc 侧笔记/记忆层 facade（D1 骨架）。
 //!
-//! 设计：`docs/design-cc-memory-layer.md`。内嵌 notebase 引擎（Rust 原生，
+//! 设计：`docs/designs/design-cc-memory-layer.md`。内嵌 notebase 引擎（Rust 原生，
 //! 无 FFI 跨界），API 与 mac `/api/notes*` 同形状，鉴权 Bearer token。
 //! 写入 = notebase delta oplog（无整篇副本堆积）；幂等台账走 vault_meta
 //! `opid:<id>`（重启不丢）。trx 双向同步属 D2，不在本骨架。
@@ -23,9 +23,9 @@ use serde_json::{json, Value};
 
 use notebase_store::Vault;
 
-/// agent 参考文档自举：编译期嵌入仓库 docs/agent-usage.md，
+/// agent 参考文档自举：编译期嵌入仓库 docs/references/agent-api-v1.md，
 /// agent 从服务本身拉取（GET /api/notes/_doc），不必找仓库。
-const AGENT_USAGE_DOC: &str = include_str!("../../docs/agent-usage.md");
+const AGENT_USAGE_DOC: &str = include_str!("../../docs/references/agent-api-v1.md");
 
 struct App {
     vault: Mutex<Vault>,
@@ -130,7 +130,7 @@ async fn meta(State(_state): State<Arc<App>>) -> Json<Value> {
         "ok": true,
         "api": "clipvault-notes",
         "host": "cc",
-        "version": "d3",
+        "version": "v1",
         "docs": "/api/notes/_doc (agent usage, markdown)",
         "endpoints": {
             "POST /api/notes": "create/update a note (body required; id to update; opId idempotent)",

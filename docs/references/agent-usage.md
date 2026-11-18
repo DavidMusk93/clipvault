@@ -167,7 +167,7 @@ POST /api/notes/_backfill  { notes:[{id, body, createdAt, updatedAt}] }  ≤500/
 ## 文档自举
 
 `GET /api/notes/_doc` 直接返回本文件（markdown）—— agent 不需要访问仓库即可拿到用法。
-cc 与 mac 双向 trx 同步（≤4s），架构与实施状态见 `docs/design-cc-memory-layer.md`。
+cc 与 mac 双向 trx 同步（≤4s），架构与实施状态见 `docs/designs/design-cc-memory-layer.md`。
 
 ## 不变量（agent 必须遵守）
 

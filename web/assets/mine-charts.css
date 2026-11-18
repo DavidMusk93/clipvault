@@ -1,7 +1,7 @@
 /* ClipVault · chart skin (web/assets/mine-charts.mjs)
  *
  * The canonical look for the pure chart builders that both the session analysis
- * sheet and the operations drawer render. Rules live in docs/design-taste.md ·
+ * sheet and the operations drawer render. Rules live in docs/designs/design-taste.md ·
  * 「图表选型」: adjacent ratio segments keep a real gap + hairline stroke, one unit
  * per chart, bars are square-ended, and every colour block carries its number.
  *

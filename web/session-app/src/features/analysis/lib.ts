@@ -3,7 +3,7 @@ import { parseHookTs } from "@render";
 import type { Mine } from "../../api/mine";
 
 /**
- * Analysis presentation helpers. Taste (docs/design-taste.md 「分析」):
+ * Analysis presentation helpers. Taste (docs/designs/design-taste.md 「分析」):
  * colour is an information channel that always carries its number; the
  * structure is ① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 → ④ 账本.
  */
@@ -227,7 +227,7 @@ const LOSS_RAMP = [1, 0.72, 0.52, 0.36, 0.24];
 
 /**
  * Losses that share one axis. `idle` is a wall-clock gap between events, not
- * tool time (docs/session-analysis.md L1g), so it never joins the composition
+ * tool time (docs/references/session-analysis.md L1g), so it never joins the composition
  * or the shared bar scale — in a 7-day window it would be 99% of the bar.
  */
 export function lossParts(data: Mine | null | undefined): {

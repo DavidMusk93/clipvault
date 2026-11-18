@@ -13,7 +13,7 @@ const entry = readFileSync(join(root, 'web/assets/notes-editor/entry.js'), 'utf8
 const css = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.css'), 'utf8');
 const vendor = readFileSync(join(root, 'scripts/vendor-notes-editor.sh'), 'utf8');
 const js = readFileSync(join(root, 'web/assets/notes-editor/notes-editor.js'), 'utf8');
-const taste = readFileSync(join(root, 'docs/design-taste.md'), 'utf8');
+const taste = readFileSync(join(root, 'docs/designs/design-taste.md'), 'utf8');
 
 test('one matcher: case, whole word, tokens, literal metacharacters', () => {
   const text = 'Foo foo FOO foobar';

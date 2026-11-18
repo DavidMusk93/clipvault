@@ -138,5 +138,5 @@ GET /api/archive/view?id=<uuid>&embed=1
 5. 敏感域名走确认  
 6. 站点快路径必须对照作者介质清单（X：`media_entities` / atomic / MARKDOWN / DIVIDER / LINK）。对不上要占位 + `meta.coverage.warnings`，禁止静默省略。`cv-x-article` 不等于完整。`DIVIDER` 画 `<hr>`；正文 URL / `@` 画 `<a>`，不是纯文本。
 
-渲染层（Draft.js entity、View 运行时、站点特例、改渲染器清单）真源：[`archive-render.md`](archive-render.md)。
+渲染层（Draft.js entity、View 运行时、站点特例、改渲染器清单）真源：[`archive-render.md`](../references/archive-render.md)。
 

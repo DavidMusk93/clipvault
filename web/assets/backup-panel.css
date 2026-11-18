@@ -1,4 +1,4 @@
-/* Backup drawer — docs/design-taste.md · 备份面板.
+/* Backup drawer — docs/designs/design-taste.md · 备份面板.
    Grouped #F5F5F7 floor, white 14px cards, 8pt grid, one semantic colour per state:
    green ok · blue running · orange needs attention · red failed · grey off.
    Data marks have straight corners; legends are HTML with numbers. */

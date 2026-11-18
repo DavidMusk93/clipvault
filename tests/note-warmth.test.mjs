@@ -70,7 +70,7 @@ test('note surfaces stay pale while hue families, chroma and the spine separate 
   assert.equal(new Set(papers).size, 16);
   const spines = [...html.matchAll(/--edit-spine: (#[0-9A-F]{6});/g)].map(m => m[1]);
   assert.equal(new Set(spines).size, 4, 'one full-strength spine per hue family');
-  const taste = readFileSync(join(root, 'docs/design-taste.md'), 'utf8');
+  const taste = readFileSync(join(root, 'docs/designs/design-taste.md'), 'utf8');
   let previous = Infinity;
   const chroma = papers.map(paper => {
     const rgb = paper.slice(1).match(/../g).map(v => parseInt(v, 16));

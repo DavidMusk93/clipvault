@@ -14,7 +14,7 @@ const server = readFileSync(join(root, 'trae_hooks/server.py'), 'utf8');
 const mine = readFileSync(join(root, 'trae_hooks/mine.py'), 'utf8');
 const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
-const designPath = join(root, 'docs/session-analysis.md');
+const designPath = join(root, 'docs/references/session-analysis.md');
 
 test('this file and session_mine_main.py are in the deploy gate', () => {
   assert.match(check, /session-mine\.test\.mjs/);
@@ -28,7 +28,7 @@ test('AGENTS.md treats sessions as an asset that must be mined', () => {
 });
 
 test('the analysis contract is a tracked design doc', () => {
-  assert.ok(existsSync(designPath), 'docs/session-analysis.md must exist');
+  assert.ok(existsSync(designPath), 'docs/references/session-analysis.md must exist');
   const doc = readFileSync(designPath, 'utf8');
   assert.match(doc, /doc_id: clipvault-session-analysis-v2/);
   assert.match(doc, /kind: design/);

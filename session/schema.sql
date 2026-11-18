@@ -1,7 +1,7 @@
 -- ClipVault session store (PostgreSQL 18).
 --
 -- Replaces the embedded DuckDB file. One corpus lives on the primary backend
--- (d2); a logical-CDC replica lives on cc. See docs/design-session-backends.md.
+-- (d2); a logical-CDC replica lives on cc. See docs/designs/design-session-backends.md.
 --
 -- Timestamps are timestamptz. Writers set TimeZone=UTC on the session and store
 -- naive-UTC values; readers normalise back to naive-UTC on the wire (INV-5).

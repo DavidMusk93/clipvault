@@ -2,7 +2,7 @@
 //!
 //! One PostgreSQL corpus, exposed as Session API v1 (SA-v1) by a facade
 //! (`clipvault-session`) and fed by a fail-open collector (`clipvault-hook`).
-//! See `docs/design-session-backends.md`.
+//! See `docs/designs/design-session-backends.md`.
 
 pub mod config;
 pub mod db;

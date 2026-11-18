@@ -8,7 +8,7 @@
 //!   rows        mine_rows (per-event extraction into counters + turns)
 //!   run         SQL fetch + `mine()` orchestration + `ack_finding`
 //!
-//! Contract: `docs/session-analysis.md`.
+//! Contract: `docs/references/session-analysis.md`.
 
 use std::collections::HashMap;
 

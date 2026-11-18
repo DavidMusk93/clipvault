@@ -45,7 +45,7 @@
       --warn-soft: rgba(178, 80, 0, 0.12);
       --danger: #d70015;
       --danger-soft: rgba(215, 0, 21, 0.12);
-      /* Type badge palette — shared with Android typeStyle() · docs/design-taste.md */
+      /* Type badge palette — shared with Android typeStyle() · docs/designs/design-taste.md */
       --type-text: #C47A2C;
       --type-note: #C47A2C;
       --type-image: #2E7D32;
@@ -304,7 +304,7 @@
     .badge-count .material-symbols-outlined { font-size: 13px; }
     /* —— Operation logs: budgeted reading, not a card census ——
        Charts use the shared skin (web/assets/mine-charts.css, loaded lazily with
-       the panel). One colour per source comes from docs/design-taste.md · 操作日志来源色. */
+       the panel). One colour per source comes from docs/designs/design-taste.md · 操作日志来源色. */
     .ops-windows { display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--fill); }
     .ops-window {
       height: 24px; padding: 0 10px; border: 0; border-radius: 7px;
@@ -8309,7 +8309,7 @@ window.ClipViewMasonry = Masonry;
     }
 
 
-    /** Clipboard type → label/icon/class. Shared palette: docs/design-taste.md + Android typeStyle(). */
+    /** Clipboard type → label/icon/class. Shared palette: docs/designs/design-taste.md + Android typeStyle(). */
     function typeMeta(type) {
       const t = String(type || 'other').toLowerCase();
       const map = {

@@ -151,7 +151,7 @@ test('web link UI: popover, same-slot button, no wall reset', () => {
   const end = html.indexOf('async function applyAppHash', j);
   const jump = html.slice(j, end > j ? end : j + 2000);
   assert.doesNotMatch(jump, /fetchPage\(\{\s*reset:\s*true/);
-  const taste = readFileSync(join(root, 'docs/design-taste.md'), 'utf8');
+  const taste = readFileSync(join(root, 'docs/designs/design-taste.md'), 'utf8');
   assert.match(taste, /关联入口/);
   assert.match(taste, /落地信标/);
   assert.match(html, /function flashCard/);

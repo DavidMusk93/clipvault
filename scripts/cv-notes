@@ -48,27 +48,40 @@ def load_token(explicit: str) -> str:
     sys.exit("no agent token: --token / $CLIPVAULT_AGENT_TOKEN / config/agent-token")
 
 
+API_PREFIX = "/api/v1/notes"
+LEGACY_PREFIX = "/api/notes"
+
+
 def request(base: str, token: str, method: str, path: str, payload=None) -> dict:
+    """v1 优先：/api/v1/notes 404（部署无 v1）时自动回退 legacy /api/notes。"""
     data = None
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": "cv-notes/1.0"}
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(base.rstrip("/") + path, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            body = resp.read().decode("utf-8", "replace")
-            try:
-                return json.loads(body) if body else {}
-            except json.JSONDecodeError:
-                return {"raw": body}
-    except urllib.error.HTTPError as e:
+    assert path.startswith(LEGACY_PREFIX)
+    suffix = path[len(LEGACY_PREFIX):]
+    for prefix in (API_PREFIX, LEGACY_PREFIX):
+        req = urllib.request.Request(
+            base.rstrip("/") + prefix + suffix, data=data, headers=headers, method=method
+        )
         try:
-            out = json.loads(e.read().decode("utf-8", "replace"))
-        except Exception:
-            out = {"message": e.reason}
-        out["_http"] = e.code
-        return out
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = resp.read().decode("utf-8", "replace")
+                try:
+                    return json.loads(body) if body else {}
+                except json.JSONDecodeError:
+                    return {"raw": body}
+        except urllib.error.HTTPError as e:
+            try:
+                out = json.loads(e.read().decode("utf-8", "replace"))
+            except Exception:
+                out = {"message": e.reason}
+            out["_http"] = e.code
+            if e.code == 404 and prefix == API_PREFIX:
+                continue  # 旧部署无 v1 → legacy 重试
+            return out
+    return {"_http": 404, "message": "not found"}
 
 
 def emit(obj) -> None:

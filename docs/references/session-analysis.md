@@ -8,8 +8,8 @@ applies_to:
   - trae_hooks/server.py
   - trae_hooks/web/sessions.html
 depends_on:
-  - docs/trae-hooks.md
-  - docs/design-taste.md
+  - docs/references/trae-hooks.md
+  - docs/designs/design-taste.md
   - AGENTS.md
 supersedes:
   - ad-hoc-analysis-sheet-v1

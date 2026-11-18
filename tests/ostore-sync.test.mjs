@@ -14,7 +14,7 @@ import { src, root } from './helpers/src.mjs';
 const wire = src('OstoreSyncWire.swift');
 const sync = src('CloudDocsSyncService.swift');
 const web = src('WebServer.swift');
-const doc = readFileSync(join(root, 'docs/ostore-sync.md'), 'utf8');
+const doc = readFileSync(join(root, 'docs/references/ostore-sync.md'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
 
 function slice(text, needle, maxLen = 4000) {
@@ -174,7 +174,7 @@ test('lag and delivery are observable without reading note bodies', () => {
   assert.match(sync, /payload: \["n": pulled\.n, "reason": reason, "wire": "ostore"\]/);
   assert.match(sync, /payload: \["kind": kind, "n": stat\.ok, "wire": "ostore"\]/);
   for (const name of ['sync_push', 'sync_pull', 'sync_apply', 'sync_blob_wait', 'sync_queue_depth', 'sync_peer_lag']) {
-    assert.ok(doc.includes(name), `docs/ostore-sync.md missing metric ${name}`);
+    assert.ok(doc.includes(name), `docs/references/ostore-sync.md missing metric ${name}`);
   }
 });
 

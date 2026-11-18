@@ -5,7 +5,7 @@
  * pixels but the reading:
  *
  *   1. chart shape must follow the data — no duration samples means an explicit
- *      boundary, not an axis pretending there is nothing to see (docs/design-taste.md
+ *      boundary, not an axis pretending there is nothing to see (docs/designs/design-taste.md
  *      · 图表选型);
  *   2. aggregate JSON keys must stay in step with `OpsAnalytics.json` (the panel and
  *      the Swift aggregate are edited in different languages);

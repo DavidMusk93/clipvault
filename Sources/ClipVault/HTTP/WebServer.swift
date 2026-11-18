@@ -259,11 +259,18 @@ class WebServer {
 
     private func handleRequest(_ req: OriginWire.Request, connection: HTTPByteSink) {
         let method = req.method
-        let path = Self.stripPublicPrefix(req.path)
+        var path = Self.stripPublicPrefix(req.path)
         let headers = req.headers
         let data = req.body
-        let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
         let loopback = Self.isLoopbackRequest(headers)
+
+        // Agent API 版本化：/api/v1/notes* → 内部同一路由族（未来 v2 并存）。
+        // legacy /api/notes* 保持兼容别名。
+        var pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
+        if pathOnly.hasPrefix("/api/v1/notes") {
+            path = "/api/notes" + path.dropFirst("/api/v1/notes".count)
+            pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
+        }
 
         if pathOnly == "/login/setup" {
             if !loopback {

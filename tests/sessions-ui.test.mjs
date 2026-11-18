@@ -89,7 +89,7 @@ test('list cards label the agent source so pi/trae/grok/codex differ', () => {
   assert.match(html, /data-src="pi"/);
   assert.match(html, /data-src="grok"/);
   assert.match(html, /data-src="codex"/);
-  const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
+  const taste = fs.readFileSync(path.join(__dirname, '../docs/designs/design-taste.md'), 'utf8');
   assert.match(taste, /agent 来源/);
   assert.match(taste, /sourceLabel/);
   const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
@@ -154,7 +154,7 @@ test('session list pins locally and paints recency/volume in soft color', () => 
   const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
   const schema = fs.readFileSync(path.join(__dirname, '../trae_hooks/schema.sql'), 'utf8');
   const swift = src('WebServer.swift');
-  const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
+  const taste = fs.readFileSync(path.join(__dirname, '../docs/designs/design-taste.md'), 'utf8');
   const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
   assert.match(schema, /CREATE TABLE IF NOT EXISTS session_pins/);
   assert.match(server, /path == \"\/api\/sessions\/pin\"/);
@@ -216,7 +216,7 @@ test('user turns stay open; agent tools compress on the left', () => {
 
 test('AGENTS.md 墙 encodes UI incremental + lazy', () => {
   const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
-  const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
+  const taste = fs.readFileSync(path.join(__dirname, '../docs/designs/design-taste.md'), 'utf8');
   const wall = agents.split('## 墙')[1]?.split('## 笔记')[0] ?? '';
   assert.ok(wall.length > 0, 'missing ## 墙 … ## 笔记');
   assert.match(wall, /UI 增量 \+ lazy/);
@@ -325,7 +325,7 @@ test('unchanged poll must not pinBottom; jitter is traced via ui-metrics', () =>
 
 test('session load coalesces hooks and omits bulky tool payloads from the list', () => {
   const server = fs.readFileSync(path.join(__dirname, '../trae_hooks/server.py'), 'utf8');
-  const taste = fs.readFileSync(path.join(__dirname, '../docs/design-taste.md'), 'utf8');
+  const taste = fs.readFileSync(path.join(__dirname, '../docs/designs/design-taste.md'), 'utf8');
   const agents = fs.readFileSync(path.join(__dirname, '../AGENTS.md'), 'utf8');
   assert.match(server, /view != \"beats\"/);
   assert.match(server, /list_cols =/);

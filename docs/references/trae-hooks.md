@@ -2,8 +2,8 @@
 
 > **Partially superseded (draft).** The storage/collection shape below (Mac is the
 > only writer, Quack `:9494`, reverse tunnels `19494` / `19495`) is replaced at
-> cutover by `docs/design-session-backends.md` and
-> `docs/design-session-store-postgres-hub.md`: one PostgreSQL 18 corpus on d2, the
+> cutover by `docs/designs/design-session-backends.md` and
+> `docs/designs/design-session-store-postgres-hub.md`: one PostgreSQL 18 corpus on d2, the
 > facade on d2, a logical-CDC replica on cc, and Macs as **backend clients**
 > (fan-in) + `ssh -L 55432` collectors. Keep
 > this file for the hook protocol and the metrics plane until Phase 4.
@@ -142,7 +142,7 @@ sg_d    quack:127.0.0.1:19495   ssh -R → Mac :9494   隧道 clipvault-quack-sg
 
 面板方向 `agent.metrics`（`/api/mine`）：总览 / 按模型 / 上下文构成 / 每天成本曲线 / Skill 上下文成本。
 
-**会话分析的完整契约（四层模型、损耗账本口径、Agent 接口）在 `docs/session-analysis.md`。**
+**会话分析的完整契约（四层模型、损耗账本口径、Agent 接口）在 `docs/references/session-analysis.md`。**
 Agent 侧不要手拼 HTTP，直接用：
 
 ```bash

@@ -77,11 +77,11 @@
 | 不是 | 企业协同剪贴板、Notion 替代、又一个 `ClipXxx` 工具箱 |
 | 对外品牌 | 文案 / README / 窗口标题 / UI 字符串 / 仓库 / 二进制 → **ClipVault** |
 | 磁盘兼容 | 本机库仍可读 `CLIPVAULT_HOME`/`KEEPSAKE_HOME`；db 文件名 `clipflow.db`；CloudDocs 目录旧名 `ClipFlow/` 继续识别 |
-| 视觉真源 | [`docs/design-taste.md`](docs/design-taste.md)（改色先改它，再 Web + Android） |
+| 视觉真源 | [`docs/designs/design-taste.md`](docs/designs/design-taste.md)（改色先改它，再 Web + Android） |
 
 否决回潮：`Keepsake` 当现行品牌、`ClipView`/`ClipFlow` 当对外品牌、`XxxView` 组件腔。
 
-品味落点：可执行 token → `docs/design-taste.md`；跨会话裁决 → nmem。禁止只改一处颜色却不回写真源。
+品味落点：可执行 token → `docs/designs/design-taste.md`；跨会话裁决 → nmem。禁止只改一处颜色却不回写真源。
 
 ---
 
@@ -268,7 +268,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 删除：软删除进 30 天回收箱 + 撤销；**只有左拖拽**露出 trailing「删除」（手指与鼠标同一条路径，hover 不露出），拖得再远也不自动删、必须点「删除」；打开中的笔记删除后切到下一条；对端删除不得触发保存把笔记写回。禁止硬删、禁止只做无撤销的删除、禁止让回收箱看不见笔记。
 
-**Agent 写入（P0 起）**：`/api/notes*` 是 agent 专用端点族，与用户 UI 同一条 `saveComposeNote()` 管线，归因 `source="agent:<name>"`；开关 `CLIPVAULT_AGENT_API=1` 关闭时这些端点不存在。用法与契约：`docs/agent-usage.md`。禁止 agent 第二写入器。
+**Agent 写入（P0 起）**：`/api/notes*` 是 agent 专用端点族，与用户 UI 同一条 `saveComposeNote()` 管线，归因 `source="agent:<name>"`；开关 `CLIPVAULT_AGENT_API=1` 关闭时这些端点不存在。用法与契约：`docs/references/agent-api-v1.md`。禁止 agent 第二写入器。
 
 禁止：Vditor / Crepe WYSIWYG；textarea 玩具编辑器；另开文档页；笔记另搞 `note_pin` trx。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`。列表失败禁止开空白新笔记。
 
@@ -294,7 +294,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
   置顶  DuckDB session_pins + POST /api/sessions/pin   不进墙 pin rail
 ```
 
-采集是 **Mac 一份 DuckDB + 多机 Quack 写入**，不是 clip 的 trx 同步。远端只装 hook/spool/quack client，禁止每机再起 `server.py`。部署：`docs/trae-hooks.md`。
+采集是 **Mac 一份 DuckDB + 多机 Quack 写入**，不是 clip 的 trx 同步。远端只装 hook/spool/quack client，禁止每机再起 `server.py`。部署：`docs/references/trae-hooks.md`。
 
 **hook 禁止每次拉 `/api/sessions`+全量 events。** 工具 **索引必须完整**；bundle 正文 **lazy** 加载。历史回合不得只剩 `Stop.last_assistant_message`。回归：`tests/session-thread.test.mjs`。
 
@@ -302,7 +302,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 列卡必须标最后一条 `localDateTime`（`YYYY-MM-DD HH:mm:ss`）、实例 `instance_id`、agent 来源 `source`（`trae`/`pi`/`grok`/`codex`，来源色点 + 标签）、工作目录 `cwd`。禁止只用「刚刚」当会话时刻。
 
-**会话是资产。** 只拉正文没有价值，分析必须是**可归因的损耗账本 + Agent 可复测的闭环**（契约：`docs/session-analysis.md`）。分析走 `GET /api/mine`（当前会话 / 最近 7 天；方向可多选：工作目录、Git 库、Taste、任务描述、用户提醒、操作流程、文件、工具、失败/重试、热点/冗余、MCP、阶段、成本/缓存/上下文），四层输出：L0 账本（回合/工具/文件/阶段/成本，事实）→ L1 归因（失败重试、重复读、空等轮询、前缀重填、返工往返、缺定位搜索、空档、skill 上下文成本；秒数**互斥**，按优先级 fail > retry > reread > locate 归账，账本可相加）→ L2 结论（每条必带 impact(秒/$) + cause + action + gate + metric(now/target) + 证据 `refs`(回合/事件 id)，按 $/秒 排序）→ L3 闭环（`format=agent` 返回 `brief` + 稳定 `metric.id` + `verify.rerun`，对**上一个同长度窗口**出 Δ）。**禁止关键词→断言**（「反复提醒 ×N」「prompt 缺路径」这类必须删）：一条结论删掉标题后读者无法自己算出亏了多少，就不该存在。**也要挖用户输入**：提醒/纠正主题要变成 AGENTS 闸门，而不是每次口头重申；操作流程算**额外往返**（短催 + 纠正 + 催促），长任务要求「阶段结论再停」。Agent 侧入口：`python3 trae_hooks/mine.py --agent [--scope session --session-id <id>]`（读 `brief` 后改行为，下次同窗口重跑看 metric 是否向 target 移动）；Agent 可用 `POST /api/mine/ack` 声明「已应用/忽略」（finding_id + status + metric），下一窗口分析回读 `loop` 与 `## 闭环核对`（`fail_n 9 -> 11（目标 0）=> 未改善`），无 target 不判闭环。打开后随 SSE `hook_event` 去抖重算（禁止 `setInterval`）。右下角「分析」在「调试」上方，打开后是铺满会话区的 sheet，禁止 420px 浮层截断路径；`?mine=1` 深链直接打开分析。**sheet 打开时给父页 `clipvault-sessions-overlay`，父页加 `is-overlay` 隐藏面板关闭钮**，避免会话关闭钮与面板关闭钮重合。禁止把分析做成 metrics 再版，禁止把 tool 正文灌进分析 JSON。回归：`tests/session-mine.test.mjs` + `tests/session_mine_main.py`。
+**会话是资产。** 只拉正文没有价值，分析必须是**可归因的损耗账本 + Agent 可复测的闭环**（契约：`docs/references/session-analysis.md`）。分析走 `GET /api/mine`（当前会话 / 最近 7 天；方向可多选：工作目录、Git 库、Taste、任务描述、用户提醒、操作流程、文件、工具、失败/重试、热点/冗余、MCP、阶段、成本/缓存/上下文），四层输出：L0 账本（回合/工具/文件/阶段/成本，事实）→ L1 归因（失败重试、重复读、空等轮询、前缀重填、返工往返、缺定位搜索、空档、skill 上下文成本；秒数**互斥**，按优先级 fail > retry > reread > locate 归账，账本可相加）→ L2 结论（每条必带 impact(秒/$) + cause + action + gate + metric(now/target) + 证据 `refs`(回合/事件 id)，按 $/秒 排序）→ L3 闭环（`format=agent` 返回 `brief` + 稳定 `metric.id` + `verify.rerun`，对**上一个同长度窗口**出 Δ）。**禁止关键词→断言**（「反复提醒 ×N」「prompt 缺路径」这类必须删）：一条结论删掉标题后读者无法自己算出亏了多少，就不该存在。**也要挖用户输入**：提醒/纠正主题要变成 AGENTS 闸门，而不是每次口头重申；操作流程算**额外往返**（短催 + 纠正 + 催促），长任务要求「阶段结论再停」。Agent 侧入口：`python3 trae_hooks/mine.py --agent [--scope session --session-id <id>]`（读 `brief` 后改行为，下次同窗口重跑看 metric 是否向 target 移动）；Agent 可用 `POST /api/mine/ack` 声明「已应用/忽略」（finding_id + status + metric），下一窗口分析回读 `loop` 与 `## 闭环核对`（`fail_n 9 -> 11（目标 0）=> 未改善`），无 target 不判闭环。打开后随 SSE `hook_event` 去抖重算（禁止 `setInterval`）。右下角「分析」在「调试」上方，打开后是铺满会话区的 sheet，禁止 420px 浮层截断路径；`?mine=1` 深链直接打开分析。**sheet 打开时给父页 `clipvault-sessions-overlay`，父页加 `is-overlay` 隐藏面板关闭钮**，避免会话关闭钮与面板关闭钮重合。禁止把分析做成 metrics 再版，禁止把 tool 正文灌进分析 JSON。回归：`tests/session-mine.test.mjs` + `tests/session_mine_main.py`。
 
 禁止：`setInterval` 刷 DOM；每次 hook 整页 `innerHTML`；overlay 盖住后续气泡；embed 窄宽叠成 30vh；用最新 200 条工具当整段历史。
 
@@ -332,7 +332,7 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 `/api/archive/asset`。阅读态（划线/评论/续读）进 SQLite，不进 capture HTML，不进 IndexedDB。
 
-抽取：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」。X Article atomic：`MEDIA`/`IMAGE` → 图；`MARKDOWN` → 代码，无围栏的管道表 → `div.cv-table`；`DIVIDER` → `<hr>`；`LINK` → `<a>`；其余 `.cv-x-dropped`。inline LINK / `data.urls` / mention 也画 `<a>`（仅 http(s)）。有 `article.title` 时正文 `header-*` 下移一级。`entityMap` 按 `key` 查，禁止当下标。禁止只凭 `cv-x-article` 当成功。X **长帖/Note** 不是 Article：vxtwitter 全文按空行切 `<p>`/`<h2>`，禁止 Readability 单 `<span>` 一坨字。渲染手册：`docs/archive-render.md`。
+抽取：Readability 前把孤儿 `img`+`figcaption` 包进 `<figure>`；保留「每条 li 有文案+图」。X Article atomic：`MEDIA`/`IMAGE` → 图；`MARKDOWN` → 代码，无围栏的管道表 → `div.cv-table`；`DIVIDER` → `<hr>`；`LINK` → `<a>`；其余 `.cv-x-dropped`。inline LINK / `data.urls` / mention 也画 `<a>`（仅 http(s)）。有 `article.title` 时正文 `header-*` 下移一级。`entityMap` 按 `key` 查，禁止当下标。禁止只凭 `cv-x-article` 当成功。X **长帖/Note** 不是 Article：vxtwitter 全文按空行切 `<p>`/`<h2>`，禁止 Readability 单 `<span>` 一坨字。渲染手册：`docs/references/archive-render.md`。
 
 选区条：28px 浅玻璃；黄点=划线；已有划线弹出「评论 | 删除」；**删除不进评论卡**。划线定位：quote 是选区在正文索引里的原文切片（含换行；`<br>` 占一个换行），prefix/suffix 是这个切片两侧的原文。元素边界的选区也要落到同一套偏移。旧行里被折过空白的 quote 只在回放时按字符对齐。对不上就不上色。禁止为了划线改 CAS。
 
@@ -374,7 +374,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   墙            ORDER BY timestamp DESC, id DESC
 ```
 
-策略真源：`WallClockPolicy.swift`。ostore wire 设计与排查：`docs/ostore-sync.md`（凭据 `config/ostore-backup.json` 0600；`GET /api/sync/status` 的 `ostoreConnected` 决定是事件驱动还是 2s 轮询兜底）。回归：`tests/daily-capture.test.mjs`（按日哈希匹配、跨日保留、去重边界与同步计数）+ `tests/wall_clock_main.swift`（午夜/DST、策略 + 440 团块 keyset 必须翻到更早 text；类型 chip 走同一 keyset，禁止只滤第 1 页）+ `tests/ostore-sync.test.mjs`（附件先于 trx、一次 list 做发现、事件只触发 cycle、游标按 host、备份切片绝不当总线）。
+策略真源：`WallClockPolicy.swift`。ostore wire 设计与排查：`docs/references/ostore-sync.md`（凭据 `config/ostore-backup.json` 0600；`GET /api/sync/status` 的 `ostoreConnected` 决定是事件驱动还是 2s 轮询兜底）。回归：`tests/daily-capture.test.mjs`（按日哈希匹配、跨日保留、去重边界与同步计数）+ `tests/wall_clock_main.swift`（午夜/DST、策略 + 440 团块 keyset 必须翻到更早 text；类型 chip 走同一 keyset，禁止只滤第 1 页）+ `tests/ostore-sync.test.mjs`（附件先于 trx、一次 list 做发现、事件只触发 cycle、游标按 host、备份切片绝不当总线）。
 
 禁止：共享 CAS 当协议；备份切片当同步总线；OCR 只写本机 SQLite；OCR/hydrate 拨捕获钟；把 440 张图合成一张卡；`readBlobFile` 用 `count == 64` 丢掉 `{sha}.rtf`/`{sha}.pdf`；给同步再加第三条私有日志（只有 `trx/` 一份真源）；在 ostore 事件里做业务判断；拿 `list.sha256` 当对象校验（cc ostore 该字段历史上装的是 MD5）。
 
@@ -399,7 +399,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 墙图 `/api/image?id=` 与归档资产同一套回源：`hydrateBlob`（live/attach ∪ backup CAS）。禁止 SQLite 有 type=image 却对墙 404。`blobs/` 禁止指到 `Documents/` 的 symlink（LaunchAgent TCC 读不到历史 CAS；列目录失败不得报 `blobs=0` 成功）。
 
-事故：`docs/incident-20260813` 叙事已迁出；nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813`。
+事故：`docs/reports/2026-08-13-incident` 叙事已迁出；nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813`。
 
 ---
 
@@ -563,7 +563,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
   两边都空 → 再查备份 snapshots
 ```
 
-完整复盘：`docs/incident-20260811-wrong-data-home.md`。
+完整复盘：`docs/reports/2026-08-11-wrong-data-home.md`。
 
 ### 唯一重启路径
 
@@ -616,24 +616,24 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 
 | 主题 | 去哪 |
 | --- | --- |
-| 视觉 token | `docs/design-taste.md` |
+| 视觉 token | `docs/designs/design-taste.md` |
 | 归档闭包 | nmem `clipvault_archive_closure_sync_20260817` |
-| ostore 实时同步（wire/凭据/时延预算） | `docs/ostore-sync.md`；`tests/ostore-sync.test.mjs` |
+| ostore 实时同步（wire/凭据/时延预算） | `docs/references/ostore-sync.md`；`tests/ostore-sync.test.mjs` |
 | 分层哲学 | nmem `clipvault_design_philosophy_layered_memory_20260814` |
 | 阅读态 SQLite | nmem `clipvault_reader_learning_layer_sqlite_20260814` |
 | Compose | nmem `c2c20497-bc52-4204-99fc-34191bb98a99` |
 | 评论 header | nmem `clipvault_reader_comment_header_strut_20260814` |
-| 错 home | `docs/incident-20260811-wrong-data-home.md` |
+| 错 home | `docs/reports/2026-08-11-wrong-data-home.md` |
 | 墙记忆丢失（拨钟/砍尾/滤错/图404/塌列/折头/不动） | 本文硬约束 4–5；`tests/wall-integrity.test.mjs` + `tests/wall-live-update.test.mjs` |
 | GDrive EDEADLK | nmem `clipvault_fix_gdrive_edeadlk_cvbak_20260813` |
 | 操作日志读数 | 本文 · 操作日志（审计）；`tests/oplog_analytics_main.swift` + `tests/oplog-panel.test.mjs` |
 | URL/HTML 安全 | nmem `clipvault_gate_url_html_safety_20260813` |
 | SQLite 运维 | `.trae/skills/sqlite-runtime-tricks/` |
-| clip-link | `docs/feature-clip-link.md` |
-| 归档功能 | `docs/feature-url-archive.md` |
-| 归档渲染 | `docs/archive-render.md` |
-| Agent 笔记 API（开关/token/归因） | `docs/agent-usage.md`；`Sources/ClipVault/HTTP/AgentNotesAccess.swift` |
-| cc 记忆层（部署设计 + cc-notes 骨架） | `docs/design-cc-memory-layer.md`；`cc-notes/`（Rust + notebase） |
-| Trae 会话采集 | `docs/trae-hooks.md` |
+| clip-link | `docs/designs/feature-clip-link.md` |
+| 归档功能 | `docs/designs/feature-url-archive.md` |
+| 归档渲染 | `docs/references/archive-render.md` |
+| Agent 笔记 API（开关/token/归因） | `docs/references/agent-api-v1.md`；`Sources/ClipVault/HTTP/AgentNotesAccess.swift` |
+| cc 记忆层（部署设计 + cc-notes 骨架） | `docs/designs/design-cc-memory-layer.md`；`cc-notes/`（Rust + notebase） |
+| Trae 会话采集 | `docs/references/trae-hooks.md` |
 
 一句话：**ClipVault = 个人剪贴板记忆。** 终局、像产品、本机优先。历史文件夹名不定义品牌。

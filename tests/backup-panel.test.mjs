@@ -24,7 +24,7 @@ import {
 const html = readFileSync(join(root, 'web/index.html'), 'utf8');
 const css = readFileSync(join(root, 'web/assets/backup-panel.css'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
-const taste = readFileSync(join(root, 'docs/design-taste.md'), 'utf8');
+const taste = readFileSync(join(root, 'docs/designs/design-taste.md'), 'utf8');
 
 let JSDOM = null;
 try { ({ JSDOM } = await import('jsdom')); } catch { JSDOM = null; }

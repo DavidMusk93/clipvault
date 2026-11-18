@@ -11,7 +11,7 @@ const auth = src('ComposeNotes.swift');
 const db = src('DatabaseManager.swift');
 const web = src('WebServer.swift');
 const sync = src('CloudDocsSyncService.swift');
-const taste = readFileSync(join(root, 'docs/design-taste.md'), 'utf8');
+const taste = readFileSync(join(root, 'docs/designs/design-taste.md'), 'utf8');
 
 test('compose is a note type, not an edit of capture', () => {
   assert.match(auth, /ClipboardType\.note|type=note|case note/);

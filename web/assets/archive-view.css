@@ -1,6 +1,6 @@
 /* ClipVault archive View — technical reading surface.
    View-time only. Does not mutate CAS / archive HTML.
-   Tokens: docs/design-taste.md */
+   Tokens: docs/designs/design-taste.md */
 
 @font-face {
   font-family: "JetBrains Mono";

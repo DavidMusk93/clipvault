@@ -2,13 +2,13 @@
 
 | 项 | 值 |
 | --- | --- |
-| 文档 | `docs/feature-clip-link.md` |
+| 文档 | `docs/designs/feature-clip-link.md` |
 | 作者 | @DavidMusk93 / Grok Build |
 | 日期 | 2026-08-28 |
 | 状态 | Draft（评审修订） |
 | 产品 | ClipVault（仓库历史名 ClipView / ClipFlowServer） |
 | 仓库 | 本机工作副本 |
-| 对照 | `docs/feature-url-archive.md` · `docs/design-taste.md` · `AGENTS.md` |
+| 对照 | `docs/designs/feature-url-archive.md` · `docs/designs/design-taste.md` · `AGENTS.md` |
 
 ---
 
@@ -46,7 +46,7 @@ UI 不进图、不上 Notion 式 backlinks 栏：一颗与评价同槽的 32×32
 
 因此 **同一 UUID 上可以留下「赢家」的旧 `content_hash`，而后来那份不同字节的 payload 从未成为该行的 hash**。`findIdByContentHash(失败者的 hash)` 返回 nil，即使用户眼里「还是那段字」。这是 RTF/HTML 包装变化的已知行为，不是 bug 要在关联里修。
 
-关联与深链的产品规则与 `docs/design-taste.md` 一致：**主规则仅 exact `content_hash` latest-alive**。hash miss → 「库里没有这份内容」。`text_hash` 只用于捕获去重，不当 locator、不进 `pair_key`、不进 `#h=`。
+关联与深链的产品规则与 `docs/designs/design-taste.md` 一致：**主规则仅 exact `content_hash` latest-alive**。hash miss → 「库里没有这份内容」。`text_hash` 只用于捕获去重，不当 locator、不进 `pair_key`、不进 `#h=`。
 
 残留重复行由 `dedupeStaleBatch` 删掉（置顶 / 归档 / `reader_ops` 保护；本功能再保护 `clip_links` / `clip_link_ops`）。片段折叠（substr-fold）已回滚。
 
@@ -389,7 +389,7 @@ history.replaceState(null, '', '#h=' + item.contentHash)   # 笔记用 #id=
 
 ### UI（taste）
 
-对照 `docs/design-taste.md`：列表轻、无 hover `translateY`、同槽同尺寸、中文。
+对照 `docs/designs/design-taste.md`：列表轻、无 hover `translateY`、同槽同尺寸、中文。
 
 **入口（K6）**
 
@@ -948,8 +948,8 @@ swift build --product ClipFlowServer
 | 文档 / 符号 | 用途 |
 | --- | --- |
 | `AGENTS.md` · 身份 / 捕获与判断 / 墙 | 产品法 |
-| `docs/design-taste.md` | ×N popover、exact content_hash、评价不上主卡 |
-| `docs/feature-url-archive.md` | 同目录体例 |
+| `docs/designs/design-taste.md` | ×N popover、exact content_hash、评价不上主卡 |
+| `docs/designs/feature-url-archive.md` | 同目录体例 |
 | nmem `clipvault_sync_judgment_layers_20260814` | 判断层必须 `recordLocal*` |
 | nmem `clipvault_design_philosophy_layered_memory_20260814` | 五层记忆 |
 | `DatabaseManager.saveItemDetailed` / `findIdByContentHash` / `findIdByTextHash` / `bumpLatestAlive` | 身份；bump 不改 `content_hash` |
@@ -1023,7 +1023,7 @@ swift build --product ClipFlowServer
 **Files:**
 
 - `web/index.html` — 按钮、`#linkToast`、`openLinkToast`、picker、`patchCardLinkState(from+peer)`；`mergeHead` overlay `linkCount`（K13）；跳转接笔记面板
-- `docs/design-taste.md` — 「关联入口：同槽 icon-btn，popover 同 ×N」
+- `docs/designs/design-taste.md` — 「关联入口：同槽 icon-btn，popover 同 ×N」
 - `tests/frontend-smoke.test.mjs` — `#linkToast`、`data-link`、禁主卡挂列表、`mergeHead` 含 `linkCount`
 - `tests/clip-link.test.mjs` — 可补 UI 字符串门禁
 
@@ -1035,7 +1035,7 @@ swift build --product ClipFlowServer
 
 **Depends on:** PR3（或同 PR）
 
-**Files:** `docs/feature-clip-link.md`、`AGENTS.md` · 捕获与判断 一行、`README.md` 若有能力清单
+**Files:** `docs/designs/feature-clip-link.md`、`AGENTS.md` · 捕获与判断 一行、`README.md` 若有能力清单
 
 ### PR5 — 热更新与笔记反链（P2，非阻塞）
 

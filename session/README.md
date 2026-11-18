@@ -2,7 +2,7 @@
 
 The ClipVault session plane. Replaces the Python `trae_hooks` server with a
 PostgreSQL-backed **Session API v1 (SA-v1)** facade plus a fail-open hook
-collector. Architecture: `docs/design-session-backends.md`.
+collector. Architecture: `docs/designs/design-session-backends.md`.
 
 Two binaries:
 

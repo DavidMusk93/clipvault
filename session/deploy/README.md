@@ -1,7 +1,7 @@
 # session deploy
 
 Topology and runbook for the Rust session plane. Architecture:
-`docs/design-session-backends.md`.
+`docs/designs/design-session-backends.md`.
 
 ```text
    Macs (backends.d fan-in)                       d2 (primary)            cc (replica)

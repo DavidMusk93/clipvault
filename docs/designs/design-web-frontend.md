@@ -12,8 +12,8 @@ applies_to:
   - session/deploy/sync_backend_web.sh
 depends_on:
   - AGENTS.md
-  - docs/design-taste.md
-  - docs/session-analysis.md
+  - docs/designs/design-taste.md
+  - docs/references/session-analysis.md
 supersedes: []
 verified_by:
   - scripts/check-frontend.sh
@@ -64,7 +64,7 @@ stays vanilla until the panel proves the stack.
 | --- | --- |
 | The panel is an iframe `/trae/?embed=1` served by the **backend** (d2/cc), not the Mac | Build output must be synced to the backend web dir (`session/deploy/sync_backend_web.sh`), not only to the Mac app. |
 | Local/offline, no CDN | Every dep is bundled; no remote fonts/scripts; CSP unchanged. |
-| Visual truth is `docs/design-taste.md` | Tokens (Honey `#C47A2C`, role colors) become Tailwind v4 theme variables; components are themed from one source. |
+| Visual truth is `docs/designs/design-taste.md` | Tokens (Honey `#C47A2C`, role colors) become Tailwind v4 theme variables; components are themed from one source. |
 | Existing gates | `scripts/check-frontend.sh` gains `vite build` + `vitest`; existing `node --test` and swiftc/python gates stay. |
 | Two-layer scroll, embed postMessage contract | The React app keeps `#sessionList`/`#thread` scrollers and the `clipvault-sessions-*` postMessage handshake. |
 
@@ -155,10 +155,10 @@ the one server change this design depends on.
    rebuilds the taste (① 损耗判定 → ② 损耗排行 → ③ 回合时间轴 → ④ 账本, semantic
    colour, golden-ratio verdict) with Radix/shadcn primitives + Tailwind tokens +
    ECharts. The old vanilla markup is **not** the spec — the taste is (see
-   docs/design-taste.md 「分析」/「布局与节奏」). Charts come from `MineChart`
+   docs/designs/design-taste.md 「分析」/「布局与节奏」). Charts come from `MineChart`
    (`lib/echarts.ts` `buildMineOption`); the palette/formatters are shared with the
    vanilla rollback via `web/assets/mine-charts.mjs` (aliased `@charts`).
-2. **Tokens are code**: `theme/tokens.css` is generated from `docs/design-taste.md`;
+2. **Tokens are code**: `theme/tokens.css` is generated from `docs/designs/design-taste.md`;
    no component hardcodes a hex.
 3. **Every API response is Zod-parsed**; the Rust struct and the TS schema are
    reviewed together (later: generate TS from Rust with `ts-rs`).

@@ -34,7 +34,7 @@ function readSaved(): { scope: Scope; dirs: string[] } {
 }
 
 /**
- * 「分析」sheet — rebuilt from the taste (docs/design-taste.md 「分析」), styled on
+ * 「分析」sheet — rebuilt from the taste (docs/designs/design-taste.md 「分析」), styled on
  * Apple HIG: 8pt spacing grid, SF type scale, grouped white cards on the system
  * grouped background, controls ≥28px, chrome kept out of the way.
  * ① 判定（分数 + 损耗构成 + 费用）→ ② 发现 → ③ 回合 → ④ 账本.

@@ -17,7 +17,7 @@
  * `renderReport` / `renderRows` / `chartPlan` are pure string builders, so
  * `tests/oplog-panel.test.mjs` can pin the reading and the shape selection without
  * a browser. Colours come from the shared chart palette
- * (`web/assets/mine-charts.mjs`) and the ops source table in docs/design-taste.md.
+ * (`web/assets/mine-charts.mjs`) and the ops source table in docs/designs/design-taste.md.
  */
 
 import { columns, rankBars, stackBar } from './mine-charts.mjs';
@@ -77,7 +77,7 @@ export function fmtGap(seconds) {
 
 export const pct = (v) => `${(Number(v) * 100).toFixed(Number(v) * 100 >= 10 ? 0 : 1)}%`;
 
-/** Alias table for `operation_logs.source` -> palette key (docs/design-taste.md). */
+/** Alias table for `operation_logs.source` -> palette key (docs/designs/design-taste.md). */
 export function sourceKey(source) {
   const s = String(source || 'system').toLowerCase().trim();
   if (['web', 'clipboard', 'backup', 'maintenance', 'app', 'sync', 'system'].includes(s)) return s;
@@ -128,7 +128,7 @@ export const SOURCE_COLORS = {
 };
 
 /**
- * Shape follows the data (docs/design-taste.md · 图表选型). Returns descriptors,
+ * Shape follows the data (docs/designs/design-taste.md · 图表选型). Returns descriptors,
  * not HTML, so the page can show a boundary note where a chart would be lying.
  */
 export function chartPlan(report) {

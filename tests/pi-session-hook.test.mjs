@@ -12,7 +12,7 @@ import { root } from './helpers/src.mjs';
 const adapter = readFileSync(join(root, 'trae_hooks/pi/clipvault-session.ts'), 'utf8');
 const install = readFileSync(join(root, 'trae_hooks/pi/install_pi_hook.sh'), 'utf8');
 const mine = readFileSync(join(root, 'trae_hooks/mine.py'), 'utf8');
-const docs = readFileSync(join(root, 'docs/trae-hooks.md'), 'utf8');
+const docs = readFileSync(join(root, 'docs/references/trae-hooks.md'), 'utf8');
 const remoteInstall = readFileSync(join(root, 'trae_hooks/pi/install_pi_hook_remote.sh'), 'utf8');
 const installRemote = readFileSync(join(root, 'trae_hooks/install_remote.sh'), 'utf8');
 const hookClient = readFileSync(join(root, 'trae_hooks/hook_client.py'), 'utf8');

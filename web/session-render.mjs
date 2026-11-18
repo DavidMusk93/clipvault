@@ -25,7 +25,7 @@ export function prettyJson(value) {
   return JSON.stringify(value, null, 2);
 }
 
-/** IM role for a hook event. Taste: docs/design-taste.md 「Trae 会话 IM 角色色」 */
+/** IM role for a hook event. Taste: docs/designs/design-taste.md 「Trae 会话 IM 角色色」 */
 export const IM_ROLES = {
   user: { label: '你', align: 'end' },
   assistant: { label: '助手', align: 'start' },
@@ -415,7 +415,7 @@ export function renderEventBlocks(event, engines = {}) {
 // ---------------------------------------------------------------------------
 // IM markup. This is the session display logic (roles, alignment, beats vs
 // tool index, bundles, ask blocks). The React panel renders this HTML; do NOT
-// fork it into a second implementation. Taste: docs/design-taste.md 「会话」.
+// fork it into a second implementation. Taste: docs/designs/design-taste.md 「会话」.
 // ---------------------------------------------------------------------------
 
 export const esc = (s) =>

@@ -46,7 +46,7 @@ DIR_IDS = tuple(d["id"] for d in DIRECTIONS)
 
 # The Agent's optimization surface. `id` is stable across sessions; UI and Agent
 # both read these keys, so never rename one without evolving the contract in
-# docs/session-analysis.md.
+# docs/references/session-analysis.md.
 METRICS: tuple[dict[str, Any], ...] = (
     {"id": "turns", "label": "回合", "unit": "", "dir": "flat", "target": None, "note": "窗口内回合数"},
     {"id": "tools", "label": "工具调用", "unit": "", "dir": "flat", "target": None, "note": "PostToolUse 次数"},

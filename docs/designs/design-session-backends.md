@@ -19,12 +19,12 @@ applies_to:
   - trae_hooks/pi/install_pi_hook_remote.sh
   - Sources/ClipVault/HTTP/WebServer.swift
   - web/index.html
-  - docs/trae-hooks.md
+  - docs/references/trae-hooks.md
 depends_on:
   - AGENTS.md
-  - docs/design-session-store-postgres-hub.md
-  - docs/trae-hooks.md
-  - docs/session-analysis.md
+  - docs/designs/design-session-store-postgres-hub.md
+  - docs/references/trae-hooks.md
+  - docs/references/session-analysis.md
 supersedes: []
 verified_by:
   - tests/session-store-sql.test.mjs
@@ -148,8 +148,8 @@ replicated tables. Reads fail over; writes never.
 | POST | `/api/mine/ack` | idempotent `analysis_acks` write (primary only) |
 | POST | `/api/sessions/pin` | pin / unpin (primary only) |
 
-Payload shapes are unchanged from `docs/design-session-store-postgres-hub.md` §4
-and `docs/session-analysis.md`. The plugin layer adds discovery, grouping and
+Payload shapes are unchanged from `docs/designs/design-session-store-postgres-hub.md` §4
+and `docs/references/session-analysis.md`. The plugin layer adds discovery, grouping and
 transport; it never changes a payload.
 
 ### 3.2 Backend descriptor (the plugin artifact)
@@ -443,12 +443,12 @@ threads + an untyped driver; and `tokio-postgres` gives `LISTEN`/`NOTIFY` and
 Ordering stays architecture -> correctness -> performance: the endpoints,
 invariants and reconciliation anchors are pinned before any tuning knobs. The
 Python `trae_hooks` files remain in the tree only until the client-side cutover
-(`docs/trae-hooks.md` is the migration reference), and are not modified by this
+(`docs/references/trae-hooks.md` is the migration reference), and are not modified by this
 design.
 
 ## Appendix A - Relationship to the hub design
 
-`docs/design-session-store-postgres-hub.md`
+`docs/designs/design-session-store-postgres-hub.md`
 (`clipvault-session-store-postgres-hub-v1`) already fixed the PostgreSQL move to
 d2, the façade contract, the wire timezone rule and the dedupe rules; it is
 retained. This document adds what it left open: the **write-amplification

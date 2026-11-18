@@ -11,7 +11,7 @@ import { src, root } from './helpers/src.mjs';
 
 const ostore = src('OstoreBackup.swift');
 const indexHtml = readFileSync(join(root, 'web/index.html'), 'utf8');
-const doc = readFileSync(join(root, 'docs/ostore-backup.md'), 'utf8');
+const doc = readFileSync(join(root, 'docs/references/ostore-backup.md'), 'utf8');
 const check = readFileSync(join(root, 'scripts/check-frontend.sh'), 'utf8');
 
 function sliceFrom(text, startNeedle, maxLen = 4000) {

@@ -80,7 +80,7 @@ data class TypeStyle(
 )
 
 /**
- * Clipboard type colors — **must match** Web `.badge.type-*` and `docs/design-taste.md`.
+ * Clipboard type colors — **must match** Web `.badge.type-*` and `docs/designs/design-taste.md`.
  * Hex table is the product token source of truth.
  */
 fun typeStyle(type: String): TypeStyle = when (type.lowercase()) {

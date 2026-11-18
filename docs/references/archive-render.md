@@ -1,6 +1,6 @@
 # 归档网页渲染知识库
 
-ClipVault 离线阅读面怎么从 URL 变成可排版的 HTML。产品入口与存储见 [`feature-url-archive.md`](feature-url-archive.md)。视觉 token 见 [`design-taste.md`](design-taste.md)「归档 View 技术介质」。
+ClipVault 离线阅读面怎么从 URL 变成可排版的 HTML。产品入口与存储见 [`feature-url-archive.md`](../designs/feature-url-archive.md)。视觉 token 见 [`design-taste.md`](../designs/design-taste.md)「归档 View 技术介质」。
 
 ## 一句话
 

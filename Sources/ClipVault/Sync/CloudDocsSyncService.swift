@@ -30,7 +30,7 @@ import CryptoKit
 /// ```
 ///
 /// Local: outbox under `KEEPSAKE_HOME/sync/outbox/`, cursors in `keepsake_meta`.
-/// Wire details: `OstoreSyncWire`. Design: `docs/ostore-sync.md`.
+/// Wire details: `OstoreSyncWire`. Design: `docs/references/ostore-sync.md`.
 final class CloudDocsSyncService {
     private(set) static var shared: CloudDocsSyncService?
 

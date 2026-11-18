@@ -57,7 +57,7 @@ if [ -n "$QUACK" ]; then
   if nc -z -w 2 "${host:-127.0.0.1}" "${port:-9494}" 2>/dev/null; then
     echo "  ok: quack tunnel reachable at $QUACK"
   else
-    echo "  WARN: $QUACK not reachable — start the Mac-side reverse tunnel (docs/trae-hooks.md)"
+    echo "  WARN: $QUACK not reachable — start the Mac-side reverse tunnel (docs/references/trae-hooks.md)"
   fi
 fi
 
