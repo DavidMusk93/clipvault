@@ -317,6 +317,7 @@ async fn apply_op(app: &Arc<App>, op: &SyncOp) -> Result<(usize, usize), String>
             let existed = vault.store().note(&id).map_err(|e| e.to_string())?.is_some();
             if existed {
                 vault.delete(&id).map_err(|e| e.to_string())?;
+                app.tag_store.clear(&id);
             }
             Ok::<_, String>((existed as usize, (!existed) as usize))
         })
@@ -339,6 +340,7 @@ async fn apply_op(app: &Arc<App>, op: &SyncOp) -> Result<(usize, usize), String>
                     } else {
                         doc.set_markdown(&body).map_err(|e| e.to_string())?;
                         vault.save_and_index(&doc).map_err(|e| e.to_string())?;
+                        app.tag_store.refresh(&id, &body);
                         Ok((1, 0))
                     }
                 }
@@ -347,7 +349,10 @@ async fn apply_op(app: &Arc<App>, op: &SyncOp) -> Result<(usize, usize), String>
                         .import_markdown_as(&id, &body, wall_ms, wall_ms)
                         .map_err(|e| e.to_string())?
                     {
-                        Some(_) => Ok((1, 0)),
+                        Some(_) => {
+                            app.tag_store.refresh(&id, &body);
+                            Ok((1, 0))
+                        }
                         None => Ok((0, 1)), // 已存在（并发）
                     }
                 }

@@ -6,6 +6,7 @@
 //! `opid:<id>`（重启不丢）。trx 双向同步属 D2，不在本骨架。
 
 mod sync;
+mod tags;
 
 use std::sync::{Arc, Mutex};
 
@@ -24,6 +25,7 @@ struct App {
     vault: Mutex<Vault>,
     token: String,
     sync: Option<sync::SyncConfig>,
+    tag_store: tags::TagStore,
 }
 
 #[derive(Debug)]
@@ -118,12 +120,13 @@ async fn meta(State(_state): State<Arc<App>>) -> Json<Value> {
         "ok": true,
         "api": "clipvault-notes",
         "host": "cc",
-        "version": "d1",
+        "version": "d3",
         "endpoints": {
             "POST /api/notes": "create/update a note (body required; id to update; opId idempotent)",
             "GET /api/notes": "list notes (?q= fts, ?limit=, ?offset=)",
-            "GET /api/notes/{id}": "single note (markdown projection)",
-            "GET /api/notes/_meta": "this capability list",
+            "GET /api/notes/{id}": "single note (markdown projection + tags)",
+            "GET /api/notes/tags": "tag counts",
+            "GET /api/notes/{id}/...": "list also accepts ?tag= and ?since= (d3)",
         },
     }))
 }
@@ -132,14 +135,32 @@ async fn list_notes(
     State(state): State<Arc<App>>,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Value>> {
-    if q.tag.is_some() || q.since.is_some() {
-        // D1 子集：tag/since 属 D3（note_tags 投影与 since 游标）。
-        return Err(AppError::bad("tag/since not available in d1"));
+    // D3：?tag= 走 tags.db 索引；?since=（unix 秒）按 updated_at 过滤；?q= 走 FTS。
+    if let Some(tag) = q.tag.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        let ids = state.tag_store.notes_with_tag(&tag.to_lowercase());
+        let mut notes: Vec<Value> = Vec::new();
+        for id in ids.iter().take(q.limit.unwrap_or(50).min(200)) {
+            let id2 = id.clone();
+            if let Ok(Some(meta)) = with_vault(state.clone(), move |vault| {
+                vault.store().note(&id2)
+            })
+            .await
+            {
+                if q.since.map(|since| (meta.updated_at as f64 / 1000.0) <= since) != Some(true) {
+                    notes.push(json!({
+                        "id": meta.id, "title": meta.title,
+                        "createdAt": meta.created_at, "updatedAt": meta.updated_at,
+                    }));
+                }
+            }
+        }
+        return Ok(Json(json!({ "ok": true, "count": notes.len(), "notes": notes })));
     }
     let limit = q.limit.unwrap_or(50).min(200);
     let offset = q.offset.unwrap_or(0);
+    let since_ms = q.since.map(|s| (s * 1000.0) as i64);
     let query = q.q;
-    let notes = with_vault(state.clone(), move |vault| match query.as_deref() {
+    let mut notes = with_vault(state.clone(), move |vault| match query.as_deref() {
         Some(qs) if !qs.trim().is_empty() => vault
             .search(qs.trim(), limit)
             .map(|hits| {
@@ -163,6 +184,9 @@ async fn list_notes(
         }),
     })
     .await?;
+    if let Some(ms) = since_ms {
+        notes.retain(|n| n.get("updatedAt").and_then(|v| v.as_i64()).unwrap_or(0) > ms);
+    }
     Ok(Json(json!({ "ok": true, "count": notes.len(), "notes": notes })))
 }
 
@@ -187,12 +211,25 @@ async fn show_note(
     let out = with_vault(state.clone(), move |vault| load_full(vault, &id)).await?;
     match out {
         None => Err(AppError::not_found("笔记不存在")),
-        Some((id, title, created, updated, markdown)) => Ok(Json(json!({
-            "ok": true,
-            "item": item_json(&id, &title, created, updated, Some(markdown)),
-            "tags": [],
-        }))),
+        Some((id, title, created, updated, markdown)) => {
+            let note_tags = state.tag_store.for_note(&id);
+            Ok(Json(json!({
+                "ok": true,
+                "item": item_json(&id, &title, created, updated, Some(markdown)),
+                "tags": note_tags,
+            })))
+        }
     }
+}
+
+async fn note_tags_counts(State(state): State<Arc<App>>) -> Json<Value> {
+    let rows: Vec<Value> = state
+        .tag_store
+        .counts()
+        .into_iter()
+        .map(|(tag, n)| json!({ "tag": tag, "count": n }))
+        .collect();
+    Json(json!({ "ok": true, "tags": rows }))
 }
 
 async fn save_note(
@@ -287,10 +324,11 @@ async fn save_note(
             }
             None => None,
         };
-        notebase_store::Result::Ok((id, title, created, updated, created_new, sync_op))
+        notebase_store::Result::Ok((id, title, created, updated, created_new, sync_op, body.body.clone()))
     })
     .await?;
-    let (id, title, created, updated, created_new, sync_op) = out;
+    let (id, title, created, updated, created_new, sync_op, body_md) = out;
+    state.tag_store.refresh(&id, &body_md);
     if let (Some(cfg), Some(op)) = (sync_cfg.as_ref(), sync_op) {
         let cfg = cfg.clone();
         let path = format!(
@@ -339,6 +377,7 @@ async fn delete_note(
     if !existed {
         return Err(AppError::not_found("笔记不存在"));
     }
+    state.tag_store.clear(&id);
     if let (Some(cfg), Some(op)) = (sync_cfg.as_ref(), tomb) {
         let cfg = cfg.clone();
         let path = format!(
@@ -399,6 +438,7 @@ async fn main() {
     };
     let vault = Vault::open(std::path::Path::new(&home).join("notes.vault"))
         .expect("open notebase vault");
+    let tag_store = tags::TagStore::open(&std::path::Path::new(&home).join("tags.db"));
     let port: u16 = std::env::var("CLIPVAULT_NOTES_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -407,6 +447,7 @@ async fn main() {
         vault: Mutex::new(vault),
         token,
         sync: sync::SyncConfig::from_env(),
+        tag_store,
     });
     if let Some(cfg) = &state.sync {
         println!(
@@ -422,6 +463,7 @@ async fn main() {
         .route("/api/notes/_meta", get(meta))
         .route("/api/notes", get(list_notes).post(save_note))
         .route("/api/notes/{id}", get(show_note).delete(delete_note))
+        .route("/api/notes/tags", get(note_tags_counts))
         .layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state);
 

@@ -4153,6 +4153,14 @@ final class DatabaseManager: ObservableObject {
             guard insertNewItem(item, db: db) else { return false }
         }
         upsertFTS(id: id.uuidString, text: body, ocr: nil, source: ComposeNotes.sourceApp, html: nil)
+        // Tag projection parity with saveComposeNoteLocked: notes arriving via sync
+        // must refresh note_tags too, or agent-written tags only exist on the writer.
+        refreshNoteTagsLocked(
+            itemId: id.uuidString,
+            body: body,
+            ts: timestamp.timeIntervalSince1970,
+            on: db
+        )
         let sql = """
         INSERT OR IGNORE INTO compose_ops (
             id, item_id, ts, title, body, ref_item_id, blob_keys, source, parent_hash, content_hash
