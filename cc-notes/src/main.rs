@@ -28,9 +28,49 @@ use notebase_store::Vault;
 /// agent 从服务本身拉取（GET /api/notes/_doc），不必找仓库。
 const AGENT_USAGE_DOC: &str = include_str!("../../docs/references/agent-api-v1.md");
 
+/// 多 agent 身份面：tokens.json = [{"name":"pi","token":"<hex>"}, ...]。
+/// 命中任意活跃 token 即授权；identity = token name（agent:<name> 归因）。
+/// 文件每次鉴权即时读取（小文件，运维改完即生效，无需重启）。
+struct TokenRegistry {
+    tokens: Vec<(String, String)>, // (name, token)
+}
+
+impl TokenRegistry {
+    fn load(path: Option<&std::path::Path>) -> TokenRegistry {
+        let mut tokens: Vec<(String, String)> = Vec::new();
+        if let Some(p) = path {
+            if let Ok(raw) = std::fs::read_to_string(p) {
+                if let Ok(v) = serde_json::from_str::<Vec<serde_json::Value>>(&raw) {
+                    for e in v {
+                        let name = e.get("name").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                        let token = e.get("token").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+                        if !name.is_empty() && !token.is_empty() {
+                            tokens.push((name, token));
+                        }
+                    }
+                }
+            }
+        }
+        TokenRegistry { tokens }
+    }
+
+    /// 返回命中的 agent 身份名。
+    fn identify(&self, presented: &str) -> Option<String> {
+        self.tokens
+            .iter()
+            .find(|(_, t)| constant_eq(presented, t))
+            .map(|(n, _)| n.clone())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
+}
+
 struct App {
     vault: Mutex<Vault>,
     token: String,
+    tokens: TokenRegistry,
     sync: Option<sync::SyncConfig>,
     tag_store: tags::TagStore,
     link_store: links::LinkStore,
@@ -905,25 +945,42 @@ async fn rate_limit(
 
 async fn auth(
     State(state): State<Arc<App>>,
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let ok = req
+    let token = req
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|t| constant_eq(t, &state.token))
-        .unwrap_or(false);
-    if !ok {
-        return (
+        .map(str::to_string)
+        .unwrap_or_default();
+    let unauthorized = || {
+        (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "unauthorized" })),
         )
-            .into_response();
-    }
+            .into_response()
+    };
+    // 1) registry（tokens.json）优先 —— 多 agent 身份面。
+    // 2) 回落单 token（legacy 部署）。identity 由各 handler 的 agent 归因使用。
+    let identity = if !state.tokens.is_empty() {
+        match state.tokens.identify(&token) {
+            Some(name) => name,
+            None => return unauthorized(),
+        }
+    } else if constant_eq(&token, &state.token) {
+        "agent".to_string()
+    } else {
+        return unauthorized();
+    };
+    req.extensions_mut().insert(Identity(identity));
     next.run(req).await
 }
+
+/// 已鉴权的 agent 身份（token name 或 "agent"）。
+#[derive(Clone)]
+struct Identity(pub String);
 
 fn constant_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
@@ -959,6 +1016,7 @@ async fn main() {
     let state = Arc::new(App {
         vault: Mutex::new(vault),
         token,
+        tokens: TokenRegistry::load(std::env::var("CLIPVAULT_NOTES_TOKENS_FILE").ok().map(std::path::PathBuf::from).as_deref()),
         sync: sync::SyncConfig::from_env(),
         tag_store,
         link_store,
