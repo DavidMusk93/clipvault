@@ -4198,6 +4198,17 @@ final class DatabaseManager: ObservableObject {
             ts: timestamp.timeIntervalSince1970,
             on: db
         )
+        // Agent 归因透传：cc 侧 agent 写入在 mac oplog 留 agent:<name>；
+        // 普通设备同步不落（避免每条笔记一条 oplog 噪声）。
+        if source.hasPrefix("agent:") {
+            _ = appendOperationLogSync(
+                action: "compose_create",
+                itemId: id.uuidString,
+                contentHash: contentHash,
+                detail: "via sync",
+                source: source
+            )
+        }
         let sql = """
         INSERT OR IGNORE INTO compose_ops (
             id, item_id, ts, title, body, ref_item_id, blob_keys, source, parent_hash, content_hash

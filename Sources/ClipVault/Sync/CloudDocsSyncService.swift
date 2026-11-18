@@ -108,6 +108,8 @@ final class CloudDocsSyncService {
         var note: String?
         /// User judgment layer (kind == user_context); never mutates capture payload.
         var userNote: String?
+        /// Agent attribution (cc side): "agent:<name>" lands in the local oplog.
+        var agent: String?
         var userStage: String?
         var userRating: Double?
 
@@ -120,6 +122,7 @@ final class CloudDocsSyncService {
             case fileUrls = "file_urls", copyCount = "copy_count"
             case blobKeys = "blob_keys", parentHash = "parent_hash", note
             case userNote = "user_note", userStage = "user_stage", userRating = "user_rating"
+            case agent
         }
     }
 
@@ -1736,6 +1739,7 @@ final class CloudDocsSyncService {
                 htmlFallback: op.htmlContent
             )
         case "compose":
+            let attribution = (op.agent?.isEmpty == false) ? "agent:\(op.agent!)" : "sync:\(op.host)"
             return database.applySyncComposeLocked(
                 id: uuid,
                 opId: op.opId,
@@ -1747,7 +1751,7 @@ final class CloudDocsSyncService {
                     guard let keys = op.blobKeys, let data = try? JSONSerialization.data(withJSONObject: keys) else { return nil }
                     return String(data: data, encoding: .utf8)
                 }(),
-                source: "sync:\(op.host)",
+                source: attribution,
                 parentHash: op.parentHash
             )
         case "reader_op":

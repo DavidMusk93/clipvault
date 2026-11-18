@@ -144,7 +144,7 @@ pub async fn ensure_pull_blobs(app: &Arc<App>, keys: &[String]) {
             };
             let bytes = fetch_attach(&cfg, &key)?;
             app.blob_store.put(&key, &bytes)?;
-            println!("[sync] blob relay: pulled {key} ({} bytes)", bytes.len());
+            ts_log(&format!("[sync] blob relay: pulled {key} ({} bytes)", bytes.len()));
             Ok::<_, String>(())
         })
         .await;
@@ -184,6 +184,17 @@ fn meta_key_applied(host: &str) -> String {
 }
 
 /// 一轮 pull。返回 (applied, skipped, advanced_hosts)。
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn ts_log(s: &str) {
+    println!("[{}] {s}", now_secs());
+}
+
 pub async fn pull_once(app: Arc<App>) -> Result<(usize, usize, usize), String> {
     let cfg = match app.sync.clone() {
         Some(c) => c,
@@ -506,9 +517,16 @@ pub fn compose_like_op(cfg: &Option<SyncConfig>, seq: u64, kind: &str, item_id: 
     })
 }
 
-pub fn build_compose_op(host_id: &str, seq: u64, item_id: &str, body: &str, wall_ms: i64) -> Value {
+pub fn build_compose_op(
+    host_id: &str,
+    seq: u64,
+    item_id: &str,
+    body: &str,
+    wall_ms: i64,
+    agent: Option<&str>,
+) -> Value {
     let wall_ts = wall_ms as f64 / 1000.0;
-    json!({
+    let mut op = json!({
         "v": 1,
         "op_id": uuid::Uuid::new_v4().to_string(),
         "host": host_id,
@@ -521,7 +539,12 @@ pub fn build_compose_op(host_id: &str, seq: u64, item_id: &str, body: &str, wall
         "text_content": body,
         "source_app": "ClipVault",
         "note": "compose",
-    })
+    });
+    // 归因透传：agent 身份（token 名）随 op 走，mac 侧 oplog 记 agent:<name>。
+    if let Some(a) = agent {
+        op["agent"] = json!(a);
+    }
+    op
 }
 
 pub fn build_tombstone_op(host_id: &str, seq: u64, item_id: &str, wall_ms: i64) -> Value {
@@ -565,7 +588,7 @@ pub fn sse_thread(app: Arc<App>, notify: Arc<tokio::sync::Notify>, connected: Ar
             match resp {
                 Ok(resp) => {
                     connected.store(true, std::sync::atomic::Ordering::Relaxed);
-                    println!("[sync] sse open · {}trx", cfg.base);
+                    ts_log("[sync] sse open");
                     let reader = resp.into_reader();
                     let mut frame = String::new();
                     for line in std::io::BufReader::new(reader).lines() {
@@ -587,7 +610,7 @@ pub fn sse_thread(app: Arc<App>, notify: Arc<tokio::sync::Notify>, connected: Ar
                     }
                 }
                 Err(e) => {
-                    eprintln!("[sync] sse connect: {e}");
+                    eprintln!("[{}] [sync] sse connect: {e}", now_secs());
                 }
             }
             connected.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -617,7 +640,7 @@ pub async fn pull_loop(app: Arc<App>) {
         }
         match pull_once(app.clone()).await {
             Ok((a, s, _)) if a > 0 || s > 0 => {
-                println!("[sync] pull applied={a} skipped={s}");
+                ts_log(&format!("[sync] pull applied={a} skipped={s}"));
             }
             Ok(_) => {}
             Err(e) => eprintln!("[sync] pull error: {e}"),

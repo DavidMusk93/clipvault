@@ -12,7 +12,7 @@ mod tags;
 
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -346,6 +346,7 @@ async fn note_tags_counts(State(state): State<Arc<App>>) -> Json<Value> {
 
 async fn save_note(
     State(state): State<Arc<App>>,
+    Extension(identity): Extension<Identity>,
     Json(body): Json<SaveNoteBody>,
 ) -> AppResult<Json<Value>> {
     if body.body.trim().is_empty() {
@@ -467,6 +468,7 @@ async fn save_note(
                     id.as_str(),
                     &body.body,
                     updated,
+                    Some(&identity.0),
                 );
                 if !ready_keys_in.is_empty() {
                     trx["blob_keys"] = json!(ready_keys_in.clone());

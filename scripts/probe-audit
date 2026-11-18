@@ -1,0 +1,17 @@
+#!/bin/bash
+# probe-audit — 测试探针终审（硬约束 6 的执行工具）。
+# 依据 = operation_logs 归因（source=agent:%），禁止内容 LIKE。
+# 有存活 agent 探针 → exit 1（结项前必须跑，零残留才算验证闭环）。
+set -euo pipefail
+DB="${CLIPVAULT_HOME:-$HOME/Library/Application Support/Keepsake}/clipflow.db"
+WINDOW="${1:-86400}" # 秒，默认 24h
+ALIVE=$(sqlite3 "$DB" "SELECT substr(o.item_id,1,8)||' '||o.source||' '||datetime(o.ts,'unixepoch','localtime')
+ FROM operation_logs o JOIN clipboard_items c ON c.id=o.item_id
+ WHERE o.source LIKE 'agent:%' AND o.action IN ('compose_create','compose_edit')
+   AND c.deleted_at IS NULL AND o.ts > strftime('%s','now')-$WINDOW;")
+if [ -n "$ALIVE" ]; then
+  echo "[probe-audit] FAIL — 存活探针（须清理后再结项）：" >&2
+  echo "$ALIVE" >&2
+  exit 1
+fi
+echo "[probe-audit] OK — 0 存活探针（window ${WINDOW}s）"
