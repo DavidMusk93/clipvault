@@ -33,6 +33,9 @@ const PRUNE_INTERVAL: Duration = Duration::from_secs(3600);
 /// when the container bridge is gone, so a query never errors and never
 /// finishes. Without this the drain loop wedges and the spool grows forever.
 const PG_CALL: Duration = Duration::from_secs(20);
+// Bound each recovery pass, including legacy multi-line spool files.
+const MAX_BATCH_FILES: usize = 500;
+const MAX_BATCH_LINES: usize = 500;
 
 /// Age after which a consumed spool file is deleted from `done/`. Set
 /// `CLIPVAULT_DONE_RETENTION_DAYS=0` to keep every file forever.
@@ -81,7 +84,15 @@ async fn main() -> Result<()> {
     let retention = done_retention();
     let mut sink = PgSink::new(config::pg_config()?);
     if once {
-        println!("flushed {} rows", sink.drain(&spool_dir).await);
+        let mut total = 0;
+        loop {
+            let written = sink.drain(&spool_dir).await;
+            total += written;
+            if written == 0 {
+                break;
+            }
+        }
+        println!("flushed {total} rows");
         if let Some(r) = retention {
             prune_done(&spool_dir, r);
         }
@@ -156,6 +167,7 @@ fn classify(err: &anyhow::Error) -> WriteError {
 struct PgSink {
     cfg: tokio_postgres::Config,
     conn: Option<(Client, JoinHandle<()>)>,
+    cursor: Option<PathBuf>,
 }
 
 /// A spooled hook file: its raw lines and the parsed row per line (`None` =
@@ -168,12 +180,19 @@ struct HookFile {
 
 impl PgSink {
     fn new(cfg: tokio_postgres::Config) -> Self {
-        Self { cfg, conn: None }
+        Self {
+            cfg,
+            conn: None,
+            cursor: None,
+        }
     }
 
     async fn client(&mut self) -> Result<&Client> {
         if self.conn.is_none() {
-            let (client, connection) = self.cfg.connect(NoTls).await.context("pg connect")?;
+            let (client, connection) = tokio::time::timeout(PG_CALL, self.cfg.connect(NoTls))
+                .await
+                .context("pg connect timed out")?
+                .context("pg connect")?;
             let driver = tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -197,7 +216,7 @@ impl PgSink {
         written
     }
 
-    fn collect(&self, spool_dir: &Path) -> (Vec<HookFile>, Vec<(PathBuf, Vec<String>)>) {
+    fn collect(&mut self, spool_dir: &Path) -> (Vec<HookFile>, Vec<(PathBuf, Vec<String>, usize)>) {
         let mut hook_files = Vec::new();
         let mut metric_files = Vec::new();
         let Ok(read) = std::fs::read_dir(spool_dir) else {
@@ -205,7 +224,22 @@ impl PgSink {
         };
         let mut entries: Vec<PathBuf> = read.filter_map(|e| e.ok().map(|e| e.path())).collect();
         entries.sort();
-        for path in entries {
+        let start = self
+            .cursor
+            .as_ref()
+            .map_or(0, |cursor| entries.partition_point(|path| path <= cursor));
+        let mut files = 0;
+        let mut remaining = MAX_BATCH_LINES;
+        for path in entries
+            .iter()
+            .cycle()
+            .skip(start)
+            .take(entries.len())
+            .cloned()
+        {
+            if files >= MAX_BATCH_FILES || remaining == 0 {
+                break;
+            }
             let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
                 continue;
             };
@@ -214,6 +248,8 @@ impl PgSink {
             if !hooks && !metrics {
                 continue;
             }
+            self.cursor = Some(path.clone());
+            files += 1;
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
             };
@@ -226,6 +262,10 @@ impl PgSink {
                 let rows = lines
                     .iter()
                     .map(|l| {
+                        if remaining == 0 {
+                            return None;
+                        }
+                        remaining -= 1;
                         serde_json::from_str::<Value>(l)
                             .ok()
                             .and_then(|v| model::from_row_value(&v))
@@ -233,7 +273,9 @@ impl PgSink {
                     .collect();
                 hook_files.push(HookFile { path, lines, rows });
             } else {
-                metric_files.push((path, lines));
+                let limit = remaining.min(lines.len());
+                remaining -= limit;
+                metric_files.push((path, lines, limit));
             }
         }
         (hook_files, metric_files)
@@ -305,11 +347,19 @@ impl PgSink {
         written
     }
 
-    async fn drain_metrics(&mut self, spool_dir: &Path, files: &[(PathBuf, Vec<String>)]) -> usize {
+    async fn drain_metrics(
+        &mut self,
+        spool_dir: &Path,
+        files: &[(PathBuf, Vec<String>, usize)],
+    ) -> usize {
         let mut written = 0;
-        for (path, lines) in files {
+        for (path, lines, limit) in files {
             let mut remain = Vec::new();
-            for line in lines {
+            for (index, line) in lines.iter().enumerate() {
+                if index >= *limit {
+                    remain.push(line.clone());
+                    continue;
+                }
                 let ok = match serde_json::from_str::<Value>(line) {
                     Ok(value) => self.write_metric(&value).await,
                     Err(_) => false,
@@ -459,4 +509,38 @@ fn unique(dir: &Path, name: &str) -> PathBuf {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     dir.join(format!("{stamp}-{name}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_batches_rotate_and_keep_unprocessed_lines() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../.tmp")
+            .join(format!("flush-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let row = r#"{"event_id":"id","ts":"2026-11-18 06:00:00","instance_id":"test","hook_event":"Stop","source":"pi","raw_json":"{}","raw_hash":"hash"}"#;
+        let first = dir.join("hooks-000.jsonl");
+        std::fs::write(&first, format!("{}\n", vec![row; 501].join("\n"))).unwrap();
+        std::fs::write(dir.join("hooks-001.jsonl"), format!("{row}\n")).unwrap();
+        let mut sink = PgSink::new(tokio_postgres::Config::new());
+        let (batch, _) = sink.collect(&dir);
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].rows.iter().flatten().count(), 500);
+        let remaining: Vec<_> = batch[0]
+            .lines
+            .iter()
+            .zip(&batch[0].rows)
+            .filter(|(_, parsed)| parsed.is_none())
+            .map(|(line, _)| line.clone())
+            .collect();
+        finish_file(&dir, &first, remaining);
+        assert_eq!(std::fs::read_to_string(&first).unwrap().lines().count(), 1);
+        let (next, _) = sink.collect(&dir);
+        assert_eq!(next[0].path.file_name().unwrap(), "hooks-001.jsonl");
+        assert_eq!(next.iter().flat_map(|f| &f.rows).flatten().count(), 2);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
