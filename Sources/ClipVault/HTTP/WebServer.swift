@@ -2036,10 +2036,14 @@ class WebServer {
                 self.sendJSON(["ok": false, "message": err ?? "笔记不存在"], connection: connection)
                 return
             }
-            var payload = self.itemToJSON(row.item)
-            payload["ok"] = true
-            payload["tags"] = row.tags
-            self.sendJSON(payload, connection: connection)
+            var itemJSON = self.itemToJSON(row.item)
+            itemJSON["ok"] = true
+            itemJSON["tags"] = row.tags
+            self.sendJSON([
+                "ok": true,
+                "item": itemJSON,
+                "tags": row.tags,
+            ], connection: connection)
         }
     }
 
