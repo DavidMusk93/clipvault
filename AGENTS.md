@@ -63,6 +63,7 @@
 禁止：把 burst 折成 head merge（`PAGE_SIZE` 只有 30）；已知 id 报 `'have'` 早退而不跟 `timestamp` 移动；用「先吸收再等超时」的固定窗口静默吞剪贴板；硬删行不落 `operation_logs`；把 note / 有 `compose_ops` 的行当作重复折叠的输家。回归：`tests/wall-live-update.test.mjs`。
 
 5. **墙序 = 捕获时间。** `clipboard_items.timestamp` 只表示复制发生的时刻（本机捕获或对端捕获 `wall_ts`）。重复计数按捕获日独立：同日再复制才更新当天记录；跨日创建 `copy_count=1` 的新记录，旧日的卡片、时间与次数不变。后台去重只能处理今天，同步不得把旧日 touch 覆写到新日。OCR、副本 upsert、hydrate **不得**改这条序。只有同日 `kind=touch` 才 bump。策略真源 `WallClockPolicy.swift`。事故：2026-09-11 OCR 回放 `wall_ts=Date()` + `MAX(timestamp)`。
+6. **测试与探针必须自清理。** 凡是会创建笔记 / 卡片 / 记录的验证步骤，**清理是同一步骤的一部分**：写前先拿 ID，验完当场软删 / 发墓碑（与删除同一条路径），禁止事后扫 LIKE 批删（用户真实内容会撞关键词）。探针文案必须一眼可辨为探针。历史事故：2026-11-18 agent API 开发遗留十余条探针笔记散落双机，事后才清。
 
 ---
 
