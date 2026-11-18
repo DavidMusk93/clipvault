@@ -336,6 +336,38 @@ async fn save_note(
 
     let sync_cfg = state.sync.clone();
     let sync_cfg2 = sync_cfg.clone();
+    // blob relay（publish 侧）在 vault 闭包之外执行（网络 IO 不进锁）。
+    let mut ready_keys: Vec<String> = Vec::new();
+    if sync_cfg.is_some() && body.body.contains("/api/image?sha=") {
+        for key in crate::sync::blob_keys_in(&body.body) {
+            let cfg = sync_cfg.clone().unwrap();
+            let fetched = tokio::task::spawn_blocking(move || {
+                let url = format!(
+                    "{}/api/files/{}/attach/{key}.bin",
+                    cfg.base, cfg.prefix
+                );
+                let resp = ureq::get(&url)
+                    .set("Authorization", &format!("Bearer {}", cfg.token))
+                    .timeout(std::time::Duration::from_secs(30))
+                    .call();
+                match resp {
+                    Ok(r) => {
+                        let mut bytes = Vec::new();
+                        use std::io::Read;
+                        r.into_reader().read_to_end(&mut bytes).map(|_| (key.clone(), bytes))
+                            .map_err(|e| format!("{key}: {e}"))
+                    }
+                    Err(_) => Err(format!("{key}: attach missing")),
+                }
+            })
+            .await;
+            if let Ok(Ok((key, bytes))) = fetched {
+                let _ = with_vault(state.clone(), move |vault| vault.store().put_blob(&bytes, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64)).await;
+                ready_keys.push(key);
+            }
+        }
+    }
+    let ready_keys_in = ready_keys.clone();
     let out = with_vault(state.clone(), move |vault| {
         let now = now_ms();
         let (id, title, created, updated, created_new) = match body.id.as_deref() {
@@ -384,13 +416,17 @@ async fn save_note(
                     .unwrap_or(0)
                     + 1;
                 vault.store().set_vault_meta("sync.seq", &seq.to_string())?;
-                Some(sync::build_compose_op(
+                let mut trx = sync::build_compose_op(
                     &cfg.host_id,
                     seq,
                     id.as_str(),
                     &body.body,
                     updated,
-                ))
+                );
+                if !ready_keys_in.is_empty() {
+                    trx["blob_keys"] = json!(ready_keys_in.clone());
+                }
+                Some(trx)
             }
             None => None,
         };
@@ -749,6 +785,47 @@ fn vault_load_any(vault: &Vault, id: &str) -> notebase_store::Result<Option<note
     Ok(None)
 }
 
+
+/// blob 出图（cc 侧 /api/image 的等价物）：notebase blob CAS 直接服务。
+/// 内容嗅探四类型（jpeg/png/gif/webp），缺省 octet-stream。
+async fn serve_blob(State(state): State<Arc<App>>, Path(sha): Path<String>) -> Response {
+    let sha = sha.trim().to_lowercase();
+    if sha.len() != 64 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        return AppError::bad("expected a 64-hex sha").into_response();
+    }
+    let bytes = with_vault(state, move |vault| vault.store().get_blob(&sha)).await;
+    match bytes {
+        Ok(Some(data)) => {
+            let ct = match data.first() {
+                Some(0xFF) => "image/jpeg",
+                Some(0x89) => "image/png",
+                Some(0x47) => "image/gif",
+                Some(0x52) if data.len() > 8 && &data[0..4] == b"RIFF" => "image/webp",
+                _ => "application/octet-stream",
+            };
+            (
+                StatusCode::OK,
+                [
+                    (axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_str(ct).unwrap()),
+                    (axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=31536000, immutable")),
+                ],
+                data,
+            )
+                .into_response()
+        }
+        Ok(None) => AppError::not_found("no blob").into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn image_by_query(
+    State(state): State<Arc<App>>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let sha = q.get("sha").cloned().unwrap_or_default();
+    serve_blob(State(state), Path(sha)).await
+}
+
 async fn usage_doc() -> Response {
     (
         StatusCode::OK,
@@ -899,10 +976,15 @@ async fn main() {
         .route("/{id}/links", post(agent_note_link_create).get(agent_note_links))
         .route("/{id}/backlinks", get(agent_note_backlinks))
         .route("/{id}/related", get(agent_note_related))
+        .route("/_raw_blobs/{sha}", get(serve_blob))
         .with_state(state.clone());
     let app = Router::new()
         .nest("/api/v1/notes", notes_routes.clone())
         .nest("/api/notes", notes_routes)
+        .route("/api/v1/blobs/{sha}", get(serve_blob))
+        .route("/api/blobs/{sha}", get(serve_blob))
+        .route("/api/image", get(image_by_query))
+        .route("/api/archive/asset", get(image_by_query))
         .layer(DefaultBodyLimit::max(512 * 1024))
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit))
         .layer(middleware::from_fn_with_state(state.clone(), auth))

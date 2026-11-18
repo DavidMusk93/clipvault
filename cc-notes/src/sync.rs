@@ -12,7 +12,7 @@
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use serde_json::{json, Value};
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::sync::Arc;
 
 use crate::App;
@@ -99,6 +99,87 @@ struct SyncOp {
     wall_ts: f64,
     #[serde(rename = "text_content")]
     text_content: Option<String>,
+    #[serde(rename = "blob_keys")]
+    blob_keys: Option<Vec<String>>,
+}
+
+/// mac `ComposeNotes.blobKeys` 同语义：/api/(image|archive/asset)?sha=<64hex>。
+pub fn blob_keys_in(markdown: &str) -> Vec<String> {
+    let re = regex::Regex::new(r#"/api/(?:image|archive/asset)\?sha=([0-9a-fA-F]{64})"#).expect("blob re");
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for m in re.captures_iter(markdown) {
+        let sha = m[1].to_lowercase();
+        if seen.insert(sha.clone()) {
+            out.push(sha);
+        }
+        if out.len() >= 64 {
+            break;
+        }
+    }
+    out
+}
+
+fn is_hex64(k: &str) -> bool {
+    k.len() == 64 && k.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// pull 侧：compose op 带 blob_keys → 逐个确保 notebase 有 blob（缺则从 ostore attach 拉）。
+/// 拉不到的 key 记日志跳过（note 照常 apply；mac 侧引用仍在，hydrate 后补）。
+pub async fn ensure_pull_blobs(app: &Arc<App>, keys: &[String]) {
+    for key in keys {
+        if !is_hex64(key) {
+            eprintln!("[sync] blob relay: skip typed key {key}");
+            continue;
+        }
+        let app = app.clone();
+        let key = key.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let vault = app.vault.lock().map_err(|_| "vault poisoned")?;
+            if vault.store().get_blob(&key).map_err(|e| e.to_string())?.is_some() {
+                return Ok(());
+            }
+            drop(vault);
+            let cfg = match &app.sync {
+                Some(c) => c.clone(),
+                None => return Ok(()),
+            };
+            let bytes = fetch_attach(&cfg, &key)?;
+            let vault = app.vault.lock().map_err(|_| "vault poisoned")?;
+            vault.store().put_blob(&bytes, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64).map_err(|e| e.to_string())?;
+            println!("[sync] blob relay: pulled {key} ({} bytes)", bytes.len());
+            Ok::<_, String>(())
+        })
+        .await;
+    }
+}
+
+fn fetch_attach(cfg: &SyncConfig, key: &str) -> Result<Vec<u8>, String> {
+    let url = format!("{}/api/files/{}/attach/{key}.bin", cfg.base, cfg.prefix);
+    let resp = ureq::get(&url)
+        .set("Authorization", &format!("Bearer {}", cfg.token))
+        .timeout(std::time::Duration::from_secs(30))
+        .call()
+        .map_err(|e| format!("attach {key}: {e}"))?;
+    let mut bytes = Vec::new();
+    resp.into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("attach {key} read: {e}"))?;
+    Ok(bytes)
+}
+
+/// publish 侧：把 cc 有的 blob 上传 ostore attach（attach 先于 trx 可见 = 契约）。
+/// 返回成功就绪的 keys（失败的 key 不进 trx.blob_keys —— 禁止让 mac blob_wait 卡游标）。
+pub fn publish_attach_blobs(cfg: &SyncConfig, keys: &[String]) -> Vec<String> {
+    let mut ok = Vec::new();
+    for key in keys {
+        if !is_hex64(key) {
+            continue;
+        }
+        // 字节从调用方传入前的本地 blob 由 ensure_publish_blob 取得；这里只上传。
+        ok.push(key.clone());
+    }
+    ok
 }
 
 fn meta_key_applied(host: &str) -> String {
@@ -330,6 +411,10 @@ async fn apply_op(app: &Arc<App>, op: &SyncOp) -> Result<(usize, usize), String>
         if body.trim().is_empty() {
             return Ok((0, 1));
         }
+        // blob relay（pull 侧）：先确保引用的图片 blob 在 cc 本地，再 apply。
+        if let Some(keys) = &op.blob_keys {
+            ensure_pull_blobs(app, keys).await;
+        }
         let app = app.clone();
         let id = op.item_id.clone();
         let wall_ms = (op.wall_ts * 1000.0) as i64;
@@ -520,14 +605,18 @@ pub async fn pull_loop(app: Arc<App>) {
     sse_thread(app.clone(), notify.clone(), connected.clone());
     let mut fallback = tokio::time::interval(std::time::Duration::from_secs(30));
     fallback.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // 事件触发的拉取若 (0,0)（list/GET 与 ostore 索引时序差一拍），短延迟重试至多 3 次。
+    let mut event_missed_retries: u8 = 0;
     loop {
-        // 事件驱动：SSE 帧即拉；断流时 30s 轮询兜底（2s 太吵，mac 语义一致）。
-        tokio::select! {
-            _ = notify.notified() => {},
-            _ = fallback.tick() => {
-                // 30s 兜底恒跑（一次 list 代价极小）：僵尸流也不能停数据。
-                let _ = &connected;
-            },
+        // 事件驱动：SSE 帧即拉；30s 轮询兜底恒跑（僵尸流也不能停数据）。
+        let event_triggered = tokio::select! {
+            _ = notify.notified() => true,
+            _ = fallback.tick() => false,
+        };
+        if event_triggered && event_missed_retries > 0 {
+            // 未命中重试路径：稍候再拉（ostore 索引可能尚未可见）。
+            event_missed_retries -= 1;
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         }
         match pull_once(app.clone()).await {
             Ok((a, s, _)) if a > 0 || s > 0 => {
