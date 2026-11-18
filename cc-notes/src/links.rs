@@ -203,6 +203,23 @@ impl LinkStore {
         rows.map(|rs| rs.filter_map(Result::ok).collect()).unwrap_or_default()
     }
 
+    /// 一跳邻居 + 二跳（co-link 信号用）：我链接的、以及与我共邻的笔记 id 集。
+    pub fn neighborhood(&self, item_id: &str) -> (Vec<String>, Vec<String>) {
+        let direct = self.peer_ids(item_id);
+        let mut second: Vec<String> = Vec::new();
+        for pid in &direct {
+            for e in self.edges("out", pid, None).into_iter().chain(self.edges("back", pid, None)) {
+                if !e.to_is_note || e.peer_id.is_empty() { continue; }
+                if e.peer_id.eq_ignore_ascii_case(item_id) { continue; }
+                if direct.iter().any(|d| d.eq_ignore_ascii_case(&e.peer_id)) { continue; }
+                second.push(e.peer_id.clone());
+            }
+        }
+        second.sort();
+        second.dedup();
+        (direct, second)
+    }
+
     /// 双向邻接（related 排除已链接对端用）。
     pub fn peer_ids(&self, item_id: &str) -> Vec<String> {
         let mut out: Vec<String> = self.edges("out", item_id, None)

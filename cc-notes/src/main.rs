@@ -764,7 +764,40 @@ async fn build_links_view(
     Ok(Json(json!({ "ok": true, "count": links.len(), "links": links })))
 }
 
-/// GET /api/notes/{id}/related — tags 作 FTS 词，排除自身与已链接对端。
+/// 打分（可解释）：total = 3×共享tag + 2×co-link邻居 + recency(0..1)。
+/// recency = 2^(-age_days/14)（两周半衰期），updated_at 为准。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RelatedScore {
+    total: f64,
+    shared_tags: f64,
+    co_link: f64,
+    recency: f64,
+}
+
+fn score_related(
+    now_ms: i64,
+    my_tags: &[String],
+    cand_tags: &[String],
+    co_link_peers: usize,
+    updated_ms: i64,
+) -> RelatedScore {
+    let shared = my_tags
+        .iter()
+        .filter(|t| cand_tags.iter().any(|c| c.eq_ignore_ascii_case(t)))
+        .count() as f64;
+    let age_days = ((now_ms - updated_ms).max(0) as f64) / 86_400_000.0;
+    let recency = 2.0f64.powf(-age_days / 14.0);
+    RelatedScore {
+        total: 3.0 * shared + 2.0 * co_link_peers as f64 + recency,
+        shared_tags: shared,
+        co_link: co_link_peers as f64,
+        recency,
+    }
+}
+
+/// GET /api/notes/{id}/related — tags 作候选池（FTS），link 图与 recency 打分，
+/// 排除自身与已链接对端。分数可解释（sharedTags / coLink / recency 三个分量）。
 async fn agent_note_related(
     State(state): State<Arc<App>>,
     Path(id): Path<String>,
@@ -785,9 +818,9 @@ async fn agent_note_related(
     if tags.is_empty() {
         return Ok(Json(json!({ "ok": true, "basedOn": [], "count": 0, "items": [] })));
     }
-    let linked_peers: Vec<String> = state.link_store.peer_ids(&note_id);
+    let (direct_peers, second_peers) = state.link_store.neighborhood(&note_id);
     let qstr = tags.join(" ");
-    let limit_q = limit + linked_peers.len() + 5;
+    let limit_q = limit + direct_peers.len() + second_peers.len() + 10;
     let mut hits = with_vault(state.clone(), move |vault| {
         vault.search(&qstr, limit_q).map(|hits| {
             hits.into_iter()
@@ -796,23 +829,53 @@ async fn agent_note_related(
         })
     })
     .await?;
-    let mut items: Vec<Value> = Vec::new();
+    let now_ms = now_ms();
+    let mut scored: Vec<(RelatedScore, Value)> = Vec::new();
     for (hid, title, snippet) in hits.drain(..) {
-        if hid == note_id || linked_peers.iter().any(|p| p.eq_ignore_ascii_case(&hid)) {
+        if hid.eq_ignore_ascii_case(&note_id) {
             continue;
+        }
+        if direct_peers.iter().any(|p| p.eq_ignore_ascii_case(&hid)) {
+            continue; // 已链接对端不重复推荐
         }
         let tags = id_candidates(&hid)
             .iter()
             .map(|c| state.tag_store.for_note(c))
             .find(|t| !t.is_empty())
             .unwrap_or_default();
-        items.push(json!({
-            "id": hid, "title": title, "preview": snippet, "tags": tags,
-        }));
-        if items.len() >= limit {
-            break;
-        }
+        // co-link：候选与我在二跳图上相邻（我们链接了同一个第三篇）—— 纯共邻信号。
+        let co_link = if second_peers.iter().any(|p| p.eq_ignore_ascii_case(&hid)) { 1 } else { 0 };
+        let updated = with_vault(state.clone(), {
+            let hid = hid.clone();
+            move |vault| {
+                Ok::<_, notebase_store::Error>(
+                    vault.store().note(&hid)?.map(|m| m.updated_at).unwrap_or(0),
+                )
+            }
+        })
+        .await?;
+        let score = score_related(now_ms, &tags, &tags, co_link, updated);
+        scored.push((
+            score,
+            json!({
+                "id": hid, "title": title, "preview": snippet, "tags": tags,
+            }),
+        ));
     }
+    scored.sort_by(|a, b| b.0.total.partial_cmp(&a.0.total).unwrap_or(std::cmp::Ordering::Equal));
+    let items: Vec<Value> = scored
+        .into_iter()
+        .take(limit)
+        .map(|(score, mut item)| {
+            item["score"] = json!({
+                "total": (score.total * 100.0).round() / 100.0,
+                "sharedTags": score.shared_tags,
+                "coLink": score.co_link,
+                "recency": (score.recency * 1000.0).round() / 1000.0,
+            });
+            item
+        })
+        .collect();
     Ok(Json(json!({ "ok": true, "basedOn": tags, "count": items.len(), "items": items })))
 }
 
