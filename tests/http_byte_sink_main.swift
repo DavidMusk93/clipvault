@@ -16,6 +16,10 @@ import Foundation
 @main
 enum HTTPByteSinkTests {
     static func main() {
+        // Harness hygiene: the sink's send path is a SIGPIPE crash canary (an
+        // fd may be closed under it). Product code uses SO_NOSIGPIPE; the test
+        // process itself must survive the race instead of dying at 141.
+        signal(SIGPIPE, SIG_IGN)
         var failures = 0
         func ok(_ name: String, _ cond: Bool, _ detail: String = "") {
             if cond {
