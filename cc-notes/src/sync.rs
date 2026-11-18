@@ -477,7 +477,8 @@ pub fn sse_thread(app: Arc<App>, notify: Arc<tokio::sync::Notify>, connected: Ar
                 .set("Accept", "text/event-stream")
                 // 压缩代理会攒小帧，读起来像死流 —— 与 mac 同一条教训。
                 .set("Accept-Encoding", "identity")
-                .timeout_connect(std::time::Duration::from_secs(10))
+                // 不设总体超时：ostore 头部/首 ping 可能 ~15s 才到（curl 实测），
+                // 设了就把健康的流掐死。僵尸流由 30s 兜底轮询扛。
                 .call();
             match resp {
                 Ok(resp) => {
