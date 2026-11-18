@@ -122,6 +122,26 @@ curl -sS --noproxy '*' -X POST http://127.0.0.1/api/notes \
   -d '{"body":"# 会话结论\n\nTUDP Cube archive 起点用既有 RG start。","agent":"pi"}'
 ```
 
+## CLI wrapper（P4）
+
+```bash
+# token: --token > $CLIPVAULT_AGENT_TOKEN > $CLIPVAULT_HOME/config/agent-token
+./scripts/cv-notes meta
+./scripts/cv-notes save --agent pi --op-id op-001 --body-file - <<'EOF'
+正文…
+EOF
+./scripts/cv-notes list --tag tudp --limit 10
+./scripts/cv-notes get <id>
+./scripts/cv-notes link <note-id> --to-id <id> --kind explains
+./scripts/cv-notes links <note-id> --kind supersedes
+./scripts/cv-notes backlinks <note-id>
+./scripts/cv-notes related <note-id> --limit 5
+./scripts/cv-notes delete <note-id>   # 软删可撤销
+./scripts/cv-notes tags
+```
+
+远程服务：`--base` / `$CLIPVAULT_BASE`（默认本机 :8080）。
+
 ## 不变量（agent 必须遵守）
 
 1. **唯一写管线**：agent 写入与用户共用 `saveComposeNote()`；用户 UI 会通过 SSE `compose_saved` 实时看到 agent 的编辑。禁止 agent 直写 SQLite 或绕过该管线。
