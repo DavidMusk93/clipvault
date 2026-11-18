@@ -773,6 +773,17 @@ final class DatabaseManager: ObservableObject {
             backfillNoteTags()
             metaSet("note_tags_backfill", "1")
         }
+        // Agent notes API (P2a): idempotency ledger. One row per accepted agent op;
+        // replay of the same op id answers from here without writing again.
+        execQuiet("""
+        CREATE TABLE IF NOT EXISTS agent_note_ops (
+            op_id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            content_hash TEXT,
+            ts REAL NOT NULL
+        );
+        """)
+        execQuiet("CREATE INDEX IF NOT EXISTS idx_agent_note_ops_item ON agent_note_ops(item_id, ts DESC);")
         execQuiet("""
         CREATE TABLE IF NOT EXISTS share_links (
             token TEXT PRIMARY KEY,
@@ -3251,6 +3262,7 @@ final class DatabaseManager: ObservableObject {
         refId: String?,
         parentHash: String? = nil,
         source: String = "web",
+        merge: Bool = true,
         completion: @escaping (ComposeNotes.SaveResult?, String?) -> Void
     ) {
         dbQueue.async { [weak self] in
@@ -3260,7 +3272,7 @@ final class DatabaseManager: ObservableObject {
             }
             do {
                 let item = try self.saveComposeNoteLocked(
-                    id: id, title: title, body: body, refId: refId, parentHash: parentHash, source: source
+                    id: id, title: title, body: body, refId: refId, parentHash: parentHash, source: source, merge: merge
                 )
                 DispatchQueue.main.async { completion(item, nil) }
             } catch {
@@ -3274,13 +3286,21 @@ final class DatabaseManager: ObservableObject {
         case notANote
         case missing
         case engine
+        /// Agent merge=false path: CAS base is stale; carries the live hash for rebase.
+        case casConflict(currentHash: String)
         var errorDescription: String? {
             switch self {
             case .empty: return "先写点什么"
             case .notANote: return "只能改自己写下的笔记"
             case .missing: return "笔记不存在"
             case .engine: return "笔记引擎写入失败，本次保存已取消（旧内容仍在）"
+            case .casConflict: return "内容已被并行修改（CAS 冲突）"
             }
+        }
+        /// Machine-readable code for the agent API: "cas_conflict:<currentHash>".
+        var agentCode: String? {
+            if case .casConflict(let hash) = self { return "cas_conflict:\(hash)" }
+            return nil
         }
     }
 
@@ -3291,7 +3311,8 @@ final class DatabaseManager: ObservableObject {
         body rawBody: String,
         refId: String?,
         parentHash: String? = nil,
-        source: String
+        source: String,
+        merge: Bool = true
     ) throws -> ComposeNotes.SaveResult {
         guard let db = db else { throw ComposeError.missing }
         let incoming = ComposeNotes.normalizedBody(title: title, body: rawBody)
@@ -3312,6 +3333,13 @@ final class DatabaseManager: ObservableObject {
             id = UUID()
             current = nil
             isUpdate = false
+        }
+        // Agent merge=false：CAS 必须严格命中（parentHash == 当前 hash），否则拒绝并带回 live hash。
+        // 用户路径（merge=true）不进这个分支，语义逐字节不变。
+        if isUpdate, !merge, let current, let parentHash, !parentHash.isEmpty {
+            if current.contentHash != parentHash {
+                throw ComposeError.casConflict(currentHash: current.contentHash)
+            }
         }
         let plan = planComposeWrite(
             noteId: id,
@@ -3431,6 +3459,110 @@ final class DatabaseManager: ObservableObject {
     struct AgentNoteRow {
         let item: ClipboardItem
         let tags: [String]
+    }
+
+    /// Agent 保存结果：CAS 冲突单独携带 live hash，不走 errorDescription 字符串。
+    struct AgentSaveOutcome {
+        let result: ComposeNotes.SaveResult?
+        let casConflictHash: String?
+        let message: String?
+    }
+
+    /// Agent 写入：仍走 saveComposeNoteLocked 唯一管线，只是把 ComposeError
+    /// 拆成结构化结果（casConflict 带回 live hash 供 rebase）。默认 merge=true 与用户路径一致。
+    func saveAgentNote(
+        id: UUID?,
+        title: String?,
+        body: String,
+        refId: String?,
+        parentHash: String?,
+        merge: Bool,
+        source: String,
+        completion: @escaping (AgentSaveOutcome) -> Void
+    ) {
+        dbQueue.async { [weak self] in
+            guard let self else {
+                DispatchQueue.main.async {
+                    completion(AgentSaveOutcome(result: nil, casConflictHash: nil, message: "internal"))
+                }
+                return
+            }
+            do {
+                let r = try self.saveComposeNoteLocked(
+                    id: id, title: title, body: body, refId: refId,
+                    parentHash: parentHash, source: source, merge: merge
+                )
+                DispatchQueue.main.async {
+                    completion(AgentSaveOutcome(result: r, casConflictHash: nil, message: nil))
+                }
+            } catch let e as ComposeError {
+                switch e {
+                case .casConflict(let hash):
+                    DispatchQueue.main.async {
+                        completion(AgentSaveOutcome(result: nil, casConflictHash: hash, message: nil))
+                    }
+                default:
+                    DispatchQueue.main.async {
+                        completion(AgentSaveOutcome(result: nil, casConflictHash: nil, message: e.errorDescription ?? "error"))
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(AgentSaveOutcome(result: nil, casConflictHash: nil, message: error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    /// 幂等台账：同 opId 已接受过 → 返回当时那篇（现状读）。
+    func agentNoteOpLookup(_ opId: String, completion: @escaping (AgentNoteRow?) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "SELECT item_id FROM agent_note_ops WHERE op_id = ?;", -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            bindText(stmt, 1, opId)
+            var itemId: String?
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                itemId = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+            }
+            sqlite3_finalize(stmt)
+            guard let itemId, let uuid = UUID(uuidString: itemId) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            self.fetchAgentNote(id: uuid) { row, _ in
+                completion(row)
+            }
+        }
+    }
+
+    /// 幂等台账登记（INSERT OR IGNORE；并发同 opId 只留一条）。
+    func recordAgentNoteOp(_ opId: String, itemId: UUID, contentHash: String?) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else { return }
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "INSERT OR IGNORE INTO agent_note_ops (op_id, item_id, content_hash, ts) VALUES (?, ?, ?, ?);",
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return }
+            bindText(stmt, 1, opId)
+            bindText(stmt, 2, itemId.uuidString)
+            if let contentHash {
+                bindText(stmt, 3, contentHash)
+            } else {
+                sqlite3_bind_null(stmt, 3)
+            }
+            sqlite3_bind_double(stmt, 4, Date().timeIntervalSince1970)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
     }
 
     /// One-time backfill of note_tags from existing notes.

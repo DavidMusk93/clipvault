@@ -80,6 +80,13 @@ enum AgentNotesTests {
             "agent:" + String(repeating: "a", count: 32)
         )
 
+        // opId 幂等键消洗：白名单 + 长度 + 非法即 nil。
+        eq("opid", AgentNotesAccess.sanitizeOpId(" pi-2026.11_18:x ") ?? "", "pi-2026.11_18:x")
+        ok("opid-nil", AgentNotesAccess.sanitizeOpId(nil) == nil)
+        ok("opid-empty", AgentNotesAccess.sanitizeOpId("  ") == nil)
+        ok("opid-illegal", AgentNotesAccess.sanitizeOpId("bad id") == nil)
+        ok("opid-trunc", AgentNotesAccess.sanitizeOpId(String(repeating: "a", count: 200))?.count == 128)
+
         if fails > 0 {
             FileHandle.standardError.write(Data("agent_notes_main: \(fails) failure(s)\n".utf8))
             exit(1)

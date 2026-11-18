@@ -1989,7 +1989,7 @@ class WebServer {
         [
             "ok": true,
             "api": "clipvault-notes",
-            "version": "p1",
+            "version": "p2a",
             "endpoints": [
                 "POST /api/notes": "create/update a note (body required; id to update)",
                 "GET /api/notes": "list notes (?q= fts, ?tag=, ?since= unix ts, ?limit= default 50 max 200)",
@@ -2059,31 +2059,123 @@ class WebServer {
         }
     }
 
-    /// POST /api/notes  { body, title?, id?, refId?, parentHash?, agent? }
+    /// agent 专用 JSON 应答：带真实 HTTP 状态码（用户端点不变）。
+    private func sendAgentJSON(_ object: [String: Any], status: Int, connection: HTTPByteSink) {
+        guard let body = try? JSONSerialization.data(withJSONObject: object) else {
+            sendErrorResponse(connection: connection, status: 500, message: "JSON encode failed")
+            return
+        }
+        sendBinary(
+            status: status,
+            reason: status == 200 ? "OK" : "Error",
+            contentType: "application/json; charset=utf-8",
+            body: body,
+            connection: connection,
+            extraHeaders: [("Cache-Control", "no-store")]
+        )
+    }
+
+    /// POST /api/notes  { body, title?, id?, refId?, parentHash?, merge?, opId?, agent? }
     /// 与 /api/compose 同一条 saveComposeNote() 管线，仅归因 source="agent:<name>"。
+    /// P2a：opId 幂等重放；merge=false 时 CAS 严格命中，否则 409 带 currentHash。
     private func handleAgentNoteSave(data: Data, headers: [String: String], connection: HTTPByteSink) {
         guard let obj = jsonBody(from: data), let body = obj["body"] as? String else {
-            sendJSON(["ok": false, "message": "expected {body}"], connection: connection)
+            sendAgentJSON(["ok": false, "message": "expected {body}"], status: 400, connection: connection)
             return
         }
         let headerAgent = headers["x-clipvault-agent"]
         let agentName = (obj["agent"] as? String) ?? (headerAgent?.isEmpty == false ? headerAgent : nil)
         let source = AgentNotesAccess.agentSource(name: agentName)
+        let rawOpId = (obj["opId"] as? String) ?? headers["x-clipvault-op-id"]
+        let opId = AgentNotesAccess.sanitizeOpId(rawOpId)
+        if rawOpId != nil, opId == nil {
+            sendAgentJSON(
+                ["ok": false, "message": "opId must match [A-Za-z0-9._:-]{1,128}"],
+                status: 400,
+                connection: connection
+            )
+            return
+        }
+        let merge = (obj["merge"] as? Bool) ?? true
+        let parentHash = obj["parentHash"] as? String
         let id = (obj["id"] as? String).flatMap { UUID(uuidString: $0) }
-        database.saveComposeNote(
-            id: id,
-            title: obj["title"] as? String,
-            body: body,
-            refId: obj["refId"] as? String,
-            parentHash: obj["parentHash"] as? String,
-            source: source
-        ) { [weak self] result, err in
-            guard let self else { return }
-            guard let result else {
-                self.sendJSON(["ok": false, "message": err ?? "保存失败"], connection: connection)
-                return
+        if !merge, id != nil, (parentHash ?? "").isEmpty {
+            sendAgentJSON(
+                ["ok": false, "message": "merge=false 更新必须带 parentHash"],
+                status: 400,
+                connection: connection
+            )
+            return
+        }
+
+        func doSave() {
+            database.saveAgentNote(
+                id: id,
+                title: obj["title"] as? String,
+                body: body,
+                refId: obj["refId"] as? String,
+                parentHash: parentHash,
+                merge: merge,
+                source: source
+            ) { [weak self] outcome in
+                guard let self else { return }
+                if let result = outcome.result {
+                    if let opId {
+                        self.database.recordAgentNoteOp(
+                            opId,
+                            itemId: result.item.id,
+                            contentHash: result.item.contentHash
+                        )
+                    }
+                    self.finishComposeSave(
+                        result,
+                        connection: connection,
+                        extra: ["source": source, "idempotent": false]
+                    )
+                } else if let currentHash = outcome.casConflictHash {
+                    self.sendAgentJSON(
+                        [
+                            "ok": false,
+                            "status": "cas_conflict",
+                            "currentHash": currentHash,
+                            "message": "内容已被并行修改；GET /api/notes/{id} 拉最新后带新 parentHash 重放",
+                        ],
+                        status: 409,
+                        connection: connection
+                    )
+                } else {
+                    self.sendAgentJSON(
+                        ["ok": false, "message": outcome.message ?? "保存失败"],
+                        status: 400,
+                        connection: connection
+                    )
+                }
             }
-            self.finishComposeSave(result, connection: connection, extra: ["source": source])
+        }
+
+        if let opId {
+            database.agentNoteOpLookup(opId) { [weak self] existing in
+                guard let self else { return }
+                if let existing {
+                    var itemJSON = self.itemToJSON(existing.item)
+                    itemJSON["ok"] = true
+                    self.sendAgentJSON(
+                        [
+                            "ok": true,
+                            "idempotent": true,
+                            "item": itemJSON,
+                            "tags": existing.tags,
+                            "source": source,
+                        ],
+                        status: 200,
+                        connection: connection
+                    )
+                    return
+                }
+                doSave()
+            }
+        } else {
+            doSave()
         }
     }
 

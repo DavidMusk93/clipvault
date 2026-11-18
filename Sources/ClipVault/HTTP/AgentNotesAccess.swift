@@ -54,6 +54,15 @@ enum AgentNotesAccess {
         "agent:\(sanitizeAgentName(name))"
     }
 
+    /// 幂等 op id：可打印 ASCII `[A-Za-z0-9._:-]`，≤128，去首尾空白；非法则 nil。
+    static func sanitizeOpId(_ raw: String?) -> String? {
+        guard var id = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else { return nil }
+        id = String(id.prefix(128))
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-")
+        guard id.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        return id
+    }
+
     static func sanitizeAgentName(_ raw: String?) -> String {
         guard var name = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
             return "agent"

@@ -33,11 +33,11 @@ POST /api/notes
    409 不适用（P0 不返回；P2 显式 merge=false 时才有）
 ```
 
-### P0 · 能力表
+### 能力表
 
 ```text
 GET /api/notes/_meta
-→ { ok, api:"clipvault-notes", version:"p1", endpoints:{...} }
+→ { ok, api:"clipvault-notes", version:"p2a", endpoints:{...} }
 ```
 
 ### P1 · 读
@@ -57,6 +57,27 @@ GET /api/notes/tags
 `note_tags` 是新增投影：保存时服务端从 markdown 提取（围栏外 `#tag`，
 同前端 `extractNoteTags` 语义），首次启动回填存量笔记。前端 `#tag` 交互不动。
 
+### P2a · 写语义（幂等 + CAS）
+
+```text
+POST /api/notes 增参：
+  opId        JSON 或 header X-ClipVault-Op-Id；[A-Za-z0-9._:-]{1,128}
+              同 opId 重放 → 200 { ok, idempotent:true, item, tags, source }，不再写
+  merge       默认 true（与用户路径一致：三方合并静默）；false = 严格 CAS
+  merge=false 更新必须带 parentHash；parentHash != 当前 contentHash →
+              409 { ok:false, status:"cas_conflict", currentHash }
+              → GET /api/notes/{id} 拉最新，带新 parentHash 重放
+agent 端点错误用真实状态码：400（空 body / 非法 opId / merge=false 缺 parentHash）、
+409（CAS）、401/404/405 同 P0。
+```
+
+```bash
+# CAS 冲突重放示例
+H1=$(curl -sS ... -X POST http://127.0.0.1/api/notes \
+  -H "Authorization: Bearer $TOKEN" -H "X-ClipVault-Op-Id: op-001" \
+  -d '{"id":"UUID","body":"新内容","parentHash":"旧hash","merge":false}')
+# 409 → currentHash；用 currentHash 作为新 parentHash 再发同一 opId → 200
+
 ## 示例
 
 ```bash
@@ -73,5 +94,6 @@ curl -sS --noproxy '*' -X POST http://127.0.0.1/api/notes \
 1. **唯一写管线**：agent 写入与用户共用 `saveComposeNote()`；用户 UI 会通过 SSE `compose_saved` 实时看到 agent 的编辑。禁止 agent 直写 SQLite 或绕过该管线。
 2. **用户是主操作员**：agent 不动用户 UI 语义；合并冲突默认静默合并（与用户路径一致）。
 3. **标题只由标题栏命名**：存储形如 `# title\n\nbody`；传 `title` 字段，别在 body 首行塞 H1 冒充标题。
-4. **删除（P2 起）为软删进回收箱**，可撤销。
-5. 单用户 + agent 多身份；本产品不含多租户隔离。
+4. **删除（P2b 起）为软删进回收箱**，可撤销。
+5. **幂等与 CAS（P2a 起）**：写入带 `opId` 则同 opId 只生效一次；`merge=false` 走严格 CAS，409 后用 `currentHash` rebase 重放。
+6. 单用户 + agent 多身份；本产品不含多租户隔离。
