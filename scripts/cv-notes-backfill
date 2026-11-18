@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""cv-notes-backfill — 把本机（mac 真源）的存活笔记一次性迁入 cc 记忆层。
+
+只读本机 SQLite，POST /api/notes/_backfill 到 cc（不发布 trx，mac 时间戳保真）。
+幂等：cc 已存在的 id 会跳过，重跑安全。
+
+用法：
+  python3 scripts/cv-notes-backfill [--db PATH] [--base URL] [--token TOKEN] [--batch N] [--dry-run]
+默认 db = $CLIPVAULT_HOME/clipflow.db，base = https://<tunnel-domain>/mem（operator 提供）。
+"""
+
+import argparse
+import json
+import os
+import sqlite3
+import sys
+import urllib.request
+
+BASE_DEFAULT = os.environ.get("CLIPVAULT_NOTES_BASE", "http://127.0.0.1:9490")
+
+
+def post_backfill(base: str, token: str, notes: list) -> dict:
+    data = json.dumps({"notes": notes}, ensure_ascii=False).encode()
+    req = urllib.request.Request(
+        base.rstrip("/") + "/api/notes/_backfill",
+        data=data,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", "User-Agent": "cv-notes-backfill/1.0"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read())
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--db", default=os.path.join(
+        os.environ.get("CLIPVAULT_HOME", os.path.expanduser(
+            "~/Library/Application Support/Keepsake")), "clipflow.db"))
+    ap.add_argument("--base", default=BASE_DEFAULT)
+    ap.add_argument("--token", default=None)
+    ap.add_argument("--batch", type=int, default=100)
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+
+    token = a.token or os.environ.get("CLIPVAULT_NOTES_TOKEN")
+    if not token and a.base.startswith("http://127.0.0.1:9490"):
+        home = os.environ.get("CLIPVAULT_NOTES_HOME", "")
+        try:
+            token = open(os.path.join(home, "token")).read().strip()
+        except OSError:
+            pass
+    if not token:
+        sys.exit("need --token or $CLIPVAULT_NOTES_TOKEN")
+
+    conn = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
+    rows = conn.execute(
+        "SELECT id, text_content, timestamp, first_seen_at FROM clipboard_items "
+        "WHERE type = 'note' AND deleted_at IS NULL ORDER BY timestamp DESC"
+    ).fetchall()
+    print(f"source: {len(rows)} live notes")
+    if a.dry_run:
+        sys.exit(0)
+
+    imported = skipped = 0
+    for i in range(0, len(rows), a.batch):
+        chunk = [
+            {
+                "id": rid,
+                "body": body or "",
+                "createdAt": ts,
+                "updatedAt": ts,
+            }
+            for rid, body, ts, _ in rows[i : i + a.batch]
+        ]
+        out = post_backfill(a.base, token, chunk)
+        imported += out.get("imported", 0)
+        skipped += out.get("skippedExisting", 0)
+        print(f"  batch {i // a.batch + 1}: +{out.get('imported')} =skip{out.get('skippedExisting')}")
+    print(f"done: imported={imported} skippedExisting={skipped}")
+
+
+if __name__ == "__main__":
+    main()

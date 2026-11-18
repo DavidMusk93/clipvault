@@ -98,8 +98,10 @@ mac 侧：`CLIPVAULT_NOTEBASE_PRIMARY=1` 已生效（notebase 已是 mac 的笔�
 
 ## §10 剩余项（后续 goal）
 
+- ~~公网限流~~ **done**：cc-notes 每 IP 令牌桶 + 512KB body 上限。
+
 - cc 侧 links/backlinks/related：链接真源在 mac `clip_link_ops`；cc 侧镜像属跨 host 投影，等 agent 使用反馈再立项。
-- mac→cc 存量 backfill（~34k trx，skip 已记日志）。
+- ~~mac→cc 存量 backfill~~ **done**：`_backfill` 端点 + `scripts/cv-notes-backfill`，319 条笔记全量迁入（原时间戳保真、不发 trx），抽查内容一致。
 - cc SSE 事件驱动（现 2s 轮询，端到端 ≤4s 已达标）。
 - 图片附件（blobKeys）relay。
 

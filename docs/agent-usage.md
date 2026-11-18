@@ -150,6 +150,16 @@ EOF
 
 token 获取：cc 上 `/root/clipvault/notes/token`（0600）；与 mac 本机 token **不同**，别混用。
 
+## 运维操作
+
+```text
+POST /api/notes/_backfill  { notes:[{id, body, createdAt, updatedAt}] }  ≤500/批
+  → { ok, imported, skippedExisting, published:0 }
+  operator 一次性迁移（scripts/cv-notes-backfill）：原时间戳保真、幂等跳过已有 id、
+  不发布 trx（mac 是真源，发布只会制造 wallTs 噪声）。
+公网入口限流：每 IP burst 30、持续 1 rps（CF-Connecting-IP），超出 429 + Retry-After；
+  body 上限 512KB。cc 应答时间戳为 unix 秒（对齐 mac 形状）。
+
 ## 文档自举
 
 `GET /api/notes/_doc` 直接返回本文件（markdown）—— agent 不需要访问仓库即可拿到用法。
