@@ -140,9 +140,20 @@ EOF
 ./scripts/cv-notes tags
 ```
 
-远程服务：`--base` / `$CLIPVAULT_BASE`（默认本机 :8080）。
-cc 记忆层：`ssh -L 9491:127.0.0.1:9490 cc` 后 `cv-notes --base http://127.0.0.1:9491 --token <cc token>`；
-cc 与 mac 双向 trx 同步（≤4s），详见 `docs/design-cc-memory-layer.md`。
+## 入口（agent 面对的服务）
+
+| 入口 | 地址 | 说明 |
+| --- | --- | --- |
+| **公网（首选）** | `https://<tunnel-domain>/mem` | Cloudflare tunnel → caddy strip `/mem` → cc clipvault-notes；`cv-notes --base https://<tunnel-domain>/mem --token <cc-token>` |
+| cc 本机 | `http://127.0.0.1:9490` | cc 上直接调 |
+| ssh 隧道备用 | `ssh -L 9491:127.0.0.1:9490 cc` | 公网不可用时的回退（本地端口 9491 任意） |
+
+token 获取：cc 上 `/root/clipvault/notes/token`（0600）；与 mac 本机 token **不同**，别混用。
+
+## 文档自举
+
+`GET /api/notes/_doc` 直接返回本文件（markdown）—— agent 不需要访问仓库即可拿到用法。
+cc 与 mac 双向 trx 同步（≤4s），架构与实施状态见 `docs/design-cc-memory-layer.md`。
 
 ## 不变量（agent 必须遵守）
 

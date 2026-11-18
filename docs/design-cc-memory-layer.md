@@ -103,7 +103,14 @@ mac 侧：`CLIPVAULT_NOTEBASE_PRIMARY=1` 已生效（notebase 已是 mac 的笔�
 - cc SSE 事件驱动（现 2s 轮询，端到端 ≤4s 已达标）。
 - 图片附件（blobKeys）relay。
 
-## Owner 裁决点（§9）
+## §9 裁决记录（2026-11-18 Owner 已定）
+
+1. 服务名/端口：`clipvault-notes` :9490（已实施）。
+2. **暴露面：公网 `https://<tunnel-domain>/mem`（Cloudflare tunnel → caddy :9491 strip → :9490）为 agent 正式入口**；鉴权 = Bearer token（0600，泄漏即轮换）；ssh -L 隧道为回退。运维注意：cloudflared（`cloudflared-nmem.service`）**SIGHUP = 进程退出**，改 ingress 后用 `systemctl restart cloudflared-nmem`。
+3. 数据落点 `/root/clipvault/notes/`（已实施）。
+4. agent 身份：暂不做白名单，`agent:<name>` 自由归因。
+
+## Owner 裁决点（§9 原始问题，已全部裁决）
 
 1. cc 服务名/端口 `clipvault-notes` :9490 是否认可。
 2. agent 入口暴露面：仅 loopback + ssh 隧道（默认），还是 Caddy 公网路由 + 更强鉴权。

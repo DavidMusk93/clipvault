@@ -21,6 +21,10 @@ use serde_json::{json, Value};
 
 use notebase_store::Vault;
 
+/// agent 参考文档自举：编译期嵌入仓库 docs/agent-usage.md，
+/// agent 从服务本身拉取（GET /api/notes/_doc），不必找仓库。
+const AGENT_USAGE_DOC: &str = include_str!("../../docs/agent-usage.md");
+
 struct App {
     vault: Mutex<Vault>,
     token: String,
@@ -392,6 +396,15 @@ async fn delete_note(
     Ok(Json(json!({ "ok": true, "soft": false, "id": id })))
 }
 
+async fn usage_doc() -> Response {
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
+        AGENT_USAGE_DOC,
+    )
+        .into_response()
+}
+
 async fn auth(
     State(state): State<Arc<App>>,
     req: axum::extract::Request,
@@ -460,6 +473,7 @@ async fn main() {
     }
 
     let app = Router::new()
+        .route("/api/notes/_doc", get(usage_doc))
         .route("/api/notes/_meta", get(meta))
         .route("/api/notes", get(list_notes).post(save_note))
         .route("/api/notes/{id}", get(show_note).delete(delete_note))
