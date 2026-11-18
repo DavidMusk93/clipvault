@@ -2066,6 +2066,10 @@ final class DatabaseManager: ObservableObject {
                     source: source
                 )
                 touchLinkCountsForItem(id: idStr, hash: hash)
+                // A tombstone that stops at clipflow leaves the note in the
+                // primary engine — the notes list would show the ghost
+                // forever. Same projection rule as pulled compose ops.
+                NotebaseShadow.shared.forget(id: idStr)
             }
             NotificationCenter.default.post(
                 name: CloudDocsBackupService.itemRemovedNotification,
@@ -4862,9 +4866,15 @@ final class DatabaseManager: ObservableObject {
                     }
                     return body
                 }
-                return lines.joined(separator: " ")
+                // Empty inline markup (`\u{60}\u{60}`, `**`) carries no meaning
+                // and the engine round-trip provably drops it — that is not
+                // drift. Strip before the whitespace collapse.
+                let collapsed = lines.joined(separator: " ")
                     .split(whereSeparator: { $0.isWhitespace })
                     .joined(separator: " ")
+                return collapsed
+                    .replacingOccurrences(of: "`\u{60}", with: "")
+                    .replacingOccurrences(of: "**", with: "")
             }
             return canonical(a) == canonical(b)
         }
@@ -4987,6 +4997,20 @@ final class DatabaseManager: ObservableObject {
                 written += 1
             } else {
                 failed += 1
+            }
+        }
+        // A mirror, not an append: notes the engine holds without an alive
+        // clipflow row are ghosts (tombstones from before the engine
+        // projection existed). Remove them or the list shows them forever.
+        let alive = Set(bodies.map { $0.0 })
+        var removed = 0
+        if let engineIds = NotebaseShadow.shared.listNoteIds() {
+            for id in engineIds where !alive.contains(id) {
+                NotebaseShadow.shared.forget(id: id)
+                removed += 1
+            }
+            if removed > 0 {
+                print("[notebase] reconcile removed \(removed) engine-only note(s)")
             }
         }
         DispatchQueue.main.async { completion(written, failed) }
@@ -6120,11 +6144,13 @@ final class DatabaseManager: ObservableObject {
             }
             let idStr = id.uuidString
             var hash: String?
+            var isNote = false
             var hStmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, "SELECT content_hash FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
+            if sqlite3_prepare_v2(db, "SELECT content_hash, type FROM clipboard_items WHERE id = ?;", -1, &hStmt, nil) == SQLITE_OK {
                 self.bindText(hStmt, 1, idStr)
                 if sqlite3_step(hStmt) == SQLITE_ROW {
                     hash = sqlite3_column_text(hStmt, 0).map { String(cString: $0) }
+                    isNote = sqlite3_column_text(hStmt, 1).map { String(cString: $0) } == ClipboardType.note.rawValue
                 }
             }
             sqlite3_finalize(hStmt)
@@ -6152,6 +6178,16 @@ final class DatabaseManager: ObservableObject {
                     source: source
                 )
                 self.touchLinkCountsForItem(id: idStr, hash: hash)
+                if isNote {
+                    // Engine-first store: a user deletion must reach the
+                    // engine too, or the note lives on in the editor.
+                    NotebaseShadow.shared.forget(id: idStr)
+                }
+                // Deletions must reach peers: a local-only soft delete leaves
+                // the note alive on every other machine forever
+                // (recordLocalTombstone had zero call sites). Peers soft-delete
+                // into their own trash — restorable, TTL-bounded.
+                CloudDocsSyncService.shared?.recordLocalTombstone(id: id)
             }
             DispatchQueue.main.async { completion?(stepRes == SQLITE_DONE && changed) }
         }
@@ -6171,10 +6207,11 @@ final class DatabaseManager: ObservableObject {
             var source: String?
             var html: String?
             var hash: String?
+            var typeRaw: String?
             var q: OpaquePointer?
             if sqlite3_prepare_v2(
                 db,
-                "SELECT text_content, ocr_text, source_app, html_content, content_hash FROM clipboard_items WHERE id = ? AND deleted_at IS NOT NULL;",
+                "SELECT text_content, ocr_text, source_app, html_content, content_hash, type FROM clipboard_items WHERE id = ? AND deleted_at IS NOT NULL;",
                 -1, &q, nil
             ) == SQLITE_OK {
                 self.bindText(q, 1, idStr)
@@ -6184,6 +6221,7 @@ final class DatabaseManager: ObservableObject {
                     source = sqlite3_column_text(q, 2).map { String(cString: $0) }
                     html = sqlite3_column_text(q, 3).map { String(cString: $0) }
                     hash = sqlite3_column_text(q, 4).map { String(cString: $0) }
+                    typeRaw = sqlite3_column_text(q, 5).map { String(cString: $0) }
                 } else {
                     sqlite3_finalize(q)
                     DispatchQueue.main.async { completion?(false) }
@@ -6216,6 +6254,21 @@ final class DatabaseManager: ObservableObject {
                 source: "web"
             )
             self.touchLinkCountsForItem(id: idStr, hash: hash)
+            // Restore must resurrect the engine note the delete removed.
+            NotebaseShadow.shared.mirror(id: idStr, markdown: text ?? "", updatedAt: Date())
+            // The delete may already have tombstoned this note on peers;
+            // republish the restored body so they resurrect it too.
+            if typeRaw == ClipboardType.note.rawValue, let text, !text.isEmpty {
+                let item = ClipboardItem(
+                    id: id,
+                    timestamp: Date(),
+                    type: .note,
+                    contentHash: hash ?? ComposeNotes.contentHash(id: id, body: text),
+                    textContent: text,
+                    sourceApp: ComposeNotes.sourceApp
+                )
+                CloudDocsSyncService.shared?.recordLocalCompose(item: item, parentHash: nil)
+            }
             DispatchQueue.main.async { completion?(true) }
         }
     }

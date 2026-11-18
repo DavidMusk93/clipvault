@@ -105,6 +105,17 @@ final class NotebaseShadow {
         #endif
     }
 
+    /// Every note id the engine currently holds (reconcile drift cleanup).
+    func listNoteIds() -> [String]? {
+        #if NOTEBASE
+        guard let path, let vault = openVault(path) else { return nil }
+        guard let notes = try? vault.list(limit: 100_000, offset: 0) else { return nil }
+        return notes.map { $0.id }
+        #else
+        return nil
+        #endif
+    }
+
     /// The engine's markdown for a note (audit / repair).
     func engineMarkdown(id: String) -> String? {
         #if NOTEBASE
@@ -200,12 +211,18 @@ final class NotebaseShadow {
     }
 
     /// Drop a note from the shadow copy.
+    /// Remove one note. Best effort: the tombstone must not fail on engine
+    /// trouble — a reconcile pass removes whatever this misses.
     func forget(id: String) {
         #if NOTEBASE
         guard enabled, let path else { return }
         queue.async { [weak self] in
             guard let self, let vault = self.openVault(path) else { return }
-            _ = try? vault.delete(id: id)
+            do {
+                _ = try vault.delete(id: id)
+            } catch {
+                self.record(error)
+            }
         }
         #else
         _ = id

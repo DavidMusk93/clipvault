@@ -1143,8 +1143,8 @@ class WebServer {
         database.deleteItem(id: uuid) { [weak self] success in
             guard let self = self else { return }
             if success {
-                // Soft-delete only — do not tombstone peers (row still exists for TTL).
-                NotebaseShadow.shared.forget(id: uuid.uuidString)
+                // deleteItem projects the removal (engine forget + peer
+                // tombstone); this layer only fans the SSE event out.
                 self.broadcastSSE(event: "clip_deleted", id: uuid.uuidString)
                 self.sendJSON(["status": "deleted", "soft": true], connection: connection)
             } else {
