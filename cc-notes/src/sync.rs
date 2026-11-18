@@ -477,7 +477,7 @@ pub fn sse_thread(app: Arc<App>, notify: Arc<tokio::sync::Notify>, connected: Ar
                 .set("Accept", "text/event-stream")
                 // 压缩代理会攒小帧，读起来像死流 —— 与 mac 同一条教训。
                 .set("Accept-Encoding", "identity")
-                .timeout(std::time::Duration::from_secs(0))
+                .timeout_connect(std::time::Duration::from_secs(10))
                 .call();
             match resp {
                 Ok(resp) => {
@@ -489,8 +489,8 @@ pub fn sse_thread(app: Arc<App>, notify: Arc<tokio::sync::Notify>, connected: Ar
                         match line {
                             Ok(l) => {
                                 if l.is_empty() {
-                                    // 空行 = 帧边界；data 行存在即触发拉取。
-                                    if frame.contains("data:") {
+                                    // 空行 = 帧边界；对象事件才触发拉取（ping 不拉）。
+                                    if frame.contains("data:") && frame.contains("object.") {
                                         notify.notify_one();
                                     }
                                     frame.clear();
@@ -524,9 +524,8 @@ pub async fn pull_loop(app: Arc<App>) {
         tokio::select! {
             _ = notify.notified() => {},
             _ = fallback.tick() => {
-                if connected.load(std::sync::atomic::Ordering::Relaxed) {
-                    continue; // 流活着：兜底轮询让位给事件（SSE 自身有 ping 保活）
-                }
+                // 30s 兜底恒跑（一次 list 代价极小）：僵尸流也不能停数据。
+                let _ = &connected;
             },
         }
         match pull_once(app.clone()).await {
