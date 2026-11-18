@@ -71,6 +71,15 @@ agent 端点错误用真实状态码：400（空 body / 非法 opId / merge=fals
 409（CAS）、401/404/405 同 P0。
 ```
 
+### P2b · 删除（软删）
+
+```text
+DELETE /api/notes/{id}
+  → 200 { ok, soft:true, id }   与用户同一 deleteItem 路径
+  30 天回收箱可撤销；oplog 归因 agent:<name>；SSE clip_deleted 同用户路径
+幂等台账折叠：同一篇只保留最近 32 条 op（agent 高频写不无限堆账）。
+```
+
 ```bash
 # CAS 冲突重放示例
 H1=$(curl -sS ... -X POST http://127.0.0.1/api/notes \
@@ -94,6 +103,6 @@ curl -sS --noproxy '*' -X POST http://127.0.0.1/api/notes \
 1. **唯一写管线**：agent 写入与用户共用 `saveComposeNote()`；用户 UI 会通过 SSE `compose_saved` 实时看到 agent 的编辑。禁止 agent 直写 SQLite 或绕过该管线。
 2. **用户是主操作员**：agent 不动用户 UI 语义；合并冲突默认静默合并（与用户路径一致）。
 3. **标题只由标题栏命名**：存储形如 `# title\n\nbody`；传 `title` 字段，别在 body 首行塞 H1 冒充标题。
-4. **删除（P2b 起）为软删进回收箱**，可撤销。
+4. **删除为软删进回收箱**（30 天可撤销），agent 与用户同一路径。
 5. **幂等与 CAS（P2a 起）**：写入带 `opId` 则同 opId 只生效一次；`merge=false` 走严格 CAS，409 后用 `currentHash` rebase 重放。
 6. 单用户 + agent 多身份；本产品不含多租户隔离。

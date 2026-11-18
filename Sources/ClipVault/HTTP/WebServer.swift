@@ -1980,6 +1980,12 @@ class WebServer {
             handleAgentNotesTags(connection: connection)
         } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") {
             handleAgentNoteShow(idStr: String(pathOnly.dropFirst("/api/notes/".count)), connection: connection)
+        } else if method == "DELETE" && pathOnly.hasPrefix("/api/notes/") {
+            handleAgentNoteDelete(
+                idStr: String(pathOnly.dropFirst("/api/notes/".count)),
+                agentName: headers["x-clipvault-agent"],
+                connection: connection
+            )
         } else {
             sendErrorResponse(connection: connection, status: 405, message: "Method Not Allowed")
         }
@@ -1989,11 +1995,12 @@ class WebServer {
         [
             "ok": true,
             "api": "clipvault-notes",
-            "version": "p2a",
+            "version": "p2b",
             "endpoints": [
-                "POST /api/notes": "create/update a note (body required; id to update)",
+                "POST /api/notes": "create/update a note (body required; id to update; opId idempotent; merge=false strict CAS)",
                 "GET /api/notes": "list notes (?q= fts, ?tag=, ?since= unix ts, ?limit= default 50 max 200)",
                 "GET /api/notes/{id}": "single note + tags",
+                "DELETE /api/notes/{id}": "soft-delete into trash (undoable, ttl 30d)",
                 "GET /api/notes/tags": "tag counts",
                 "GET /api/notes/_meta": "this capability list",
             ],
@@ -2056,6 +2063,33 @@ class WebServer {
                 return
             }
             self.sendJSON(["ok": true, "tags": tags], connection: connection)
+        }
+    }
+
+    /// DELETE /api/notes/{id} — agent 软删：与用户同一 deleteItem 路径
+    /// （deleted_at + FTS 摘除 + oplog 归因 agent:<name>，30 天回收箱可撤销）。
+    private func handleAgentNoteDelete(idStr: String, agentName: String?, connection: HTTPByteSink) {
+        guard let id = UUID(uuidString: idStr.trimmingCharacters(in: .whitespaces)) else {
+            sendAgentJSON(["ok": false, "message": "expected a note id"], status: 400, connection: connection)
+            return
+        }
+        database.fetchAgentNote(id: id) { [weak self] row, err in
+            guard let self else { return }
+            guard let row else {
+                self.sendAgentJSON(["ok": false, "message": err ?? "笔记不存在"], status: 404, connection: connection)
+                return
+            }
+            let source = AgentNotesAccess.agentSource(name: agentName)
+            self.database.deleteItem(id: id, source: source) { ok in
+                if ok {
+                    self.broadcastSSE(event: "clip_deleted", id: id.uuidString)
+                }
+                self.sendAgentJSON(
+                    ["ok": ok, "soft": true, "id": id.uuidString],
+                    status: ok ? 200 : 400,
+                    connection: connection
+                )
+            }
         }
     }
 

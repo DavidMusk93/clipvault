@@ -3543,6 +3543,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// 幂等台账登记（INSERT OR IGNORE；并发同 opId 只留一条）。
+    /// 折叠：同一篇只保留最近 maxOpsPerItem 条，agent 高频写不无限堆账。
     func recordAgentNoteOp(_ opId: String, itemId: UUID, contentHash: String?) {
         dbQueue.async { [weak self] in
             guard let self, let db = self.db else { return }
@@ -3562,6 +3563,13 @@ final class DatabaseManager: ObservableObject {
             sqlite3_bind_double(stmt, 4, Date().timeIntervalSince1970)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
+            // 同一篇保留最近 32 条；旧行折叠删除（含本次重放命中的旧 op）。
+            execQuiet(
+                """
+                DELETE FROM agent_note_ops WHERE item_id = '\(itemId.uuidString)' AND op_id NOT IN
+                (SELECT op_id FROM agent_note_ops WHERE item_id = '\(itemId.uuidString)' ORDER BY ts DESC LIMIT 32);
+                """
+            )
         }
     }
 
@@ -5882,7 +5890,7 @@ final class DatabaseManager: ObservableObject {
     }
 
     /// Soft-delete: set deleted_at; keep row + CAS until TTL purge.
-    func deleteItem(id: UUID, completion: ((Bool) -> Void)? = nil) {
+    func deleteItem(id: UUID, source: String = "web", completion: ((Bool) -> Void)? = nil) {
         dbQueue.async { [weak self] in
             guard let self = self, let db = self.db else {
                 DispatchQueue.main.async { completion?(false) }
@@ -5919,7 +5927,7 @@ final class DatabaseManager: ObservableObject {
                     itemId: idStr,
                     contentHash: hash,
                     detail: "ttl_days=30",
-                    source: "web"
+                    source: source
                 )
                 self.touchLinkCountsForItem(id: idStr, hash: hash)
             }
