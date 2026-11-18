@@ -76,3 +76,4 @@ android/.externalNativeBuild/
 # Keep the repo root to maintained files only; see AGENTS.md "commit / push".
 .tmp/
 .pi/
+cc-notes/target/

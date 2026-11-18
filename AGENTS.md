@@ -632,6 +632,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | 归档功能 | `docs/feature-url-archive.md` |
 | 归档渲染 | `docs/archive-render.md` |
 | Agent 笔记 API（开关/token/归因） | `docs/agent-usage.md`；`Sources/ClipVault/HTTP/AgentNotesAccess.swift` |
+| cc 记忆层（部署设计 + cc-notes 骨架） | `docs/design-cc-memory-layer.md`；`cc-notes/`（Rust + notebase） |
 | Trae 会话采集 | `docs/trae-hooks.md` |
 
 一句话：**ClipVault = 个人剪贴板记忆。** 终局、像产品、本机优先。历史文件夹名不定义品牌。
