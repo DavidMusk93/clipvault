@@ -4158,6 +4158,21 @@ final class DatabaseManager: ObservableObject {
                     contentHash = currentHash
                 }
             }
+            // Synced compose ops must land in the engine too, or a primary
+            // engine serves stale markdown while clipflow holds the truth —
+            // the exact drift the fail-closed user path exists to prevent.
+            // Engine-first, fail closed: a refused write fails the op and the
+            // pull retries it (compose is not an idempotent success).
+            if NotebaseShadow.shared.isPrimary {
+                guard NotebaseShadow.shared.writePrimary(
+                    id: id.uuidString,
+                    markdown: body,
+                    updatedAt: timestamp
+                ) else {
+                    print("[Sync] compose engine write refused \(id.uuidString)")
+                    return false
+                }
+            }
             let sql = """
             UPDATE clipboard_items SET
                 timestamp = MAX(timestamp, ?), content_hash = ?, text_content = ?, url = COALESCE(?, url),
