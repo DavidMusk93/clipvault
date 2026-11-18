@@ -284,6 +284,19 @@ class WebServer {
             return
         }
 
+        if pathOnly == "/api/notes" || pathOnly.hasPrefix("/api/notes/") {
+            // Agent notes API: its own gate (CLIPVAULT_AGENT_API=1 + bearer token),
+            // evaluated before the public gate so the browser auth surface is untouched.
+            handleAgentNotes(
+                method: method,
+                path: pathOnly,
+                headers: headers,
+                data: data,
+                connection: connection
+            )
+            return
+        }
+
         if method == "GET" || method == "HEAD" {
             if pathOnly.hasPrefix("/s/") {
                 handleSharePage(pathOnly: pathOnly, connection: connection)
@@ -1908,19 +1921,100 @@ class WebServer {
                 self.sendJSON(["ok": false, "message": err ?? "保存失败"], connection: connection)
                 return
             }
-            CloudDocsSyncService.shared?.recordLocalCompose(item: result.item, parentHash: result.parentHash)
-            NotebaseShadow.shared.mirror(
-                id: result.item.id.uuidString,
-                markdown: result.item.textContent ?? "",
-                updatedAt: result.item.timestamp
-            )
-            self.broadcastSSE(event: "compose_saved", id: result.item.id.uuidString)
-            self.sendJSON([
-                "ok": true,
-                "item": self.itemToJSON(result.item),
-                "conflict": result.conflict,
-                "merged": result.merged,
-            ], connection: connection)
+            self.finishComposeSave(result, connection: connection)
+        }
+    }
+
+    /// 保存成功的共用收尾：同步、影子镜像、SSE、JSON 应答。
+    /// 用户路径与 agent 路径都必须走这里，保证用户 UI 实时看到每一次写入。
+    private func finishComposeSave(
+        _ result: ComposeNotes.SaveResult,
+        connection: HTTPByteSink,
+        extra: [String: Any] = [:]
+    ) {
+        CloudDocsSyncService.shared?.recordLocalCompose(item: result.item, parentHash: result.parentHash)
+        NotebaseShadow.shared.mirror(
+            id: result.item.id.uuidString,
+            markdown: result.item.textContent ?? "",
+            updatedAt: result.item.timestamp
+        )
+        broadcastSSE(event: "compose_saved", id: result.item.id.uuidString)
+        var payload: [String: Any] = [
+            "ok": true,
+            "item": itemToJSON(result.item),
+            "conflict": result.conflict,
+            "merged": result.merged,
+        ]
+        for (key, value) in extra { payload[key] = value }
+        sendJSON(payload, connection: connection)
+    }
+
+    // MARK: - agent notes API (P0)
+
+    /// /api/notes* — agent 专用端点族。开关 CLIPVAULT_AGENT_API=1，关闭时 404；
+    /// 鉴权独立 token，不触碰 loopback / 浏览器既有鉴权。写入只走 saveComposeNote()。
+    private func handleAgentNotes(
+        method: String,
+        path: String,
+        headers: [String: String],
+        data: Data,
+        connection: HTTPByteSink
+    ) {
+        guard AgentNotesAccess.enabled else {
+            // 与未知路由同形，不泄漏该端点族的存在。
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        guard AgentNotesAccess.authorize(headers: headers, dataRoot: DatabaseManager.resolveDataRoot()) else {
+            sendUnauthorized(connection: connection, path: path)
+            return
+        }
+        if method == "GET" && path == "/api/notes/_meta" {
+            sendJSON(agentNotesMeta(), connection: connection)
+        } else if method == "POST" && path == "/api/notes" {
+            handleAgentNoteSave(data: data, headers: headers, connection: connection)
+        } else {
+            sendErrorResponse(connection: connection, status: 405, message: "Method Not Allowed")
+        }
+    }
+
+    private func agentNotesMeta() -> [String: Any] {
+        [
+            "ok": true,
+            "api": "clipvault-notes",
+            "version": "p0",
+            "endpoints": [
+                "POST /api/notes": "create/update a note (body required; id to update)",
+                "GET /api/notes/_meta": "this capability list",
+            ],
+        ]
+    }
+
+    /// POST /api/notes  { body, title?, id?, refId?, parentHash?, agent? }
+    /// 与 /api/compose 同一条 saveComposeNote() 管线，仅归因 source="agent:<name>"。
+    private func handleAgentNoteSave(data: Data, headers: [String: String], connection: HTTPByteSink) {
+        guard let obj = jsonBody(from: data), let body = obj["body"] as? String else {
+            sendJSON(["ok": false, "message": "expected {body}"], connection: connection)
+            return
+        }
+        let headerAgent = headers["x-clipvault-agent"]
+        let agentName = (obj["agent"] as? String) ?? (headerAgent?.isEmpty == false ? headerAgent : nil)
+        let source = AgentNotesAccess.agentSource(name: agentName)
+        let id = (obj["id"] as? String).flatMap { UUID(uuidString: $0) }
+        database.saveComposeNote(
+            id: id,
+            title: obj["title"] as? String,
+            body: body,
+            refId: obj["refId"] as? String,
+            parentHash: obj["parentHash"] as? String,
+            source: source
+        ) { [weak self] result, err in
+            guard let self else { return }
+            guard let result else {
+                self.sendJSON(["ok": false, "message": err ?? "保存失败"], connection: connection)
+                return
+            }
+            self.finishComposeSave(result, connection: connection, extra: ["source": source])
         }
     }
 

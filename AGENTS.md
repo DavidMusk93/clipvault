@@ -267,6 +267,8 @@ TLS 关 → :80；TLS 开 → :443。macOS 用户 LaunchAgent 绑 80/443 需要 
 
 删除：软删除进 30 天回收箱 + 撤销；**只有左拖拽**露出 trailing「删除」（手指与鼠标同一条路径，hover 不露出），拖得再远也不自动删、必须点「删除」；打开中的笔记删除后切到下一条；对端删除不得触发保存把笔记写回。禁止硬删、禁止只做无撤销的删除、禁止让回收箱看不见笔记。
 
+**Agent 写入（P0 起）**：`/api/notes*` 是 agent 专用端点族，与用户 UI 同一条 `saveComposeNote()` 管线，归因 `source="agent:<name>"`；开关 `CLIPVAULT_AGENT_API=1` 关闭时这些端点不存在。用法与契约：`docs/agent-usage.md`。禁止 agent 第二写入器。
+
 禁止：Vditor / Crepe WYSIWYG；textarea 玩具编辑器；另开文档页；笔记另搞 `note_pin` trx。闲置回前台：`scheduleResync` 必须 `mergeNotesHead`。列表失败禁止开空白新笔记。
 
 ---
@@ -629,6 +631,7 @@ View：弹层 iframe `src=/api/archive/view?embed=1`（真文档）。图只走 
 | clip-link | `docs/feature-clip-link.md` |
 | 归档功能 | `docs/feature-url-archive.md` |
 | 归档渲染 | `docs/archive-render.md` |
+| Agent 笔记 API（开关/token/归因） | `docs/agent-usage.md`；`Sources/ClipVault/HTTP/AgentNotesAccess.swift` |
 | Trae 会话采集 | `docs/trae-hooks.md` |
 
 一句话：**ClipVault = 个人剪贴板记忆。** 终局、像产品、本机优先。历史文件夹名不定义品牌。
