@@ -888,16 +888,21 @@ async fn main() {
         println!("[clipvault-notes] sync wire off (no ostore token env /etc/ostore.env)");
     }
 
+    // API v1：版本入路径（/api/v1/notes*），legacy /api/notes* 兼容别名。
+    let notes_routes = Router::new()
+        .route("/", get(list_notes).post(save_note))
+        .route("/_doc", get(usage_doc))
+        .route("/_backfill", post(backfill_notes))
+        .route("/_meta", get(meta))
+        .route("/tags", get(note_tags_counts))
+        .route("/{id}", get(show_note).delete(delete_note))
+        .route("/{id}/links", post(agent_note_link_create).get(agent_note_links))
+        .route("/{id}/backlinks", get(agent_note_backlinks))
+        .route("/{id}/related", get(agent_note_related))
+        .with_state(state.clone());
     let app = Router::new()
-        .route("/api/notes/_doc", get(usage_doc))
-        .route("/api/notes/_backfill", post(backfill_notes))
-        .route("/api/notes/{id}/links", post(agent_note_link_create).get(agent_note_links))
-        .route("/api/notes/{id}/backlinks", get(agent_note_backlinks))
-        .route("/api/notes/{id}/related", get(agent_note_related))
-        .route("/api/notes/_meta", get(meta))
-        .route("/api/notes", get(list_notes).post(save_note))
-        .route("/api/notes/{id}", get(show_note).delete(delete_note))
-        .route("/api/notes/tags", get(note_tags_counts))
+        .nest("/api/v1/notes", notes_routes.clone())
+        .nest("/api/notes", notes_routes)
         .layer(DefaultBodyLimit::max(512 * 1024))
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit))
         .layer(middleware::from_fn_with_state(state.clone(), auth))
