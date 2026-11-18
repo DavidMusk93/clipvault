@@ -132,7 +132,7 @@ sg_d    quack:127.0.0.1:19495   ssh -R → Mac :9494   隧道 clipvault-quack-sg
 
 ```bash
 # 一次性回填（可重复运行，幂等）
-/Users/<user>/.trae-cn/hooks_env/pi_session_ingest.sh --since 0
+~/.trae-cn/hooks_env/pi_session_ingest.sh --since 0
 # 只解析不写：  … --dry-run   ；导出： … --out /tmp/metrics.ndjson
 ```
 

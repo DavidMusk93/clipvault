@@ -99,7 +99,7 @@ test('durations never render as 5.00kms', () => {
 });
 
 test('source aliases share the design-taste palette', () => {
-  assert.equal(sourceKey('sync:<peer-host-id>'), 'sync');
+  assert.equal(sourceKey('sync:<host-id>'), 'sync');
   assert.equal(sourceKey('maintenance'), 'maintenance');
   assert.equal(sourceKey('purge-cron'), 'maintenance');
   assert.equal(sourceKey('clipboard'), 'clipboard');

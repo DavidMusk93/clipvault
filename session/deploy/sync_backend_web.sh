@@ -8,7 +8,7 @@
 # script, which renders as an empty session panel.
 #
 # Both backends are pushed straight from this Mac. The old path fanned out
-# d2 -> cc, but d2 cannot reach <deployment-host>:22 (corp egress), so the replica
+# laptop -> server, but the laptop cannot reach <server-host>:22 directly (egress policy), so the replica
 # silently kept a stale panel and only showed up after a failover. Mac reaches
 # both, so push each host independently.
 #

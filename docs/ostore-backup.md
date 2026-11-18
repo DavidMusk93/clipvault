@@ -7,7 +7,7 @@ ClipVault 在本机备份成功后，把该主机的数据库和 CAS 媒体增�
 在 ClipVault 数据目录的 `config/ostore-backup.json` 写入以下格式，权限设为 `0600`。密钥只放服务端，禁止提交或下发到浏览器。
 
 ```json
-{"baseURL":"https://<deployment-host>/clipvault-ostore","token":"<OSTORE_TOKEN>","enabled":true}
+{"baseURL":"https://<your-domain>/clipvault-ostore","token":"<OSTORE_TOKEN>","enabled":true}
 ```
 
 `enabled` 缺省为 `true`（旧配置无需改动）。它是面板上 ostore 行的开关，写入的是同一个 `0600` 文件，只改这一个键、保留 `baseURL` / `token` 与其它未知键。cc 上现在只有一个 ostore，监听 `127.0.0.1:8781`，根目录 `/srv/ostore`。Caddy 仍把 `/clipvault-ostore/` 剥前缀后反代到这个实例。令牌用这一实例的 `OSTORE_TOKEN`，不再使用已删除的 `ostore-clipvault.service`。对象仍写在 `clipvault/` 前缀下，和网盘其它目录隔开。集群复制不包含 `clipvault/`。

@@ -6,8 +6,17 @@ import CoreGraphics
 import CryptoKit
 
 class WebServer {
-    /// Public path on <tunnel-domain>; local :80 stays `/`. Incoming `/clipvault` is stripped.
+    /// Public path prefix for tunnel deployments; local :80 stays `/`. Incoming `/clipvault` is stripped.
     static let publicPathPrefix = "/clipvault"
+
+    /// Tunnel hosts that imply https without X-Forwarded-Proto. Operator-owned
+    /// env (comma-separated), never hardcoded: deployment domains are private.
+    static let publicHosts: Set<String> = Set(
+        (ProcessInfo.processInfo.environment["CLIPVAULT_PUBLIC_HOSTS"] ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty }
+    )
 
     static func requestHeaders(_ lines: [String]) -> [String: String] {
         var out: [String: String] = [:]
@@ -88,7 +97,7 @@ class WebServer {
     private var lastProc: [String: Int] = [:]
     private static let sseMaxBuffered = 32
     private static let sseHeartbeatSeconds: Int = 15
-    /// No padding. Measured 2026-10-31 on <tunnel-domain>: the `data:` line is in the
+    /// No padding. Measured 2026-10-31 on a tunnel deployment: the `data:` line is in the
     /// first packet, and a 64KB hello made every reconnect dump tens of KB onto
     /// the Tailscale hop. A browser that had not seen headers by 20s then aborted,
     /// so the pad never flushed a stuck stream and the retry storm kept the pipe busy.
@@ -2839,7 +2848,7 @@ class WebServer {
         let proto: String
         if xf.contains("https") {
             proto = "https"
-        } else if host.contains("<tunnel-domain>") || host.contains("<deployment-domain>") {
+        } else if Self.publicHosts.contains(host.lowercased()) {
             proto = "https"
         } else {
             proto = "http"

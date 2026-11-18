@@ -292,7 +292,7 @@ Reference this guide in the following scenarios:
 
 ---
 
-## 实践规范（<company> 风格）实践规范
+## 实践规范（数据驱动 · Owner 意识 · 先跑通再优雅 · 复盘机制）
 
 > 目标：形成工程化、规范化、语义清晰的代码与协作习惯，减少沟通成本，提升交付质量。
 

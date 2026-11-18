@@ -3,11 +3,11 @@
 | 项 | 值 |
 | --- | --- |
 | 文档 | `docs/feature-clip-link.md` |
-| 作者 | <user> (@DavidMusk93) / Grok Build |
+| 作者 | @DavidMusk93 / Grok Build |
 | 日期 | 2026-08-28 |
 | 状态 | Draft（评审修订） |
 | 产品 | ClipVault（仓库历史名 ClipView / ClipFlowServer） |
-| 仓库 | `/Users/<user>/Documents/trae_projects/recallfs/projects/clipvault` |
+| 仓库 | 本机工作副本 |
 | 对照 | `docs/feature-url-archive.md` · `docs/design-taste.md` · `AGENTS.md` |
 
 ---

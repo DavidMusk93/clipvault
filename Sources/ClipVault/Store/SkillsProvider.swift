@@ -10,7 +10,7 @@ struct Skill: Codable, Identifiable {
 }
 
 enum SkillsProvider {
-    // 参考 https://github.com/tanweai/pua 的“skills”思路，结合实践规范（数据驱动、Owner 意识、先跑通再优雅、复盘机制等）整理为工程实践清单
+    // “skills”思路（数据驱动、Owner 意识、先跑通再优雅、复盘机制等）整理为工程实践清单
     static let skills: [Skill] = [
         Skill(
             id: "owner-first",
