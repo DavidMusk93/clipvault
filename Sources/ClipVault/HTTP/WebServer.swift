@@ -2000,6 +2000,12 @@ class WebServer {
                 wantBacklinks: true,
                 connection: connection
             )
+        } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") && pathOnly.hasSuffix("/related") {
+            handleAgentNoteRelated(
+                idStr: String(pathOnly.dropFirst("/api/notes/".count).dropLast("/related".count)),
+                path: path,
+                connection: connection
+            )
         } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") {
             handleAgentNoteShow(idStr: String(pathOnly.dropFirst("/api/notes/".count)), connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/notes/") {
@@ -2189,6 +2195,38 @@ class WebServer {
             let edges = wantBacklinks ? view.backlinks : view.outgoing
             self.sendAgentJSON(
                 ["ok": true, "count": edges.count, "links": edges.map(edgeJSON)],
+                status: 200,
+                connection: connection
+            )
+        }
+    }
+
+    /// GET /api/notes/{id}/related?limit= — 推荐：tags 作 FTS 词，排除自身与已链接对端。
+    private func handleAgentNoteRelated(idStr: String, path: String, connection: HTTPByteSink) {
+        guard let id = UUID(uuidString: idStr.trimmingCharacters(in: .whitespaces)) else {
+            sendAgentJSON(["ok": false, "message": "expected a note id"], status: 400, connection: connection)
+            return
+        }
+        let limit = min(max(Self.formQueryValue(path: path, name: "limit").flatMap { Int($0) } ?? 10, 1), 50)
+        database.fetchAgentNoteRelated(id: id, limit: limit) { [weak self] row, related, err in
+            guard let self else { return }
+            guard let row else {
+                self.sendAgentJSON(["ok": false, "message": err ?? "笔记不存在"], status: 404, connection: connection)
+                return
+            }
+            var itemJSON = self.itemToJSON(row.item)
+            itemJSON["ok"] = true
+            self.sendAgentJSON(
+                [
+                    "ok": true,
+                    "basedOn": row.tags,
+                    "count": related?.count ?? 0,
+                    "items": (related ?? []).map { r -> [String: Any] in
+                        var p = self.itemToJSON(r.item)
+                        p["tags"] = r.tags
+                        return p
+                    },
+                ],
                 status: 200,
                 connection: connection
             )

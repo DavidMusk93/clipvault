@@ -3764,6 +3764,39 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// GET /api/notes/{id}/related — 推荐：用本篇 tags 作 FTS 词（AND 语义），
+    /// 排除自身与已链接对端，时间倒序。纯增量读端点，无用户面影响。
+    func fetchAgentNoteRelated(id: UUID, limit: Int, completion: @escaping (AgentNoteRow?, [AgentNoteRow]?, String?) -> Void) {
+        fetchAgentNote(id: id) { [weak self] row, err in
+            guard let self else { return }
+            guard let row else {
+                DispatchQueue.main.async { completion(nil, nil, err ?? "笔记不存在") }
+                return
+            }
+            let tags = row.tags
+            guard !tags.isEmpty else {
+                DispatchQueue.main.async { completion(row, [], nil) }
+                return
+            }
+            self.fetchAgentNotes(q: tags.joined(separator: " "), tag: nil, since: nil, limit: 30) { candidates, qerr in
+                guard let candidates else {
+                    DispatchQueue.main.async { completion(row, nil, qerr ?? "internal") }
+                    return
+                }
+                self.fetchAgentNoteLinks(id: id, kind: nil) { view, _ in
+                    let linkedPeers = Set((view?.outgoing ?? []).map { $0.peer.id }
+                        + (view?.backlinks ?? []).map { $0.peer.id })
+                    let me = id.uuidString
+                    let related = candidates
+                        .filter { $0.item.id.uuidString != me && !linkedPeers.contains($0.item.id.uuidString) }
+                        .prefix(limit)
+                        .map { AgentNoteRow(item: $0.item, tags: $0.tags) }
+                    DispatchQueue.main.async { completion(row, Array(related), nil) }
+                }
+            }
+        }
+    }
+
     /// GET /api/notes/tags — counts over live notes.
     func fetchAgentNoteTags(completion: @escaping ([[String: Any]]?, String?) -> Void) {
         dbQueue.async { [weak self] in

@@ -37,7 +37,7 @@ POST /api/notes
 
 ```text
 GET /api/notes/_meta
-→ { ok, api:"clipvault-notes", version:"p2a", endpoints:{...} }
+→ { ok, api:"clipvault-notes", version:"p3b", endpoints:{...} }
 ```
 
 ### P1 · 读
@@ -83,11 +83,25 @@ DELETE /api/notes/{id}
 ### P3a · 链接（有向读，复用 clip_link 真源）
 
 ```text
-POST /api/notes/{id}/links   { toId?|toHash?, linked?默认true }
+POST /api/notes/{id}/links   { toId?|toHash?, kind?, linked?默认true }
   → { ok, changed, link, peer }   复用 submitClipLink：同一 clip_link_ops 真源、
-     度数上限 32、回收箱/自关联拒ject；kind 暂只 related（类型化待 P3b UI 契约）
-GET /api/notes/{id}/links      → { ok, count, links:[{kind,pairKey,peer:{id,type,preview,timestamp}}] }
-GET /api/notes/{id}/backlinks  → 同形状，指向本篇的入链
+     度数上限 32、回收箱/自关联拒绝
+GET /api/notes/{id}/links?kind=     → { ok, count, links:[{kind,pairKey,peer:{…}}] }
+GET /api/notes/{id}/backlinks?kind= → 同形状，指向本篇的入链
+GET /api/notes/{id}/related?limit=  → { ok, basedOn:[tags], count, items:[…] }
+     推荐：tags 作 FTS 词，排除自身与已链接对端；无 tags → items 空
+```
+
+**kind 词汇表（封闭，业界动词谓词；未知值 400）：**
+
+| kind | 语义 |
+| --- | --- |
+| `related` | 默认泛关联 |
+| `mentions` | 本篇提及/引用了对方 |
+| `explains` | 本篇解释/展开对方 |
+| `follows` | 时序承接（续写/接续） |
+| `supersedes` | 本篇取代对方（同主题新版本） |
+| `contradicts` | 与对方矛盾（对照） |
 ```
 
 ```bash
