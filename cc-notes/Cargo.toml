@@ -19,6 +19,7 @@ base64 = "0.22"
 rusqlite = { version = "0.41", features = ["bundled"] }
 regex = "1"
 urlencoding = "2"
+sha2 = "0.10"
 
 [profile.release]
 lto = "thin"

@@ -5,6 +5,7 @@
 //! 写入 = notebase delta oplog（无整篇副本堆积）；幂等台账走 vault_meta
 //! `opid:<id>`（重启不丢）。trx 双向同步属 D2，不在本骨架。
 
+mod blobs;
 mod links;
 mod sync;
 mod tags;
@@ -33,6 +34,7 @@ struct App {
     sync: Option<sync::SyncConfig>,
     tag_store: tags::TagStore,
     link_store: links::LinkStore,
+    blob_store: blobs::BlobStore,
     rate: RateLimiter,
 }
 
@@ -362,7 +364,10 @@ async fn save_note(
             })
             .await;
             if let Ok(Ok((key, bytes))) = fetched {
-                let _ = with_vault(state.clone(), move |vault| vault.store().put_blob(&bytes, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64)).await;
+                if let Err(e) = state.blob_store.put(&key, &bytes) {
+                    eprintln!("[blob relay] put {}: {e}", key[..8].to_string());
+                    continue;
+                }
                 ready_keys.push(key);
             }
         }
@@ -793,7 +798,10 @@ async fn serve_blob(State(state): State<Arc<App>>, Path(sha): Path<String>) -> R
     if sha.len() != 64 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         return AppError::bad("expected a 64-hex sha").into_response();
     }
-    let bytes = with_vault(state, move |vault| vault.store().get_blob(&sha)).await;
+    let bytes = match state.blob_store.get(&sha) {
+        Some(data) => Ok(Some(data)),
+        None => with_vault(state.clone(), move |vault| vault.store().get_blob(&sha)).await,
+    };
     match bytes {
         Ok(Some(data)) => {
             let ct = match data.first() {
@@ -943,6 +951,7 @@ async fn main() {
         .expect("open notebase vault");
     let tag_store = tags::TagStore::open(&std::path::Path::new(&home).join("tags.db"));
     let link_store = links::LinkStore::open(&std::path::Path::new(&home).join("links.db"));
+    let blob_store = blobs::BlobStore::open(&std::path::Path::new(&home).join("blobs.db"));
     let port: u16 = std::env::var("CLIPVAULT_NOTES_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -953,6 +962,7 @@ async fn main() {
         sync: sync::SyncConfig::from_env(),
         tag_store,
         link_store,
+        blob_store,
         rate: RateLimiter::new(),
     });
     if let Some(cfg) = &state.sync {

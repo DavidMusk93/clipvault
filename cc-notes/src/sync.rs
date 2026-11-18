@@ -135,18 +135,15 @@ pub async fn ensure_pull_blobs(app: &Arc<App>, keys: &[String]) {
         let app = app.clone();
         let key = key.clone();
         let _ = tokio::task::spawn_blocking(move || {
-            let vault = app.vault.lock().map_err(|_| "vault poisoned")?;
-            if vault.store().get_blob(&key).map_err(|e| e.to_string())?.is_some() {
+            if app.blob_store.get(&key).is_some() {
                 return Ok(());
             }
-            drop(vault);
             let cfg = match &app.sync {
                 Some(c) => c.clone(),
                 None => return Ok(()),
             };
             let bytes = fetch_attach(&cfg, &key)?;
-            let vault = app.vault.lock().map_err(|_| "vault poisoned")?;
-            vault.store().put_blob(&bytes, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64).map_err(|e| e.to_string())?;
+            app.blob_store.put(&key, &bytes)?;
             println!("[sync] blob relay: pulled {key} ({} bytes)", bytes.len());
             Ok::<_, String>(())
         })
