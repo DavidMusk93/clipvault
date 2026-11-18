@@ -3793,6 +3793,105 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    // MARK: - agent note links (agent notes API, P3a)
+
+    /// 链接对端的 head 形状（轻）：id/type/preview/timestamp。
+    struct AgentLinkPeerHead {
+        let id: String
+        let type: String
+        let preview: String?
+        let timestamp: Double
+    }
+
+    struct AgentLinkEdge {
+        let kind: String
+        let pairKey: String
+        let peer: AgentLinkPeerHead
+    }
+
+    struct AgentNoteLinkView {
+        let outgoing: [AgentLinkEdge]
+        let backlinks: [AgentLinkEdge]
+    }
+
+    private func agentLinkEdgeHead(
+        stmt: OpaquePointer?,
+        textCol: Int32,
+        base: Int32
+    ) -> AgentLinkPeerHead? {
+        guard let idText = sqlite3_column_text(stmt, base) else { return nil }
+        let type = sqlite3_column_text(stmt, base + 1).map { String(cString: $0) } ?? ""
+        let preview = sqlite3_column_text(stmt, textCol).map { String(cString: $0) }
+        return AgentLinkPeerHead(
+            id: String(cString: idText),
+            type: type,
+            preview: preview?.prefix(200).description,
+            timestamp: sqlite3_column_double(stmt, base + 3)
+        )
+    }
+
+    /// 同一 SELECT 取出链与回链：pair_key 唯一，投影与用户 UI 共用 clip_links。
+    private func agentLinkEdges(
+        direction: String,
+        itemId: String,
+        on db: OpaquePointer?
+    ) -> [AgentLinkEdge] {
+        // direction="out": l.from_item_id = 我，对端在 to；"back": l.to_item_id = 我，对端在 from。
+        let joinCol = direction == "out" ? "l.to_item_id" : "l.from_item_id"
+        let myCol = direction == "out" ? "l.from_item_id" : "l.to_item_id"
+        let sql = """
+        SELECT l.kind, l.pair_key, c.id, c.type, c.text_content, c.timestamp
+        FROM clip_links l
+        JOIN clipboard_items c ON c.id = \(joinCol) AND c.deleted_at IS NULL
+        WHERE \(myCol) = ?
+        ORDER BY l.updated_at DESC
+        LIMIT 100;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        bindText(stmt, 1, itemId)
+        var edges: [AgentLinkEdge] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let kind = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "related"
+            let pairKey = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            // c.id 在 col2，text_content 在 col4，timestamp 在 col5。
+            guard let peer = agentLinkEdgeHead(stmt: stmt, textCol: 4, base: 2) else { continue }
+            edges.append(AgentLinkEdge(kind: kind, pairKey: pairKey, peer: peer))
+        }
+        sqlite3_finalize(stmt)
+        return edges
+    }
+
+    /// GET /api/notes/{id}/links + /backlinks — 有向读：出链与回链分开，用户 UI 不动。
+    func fetchAgentNoteLinks(id: UUID, completion: @escaping (AgentNoteLinkView?, String?) -> Void) {
+        dbQueue.async { [weak self] in
+            guard let self, let db = self.db else {
+                DispatchQueue.main.async { completion(nil, "internal") }
+                return
+            }
+            let clauses = ["c.type = 'note'", "c.deleted_at IS NULL", "c.id = ?"]
+            var sql = self.agentNoteSelectSQL(where: clauses)
+            sql += " LIMIT 1;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                DispatchQueue.main.async { completion(nil, "笔记不存在") }
+                return
+            }
+            bindText(stmt, 1, id.uuidString)
+            let exists = sqlite3_step(stmt) == SQLITE_ROW
+            sqlite3_finalize(stmt)
+            guard exists else {
+                DispatchQueue.main.async { completion(nil, "笔记不存在") }
+                return
+            }
+            let view = AgentNoteLinkView(
+                outgoing: self.agentLinkEdges(direction: "out", itemId: id.uuidString, on: db),
+                backlinks: self.agentLinkEdges(direction: "back", itemId: id.uuidString, on: db)
+            )
+            DispatchQueue.main.async { completion(view, nil) }
+        }
+    }
+
     private func planComposeWrite(
         noteId: UUID,
         incoming: String,

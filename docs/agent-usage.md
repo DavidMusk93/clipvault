@@ -80,6 +80,16 @@ DELETE /api/notes/{id}
 幂等台账折叠：同一篇只保留最近 32 条 op（agent 高频写不无限堆账）。
 ```
 
+### P3a · 链接（有向读，复用 clip_link 真源）
+
+```text
+POST /api/notes/{id}/links   { toId?|toHash?, linked?默认true }
+  → { ok, changed, link, peer }   复用 submitClipLink：同一 clip_link_ops 真源、
+     度数上限 32、回收箱/自关联拒ject；kind 暂只 related（类型化待 P3b UI 契约）
+GET /api/notes/{id}/links      → { ok, count, links:[{kind,pairKey,peer:{id,type,preview,timestamp}}] }
+GET /api/notes/{id}/backlinks  → 同形状，指向本篇的入链
+```
+
 ```bash
 # CAS 冲突重放示例
 H1=$(curl -sS ... -X POST http://127.0.0.1/api/notes \

@@ -1978,6 +1978,26 @@ class WebServer {
             handleAgentNotesList(path: path, connection: connection)
         } else if method == "GET" && pathOnly == "/api/notes/tags" {
             handleAgentNotesTags(connection: connection)
+        } else if method == "POST" && pathOnly.hasPrefix("/api/notes/") && pathOnly.hasSuffix("/links") {
+            let idStr = String(pathOnly.dropFirst("/api/notes/".count).dropLast("/links".count))
+            handleAgentNoteLinkCreate(
+                idStr: idStr,
+                data: data,
+                agentName: headers["x-clipvault-agent"],
+                connection: connection
+            )
+        } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") && pathOnly.hasSuffix("/links") {
+            handleAgentNoteLinks(
+                idStr: String(pathOnly.dropFirst("/api/notes/".count).dropLast("/links".count)),
+                wantBacklinks: false,
+                connection: connection
+            )
+        } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") && pathOnly.hasSuffix("/backlinks") {
+            handleAgentNoteLinks(
+                idStr: String(pathOnly.dropFirst("/api/notes/".count).dropLast("/backlinks".count)),
+                wantBacklinks: true,
+                connection: connection
+            )
         } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") {
             handleAgentNoteShow(idStr: String(pathOnly.dropFirst("/api/notes/".count)), connection: connection)
         } else if method == "DELETE" && pathOnly.hasPrefix("/api/notes/") {
@@ -1995,12 +2015,15 @@ class WebServer {
         [
             "ok": true,
             "api": "clipvault-notes",
-            "version": "p2b",
+            "version": "p3a",
             "endpoints": [
                 "POST /api/notes": "create/update a note (body required; id to update; opId idempotent; merge=false strict CAS)",
                 "GET /api/notes": "list notes (?q= fts, ?tag=, ?since= unix ts, ?limit= default 50 max 200)",
                 "GET /api/notes/{id}": "single note + tags",
                 "DELETE /api/notes/{id}": "soft-delete into trash (undoable, ttl 30d)",
+                "POST /api/notes/{id}/links": "link this note to a clip/note {toId?|toHash?, linked?} (kind=related)",
+                "GET /api/notes/{id}/links": "outgoing links (peer head + kind)",
+                "GET /api/notes/{id}/backlinks": "incoming links",
                 "GET /api/notes/tags": "tag counts",
                 "GET /api/notes/_meta": "this capability list",
             ],
@@ -2063,6 +2086,100 @@ class WebServer {
                 return
             }
             self.sendJSON(["ok": true, "tags": tags], connection: connection)
+        }
+    }
+
+    /// POST /api/notes/{id}/links { toId?|toHash?, linked? } — 复用 submitClipLink
+    /// （同一真源 clip_link_ops + 投影 + 度数上限），changed 时与用户路径同一条同步腿。
+    private func handleAgentNoteLinkCreate(idStr: String, data: Data, agentName: String?, connection: HTTPByteSink) {
+        guard let id = UUID(uuidString: idStr.trimmingCharacters(in: .whitespaces)) else {
+            sendAgentJSON(["ok": false, "message": "expected a note id"], status: 400, connection: connection)
+            return
+        }
+        guard let obj = jsonBody(from: data) else {
+            sendAgentJSON(["ok": false, "message": "expected {toId?|toHash?, linked?}"], status: 400, connection: connection)
+            return
+        }
+        let toId = (obj["toId"] as? String).flatMap { UUID(uuidString: $0) }
+        let toHash = obj["toHash"] as? String
+        var linked = true
+        if let b = obj["linked"] as? Bool { linked = b }
+        let kind = obj["kind"] as? String
+        let source = AgentNotesAccess.agentSource(name: agentName)
+        database.submitClipLink(fromId: id, toId: toId, toHash: toHash, kind: kind, linked: linked, source: source) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let out):
+                if out.changed, let opId = out.opId, let action = out.action {
+                    CloudDocsSyncService.shared?.recordLocalClipLink(
+                        opId: opId,
+                        action: action,
+                        fromId: out.fromId,
+                        toContentHash: out.toContentHash,
+                        toItemId: out.toItemId,
+                        toIsNote: out.toIsNote,
+                        kind: out.kind,
+                        pairKey: out.pairKey,
+                        ts: out.ts
+                    )
+                }
+                var peerJSON: [String: Any] = [:]
+                if let peer = out.peerItem {
+                    peerJSON = [
+                        "id": peer.id.uuidString,
+                        "type": peer.type.rawValue,
+                        "preview": (peer.textContent ?? "").prefix(200).description,
+                        "timestamp": peer.timestamp.timeIntervalSince1970,
+                    ]
+                }
+                self.sendAgentJSON(
+                    [
+                        "ok": true,
+                        "changed": out.changed,
+                        "link": out.link ?? NSNull(),
+                        "peer": peerJSON,
+                    ],
+                    status: 200,
+                    connection: connection
+                )
+            case .failure(let err):
+                let msg = err.errorDescription ?? "关联失败"
+                let status = msg.contains("找不到") ? 404 : 400
+                self.sendAgentJSON(["ok": false, "message": msg], status: status, connection: connection)
+            }
+        }
+    }
+
+    /// GET /api/notes/{id}/links / backlinks — 有向读。
+    private func handleAgentNoteLinks(idStr: String, wantBacklinks: Bool, connection: HTTPByteSink) {
+        guard let id = UUID(uuidString: idStr.trimmingCharacters(in: .whitespaces)) else {
+            sendAgentJSON(["ok": false, "message": "expected a note id"], status: 400, connection: connection)
+            return
+        }
+        database.fetchAgentNoteLinks(id: id) { [weak self] view, err in
+            guard let self else { return }
+            guard let view else {
+                self.sendAgentJSON(["ok": false, "message": err ?? "笔记不存在"], status: 404, connection: connection)
+                return
+            }
+            func edgeJSON(_ e: DatabaseManager.AgentLinkEdge) -> [String: Any] {
+                [
+                    "kind": e.kind,
+                    "pairKey": e.pairKey,
+                    "peer": [
+                        "id": e.peer.id,
+                        "type": e.peer.type,
+                        "preview": e.peer.preview ?? NSNull(),
+                        "timestamp": e.peer.timestamp,
+                    ],
+                ]
+            }
+            let edges = wantBacklinks ? view.backlinks : view.outgoing
+            self.sendAgentJSON(
+                ["ok": true, "count": edges.count, "links": edges.map(edgeJSON)],
+                status: 200,
+                connection: connection
+            )
         }
     }
 
