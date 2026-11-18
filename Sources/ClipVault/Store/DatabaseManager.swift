@@ -3834,22 +3834,28 @@ final class DatabaseManager: ObservableObject {
     private func agentLinkEdges(
         direction: String,
         itemId: String,
+        kind: String?,
         on db: OpaquePointer?
     ) -> [AgentLinkEdge] {
         // direction="out": l.from_item_id = 我，对端在 to；"back": l.to_item_id = 我，对端在 from。
         let joinCol = direction == "out" ? "l.to_item_id" : "l.from_item_id"
         let myCol = direction == "out" ? "l.from_item_id" : "l.to_item_id"
-        let sql = """
+        var sql = """
         SELECT l.kind, l.pair_key, c.id, c.type, c.text_content, c.timestamp
         FROM clip_links l
         JOIN clipboard_items c ON c.id = \(joinCol) AND c.deleted_at IS NULL
         WHERE \(myCol) = ?
-        ORDER BY l.updated_at DESC
-        LIMIT 100;
         """
+        if let kind {
+            sql += " AND l.kind = ?"
+        }
+        sql += "\n ORDER BY l.updated_at DESC\n LIMIT 100;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         bindText(stmt, 1, itemId)
+        if let kind {
+            bindText(stmt, 2, kind)
+        }
         var edges: [AgentLinkEdge] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let kind = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "related"
@@ -3862,8 +3868,8 @@ final class DatabaseManager: ObservableObject {
         return edges
     }
 
-    /// GET /api/notes/{id}/links + /backlinks — 有向读：出链与回链分开，用户 UI 不动。
-    func fetchAgentNoteLinks(id: UUID, completion: @escaping (AgentNoteLinkView?, String?) -> Void) {
+    /// GET /api/notes/{id}/links + /backlinks — 有向读：出链与回链分开，可选 ?kind= 过滤。
+    func fetchAgentNoteLinks(id: UUID, kind: String?, completion: @escaping (AgentNoteLinkView?, String?) -> Void) {
         dbQueue.async { [weak self] in
             guard let self, let db = self.db else {
                 DispatchQueue.main.async { completion(nil, "internal") }
@@ -3885,8 +3891,8 @@ final class DatabaseManager: ObservableObject {
                 return
             }
             let view = AgentNoteLinkView(
-                outgoing: self.agentLinkEdges(direction: "out", itemId: id.uuidString, on: db),
-                backlinks: self.agentLinkEdges(direction: "back", itemId: id.uuidString, on: db)
+                outgoing: self.agentLinkEdges(direction: "out", itemId: id.uuidString, kind: kind, on: db),
+                backlinks: self.agentLinkEdges(direction: "back", itemId: id.uuidString, kind: kind, on: db)
             )
             DispatchQueue.main.async { completion(view, nil) }
         }
@@ -5398,6 +5404,12 @@ final class DatabaseManager: ObservableObject {
         }
     }
 
+    /// Link kind 词汇表（P3b-1，业界封闭谓词集：RDF/Neo4j 动词 + 记忆系统实践）。
+    /// 写路径白名单拒绝未知谓词；web chip 不显示 kind，新增值对用户零视觉回归。
+    static let linkKinds: Set<String> = [
+        "related", "mentions", "explains", "follows", "supersedes", "contradicts",
+    ]
+
     func submitClipLinkLocked(
         fromId: UUID,
         toId: UUID?,
@@ -5406,9 +5418,16 @@ final class DatabaseManager: ObservableObject {
         linked: Bool,
         source: String
     ) -> Result<ClipLinkSubmitResult, ClipLinkError> {
-        let kind = (rawKind?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "related"
-        if kind != "related" {
-            return .failure(.badRequest("暂只支持 related"))
+        let trimmed = rawKind?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kind: String
+        if let trimmed, !trimmed.isEmpty {
+            let lowered = trimmed.lowercased()
+            guard Self.linkKinds.contains(lowered) else {
+                return .failure(.badRequest("kind 仅支持: \(Self.linkKinds.sorted().joined(separator: "|"))"))
+            }
+            kind = lowered
+        } else {
+            kind = "related"
         }
         guard let from = fetchItemByIdLocked(fromId.uuidString) else {
             return .failure(.notFound("找不到卡片"))

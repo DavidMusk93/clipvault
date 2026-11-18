@@ -1988,12 +1988,14 @@ class WebServer {
             )
         } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") && pathOnly.hasSuffix("/links") {
             handleAgentNoteLinks(
+                path: path,
                 idStr: String(pathOnly.dropFirst("/api/notes/".count).dropLast("/links".count)),
                 wantBacklinks: false,
                 connection: connection
             )
         } else if method == "GET" && pathOnly.hasPrefix("/api/notes/") && pathOnly.hasSuffix("/backlinks") {
             handleAgentNoteLinks(
+                path: path,
                 idStr: String(pathOnly.dropFirst("/api/notes/".count).dropLast("/backlinks".count)),
                 wantBacklinks: true,
                 connection: connection
@@ -2150,13 +2152,23 @@ class WebServer {
         }
     }
 
-    /// GET /api/notes/{id}/links / backlinks — 有向读。
-    private func handleAgentNoteLinks(idStr: String, wantBacklinks: Bool, connection: HTTPByteSink) {
+    /// GET /api/notes/{id}/links / backlinks — 有向读，可选 ?kind= 白名单过滤。
+    private func handleAgentNoteLinks(path: String, idStr: String, wantBacklinks: Bool, connection: HTTPByteSink) {
         guard let id = UUID(uuidString: idStr.trimmingCharacters(in: .whitespaces)) else {
             sendAgentJSON(["ok": false, "message": "expected a note id"], status: 400, connection: connection)
             return
         }
-        database.fetchAgentNoteLinks(id: id) { [weak self] view, err in
+        var kind = Self.formQueryValue(path: path, name: "kind").map { $0.lowercased() }
+        if let kind, !DatabaseManager.linkKinds.contains(kind) {
+            sendAgentJSON(
+                ["ok": false, "message": "kind 仅支持: \(DatabaseManager.linkKinds.sorted().joined(separator: "|"))"],
+                status: 400,
+                connection: connection
+            )
+            return
+        }
+        if kind?.isEmpty == true { kind = nil }
+        database.fetchAgentNoteLinks(id: id, kind: kind) { [weak self] view, err in
             guard let self else { return }
             guard let view else {
                 self.sendAgentJSON(["ok": false, "message": err ?? "笔记不存在"], status: 404, connection: connection)
