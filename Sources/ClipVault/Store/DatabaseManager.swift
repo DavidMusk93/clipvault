@@ -5061,16 +5061,21 @@ final class DatabaseManager: ObservableObject {
         if NotebaseShadow.shared.isPrimary {
             // One query for the page, not one document load per note.
             let page = NotebaseShadow.shared.activities(notes: ids.map { $0.uuidString })
-            var engineCounts: [String: Int] = [:]
+            var merged: [String: Int] = [:]
             for (note, activity) in page {
                 let sessions = activity["sessions"] as? Int ?? 0
                 let inProgress = activity["inProgress"] as? Bool ?? false
-                engineCounts[note] = sessions + (inProgress ? 1 : 0)
+                merged[note] = sessions + (inProgress ? 1 : 0)
             }
-            if engineCounts.count == ids.count { return engineCounts }
-            var merged = engineCounts
-            for (key, value) in legacyNoteEditCounts(ids: ids.filter { merged[$0.uuidString] == nil }) {
-                merged[key] = value
+            // The engine only knows the edits that reached it: the seed replay,
+            // local saves since cutover, and synced compose ops since af47327.
+            // compose_ops still carries the burst log for the rest — remote
+            // edits synced while the engine write was broken, plus any peer
+            // history the seed missed — so take the larger of the two readings
+            // per note instead of trusting the engine alone. max() avoids
+            // double-counting the overlap; the union is approximated, not summed.
+            for (key, value) in legacyNoteEditCounts(ids: ids) {
+                merged[key] = max(merged[key] ?? 0, value)
             }
             return merged
         }
