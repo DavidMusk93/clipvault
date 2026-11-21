@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 # ---- secret 正则（行级过滤：命中即丢弃该行）----
 SECRET_PATTERNS = [
-    re.compile(r"(?i)\b(pass(word|wd)?|pwd|secret|api[_-]?key|access[_-]?key|token|cred(ential)?s?)\b\s*[:=＝][ \t]*\S"),
+    re.compile(r"(?i)\b(pass(word|wd)|pwd|secret|api[_-]?key|access[_-]?key|token|cred(ential)?s?)\b\s*[:=＝][ \t]*\S"),
     re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),                # openai/通用 sk-
     re.compile(r"\bgh[pouhr]_[A-Za-z0-9]{20,}\b"),          # github
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
