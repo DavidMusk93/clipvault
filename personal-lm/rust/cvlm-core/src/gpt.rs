@@ -5,6 +5,15 @@
 use candle_core::{DType, Device, Result, Tensor, D};
 use std::collections::HashMap;
 
+/// 手写 layer_norm（candle 0.11 metal 后端无 layer-norm 内核，用基础算子拼）。
+fn layer_norm(x: &Tensor, w: &Tensor, b: &Tensor, eps: f64) -> Result<Tensor> {
+    let mean = x.mean_keepdim(D::Minus1)?;                 // (..., 1)
+    let centered = x.broadcast_sub(&mean)?;
+    let var = centered.sqr()?.mean_keepdim(D::Minus1)?;    // (..., 1)
+    let norm = centered.broadcast_div(&(var + eps)?.sqrt()?)?;
+    norm.broadcast_mul(w)?.broadcast_add(b)
+}
+
 pub struct GptTensors {
     pub tok_emb: Tensor,   // (V, C)
     pub pos_emb: Tensor,   // (P, C)
@@ -76,6 +85,17 @@ impl GptTensors {
         Ok(Self { tok_emb, pos_emb, blocks, ln_f_w, ln_f_b, head_w, device, d_model, n_head })
     }
 
+    fn dbg(name: &str, t: &Tensor) {
+        if let Ok(flat) = t.to_dtype(DType::F32).and_then(|f| f.flatten_all()).and_then(|f| f.to_vec1::<f32>()) {
+            let n = flat.len().min(4);
+            let mean = flat.iter().sum::<f32>() / flat.len() as f32;
+            let std = (flat.iter().map(|v| (v-mean)*(v-mean)).sum::<f32>() / flat.len() as f32).sqrt();
+            let absmax = flat.iter().fold(0.0f32, |a, v| a.max(v.abs()));
+            println!("[dbg] {name}: mean={mean:.5} std={std:.5} absmax={absmax:.5} first4={:?}",
+                     &flat[..n]);
+        }
+    }
+
     /// idx: (B, T) u32 → logits (B, T, V)
     pub fn forward(&self, idx: &Tensor) -> Result<Tensor> {
         let (b_size, t) = idx.dims2()?;
@@ -95,6 +115,9 @@ impl GptTensors {
         let mut x = tok_lut
             .reshape((b_size, t, self.d_model))?
             .broadcast_add(&pos_lut)?;
+        if std::env::var("CVLM_DEBUG").is_ok() {
+            Self::dbg("emb_sum", &x);
+        }
 
         // 因果 mask (T,T)，一次性缓存成本可接受
         let mask: Vec<Vec<f32>> = (0..t)
@@ -106,12 +129,14 @@ impl GptTensors {
             .collect();
         let mask = Tensor::new(mask, &self.device)?;
 
+        let mut first = true;
         for blk in &self.blocks {
-            let h = candle_nn::ops::layer_norm(&x, &blk.ln1_w, &blk.ln1_b, 1e-5)?;
-            let qkv = h
+            let h = layer_norm(&x, &blk.ln1_w, &blk.ln1_b, 1e-5)?;
+            let h2d = h.reshape((b_size * t, self.d_model))?;
+            let qkv = h2d
                 .matmul(&blk.qkv_w.t()?)?
-                .broadcast_add(&blk.qkv_b.reshape((1, 1, blk.qkv_b.elem_count()))?)?;
-            let qkv = qkv.reshape((b_size, t, 3, self.d_model))?;
+                .broadcast_add(&blk.qkv_b.reshape((1, blk.qkv_b.elem_count()))?)?
+                .reshape((b_size, t, 3, self.d_model))?;
             let q = qkv.narrow(2, 0, 1)?.squeeze(2)?;
             let k = qkv.narrow(2, 1, 1)?.squeeze(2)?;
             let v = qkv.narrow(2, 2, 1)?.squeeze(2)?;
@@ -130,23 +155,36 @@ impl GptTensors {
                 .transpose(1, 2)?
                 .reshape((b_size, t, self.d_model))?
                 .contiguous()?;
-            let attn_out = y
+            let y2d = y.reshape((b_size * t, self.d_model))?;
+            let attn_out = y2d
                 .matmul(&blk.proj_w.t()?)?
-                .broadcast_add(&blk.proj_b.reshape((1, 1, blk.proj_b.elem_count()))?)?;
+                .broadcast_add(&blk.proj_b.reshape((1, blk.proj_b.elem_count()))?)?
+                .reshape((b_size, t, self.d_model))?;
+            if std::env::var("CVLM_DEBUG").is_ok() && first {
+                Self::dbg("q3d", &qkv);
+                Self::dbg("attn_out", &attn_out);
+            }
             x = (x + attn_out)?;
 
-            let h2 = candle_nn::ops::layer_norm(&x, &blk.ln2_w, &blk.ln2_b, 1e-5)?;
-            let m = h2
+            let h2 = layer_norm(&x, &blk.ln2_w, &blk.ln2_b, 1e-5)?;
+            let h2d2 = h2.reshape((b_size * t, self.d_model))?;
+            let m = h2d2
                 .matmul(&blk.fc_w.t()?)?
-                .broadcast_add(&blk.fc_b.reshape((1, 1, blk.fc_b.elem_count()))?)?;
+                .broadcast_add(&blk.fc_b.reshape((1, blk.fc_b.elem_count()))?)?;
             let m = m.gelu_erf()?;
             let m = m
                 .matmul(&blk.mlp_proj_w.t()?)?
-                .broadcast_add(&blk.mlp_proj_b.reshape((1, 1, blk.mlp_proj_b.elem_count()))?)?;
+                .broadcast_add(&blk.mlp_proj_b.reshape((1, blk.mlp_proj_b.elem_count()))?)?
+                .reshape((b_size, t, self.d_model))?;
+            if std::env::var("CVLM_DEBUG").is_ok() && first {
+                Self::dbg("mlp_out", &m);
+            }
             x = (x + m)?;
+            first = false;
         }
 
-        let x = candle_nn::ops::layer_norm(&x, &self.ln_f_w, &self.ln_f_b, 1e-5)?;
-        x.matmul(&self.head_w.t()?)
+        let x = layer_norm(&x, &self.ln_f_w, &self.ln_f_b, 1e-5)?;
+        let x2d = x.reshape((b_size * t, self.d_model))?;
+        x2d.matmul(&self.head_w.t()?)?.reshape((b_size, t, self.head_w.dim(0)?))
     }
 }

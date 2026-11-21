@@ -43,9 +43,8 @@ impl Engine {
         let n_layer = model_cfg["n_layer"].as_u64().ok_or_else(|| err("cfg n_layer"))? as usize;
         let n_head = model_cfg["n_head"].as_u64().ok_or_else(|| err("cfg n_head"))? as usize;
         let tok = Tokenizer::load(&bundle_dir.join("tokenizer.json"))?;
-        let (device, device_label) = Self::pick_device();
-        let map = candle_core::safetensors::load(bundle_dir.join("model.safetensors"), &device)?;
-        let model = GptTensors::load(&map, n_layer, n_head)?;
+        // metal 优先；遇到无内核的 op 在首次 forward 时才会暴露 → 这里只做加载，
+        // generate 失败时由 SharedEngine 回退 CPU 重载。
         let meta = std::fs::metadata(bundle_dir.join("manifest.json"))?;
         let mtime = meta
             .modified()
@@ -53,6 +52,30 @@ impl Engine {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| (d.as_secs() as i64, d.subsec_nanos()))
             .unwrap_or((0, 0));
+        let (device, device_label) = match std::env::var("CVLM_DEVICE").as_deref() {
+            Ok("cpu") => (Device::Cpu, "cpu".into()),
+            _ => Self::pick_device(),
+        };
+        let map = candle_core::safetensors::load(bundle_dir.join("model.safetensors"), &device)?;
+        let model = GptTensors::load(&map, n_layer, n_head)?;
+        // 加载后做一次 1-token forward 冒烟：metal 缺内核立刻暴露，可回退
+        if device_label != "cpu" {
+            let smoke = Tensor::new(vec![0u32], &device)?.reshape((1, 1))?;
+            if model.forward(&smoke).is_err() {
+                let map = candle_core::safetensors::load(
+                    bundle_dir.join("model.safetensors"), &Device::Cpu)?;
+                let model = GptTensors::load(&map, n_layer, n_head)?;
+                return Ok(Self {
+                    version: cfg["version"].as_str().unwrap_or("unknown").into(),
+                    bundle_dir: bundle_dir.to_path_buf(),
+                    device_label: "cpu-fallback".into(),
+                    tok, model,
+                    vocab_size: model_cfg["vocab_size"].as_u64().unwrap_or(0) as usize,
+                    block_size: model_cfg["block_size"].as_u64().unwrap_or(512) as usize,
+                    manifest_mtime: mtime,
+                });
+            }
+        }
         Ok(Self {
             version: cfg["version"].as_str().unwrap_or("unknown").into(),
             bundle_dir: bundle_dir.to_path_buf(),
@@ -79,6 +102,23 @@ impl Engine {
             }
             Err(_) => false,
         }
+    }
+
+    pub fn tokenize(&self, text: &str) -> Vec<u32> {
+        self.tok.encode(text)
+    }
+
+    pub fn debug_logits(&self, ids: &[u32]) -> Result<Vec<f32>> {
+        let idx = Tensor::new(ids.to_vec(), &self.model.device)?
+            .reshape((1, ids.len()))?
+            .to_dtype(DType::U32)?;
+        let logits = self.model.forward(&idx)?;
+        logits
+            .narrow(1, ids.len() - 1, 1)?
+            .squeeze(1)?
+            .squeeze(0)?
+            .to_vec1::<f32>()
+            .map_err(|e| crate::anyhow_result::err(e.to_string()))
     }
 
     /// 续写。ctx 截断到 block_size。

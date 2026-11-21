@@ -96,6 +96,18 @@ fn main() {
 
     match cmd {
         "version" => println!("cv-lm {}", env!("CARGO_PKG_VERSION")),
+        "debug" => {
+            // debug "text" --bundle: 打印最后一位置信度前8
+            let text = args.get(1).cloned().unwrap_or_default();
+            let bundle = arg_flag(&args, "--bundle").map(PathBuf::from).unwrap_or_else(default_bundle);
+            let eng = Engine::load(&bundle).unwrap_or_else(|e| { eprintln!("load: {e}"); std::process::exit(1) });
+            let ids = eng.tokenize(&text);
+            eprintln!("ids: {:?}", ids);
+            let logits = eng.debug_logits(&ids).unwrap();
+            let mut v: Vec<(u32, f32)> = logits.iter().enumerate().map(|(i, x)| (i as u32, *x)).collect();
+            v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            for (id, l) in v.iter().take(8) { println!("id={id} logit={l:.4}") }
+        }
         "complete" => {
             let text = args.get(1).cloned().unwrap_or_default();
             let bundle = arg_flag(&args, "--bundle").map(PathBuf::from).unwrap_or_else(default_bundle);
@@ -111,7 +123,7 @@ fn main() {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0.0),
                 top_k: 40,
-                stop_on_newline: true,
+                stop_on_newline: !args.iter().any(|a| a == "--no-stop"),
             };
             match eng.generate(&text, &p) {
                 Ok(out) => println!("{out}"),
