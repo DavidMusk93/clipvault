@@ -12,7 +12,7 @@ import numpy as np
 import torch
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / "train"))
 from model import GPT
 
 ROOT = HERE.parent

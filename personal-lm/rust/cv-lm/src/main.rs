@@ -124,6 +124,7 @@ fn main() {
                     .unwrap_or(0.0),
                 top_k: 40,
                 stop_on_newline: !args.iter().any(|a| a == "--no-stop"),
+                rep_penalty: 1.3,
             };
             match eng.generate(&text, &p) {
                 Ok(out) => println!("{out}"),
@@ -206,11 +207,18 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine) {
                     .unwrap_or(if is_complete { 0.0 } else { 0.8 }),
                 top_k: v["top_k"].as_u64().map(|x| x as usize).unwrap_or(40),
                 stop_on_newline: if is_complete { true } else { false },
+                rep_penalty: v["rep_penalty"].as_f64().map(|x| x as f32)
+                    .unwrap_or(if is_complete { 1.3 } else { 1.15 }),
             };
             let guard = shared.engine.lock().unwrap();
             let eng = guard.as_ref().unwrap();
             match eng.generate(prefix, &p) {
-                Ok(text) => {
+                Ok(mut text) => {
+                    // 补全（ghost text）不应以换行/空白开头：标题行后续写的
+                    // 第一个 token 往往就是 \n，直接吃掉
+                    if is_complete {
+                        text = text.trim_start_matches(['\n', '\r', ' ']).to_string();
+                    }
                     let key = if is_complete { "completion" } else { "text" };
                     respond(&mut stream, "200 OK",
                             &json!({key: text, "version": eng.version}));

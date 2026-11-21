@@ -24,6 +24,8 @@ pub struct GenParams {
     pub temperature: f32,
     pub top_k: usize,
     pub stop_on_newline: bool,
+    /// 重复惩罚：>1 时对已出现 token 的 logit 除以该值（1.0 = 关闭）
+    pub rep_penalty: f32,
 }
 
 impl Engine {
@@ -137,7 +139,11 @@ impl Engine {
                 .to_dtype(DType::U32)?;
             let logits = self.model.forward(&idx)?; // (1,T,V)
             let last = logits.narrow(1, ctx_len - 1, 1)?.squeeze(1)?; // (1,V)
-            let next = sample(&last.to_dtype(DType::F32)?.squeeze(0)?.to_vec1::<f32>()?, p)?;
+            let next = sample(
+                &last.to_dtype(DType::F32)?.squeeze(0)?.to_vec1::<f32>()?,
+                p,
+                &ids,
+            )?;
             if next == 0 {
                 break; // NUL 视作终止
             }
@@ -153,7 +159,25 @@ impl Engine {
 }
 
 /// 采样：temperature=0 → argmax；否则 top-k + softmax + 加权随机。
-fn sample(logits: &[f32], p: &GenParams) -> Result<u32> {
+fn sample(logits: &[f32], p: &GenParams, seen: &[u32]) -> Result<u32> {
+    // 重复惩罚：已出现的 token，logit / penalty（贪心与采样都生效）
+    let penalized: Vec<f32> = if p.rep_penalty > 1.0 {
+        let mut counts: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+        for &t in seen {
+            *counts.entry(t).or_insert(0) += 1;
+        }
+        logits
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let c = counts.get(&(i as u32)).copied().unwrap_or(0);
+                if c > 0 { l / (p.rep_penalty * c as f32) } else { *l }
+            })
+            .collect()
+    } else {
+        logits.to_vec()
+    };
+    let logits = &penalized[..];
     if p.temperature <= 1e-6 {
         return Ok(logits
             .iter()
