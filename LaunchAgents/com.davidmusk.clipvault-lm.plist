@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.davidmusk.clipvault-lm</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/&lt;user&gt;/Library/Application Support/Keepsake/bin/cv-lm</string>
+    <string>serve</string>
+    <string>--port</string>
+    <string>8788</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/&lt;user&gt;</string>
+    <key>CVLM_BUNDLE</key>
+    <string>/Users/&lt;user&gt;/Library/Application Support/Keepsake/models/personal-lm</string>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>WorkingDirectory</key>
+  <string>/Users/&lt;user&gt;</string>
+  <key>StandardOutPath</key>
+  <string>/Users/&lt;user&gt;/Library/Application Support/Keepsake/logs/cv-lm.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/&lt;user&gt;/Library/Application Support/Keepsake/logs/cv-lm.err.log</string>
+</dict>
+</plist>
