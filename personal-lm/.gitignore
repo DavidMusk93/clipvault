@@ -1,0 +1,22 @@
+# ── personal-lm 隐私护栏 ──────────────────────────────────────────
+# 本模型是个人专属：语料、tokenizer、checkpoint、导出的模型 bundle
+# 全部含个人数据/个人文风，一律禁止入库推送。代码可以推送，产物不行。
+corpus/
+data/raw/
+checkpoints/
+exports/
+models/
+.venv/
+__pycache__/
+
+# 训练/导出产物按内容与扩展名双重拦截
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+*.gguf
+*.bin
+tokenizer.json
+vocab.json
+merges.txt
+manifest.json
