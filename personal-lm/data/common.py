@@ -10,23 +10,27 @@ from datetime import datetime, timezone
 
 # ---- secret 正则（行级过滤：命中即丢弃该行）----
 SECRET_PATTERNS = [
-    re.compile(r"(?i)\b(pass(word|wd)?|pwd|secret|api[_-]?key|access[_-]?key|token|cred(ential)?s?)\b\s*[:=＝]\s*\S"),
+    re.compile(r"(?i)\b(pass(word|wd)?|pwd|secret|api[_-]?key|access[_-]?key|token|cred(ential)?s?)\b\s*[:=＝][ \t]*\S"),
     re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),                # openai/通用 sk-
     re.compile(r"\bgh[pouhr]_[A-Za-z0-9]{20,}\b"),          # github
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                    # aws
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),        # slack
-    re.compile(r"\bnmem_[A-Za-z0-9]{20,}\b"),               # nmem key（记忆 ID 带下划线，不误伤）
+    re.compile(r"(?<![A-Za-z0-9_])nmem_[A-Za-z0-9_-]{30,}\b"),  # nmem key；记忆 ID 前有字母/下划线，不误伤
+    re.compile(r"(?i)\b(x-nmem-api-key|x-api-key|api-key|apikey)\"?\s*[:=：]\s*\"?[A-Za-z0-9._-]{20,}"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}\b"),  # JWT
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=|-]{20,}\b"),
     re.compile(r"(?im)^-----BEGIN [A-Z ]*PRIVATE KEY-----$"),
     re.compile(r"(?i)\bpostgres(ql)?://[^\s]*:[^\s@]*@"),
     re.compile(r"(?i)\bmysql://[^\s]*:[^\s@]*@"),
-    re.compile(r"(?i)\bpw(or)?d\s*[:=＝]\s*\S"),
+    re.compile(r"(?i)\bpw(or)?d\s*[:=＝][ \t]*\S"),
     re.compile(r"(?i)\b密(码|钥)\s*[:=：]\s*\S"),
     re.compile(r"\b[Bb]earer\s+[A-Za-z0-9._~+/=|-]{20,}\b"),
 ]
 SECRET_PLACEHOLDER = "[filtered]"
+
+# 语料安全检查：任何这些模式命中都必须为 0 才能进训练
+# （见 build_corpus.py 末尾 assert）
 
 # ---- 结构噪声（整行丢弃）----
 NOISE_PATTERNS = [
