@@ -25,4 +25,10 @@ echo "── 4/4 eval + 导出 bundle（→ CLIPVAULT_HOME/models/personal-lm，
 "$PY" "$HERE/eval/perplexity.py"
 "$PY" "$HERE/train/export_bundle.py"
 
+# live web 资产同步（ClipVaultServer 从 Keepsake/web 服务）
+DEST="$HOME/Library/Application Support/Keepsake/web/assets/notes-editor"
+if [ -d "$DEST" ]; then
+  cp "$HERE/../web/assets/notes-editor/entry.js"      "$HERE/../web/assets/notes-editor/notes-editor.js"      "$HERE/../web/assets/notes-editor/notes-editor.css" "$DEST/" 2>/dev/null || true
+fi
+
 echo "✅ 迭代完成：新 bundle 已热加载，无需重启 cv-lm / ClipVaultServer"
