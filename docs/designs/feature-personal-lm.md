@@ -63,25 +63,32 @@
                         部署（见下图 2）
 ```
 
-### 2) 应用架构（in ClipVault，`http-front` Rust sidecar，:8080）
+### 2) 应用架构（实施修订版：`cv-lm serve` 独立加载器）
+
+> **实施决策（2026-11-22）**：浏览器日常入口是 Swift ClipVaultServer `:8080`
+> （http-front `:80/:443` 未在日常路径上）。推理引擎改为独立进程
+> **`cv-lm serve`（127.0.0.1:8788，LaunchAgent）**：Web UI 与其他 applet 都直接
+> 调它（CORS 已开），http-front 保持零改动。bundle 支持热加载（manifest mtime）。
 
 ```
- web 编辑器 (web/index.html)
-   │  打字… 防抖 150ms
-   ▼
- POST /api/lm/complete {prefix, max_tokens}
-   │                                   ┌─────────────────────────────────┐
-   ▼                                   │ http-front (Rust) 新增 lm 模块    │
- POST /api/lm/compose {topic,mode} ───▶│  ├─ candle engine: 加载           │
-   │                                   │  │   model.safetensors           │
-   │                                   │  │   自实现 transformer 前向       │
-   │                                   │  ├─ KV cache + 前缀缓存           │
-   │                                   │  └─ RAG(可选): clipboard_fts     │
-   │                                   │      top-k 相关 clip 拼进前缀      │
-   │                                   └─────────────────────────────────┘
-   ▼
- ghost text / 流式初稿 ◀──── SSE 流式返回（compose 用）
- Tab 接受 / 用户继续编辑
+ web 编辑器 (notes-editor entry.js)          其他 applet (recallfs/*)
+   │  打字… 防抖 260ms                            │
+   ▼                                             ▼
+ POST /complete {prefix}        POST /complete|/compose（CLI: cv-lm complete）
+   │                                             │
+   └───────────────────┬──────────────────────────┘
+                       ▼
+   ┌─────────────────────────────────────────────┐
+   │ cv-lm serve  (127.0.0.1:8788, LaunchAgent)  │
+   │  └─ cvlm-core (Rust/candle, metal)          │
+   │      ├─ bundle: config+tokenizer+safetensors │
+   │      │    ← CLIPVAULT_HOME/models/personal-lm│
+   │      ├─ 自实现 transformer 前向（同 Python）  │
+   │      └─ 热加载: manifest.json mtime 变更即重载 │
+   └─────────────────────────────────────────────┘
+                       │
+                       ▼
+   ghost text（灰色，Tab 接受） / 风格初稿（Mod-Shift-g）
 ```
 
 ### 3) 迭代闭环（内容增长 → 模型跟进）
