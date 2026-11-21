@@ -1,0 +1,8 @@
+/Users/david/dev/ClipView/personal-lm/rust/target/release/deps/raw_cpuid-89dfcb20c7c19dc6.d: /Users/david/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-cpuid-11.6.0/src/lib.rs /Users/david/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-cpuid-11.6.0/src/extended.rs
+
+/Users/david/dev/ClipView/personal-lm/rust/target/release/deps/libraw_cpuid-89dfcb20c7c19dc6.rlib: /Users/david/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-cpuid-11.6.0/src/lib.rs /Users/david/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-cpuid-11.6.0/src/extended.rs
+
+/Users/david/dev/ClipView/personal-lm/rust/target/release/deps/libraw_cpuid-89dfcb20c7c19dc6.rmeta: /Users/david/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-cpuid-11.6.0/src/lib.rs /Users/david/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-cpuid-11.6.0/src/extended.rs
+
+/Users/david/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-cpuid-11.6.0/src/lib.rs:
+/Users/david/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/raw-cpuid-11.6.0/src/extended.rs:

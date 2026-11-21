@@ -12,6 +12,105 @@ import { extractCalcExpr, formatCheckpoint, hrStampBlock, inFence, isHrLine, isS
 import { wrapAtomicTokens, guardRanges } from '../notes-wrap.mjs'
 import { findRanges } from '../../notes-find.mjs'
 
+/* ── personal-lm: 打字补全（ghost text）+ 个人风格初稿 ─────────────
+   服务: cv-lm serve @ 127.0.0.1:8788（LaunchAgent com.davidmusk.clipvault-lm）
+   语义: 防抖 260ms → POST /complete → 灰色 ghost 插入预览 → Tab 接受 */
+const LM_URL = 'http://127.0.0.1:8788'
+const setLmGhost = StateEffect.define()
+const clearLmGhost = StateEffect.define()
+
+class LmGhostWidget extends WidgetType {
+  constructor(text) { super(); this.text = text }
+  eq(o) { return o.text === this.text }
+  toDOM() {
+    const s = document.createElement('span')
+    s.className = 'cm-lm-ghost'
+    s.textContent = this.text
+    return s
+  }
+  ignoreEvent() { return true }
+}
+
+const lmGhostField = StateField.define({
+  create() { return { text: '', pos: 0 } },
+  update(v, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setLmGhost)) return { text: e.value.text, pos: e.value.pos }
+      if (e.is(clearLmGhost)) return { text: '', pos: 0 }
+    }
+    if (tr.docChanged || tr.selection) return { text: '', pos: 0 }
+    return v
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => {
+    if (!v.text) return Decoration.none
+    return Decoration.set([Decoration.widget({
+      widget: new LmGhostWidget(v.text), side: 1,
+    }).range(v.pos)])
+  }),
+})
+
+function acceptLmGhost(v) {
+  const g = v.state.field(lmGhostField, false)
+  if (!g || !g.text) return false
+  const pos = v.state.selection.main.head
+  if (pos !== g.pos) return false
+  v.dispatch({
+    changes: { from: pos, insert: g.text },
+    selection: { anchor: pos + g.text.length },
+    userEvent: 'input.personal-lm.accept',
+  })
+  return true
+}
+
+function lmCompose(v) {
+  const topic = window.prompt('个人风格初稿 · 主题 / 一句话需求')
+  if (!topic || !topic.trim()) return true
+  const pos = v.state.selection.main.head
+  fetch(LM_URL + '/compose', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt: topic, max_tokens: 220 }),
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      const text = d && d.text
+      if (!text) { window.alert('cv-lm 未返回内容（检查 127.0.0.1:8788 /health）'); return }
+      v.dispatch({ changes: { from: pos, insert: text + '\n\n' }, userEvent: 'input.personal-lm.compose' })
+    })
+    .catch(() => window.alert('cv-lm 不可达：先启动 cv-lm serve（port 8788）'))
+  return true
+}
+
+let lmTimer = 0
+const lmCompleter = EditorView.updateListener.of((u) => {
+  if (!u.docChanged && !u.selectionSet) return
+  const view = u.view
+  view.dispatch({ effects: clearLmGhost.of({}) })
+  if (!u.docChanged) return
+  const cur = u.state.selection.main
+  if (!cur.empty) return
+  const prefix = u.state.doc.sliceString(Math.max(0, cur.head - 400), cur.head)
+  if (!prefix.trim()) return
+  clearTimeout(lmTimer)
+  lmTimer = setTimeout(() => {
+    fetch(LM_URL + '/complete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prefix, max_tokens: 28 }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const text = d && d.completion
+        const now = view.state.selection.main
+        if (!text || !now.empty) return
+        const nowPrefix = view.state.doc.sliceString(Math.max(0, now.head - 400), now.head)
+        if (nowPrefix !== prefix) return // 光标已移动或文档已变
+        view.dispatch({ effects: setLmGhost.of({ text, pos: now.head }) })
+      })
+      .catch(() => {}) // cv-lm 未起：静默降级，编辑器不受影响
+  }, 260)
+})
+
 const MODE_KEY = 'clipvault.notes.mode'
 const SPLIT_KEY = 'clipvault.notes.split'
 const WRAP_KEY = 'clipvault.notes.codeWrap'
@@ -814,8 +913,12 @@ async function mount(root, opts) {
       calcField,
       findField,
       atomicWrapField,
+      lmGhostField,
+      lmCompleter,
       EditorView.inputHandler.of(notesInput),
       Prec.highest(keymap.of([
+        { key: 'Tab', run: acceptLmGhost },
+        { key: 'Mod-Shift-g', run: lmCompose },
         { key: 'Tab', run: acceptCalc },
         { key: 'Tab', run: (v) => indentList(v, 1) },
         { key: 'Shift-Tab', run: (v) => indentList(v, -1) },

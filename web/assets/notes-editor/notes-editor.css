@@ -524,3 +524,14 @@
   .notes-findbar { animation: none; }
   .notes-findbar-expand .material-symbols-outlined { transition: none; }
 }
+
+/* ── personal-lm ghost text（打字补全预览，Tab 接受） ── */
+.cm-lm-ghost {
+  color: var(--notes-ghost, #a5a5ad);
+  font-style: italic;
+  opacity: 0.8;
+  pointer-events: none;
+}
+@media (prefers-color-scheme: dark) {
+  .cm-lm-ghost { color: var(--notes-ghost-dark, #6e6e78); }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "cv-lm"
+version = "0.1.0"
+edition = "2021"
+description = "ClipVault personal-LM applet loader: standalone HTTP server (:8788) + CLI complete. Depends on cvlm-core."
+
+[dependencies]
+cvlm-core = { path = "../cvlm-core" }
+serde_json = "1"
+
+[[bin]]
+name = "cv-lm"
+path = "src/main.rs"
