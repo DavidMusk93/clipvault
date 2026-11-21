@@ -9,6 +9,7 @@ mod metrics;
 mod origin;
 
 use std::convert::Infallible;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -293,6 +294,12 @@ async fn proxy_inner(
         }
     };
     let bytes_in = collected.len() as u64;
+    // Capture before `headers` is moved into write_request.
+    let accept_encoding = headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("accept-encoding"))
+        .map(|(_, v)| v.to_ascii_lowercase())
+        .unwrap_or_default();
     if collected.len() > origin::MAX_BODY {
         record(
             t0,
@@ -385,6 +392,50 @@ async fn proxy_inner(
                         bytes_in,
                         n,
                     );
+                    // Compress buffered responses (API JSON / HTML / text) when
+                    // the client accepts it and origin did not encode already.
+                    // Big uncompressed JSON bursts (tens of KB) are exactly what
+                    // stalls on the lossy WAN legs.
+                    if let Some((body, enc)) = compress(&accept_encoding, &meta.headers, &buf) {
+                        let mut r = Response::new(
+                            Full::new(Bytes::from(body))
+                                .map_err(|never| match never {})
+                                .boxed(),
+                        );
+                        *r.status_mut() = status_from(status);
+                        let parts = r.headers_mut();
+                        for (k, v) in meta.headers {
+                            let lname = k.to_ascii_lowercase();
+                            if matches!(
+                                lname.as_str(),
+                                "connection"
+                                    | "keep-alive"
+                                    | "transfer-encoding"
+                                    | "upgrade"
+                                    | "te"
+                                    | "trailer"
+                                    | "content-length"
+                                    | "content-encoding"
+                            ) {
+                                continue;
+                            }
+                            if let (Ok(name), Ok(value)) = (
+                                HeaderName::from_bytes(lname.as_bytes()),
+                                HeaderValue::from_str(&v),
+                            ) {
+                                parts.append(name, value);
+                            }
+                        }
+                        parts.insert(
+                            HeaderName::from_static("content-encoding"),
+                            HeaderValue::from_static(enc),
+                        );
+                        parts.append(
+                            HeaderName::from_static("vary"),
+                            HeaderValue::from_static("accept-encoding"),
+                        );
+                        return Ok(r);
+                    }
                     Response::new(
                         Full::new(Bytes::from(buf))
                             .map_err(|never| match never {})
@@ -452,6 +503,58 @@ async fn proxy_inner(
             Ok(r)
         }
     }
+}
+
+/// Compress a buffered origin response when worthwhile.
+/// Returns `(body, content-encoding)` or None when the client does not accept
+/// encoding, origin already encoded, body too small, or type not compressible.
+fn compress(
+    accept: &str,
+    res_headers: &[(String, String)],
+    body: &[u8],
+) -> Option<(Vec<u8>, &'static str)> {
+    if body.len() < 1024 {
+        return None;
+    }
+    // Origin already encoded or explicitly no-transform: leave as is.
+    let lower = |s: &str| s.to_ascii_lowercase();
+    for (k, v) in res_headers {
+        let lk = lower(k);
+        if lk == "content-encoding" {
+            return None;
+        }
+        if lk == "cache-control" && v.contains("no-transform") {
+            return None;
+        }
+    }
+    // Compressible types only (JSON API, HTML, text, css/js/svg).
+    let ctype = res_headers
+        .iter()
+        .find(|(k, _)| lower(k) == "content-type")
+        .map(|(_, v)| lower(v))
+        .unwrap_or_default();
+    let compressible = ["application/json", "text/", "image/svg"]
+        .iter()
+        .any(|p| ctype.starts_with(p))
+        || ctype.contains("javascript");
+    if !compressible {
+        return None;
+    }
+    // Client preference: br > gzip.
+    if accept.split(',').any(|t| t.trim().starts_with("br")) {
+        let mut out = Vec::with_capacity(body.len() / 4);
+        let mut w = brotli::CompressorWriter::new(&mut out, 4096, 5, 20);
+        w.write_all(&body).ok()?;
+        drop(w);
+        return Some((out, "br"));
+    }
+    if accept.split(',').any(|t| t.trim().starts_with("gzip")) {
+        let mut enc = flate2::write::GzEncoder::new(Vec::with_capacity(body.len() / 3), flate2::Compression::fast());
+        enc.write_all(&body).ok()?;
+        let out = enc.finish().ok()?;
+        return Some((out, "gzip"));
+    }
+    None
 }
 
 fn conn_builder() -> ConnBuilder<TokioExecutor> {

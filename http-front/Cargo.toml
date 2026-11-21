@@ -5,7 +5,9 @@ edition = "2021"
 description = "ClipVault one-hop HTTP/2 (h2c :80 / TLS :443). Origin is CV01, not HTTP."
 
 [dependencies]
+brotli = "7"
 bytes = "1"
+flate2 = "1"
 http = "1"
 http-body = "1"
 http-body-util = "0.1"

@@ -523,6 +523,8 @@ class WebServer {
         let pathOnly = path.split(separator: "?", maxSplits: 1).map(String.init).first ?? path
         if pathOnly == "/" || pathOnly == "/index.html" {
             sendHTMLResponse(connection: connection)
+        } else if pathOnly == "/sw.js" {
+            sendSWScript(connection: connection)
         } else if pathOnly == "/notes" || pathOnly == "/notes.html" {
             sendWebFile("notes.html", connection: connection)
         } else if pathOnly == "/api/items" || pathOnly == "/api/clips" {
@@ -1398,6 +1400,24 @@ class WebServer {
             body: data,
             connection: connection,
             extraHeaders: [("Cache-Control", cache)]
+        )
+    }
+
+    /// Service worker script. no-store so deploys take effect on the next
+    /// reload; the SW itself bypasses the HTTP cache for update checks anyway.
+    private func sendSWScript(connection: HTTPByteSink) {
+        guard let webRoot = projectWebDirectory(),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: webRoot + "/sw.js")), !data.isEmpty else {
+            sendErrorResponse(connection: connection, status: 404, message: "Not Found")
+            return
+        }
+        sendBinary(
+            status: 200,
+            reason: "OK",
+            contentType: "text/javascript; charset=utf-8",
+            body: data,
+            connection: connection,
+            extraHeaders: [("Cache-Control", "no-store"), ("Service-Worker-Allowed", "/")]
         )
     }
 

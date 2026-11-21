@@ -87,6 +87,7 @@ final class ClipVaultAuth {
         <!DOCTYPE html><html lang="zh-CN"><meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width,initial-scale=1"/>
         <title>ClipVault</title>
+        <script>if('serviceWorker' in navigator){addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}</script>
         <style>
           body{font:16px/1.45 -apple-system,BlinkMacSystemFont,sans-serif;max-width:22rem;margin:18vh auto;padding:0 1.2rem;color:#1d1d1f}
           input{font:22px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.28em;width:100%;box-sizing:border-box;padding:.7rem .8rem;border:1px solid #d2d2d7;border-radius:12px;text-align:center}
