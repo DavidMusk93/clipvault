@@ -4,6 +4,7 @@
 use crate::gpt::GptTensors;
 use crate::tokenizer::Tokenizer;
 use crate::anyhow_result::{err, Result};
+use crate::gpt::KvCache;
 use candle_core::{DType, Device, Tensor};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -124,22 +125,25 @@ impl Engine {
             .map_err(|e| crate::anyhow_result::err(e.to_string()))
     }
 
-    /// 续写。ctx 截断到 block_size。
+    /// 续写。ctx 截断到 block_size；KV cache 增量解码（prefill 一次 + 逐 token）。
     pub fn generate(&self, prompt: &str, p: &GenParams) -> Result<String> {
         let mut ids = self.tok.encode(prompt);
-        if ids.len() > self.block_size - p.max_tokens.min(self.block_size / 2) {
-            let keep = self.block_size.saturating_sub(p.max_tokens);
+        let max_new = p.max_tokens;
+        if ids.len() > self.block_size - max_new.min(self.block_size / 2) {
+            let keep = self.block_size.saturating_sub(max_new);
             ids = ids[ids.len() - keep..].to_vec();
         }
-        let mut out: Vec<u32> = Vec::with_capacity(p.max_tokens);
-        for _ in 0..p.max_tokens {
-            let ctx_len = ids.len().min(self.block_size);
-            let ctx = &ids[ids.len() - ctx_len..];
-            let idx = Tensor::new(ctx.to_vec(), &self.model.device)?
-                .reshape((1, ctx_len))?
+        let mut out: Vec<u32> = Vec::with_capacity(max_new);
+        let mut cache = KvCache::new(self.model.blocks.len());
+        // prefill：整段 ctx 一次算完
+        let logits = {
+            let idx = Tensor::new(ids.clone(), &self.model.device)?
+                .reshape((1, ids.len()))?
                 .to_dtype(DType::U32)?;
-            let logits = self.model.forward(&idx)?; // (1,T,V)
-            let last = logits.narrow(1, ctx_len - 1, 1)?.squeeze(1)?; // (1,V)
+            self.model.forward_cached(&idx, 0, &mut cache)?
+        };
+        let mut last = logits.narrow(1, ids.len() - 1, 1)?.squeeze(1)?; // (1,V)
+        for step in 0..max_new {
             let next = sample(
                 &last.to_dtype(DType::F32)?.squeeze(0)?.to_vec1::<f32>()?,
                 p,
@@ -154,6 +158,13 @@ impl Engine {
             }
             out.push(next);
             ids.push(next);
+            // decode：仅 1 token 前向（KV cache 已含全部历史）
+            let idx = Tensor::new(vec![next], &self.model.device)?
+                .reshape((1, 1))?
+                .to_dtype(DType::U32)?;
+            let logits = self.model.forward_cached(&idx, cache.len(), &mut cache)?;
+            last = logits.squeeze(1)?; // (1,V)
+            let _ = step;
         }
         Ok(self.tok.decode(&out))
     }

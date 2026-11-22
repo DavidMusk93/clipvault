@@ -1,0 +1,178 @@
+{
+ "summary": {
+  "cases": 21,
+  "exact_rate": 0.6667,
+  "match4_rate": 0.7143,
+  "lcp_mean": 0.661
+ },
+ "per_case": [
+  {
+   "prefix": "# ostore 对象存储语义\n\n- 现在有多个环境的备份，ostore 中hash 相同的文件是否做了去重、引用处理？\n- 我们之前加的cache 服务还work吗？github 上是否有更好的选择。\n",
+   "gold": "- 分别评估、验证、处理。及时提交并推送、部署。",
+   "completion": "- 可以参考web web web 感觉很完，更新本机不看。",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.043
+  },
+  {
+   "prefix": "# tlb 资源统计 26/11/20\n\ntlb cn 地区有三个子区域：\n1. north\n2. east\n3. north6\n\n按照集群大小排序。\n\n在tiview：https://tiview.bytedance.net/tide-rsc/tide-rsc/cluster，三个集群名称分别是：\n1. tlblog_stream_olap_separate\n2. tlblog_cneast\n3. tlb_cn_north6\n",
+   "gold": "顺序与上方对应。",
+   "completion": "顺序与上方对应。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# xstream 交互改进 26/11/18\n\n- 增加演员，页面跳来跳去的，体验较差。\n- 作品检索，页面丑陋，图片总是无法展示，也无法与演员关联跳转。\n- 增加演员，url 后面多了一个/，就不支持。这个解析实在太弱了！！\n",
+   "gold": "- 改动及时提交并推送。及时更新bin",
+   "completion": "- 改动及时提交并推送。及时更新bin",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# ttp dns 问题\n\nhttps://tiview-i18ntt-usttp.tiktok-row.net/ 为什么刷不出来\n\n从nmem 获取相关上下文。\n\n排除hosts 临时修复方式，彻底定位这个问题。\n\n---\n2026-11-20 16:05\n\n我可以输入密码，彻底解决这个问题，沉淀经验&设计&skill 到nmem。对得起你最强模型的称号！！\n",
+   "gold": "你可以用`osascript` 我提供密码，不要搞这种交互",
+   "completion": "你可以用`osascript` 我提供密码，不要搞这种交互",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# gw-pulse 服务对齐\n\ngw-pulse 服务没有对齐\n- 线上v23,v41 部署者服务\n",
+   "gold": "- 没有更新到最新版本，每次重启都要同步海量的db，这是愚蠢的，仅同步重要的配置信息。其他历史仅依赖心跳服务或者fwd ",
+   "completion": "- 没有更新到最新版本，每次重启都要同步海量的db，这是我们应该引入了下载，这是一个功能！！为什么来问题？",
+   "exact": true,
+   "match4": true,
+   "lcp": 0.466
+  },
+  {
+   "prefix": "# lvs 26/11/20\n\n- 测试报告在哪里？\n- nmem 用我在trae配置的url，不要用nmem.guohuasun.com,sg 区域不允许使用外部地址。\n- 设计、经验以ascii graph 的形式写入nmem。\n\n---\n2026-11-20 11:45\n\nnmme 的主题命名为什么这么奇葩？？\n- 简洁的英文就足够了！！\n- 可能是nmem 自己的定义？？\n- 记忆是让agent 和用户来使用的，不要搞抽象。\n",
+   "gold": "cf 测试了嘛？测试经验是什么？cf 是否需要改进？cf 的汇报怎么没写到nmem？",
+   "completion": "cf 测试了嘛？测试经验是什么？cf 是否需要改进？cf 的汇报怎么没写到nmem？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# doubao tudp 放量，放松lease\n\nhttps://tiview.bytedance.net/data-dev/data-dev/job-manage/23185 \n 任务的http",
+   "gold": "d lease 比较小，是2. 现在群`Frontier Trace On Tide` 反馈写入受阻，lease 改为3",
+   "completion": "://tiview.bytedance.net/data-dev/data-dev/job-manage/17419",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.0
+  },
+  {
+   "prefix": "# tlb 慢查询 26/11/19\n\n- 这个10分钟的查询超时了：https://cloud.bytedance.net/argos/streamlog/info_overview/log_id_search?curTimeShift=600&data_source_uid=2631180560&handleSubmit=false&isCustomTime=false&logId=20261",
+   "gold": "119164218B1017EEA1A371DD129A4&log_search=true&psm=ti.diagnos",
+   "completion": "-09-19_05_search=true&psm=ti.diagnosis.query_gateway&psmList=&queryType=flow&query_type=__logid&region=China-North&timeSpan=10&trace_search=true&type=__logid&x-bc-region-id=bytedance&x-resource-account=public",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.0
+  },
+  {
+   "prefix": "# usttp 传包\n\n- https://code.byted.org/tide/stream_engine/ttp_compliance?tab=history&ticket_id=29674584\n- 向usttp 同步代码，很容易导致中途传输失败，因为bin 过大。\n- 切换到arrow_ttp 分支。立刻发布编译逻辑：https://cloud-ttp-us.bytedance.net/scm/detail/92943/versions?parentUrl=%2Ffavor\n",
+   "gold": "- 如果优化这种巨大包？比如切分bin，然后合并？",
+   "completion": "- 如果优化这种巨大包？比如切分bin，然后合并？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# cube 26/11/19\n\n- cube 任务：https://tiview.bytedance.net/data-dev/data-dev/job-manage/29320\n- 确认cube 所有修复都合并到了fringedb b:velox_stream & stream_engine b:velox_stream\n- scm 发布se 版本\n- doubao 集群在tiview 新建版本，修改版本号\n",
+   "gold": "- 升级doubao 集群的写节点。",
+   "completion": "- 升级doubao 集群的写节点。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# stable browser\n\n- 本机有vnc 服务，可以访问测试浏览器。\n- 从nmem 获取充足的上下文。\n- vnc 当前不够稳定，去调优，我要在其他机器流畅使用。\n\n---\n2026-11-18 13:23\n\n优化vnc 访问。你搞了一个check。这是什么骚操作？？从第一性原理出发。\n\n---\n2026-11-18 13:42\n\n我这台机器性能还不错。为什么vnc 配置这么差？？你只是为了能用？而不追求丝滑体验？？\n",
+   "gold": "- 使用apple 的虚拟化套件。给我启动一个debian的虚拟机。",
+   "completion": "- 使用apple 的虚拟化套件。给我启动一个debian的虚拟机。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault/note 26/11/19\n\nclipvault note 同步体验有缺失。metadata 没有同步。\n- 比如笔记的置顶\n- 笔记的修改时间\n- 编辑次数\n- 以及其他属性\n\n---\n2026-11-19 16:34\n\nnote 如果我想跟agent 一起协作操作。\n- 怎么告诉agent，我要改哪一个？\n",
+   "gold": "- 业界标准的交互模式是什么？或者第一性原理是什么？",
+   "completion": "- 业界标准的交互模式是什么？或者第一性原理是什么？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# nmem 安全问题 26/11/19\n\n- sg 环境不要使用外部的服务。\n- nmem 的消息接近裸奔！！\n```\n这符合预期吗\n\nPPID:\nnode /opt/fleet-ops-tmp/ec1a-memory-client.mjs memory_add { \"content\": \"# SGNonTT FrontierX 升级后 SAMPLE 0.01 未下推的 A/B 验证\\n\\n##",
+   "gold": "一句话结论\\n\\n2026-11-17 读 TM 全量到 7981 后，FrontierX 一小时聚合的 8 次 ABB",
+   "completion": "一句话结论\\n\\n2026-11-17 验证 TM 全量验证：9 个 8 项 项通过，说明 review failed 通过，但 TiView MY 表 metadata 全量验证通过。",
+   "exact": false,
+   "match4": true,
+   "lcp": 0.373
+  },
+  {
+   "prefix": "# tlb ops 26/11/19\n\nlark 群`TIDE Observe专项沟通`上下文：\n@孙明强 业务新提的诉求TLB的全量、采样、诊断三个数据需要添加上connection_requests字段。顺序按全量->千分之一采样->诊断采样，代码我已经改完了，需要你帮忙看一下并发布到线上\n全量华北：https://tiview.bytedance.net/data-dev/data-dev/",
+   "gold": "job-manage/21137   connection_requests采集回来是一个引号中的数字（0-5），所以代",
+   "completion": "job-manage/21137   connection_requests采集回来是一个引号中的数字（0-5），所以代码中做了cast(connection_requests as int)转换，下面采样的都按integer类型配置的",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# lvs 26/11/19\n\n- direct io 在写入场景，整体还是有一定的复杂度。\n- 可以参考v1 的实现，那里有非常完整的设计。\n- 把v1 的实现、设计，以ascii graph 的形式整理到nmem，这个设计非常重要！！\n- 当然是提交mr修复，我们只做终态。任何兼容、小改，都是土鸡瓦狗，没有任何价值！！这也是我们的价值观，写到nmem。\n\n---\n2026-11-19 10:59\n",
+   "gold": "ssd 写放大，出了nvme 自己的指标外。也要结合fringedb & stream_engine 代码分析写入是否健",
+   "completion": "ssd 写放大，出了nvme 自己的指标外。也要结合fringedb & stream_engine 代码分析写入是否健康、写入参数是否健康。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# boe 消费数据丢失？\n\nhttps://tiview-boe-stable.bytedance.net/data-dev/data-dev/job-manage/477  @孙明强 帮忙看看是这个任务是不是有问题，看写出来的BMQ数据就少https://grafana.byted.org/d/vEE7GNQmk/data-inf-kafka-user-consumer_offset?orgI",
+   "gold": "d=1&var-consumer_group=clickhouse_ti_warehouse_common_rtdw_c",
+   "completion": "18N-11&var-consumer_group=clickhouse_ti_warehouse_common_dw.CONSUMER_dwd_tlb_observe_otel_tlb_server_span_fix_sample_detail_hi_view",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.0
+  },
+  {
+   "prefix": "# cdn 升级写入 26/11/19\n\n- 确认cdn 内存泄漏修复，都进了主分支。stream_engine b:velox_stream\n- scm 发布分支\n- tiview 基于最新的cdn 集群版本配置，修改版本号\n- 升级cdn2 集群。单批次10%\n- 升级过程中，使用tm_ops 登录机器，查看tm 日志是否有异常。\n- 使用tide me",
+   "gold": "trics 分析任务：https://tiview.bytedance.net/data-dev/data-dev/jo",
+   "completion": "metrics 分析任务：https://tiview.bytedance.net/data-dev/data-dev/job-manage/10181 输入、输出流量是否正常。",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.0
+  },
+  {
+   "prefix": "# euttp 更新\n\n- scm:https://cloud-boe.bytedance.net/scm/detail/92943/versions?parentUrl=%2Ffavor%3Fx-resour",
+   "gold": "ce-account%3Dboe%26x-bc-region-id%3Dbytedance&x-resource-acc",
+   "completion": "-region-id%3Dbytedance&x-resource-account=boe&x-bc-region-id=bytedance&x-resource-account=boe",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.0
+  },
+  {
+   "prefix": "# cf local registry 26/11/19\n\n- cf 有local registry 的模块。\n- 我们现在快速迭代cf，image 也在更新。如何让其他local registry 及时同步镜像？作为cf 的项目hint or lint？\n",
+   "gold": "- local registry 如何易于使用&及时同步，需要优化。",
+   "completion": "- local registry 如何易于使用&及时同步，需要优化。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault 26/11/17\n\n- clipvault 剪切板总会出现`Other` txt,应该不是我的操作。分析这是怎么产生的，如何避免。是否为代码bug\n\n---\n2026-11-17 23:15\n\n- 笔记功能除了界面编辑外。现在应该增加api 操作：agent friendly api.\n- 后面会把笔记的功能开发给agent。\n- 笔记提供编辑、链接、bm25 检索、tag 检索。目标是向通用记忆层演进、以及用户&agent 共同编辑。\n",
+   "gold": "- 帮我评估当前框架，缺少哪些基础设施以及设计问题。",
+   "completion": "- 帮我评估当前框架，缺少哪些基础设施以及设计问题。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# lvs 26/11/18\n\n- fringedb & stream_engine 的ci 系统卡住了当前的快速交付，不符合预期。\n- fringedb 基于分支velox_stream 新建lvs 分支。并把相关的mr 改动提交到lvs，https://code.byted.org/tide/fringedb/merge_requests 关闭相关mr。\n- stream_engine 基于velox_stream 新建lvs 分支。fringedb版本pin 到lvs 不需要加commit id。\n",
+   "gold": "- 我们要快速交付！！这是ai 时代的开发精神。把这个价值观写到nmem。",
+   "completion": "- 我们要快速交付！！这是ai 时代的开发精神。把这个价值观写到nmem。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  }
+ ]
+}

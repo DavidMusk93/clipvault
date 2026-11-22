@@ -26,19 +26,19 @@ pub struct GptTensors {
     pub n_head: usize,
 }
 
-struct Block {
-    ln1_w: Tensor,
-    ln1_b: Tensor,
-    qkv_w: Tensor,
-    qkv_b: Tensor,
-    proj_w: Tensor,
-    proj_b: Tensor,
-    ln2_w: Tensor,
-    ln2_b: Tensor,
-    fc_w: Tensor,
-    fc_b: Tensor,
-    mlp_proj_w: Tensor,
-    mlp_proj_b: Tensor,
+pub struct Block {
+    pub ln1_w: Tensor,
+    pub ln1_b: Tensor,
+    pub qkv_w: Tensor,
+    pub qkv_b: Tensor,
+    pub proj_w: Tensor,
+    pub proj_b: Tensor,
+    pub ln2_w: Tensor,
+    pub ln2_b: Tensor,
+    pub fc_w: Tensor,
+    pub fc_b: Tensor,
+    pub mlp_proj_w: Tensor,
+    pub mlp_proj_b: Tensor,
 }
 
 fn lin(t: &HashMap<String, Tensor>, key: &str) -> Result<(Tensor, Tensor)> {
@@ -186,5 +186,132 @@ impl GptTensors {
         let x = layer_norm(&x, &self.ln_f_w, &self.ln_f_b, 1e-5)?;
         let x2d = x.reshape((b_size * t, self.d_model))?;
         x2d.matmul(&self.head_w.t()?)?.reshape((b_size, t, self.head_w.dim(0)?))
+    }
+}
+
+/// per-layer KV cache：(B, nh, T_total, dh)，增量解码用。
+pub struct KvCache {
+    pub k: Vec<Tensor>,
+    pub v: Vec<Tensor>,
+}
+
+impl KvCache {
+    pub fn new(n_layer: usize) -> Self {
+        Self { k: Vec::with_capacity(n_layer), v: Vec::with_capacity(n_layer) }
+    }
+    pub fn len(&self) -> usize {
+        self.k.first().map(|t| t.dim(2).unwrap_or(0)).unwrap_or(0)
+    }
+}
+
+impl GptTensors {
+    /// 带缓存的 forward：idx (B, T_new)，pos0 = 已缓存长度。
+    /// prefill：cache 为空、idx 为整段 ctx；decode：idx 为 1 个 token。
+    /// 返回 logits (B, T_new, V)。
+    pub fn forward_cached(
+        &self,
+        idx: &Tensor,
+        pos0: usize,
+        cache: &mut KvCache,
+    ) -> Result<Tensor> {
+        let (b_size, t_new) = idx.dims2()?;
+        let dh = self.d_model / self.n_head;
+        let tok_lut = self.tok_emb.index_select(&idx.reshape((b_size * t_new,))?, 0)?;
+        let pos_idx = Tensor::arange(
+            pos0 as u32, (pos0 + t_new) as u32, &self.device)?;
+        let pos_lut = self.pos_emb.index_select(&pos_idx, 0)?; // (T_new, C)
+        let mut x = tok_lut
+            .reshape((b_size, t_new, self.d_model))?
+            .broadcast_add(&pos_lut.unsqueeze(0)?)?;
+
+        let t_total = cache.len() + t_new;
+        // mask：仅当 T_new>1（prefill）需要；decode T_new=1 时全历史可见
+        let mask = if t_new > 1 && cache.len() > 0 {
+            let m: Vec<Vec<f32>> = (0..t_new)
+                .map(|i| {
+                    (0..t_total)
+                        .map(|j| {
+                            if j > pos0 + i { f32::NEG_INFINITY } else { 0.0 }
+                        })
+                        .collect()
+                })
+                .collect();
+            Some(Tensor::new(m, &self.device)?.reshape((1, 1, t_new, t_total))?)
+        } else if t_new > 1 {
+            let m: Vec<Vec<f32>> = (0..t_new)
+                .map(|i| (0..t_new).map(|j| if j > i { f32::NEG_INFINITY } else { 0.0 }).collect())
+                .collect();
+            Some(Tensor::new(m, &self.device)?.reshape((1, 1, t_new, t_new))?)
+        } else {
+            None
+        };
+
+        for (li, blk) in self.blocks.iter().enumerate() {
+            let h = layer_norm(&x, &blk.ln1_w, &blk.ln1_b, 1e-5)?;
+            let h2d = h.reshape((b_size * t_new, self.d_model))?;
+            let qkv = h2d
+                .matmul(&blk.qkv_w.t()?)?
+                .broadcast_add(&blk.qkv_b.reshape((1, blk.qkv_b.elem_count()))?)?
+                .reshape((b_size, t_new, 3, self.d_model))?;
+            let q = qkv.narrow(2, 0, 1)?.squeeze(2)?;
+            let k = qkv.narrow(2, 1, 1)?.squeeze(2)?;
+            let v = qkv.narrow(2, 2, 1)?.squeeze(2)?;
+            let shape = (b_size, t_new, self.n_head, dh);
+            let q = q.reshape(shape)?.transpose(1, 2)?.contiguous()?;
+            let k = k.reshape(shape)?.transpose(1, 2)?.contiguous()?;
+            let v = v.reshape(shape)?.transpose(1, 2)?.contiguous()?;
+
+            // 拼接历史 KV（首次填充 push，其后替换）
+            let (k_all, v_all) = if cache.k.len() > li {
+                (
+                    Tensor::cat(&[&cache.k[li], &k], 2)?,
+                    Tensor::cat(&[&cache.v[li], &v], 2)?,
+                )
+            } else {
+                (k.clone(), v.clone())
+            };
+            if cache.k.len() > li {
+                cache.k[li] = k_all.clone();
+                cache.v[li] = v_all.clone();
+            } else {
+                cache.k.push(k_all.clone());
+                cache.v.push(v_all.clone());
+            }
+
+            let att = q.matmul(&k_all.transpose(D::Minus2, D::Minus1)?.contiguous()?)?;
+            let att = att.affine(1.0 / (dh as f64).sqrt(), 0.0)?;
+            let att = match &mask {
+                Some(m) => att.broadcast_add(m)?,
+                None => att,
+            };
+            let att = candle_nn::ops::softmax_last_dim(&att)?;
+            let y = att.matmul(&v_all)?;
+            let y = y
+                .transpose(1, 2)?
+                .reshape((b_size, t_new, self.d_model))?
+                .contiguous()?;
+            let y2d = y.reshape((b_size * t_new, self.d_model))?;
+            let attn_out = y2d
+                .matmul(&blk.proj_w.t()?)?
+                .broadcast_add(&blk.proj_b.reshape((1, blk.proj_b.elem_count()))?)?
+                .reshape((b_size, t_new, self.d_model))?;
+            x = (x + attn_out)?;
+
+            let h2 = layer_norm(&x, &blk.ln2_w, &blk.ln2_b, 1e-5)?;
+            let h2d2 = h2.reshape((b_size * t_new, self.d_model))?;
+            let m = h2d2
+                .matmul(&blk.fc_w.t()?)?
+                .broadcast_add(&blk.fc_b.reshape((1, blk.fc_b.elem_count()))?)?;
+            let m = m.gelu_erf()?;
+            let m = m
+                .matmul(&blk.mlp_proj_w.t()?)?
+                .broadcast_add(&blk.mlp_proj_b.reshape((1, blk.mlp_proj_b.elem_count()))?)?
+                .reshape((b_size, t_new, self.d_model))?;
+            x = (x + m)?;
+        }
+
+        let x = layer_norm(&x, &self.ln_f_w, &self.ln_f_b, 1e-5)?;
+        let x2d = x.reshape((b_size * t_new, self.d_model))?;
+        x2d.matmul(&self.head_w.t()?)?.reshape((b_size, t_new, self.head_w.dim(0)?))
     }
 }

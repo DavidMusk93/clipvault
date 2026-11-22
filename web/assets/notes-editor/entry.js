@@ -108,7 +108,7 @@ const lmCompleter = EditorView.updateListener.of((u) => {
         view.dispatch({ effects: setLmGhost.of({ text, pos: now.head }) })
       })
       .catch(() => {}) // cv-lm 未起：静默降级，编辑器不受影响
-  }, 260)
+  }, 150)
 })
 
 const MODE_KEY = 'clipvault.notes.mode'
