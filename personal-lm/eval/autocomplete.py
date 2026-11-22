@@ -46,7 +46,16 @@ def build_cases(n: int = 60):
         # 在换行处切，贴近真实打字场景
         nl = text.find("\n", cut)
         cut = nl + 1 if 0 < nl < cut + 80 else cut
-        prefix, gold = text[:cut], text[cut:cut + 60].strip()
+        prefix = text[:cut]
+        # gold = 分隔符/时间戳/空行之后的第一个内容行（与 ghost text 语义对齐）
+        gold_lines = []
+        for ln in text[cut:].splitlines():
+            s = ln.strip()
+            if not s or s == "---" or (len(s) >= 8 and s[:4].isdigit() and "-" in s[:8]):
+                continue
+            gold_lines.append(s)
+            break
+        gold = " ".join(gold_lines)[:60]
         if not gold:
             continue
         cases.append({"prefix": prefix, "gold": gold})
@@ -93,9 +102,7 @@ def main():
             continue
         ng, nc = norm(c["gold"]), norm(comp)
         e = ng[:20] == nc[:20] and len(nc) > 0
-        g4 = tok.encode(c["gold"])[:4]
-        c4 = tok.encode(comp)[:4]
-        m = g4 == c4 and len(c4) > 0
+        m = norm(c["gold"])[:8] == nc[:8] and len(nc) > 0  # 前8字符一致
         exact += e
         m4 += m
         lcps.append(lcp_ratio(nc, ng))

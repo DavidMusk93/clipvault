@@ -19,6 +19,7 @@ pub struct Engine {
     manifest_mtime: (i64, u32),
 }
 
+#[derive(Clone)]
 pub struct GenParams {
     pub max_tokens: usize,
     pub temperature: f32,

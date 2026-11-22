@@ -201,32 +201,103 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine) {
             let is_complete = path == "/complete";
             let p = GenParams {
                 max_tokens: v["max_tokens"].as_u64().map(|x| x as usize)
-                    .unwrap_or(if is_complete { 24 } else { 256 })
+                    .unwrap_or(if is_complete { 40 } else { 256 })
                     .min(512),
                 temperature: v["temperature"].as_f64().map(|x| x as f32)
                     .unwrap_or(if is_complete { 0.35 } else { 0.8 }),
                 top_k: v["top_k"].as_u64().map(|x| x as usize).unwrap_or(if is_complete { 20 } else { 40 }),
-                stop_on_newline: if is_complete { true } else { false },
+                stop_on_newline: false,
                 rep_penalty: v["rep_penalty"].as_f64().map(|x| x as f32)
                     .unwrap_or(if is_complete { 1.2 } else { 1.15 }),
             };
-            let guard = shared.engine.lock().unwrap();
-            let eng = guard.as_ref().unwrap();
-            match eng.generate(prefix, &p) {
-                Ok(mut text) => {
-                    // 补全（ghost text）不应以换行/空白开头：标题行后续写的
-                    // 第一个 token 往往就是 \n，直接吃掉
-                    if is_complete {
-                        text = text.trim_start_matches(['\n', '\r', ' ']).to_string();
-                    }
-                    let key = if is_complete { "completion" } else { "text" };
-                    respond(&mut stream, "200 OK",
-                            &json!({key: text, "version": eng.version}));
+            if is_complete {
+                // ghost text：确定性贪心 + 跳过 ---/时间戳样板，给内容行。
+                // 采样会让多轮续写分歧；贪心保证结构预测（---+时间戳+列表项）稳定可跳过。
+                let p_complete = cvlm_core::GenParams {
+                    temperature: 0.0,      // 纯贪心：rep_penalty 会把时间戳等合法重复掰成乱码
+                    top_k: 1,
+                    rep_penalty: 1.0,
+                    max_tokens: p.max_tokens.max(80).min(160),
+                    ..p.clone()
+                };
+                let text = skip_boilerplate(shared, prefix, &p_complete);
+                let ver = shared.version().unwrap_or_default();
+                respond(&mut stream, "200 OK", &json!({"completion": text, "version": ver}));
+            } else {
+                let guard = shared.engine.lock().unwrap();
+                let eng = guard.as_ref().unwrap();
+                match eng.generate(prefix, &p) {
+                    Ok(text) => respond(&mut stream, "200 OK",
+                                        &json!({"text": text, "version": eng.version})),
+                    Err(e) => respond(&mut stream, "500 Internal Server Error",
+                                      &json!({"error": e.to_string()})),
                 }
-                Err(e) => respond(&mut stream, "500 Internal Server Error",
-                                  &json!({"error": e.to_string()})),
             }
         }
         _ => respond(&mut stream, "404 Not Found", &json!({"error": "not found"})),
     }
+}
+
+
+/// 样板行判定：--- 分隔行、纯数字/时间戳形态行（小模型生成的时间戳常是乱码）。
+fn is_boilerplate_line(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() || t == "---" || t == "***" || t == "___" {
+        return true;
+    }
+    // 单一字符重复行（====、---- 等）：结构装饰
+    if t.len() >= 3 && t.chars().all(|c| c == t.chars().next().unwrap()) {
+        return true;
+    }
+    // 短 ASCII 碎片以数字/横线开头：截断的时间戳产物（"2026-"、"-09-"）
+    if t.len() < 6 {
+        return t.starts_with('-')
+            || t.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false);
+    }
+    if !t.chars().all(|c| c.is_ascii()) {
+        return false;
+    }
+    let digits = t.chars().filter(|c| c.is_ascii_digit()).count();
+    let ratio = digits as f32 / t.len() as f32;
+    ratio >= 0.4 && (t.contains('-') || t.contains(':'))
+}
+
+/// /complete 的内容行提取：迭代生成跳过样板（---/时间戳），返回第一条内容行。
+fn skip_boilerplate(
+    shared: &cvlm_core::SharedEngine,
+    prefix: &str,
+    p: &cvlm_core::GenParams,
+) -> String {
+    let mut accum = String::new();
+    for _ in 0..4 {
+        let guard = shared.engine.lock().unwrap();
+        let eng = guard.as_ref().unwrap();
+        let piece = match eng.generate(&format!("{prefix}{accum}"), p) {
+            Ok(t) => t,
+            Err(_) => break,
+        };
+        drop(guard);
+        if piece.trim().is_empty() {
+            break;
+        }
+        accum.push_str(&piece);
+        // 只认"换行终止"的完整行；末尾半行不算（下一轮补全后再取）
+        let complete_part = match accum.rfind('\n') {
+            Some(i) => &accum[..i],
+            None => "",
+        };
+        for line in complete_part.lines() {
+            let s = line.trim();
+            if !s.is_empty() && !is_boilerplate_line(s) {
+                return s.to_string();
+            }
+        }
+    }
+    // 兜底：最后一块去掉样板后的残余
+    accum
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty() && !is_boilerplate_line(l))
+        .unwrap_or("")
+        .to_string()
 }

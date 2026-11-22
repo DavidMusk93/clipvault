@@ -62,7 +62,7 @@ case "$CMD" in
     RSIZE=$(oapi GET "/api/list?prefix=$PREFIX/" | python3 -c \
       "import json,sys;[print(e['size']) for e in json.load(sys.stdin)['entries'] if e['path'].endswith('bundle.tar.gz')]" \
       2>/dev/null || echo 0)
-    [ "$RSIZE" = "$SIZE" ] || { echo "警告：远端 bundle.tar.gz 大小 $RSIZE ≠ 本地 $SIZE，请重 push"; exit 1; }
+    [ "$RSIZE" = "$SIZE" ] || { echo "警告：远端 bundle.tar.gz 大小 $RSIZE 不等于本地 ${SIZE}，请重 push"; exit 1; }
     echo "[push] 远端校验 OK ($RSIZE B)"
     ;;
 
