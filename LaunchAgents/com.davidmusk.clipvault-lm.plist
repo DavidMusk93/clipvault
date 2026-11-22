@@ -17,6 +17,8 @@
     <string>/Users/&lt;user&gt;</string>
     <key>CVLM_BUNDLE</key>
     <string>/Users/&lt;user&gt;/Library/Application Support/Keepsake/models/personal-lm</string>
+    <key>CVLM_BACKEND_URL</key>
+    <string>http://127.0.0.1:8790/v1/completions</string>
     <key>PATH</key>
     <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>

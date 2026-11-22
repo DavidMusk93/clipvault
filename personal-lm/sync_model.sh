@@ -37,10 +37,15 @@ case "$CMD" in
     [ -f "$BUNDLE_DIR/manifest.json" ] || { echo "no local bundle at $BUNDLE_DIR"; exit 1; }
     VER=$(local_version)
     echo "[push] 打包 $BUNDLE_DIR (version=$VER)"
-    mkdir -p "$TMP/bundle" "$TMP/bin"
+    mkdir -p "$TMP/bundle" "$TMP/bin" "$TMP/adapters"
     cp "$BUNDLE_DIR"/* "$TMP/bundle/"
     [ -f "$BIN_DIR/cv-lm" ] && cp "$BIN_DIR/cv-lm" "$TMP/bin/" || echo "[push] 无本地 cv-lm 二进制，跳过"
-    (cd "$TMP" && tar -czf bundle.tar.gz bundle bin)
+    # LoRA adapters（Qwen 双引擎，私有）
+    LORA_DIR="${CVLM_LORA_DIR:-$(cd "$(dirname "$0")" && pwd)/lora/adapters}"
+    if ls "$LORA_DIR/"*.safetensors >/dev/null 2>&1; then
+      cp "$LORA_DIR/"*.safetensors "$TMP/adapters/"
+    fi
+    (cd "$TMP" && tar -czf bundle.tar.gz bundle bin adapters)
     SHA=$(shasum -a 256 "$TMP/bundle.tar.gz" | cut -d' ' -f1)
     SIZE=$(stat -f%z "$TMP/bundle.tar.gz")
     echo "[push] 上传 ${SIZE}B → $PREFIX/bundle.tar.gz"
@@ -79,9 +84,13 @@ case "$CMD" in
       > "$TMP/bundle.tar.gz"
     GOT=$(shasum -a 256 "$TMP/bundle.tar.gz" | cut -d' ' -f1)
     [ "$GOT" = "$SHA" ] || { echo "sha256 不匹配：期望 $SHA 实得 $GOT"; exit 1; }
-    mkdir -p "$BUNDLE_DIR" "$BIN_DIR"
+    mkdir -p "$BUNDLE_DIR" "$BIN_DIR" "$HERE/lora/adapters"
     tar -xzf "$TMP/bundle.tar.gz" -C "$TMP"
     cp "$TMP/bundle"/* "$BUNDLE_DIR/"
+    # adapters → personal-lm/lora/adapters（供 mlx_lm.server）
+    if [ -d "$TMP/adapters" ] && ls "$TMP/adapters/"*.safetensors >/dev/null 2>&1; then
+      cp "$TMP/adapters/"*.safetensors "$LORA_DIR/"
+    fi
     if [ -f "$TMP/bin/cv-lm" ]; then
       cp "$TMP/bin/cv-lm" "$BIN_DIR/cv-lm"; chmod +x "$BIN_DIR/cv-lm"; xattr -cr "$BIN_DIR/cv-lm" 2>/dev/null || true
     fi

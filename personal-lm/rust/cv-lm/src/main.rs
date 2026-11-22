@@ -243,7 +243,7 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine) {
                     temperature: 0.0,      // 纯贪心：rep_penalty 会把时间戳等合法重复掰成乱码
                     top_k: 1,
                     rep_penalty: 1.0,
-                    max_tokens: p.max_tokens.max(80).min(160),
+                    max_tokens: p.max_tokens.max(60).min(120),
                     ..p.clone()
                 };
                 let text = skip_boilerplate(shared, prefix, &p_complete);
@@ -295,7 +295,7 @@ fn skip_boilerplate(
     p: &cvlm_core::GenParams,
 ) -> String {
     let mut accum = String::new();
-    for _ in 0..4 {
+    for _ in 0..3 {
         let guard = shared.engine.lock().unwrap();
         let eng = guard.as_ref().unwrap();
         let piece = match eng.generate(&format!("{prefix}{accum}"), p) {

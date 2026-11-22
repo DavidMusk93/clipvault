@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.davidmusk.clipvault-lm-qwen</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/<user>/dev/ClipView/personal-lm/.venv/bin/python</string>
+    <string>-m</string><string>mlx_lm</string><string>server</string>
+    <string>--model</string><string>Qwen/Qwen3-0.6B</string>
+    <string>--adapter</string><string>/Users/<user>/dev/ClipView/personal-lm/lora/adapters</string>
+    <string>--adapter-path</string><string>/Users/<user>/dev/ClipView/personal-lm/lora/adapters</string>
+    <string>--port</string><string>8790</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/<user></string>
+    <key>HF_HOME</key><string>/Users/<user>/.cache/huggingface</string>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>WorkingDirectory</key><string>/Users/<user>/dev/ClipView/personal-lm</string>
+  <key>StandardOutPath</key><string>/Users/<user>/Library/Application Support/Keepsake/logs/cv-lm-qwen.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/<user>/Library/Application Support/Keepsake/logs/cv-lm-qwen.err.log</string>
+</dict>
+</plist>
