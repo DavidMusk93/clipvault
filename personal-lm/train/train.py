@@ -50,11 +50,19 @@ def main():
     ap.add_argument("--resume-latest", action="store_true")
     ap.add_argument("--max-steps", type=int, default=0, help="sanity run 上限")
     ap.add_argument("--tokens", default=str(TOKENS_BIN), help="token 流文件（v2 加权用 tokens_weighted.bin）")
+    ap.add_argument("--device", default="auto", help="auto|cuda|mps|cpu")
+    ap.add_argument("--layers", type=int, default=8)
+    ap.add_argument("--d-model", type=int, default=384)
+    ap.add_argument("--heads", type=int, default=6)
     ap.add_argument("--bf16", action="store_true", help="MPS bf16 autocast（实测比 fp32 慢，默认关）")
     args = ap.parse_args()
 
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    if args.device == "auto":
+        device = "cuda" if torch.cuda.is_available() else (
+            "mps" if torch.backends.mps.is_available() else "cpu")
+    else:
+        device = args.device
 
     data = np.memmap(args.tokens, dtype=np.uint16, mode="r")
     n_val = max(1000, len(data) // 100)
@@ -64,7 +72,8 @@ def main():
     tok_meta = json.loads(TOKENIZER_JSON.read_text())
     vocab_size = len(tok_meta["vocab"])
 
-    model = GPT(vocab_size=vocab_size, block_size=args.block)
+    model = GPT(vocab_size=vocab_size, block_size=args.block,
+                n_layer=args.layers, d_model=args.d_model, n_head=args.heads)
     model.to(device)
     print(f"[train] params: {model.num_params()/1e6:.1f}M")
 
@@ -85,7 +94,10 @@ def main():
 
     total_steps = args.steps
     rng = np.random.default_rng(1337)
-    use_bf16 = args.bf16
+    use_bf16 = args.bf16 or (device == "cuda")  # CUDA 上默认开 bf16（快 3-5x）；
+    # T4 等 bf16 不支持的卡自动回退 fp16（下方 autocast dtype 决定）
+    amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=(device == "cuda" and amp_dtype == torch.float16))
     t0 = time.time()
 
     @torch.no_grad()
@@ -94,7 +106,7 @@ def main():
         losses = []
         for _ in range(8):
             xb, yb = get_batch(val_data, args.block, args.batch, device, rng)
-            with torch.autocast("mps", dtype=torch.bfloat16, enabled=use_bf16):
+            with torch.autocast(device, dtype=amp_dtype, enabled=use_bf16):
                 _, loss = model(xb, yb)
             losses.append(loss.item())
         model.train()
@@ -117,12 +129,19 @@ def main():
             g["lr"] = lr
 
         xb, yb = get_batch(train_data, args.block, args.batch, device, rng)
-        with torch.autocast("mps", dtype=torch.bfloat16, enabled=use_bf16):
+        with torch.autocast(device, dtype=amp_dtype, enabled=use_bf16):
             _, loss = model(xb, yb)
         opt.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
+        if scaler.is_enabled():
+            scaler.scale(loss).backward()
+            scaler.unscale_(opt)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(opt)
+            scaler.update()
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
 
         if step % 10 == 0 or step == total_steps - 1:
             dt = time.time() - t0
