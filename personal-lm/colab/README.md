@@ -4,6 +4,16 @@
 > 此前的"绝不落云"铁律据此修订为：**语料/模型只进用户自己信任的存储
 > （Drive / ostore），仍然绝不进 git / 公共 Hub**。
 
+## 三条路的真相（2026-11-22 核实）
+
+| 路径 | 算力来源 | CLI 化 | 代价 |
+| --- | --- | --- | --- |
+| **消费版 Colab（Pro 会员）** | Pro 算力池（T4/A100/L4） | ❌ 官方无执行 API | 你开浏览器点 Run all；watcher 模式下只开一次 |
+| **Colab Enterprise（gcloud colab）** | GCP 计费（新账号 $300 试用金；L4/A100） | ✅ 官方 `gcloud colab executions` 全 CLI | 一次性 setup（10 分钟，2 步浏览器） |
+| Kaggle | 免费配额 30h/周（P100/T4×2） | ✅ 官方 CLI | 换个平台（包已备好 kaggle/） |
+
+⚠️ GitHub 上"利用 Colab 算力"的库 = 教程 notebook（仍人点）或浏览器自动化 hack（拿 cookie 模拟点击，脆弱+灰区）——不存在官方消费版 CLI，这是 Google 产品分界。
+
 ## 数据流
 
 ```
