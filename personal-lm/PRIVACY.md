@@ -27,3 +27,17 @@ git ls-files personal-lm | grep -E \
 
 - 剪贴板是最高敏感数据面（密码、内网地址、私聊）。
 - 模型权重是对个人语料的有损压缩，但可被提取记忆内容 → 视同语料级敏感。
+
+## 事故记录（2026-11-22）：GitHub Push Protection 拦截
+
+v2 迭代中 `lora/train.jsonl`（个人语料 JSONL）被误提交，其中含一条真实 Vercel
+API key（`vck_...`，来自剪贴板 clip）。GitHub Push Protection 在 push 时拦截。
+处置：
+
+1. `git rm --cached` + amend（commit 未推送过，无历史泄漏）。
+2. `lora/` 全目录加入 .gitignore——**LoRA 数据 = 语料 = 私有，与 corpus 同级铁律**。
+3. `data/common.py` SECRET_PATTERNS 新增 `vck_` / `vercel_*` 模式，重建语料验证 PASS。
+4. 正在训练的 LoRA 用旧数据（含 key）——**杀掉重启**，不能让 key 进模型权重。
+
+教训：新增语料源 / 新数据格式时，secret 扫描必须重新全量验证；
+"训练数据文件"和"语料"享受同等隐私待遇。

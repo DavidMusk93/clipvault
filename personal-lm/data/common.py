@@ -25,6 +25,8 @@ SECRET_PATTERNS = [
     re.compile(r"(?i)\bmysql://[^\s]*:[^\s@]*@"),
     re.compile(r"(?i)\bpw(or)?d\s*[:=＝][ \t]*\S"),
     re.compile(r"(?i)\b密(码|钥)\s*[:=：]\s*\S"),
+    re.compile(r"\bvck_[A-Za-z0-9]{20,}\b"),           # Vercel API key
+    re.compile(r"\bvercel[_-]?[A-Za-z0-9_-]{25,}\b"),   # Vercel 变体
     re.compile(r"\b[Bb]earer\s+[A-Za-z0-9._~+/=|-]{20,}\b"),
 ]
 SECRET_PLACEHOLDER = "[filtered]"
