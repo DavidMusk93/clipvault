@@ -125,6 +125,7 @@ fn main() {
                 top_k: 40,
                 stop_on_newline: !args.iter().any(|a| a == "--no-stop"),
                 rep_penalty: 1.3,
+                min_confidence: 0.0,
             };
             match eng.generate(&text, &p) {
                 Ok(out) => println!("{out}"),
@@ -214,6 +215,7 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
                 stop_on_newline: false,
                 rep_penalty: v["rep_penalty"].as_f64().map(|x| x as f32)
                     .unwrap_or(if is_complete { 1.2 } else { 1.15 }),
+                min_confidence: 0.0,
             };
             if is_complete {
                 // 意图召回优先：本地历史里找"你上次怎么写的"
@@ -262,10 +264,13 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
             } else if is_complete {
                 // ghost text：确定性贪心 + 跳过 ---/时间戳样板，给内容行。
                 // 采样会让多轮续写分歧；贪心保证结构预测（---+时间戳+列表项）稳定可跳过。
+                let min_conf: f32 = std::env::var("CVLM_GHOST_MIN_CONF")
+                    .ok().and_then(|v| v.parse().ok()).unwrap_or(0.55);
                 let p_complete = cvlm_core::GenParams {
                     temperature: 0.0,      // 纯贪心：rep_penalty 会把时间戳等合法重复掰成乱码
                     top_k: 1,
                     rep_penalty: 1.0,
+                    min_confidence: min_conf,
                     max_tokens: p.max_tokens.max(60).min(120),
                     ..p.clone()
                 };

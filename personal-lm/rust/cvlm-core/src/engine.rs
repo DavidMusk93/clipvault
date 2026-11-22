@@ -28,6 +28,8 @@ pub struct GenParams {
     pub stop_on_newline: bool,
     /// 重复惩罚：>1 时对已出现 token 的 logit 除以该值（1.0 = 关闭）
     pub rep_penalty: f32,
+    /// 首 token 置信度门控（softmax 概率）：低于则返回空（宁缺毋滥的 ghost）
+    pub min_confidence: f32,
 }
 
 impl Engine {
@@ -144,11 +146,17 @@ impl Engine {
         };
         let mut last = logits.narrow(1, ids.len() - 1, 1)?.squeeze(1)?; // (1,V)
         for step in 0..max_new {
-            let next = sample(
-                &last.to_dtype(DType::F32)?.squeeze(0)?.to_vec1::<f32>()?,
-                p,
-                &ids,
-            )?;
+            let logits_v = last.to_dtype(DType::F32)?.squeeze(0)?.to_vec1::<f32>()?;
+            if step == 0 && p.min_confidence > 0.0 {
+                // softmax 后 argmax 概率 = 模型对"下一步"的把握
+                let mx = logits_v.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let exps: f32 = logits_v.iter().map(|l| (l - mx).exp()).sum();
+                let conf = 1.0 / exps;
+                if conf < p.min_confidence {
+                    return Ok(String::new()); // 模型不确定 → 不出 ghost
+                }
+            }
+            let next = sample(&logits_v, p, &ids)?;
             if next == 0 {
                 break; // NUL 视作终止
             }
