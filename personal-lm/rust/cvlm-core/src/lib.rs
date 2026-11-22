@@ -6,6 +6,7 @@
 pub mod anyhow_result;
 pub mod engine;
 pub mod gpt;
+pub mod retrieval;
 pub mod tokenizer;
 
 pub use engine::{Engine, GenParams, SharedEngine};

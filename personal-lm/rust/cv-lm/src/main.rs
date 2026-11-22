@@ -134,6 +134,10 @@ fn main() {
         "serve" => {
             let port: u16 = arg_flag(&args, "--port").and_then(|v| v.parse().ok()).unwrap_or(8788);
             let bundle = arg_flag(&args, "--bundle").map(PathBuf::from).unwrap_or_else(default_bundle);
+            let retrieval = cvlm_core::retrieval::load_optional(
+                Some(&bundle.join("retrieval_lines.jsonl")));
+            let retrieval = std::sync::Arc::new(retrieval);
+            eprintln!("[cv-lm] retrieval: {}", if retrieval.is_some() { "loaded" } else { "off" });
             let shared = std::sync::Arc::new(SharedEngine::new(bundle.clone()));
             let shared_ref = shared.clone();
             let listener = match TcpListener::bind(("127.0.0.1", port)) {
@@ -150,7 +154,8 @@ fn main() {
                     Err(_) => continue,
                 };
                 let shared = shared_ref.clone();
-                std::thread::spawn(move || handle_conn(stream, &shared));
+                let retrieval = retrieval.clone();
+                std::thread::spawn(move || handle_conn(stream, &shared, retrieval));
             }
         }
         _ => {
@@ -164,7 +169,7 @@ fn main() {
     }
 }
 
-fn handle_conn(mut stream: TcpStream, shared: &SharedEngine) {
+fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::sync::Arc<Option<cvlm_core::retrieval::Retrieval>>) {
     let (method, path, body) = match read_request(&stream) {
         Some(x) => x,
         None => return,
@@ -210,6 +215,24 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine) {
                 rep_penalty: v["rep_penalty"].as_f64().map(|x| x as f32)
                     .unwrap_or(if is_complete { 1.2 } else { 1.15 }),
             };
+            if is_complete {
+                // 意图召回优先：本地历史里找"你上次怎么写的"
+                let tail: String = {
+                    let chars: Vec<char> = prefix.chars().collect();
+                    let start = chars.len().saturating_sub(100);
+                    chars[start..].iter().collect()
+                };
+                if let Some(idx) = retrieval.as_ref() {
+                    if let Some((line, score)) = idx.query(&tail) {
+                        if !prefix.contains(&line) {
+                            let ver = shared.version().unwrap_or_default();
+                            respond(&mut stream, "200 OK",
+                                    &json!({"completion": line, "version": ver, "source": "retrieval", "score": score}));
+                            return;
+                        }
+                    }
+                }
+            }
             if is_complete && std::env::var("CVLM_COMPLETE_BACKEND").is_ok() {
                 // 显式指定补全也走大模型后端（延迟高，默认不用）
                 let text = proxy_backend(prefix, true, &v)

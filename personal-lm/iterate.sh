@@ -15,6 +15,9 @@ echo "── 1/4 导出语料"
 "$PY" "$HERE/data/export_nmem.py" $([ "$FULL" = "--full" ] && echo "" || echo "--incremental")
 "$PY" "$HERE/data/build_corpus.py" >/dev/null
 
+echo "── 1.5/4 检索索引（意图召回层）"
+"$PY" "$HERE/data/build_retrieval.py"
+
 echo "── 2/4 语料 → tokens"
 "$PY" "$HERE/train/tokenizer.py" encode --corpus "$HERE/corpus/all.txt" --out "$HERE/corpus/tokens.bin"
 

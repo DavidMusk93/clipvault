@@ -74,6 +74,9 @@ def main():
     }
     (out / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=1))
     shutil.copy(TOKENIZER_JSON, out / "tokenizer.json")
+    retrieval_src = ROOT / "corpus" / "retrieval_lines.jsonl"
+    if retrieval_src.exists():
+        shutil.copy(retrieval_src, out / "retrieval_lines.jsonl")
 
     manifest = {
         "format": "personal-lm-bundle-v1",
