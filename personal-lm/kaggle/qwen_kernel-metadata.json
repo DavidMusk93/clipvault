@@ -1,0 +1,13 @@
+{
+  "id": "<YOUR_KAGGLE_USERNAME>/qwen-lora-train",
+  "title": "qwen-lora-train",
+  "code_file": "qwen_kernel.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": ["<YOUR_KAGGLE_USERNAME>/clipvault-personal-lm-data"],
+  "competition_sources": [],
+  "kernel_sources": []
+}
