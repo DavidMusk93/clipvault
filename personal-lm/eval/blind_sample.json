@@ -1,0 +1,38 @@
+[
+ {
+  "case": 1,
+  "prefix": " 消费和tm 进程状态监控大盘 https://grafana.byted.org/d/0KNAOkxVzx/tide-",
+  "gold_source": "retrieval",
+  "completion": "- cdn 监控大盘：https://grafana.byted.org/d/0KNAOkxVzx/tide-woker-status-viewer?orgId=1&refresh=1m hdfs 的负载需要看小时级别"
+ },
+ {
+  "case": 2,
+  "prefix": "_stream。\n- 参考lark 文档：https://bytedance.my.larkoffice.com/doc",
+  "gold_source": "?",
+  "completion": "x/DMJyNzQxNzY1"
+ },
+ {
+  "case": 3,
+  "prefix": " ai friendly api\n- gw-pulse 现在fwd 消息，还会丢数据吗？\n- 评估pg 是否健康？\n- ",
+  "gold_source": "?",
+  "completion": "评估pg 是否有垃圾数据？"
+ },
+ {
+  "case": 4,
+  "prefix": "# clipvault &语言模型\n- 我现在希望为clipvault 增加两个大功能：打字自动补全&",
+  "gold_source": "retrieval",
+  "completion": "- 我现在希望为clipvault 增加两个大功能：打字自动补全&生成个人风格的文字或者技术方案。"
+ },
+ {
+  "case": 5,
+  "prefix": "复盘：今天的部署流水线问题在于",
+  "gold_source": "?",
+  "completion": "：1.部署流程没有复用，没有复用，没有复用，没有复用。2.部署流程没有复用，没有复用，没有复用，没有复用。3.部署流程没有复用，没有复用，没有复用，没有复用。4.部署流程没有复用，没有复用，没有复用，没有复用"
+ },
+ {
+  "case": 6,
+  "prefix": "写个脚本批量检查",
+  "gold_source": "retrieval",
+  "completion": "- 批量检查，不要一台台串行，太慢了！！"
+ }
+]

@@ -240,14 +240,14 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
                 let text = proxy_backend(prefix, true, &v)
                     .unwrap_or_else(|e| format!("<backend-error: {e}>"));
                 let ver = format!("qwen-backend+{}", shared.version().unwrap_or_default());
-                respond(&mut stream, "200 OK", &json!({"completion": text, "version": ver}));
+                respond(&mut stream, "200 OK", &json!({"completion": text, "version": ver, "source": "qwen"}));
             } else if !is_complete && std::env::var("CVLM_BACKEND_URL").is_ok() {
                 // compose：聪明引擎优先（Qwen LoRA），失败回落本地小模型
                 let max_tokens = v["max_tokens"].as_u64().map(|x| x as usize).unwrap_or(256);
                 match proxy_backend(prefix, false, &v) {
                     Ok(text) if !text.trim().is_empty() => {
                         respond(&mut stream, "200 OK",
-                                &json!({"text": text, "version": "qwen-backend"}));
+                                &json!({"text": text, "version": "qwen-backend", "source": "qwen"}));
                         return;
                     }
                     _ => {} // 回落到本地引擎
@@ -276,7 +276,7 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
                 };
                 let text = skip_boilerplate(shared, prefix, &p_complete);
                 let ver = shared.version().unwrap_or_default();
-                respond(&mut stream, "200 OK", &json!({"completion": text, "version": ver}));
+                respond(&mut stream, "200 OK", &json!({"completion": text, "version": ver, "source": "lm"}));
             } else {
                 let guard = shared.engine.lock().unwrap();
                 let eng = guard.as_ref().unwrap();
@@ -381,6 +381,7 @@ fn proxy_backend(prefix: &str, is_complete: bool, body: &Value) -> Result<String
     let v: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("bad json from backend: {e}"))?;
     let mut out = v["choices"][0]["text"].as_str().unwrap_or("").to_string();
+    out = break_sentence_loops(&break_loops(&out));
     if is_complete {
         out = out.trim_start_matches(['\n', '\r', ' ']).to_string();
         loop {
@@ -429,4 +430,66 @@ fn http_post_json(host: &str, port: u16, path: &str, body: &str) -> Result<Strin
     let s = String::from_utf8_lossy(&resp);
     let idx = s.find("\r\n\r\n").ok_or("bad response")?;
     Ok(s[idx + 4..].to_string())
+}
+
+
+/// 循环断路器：贪心 "xyxyxy…" 退化。核心技巧：片段末字符若为标点（，。、,；）
+/// 视为等价（"没有复用，没有复用，…没有复用。" 这种句号打断连续段的循环也能识别）。
+fn break_loops(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let is_punct = |c: char| matches!(c, '，' | '。' | '、' | ',' | ';' | '；' | '：' | ':');
+    for p in 3..=16usize {
+        if chars.len() < p * 4 { continue; }
+        for start in 0..=(chars.len().saturating_sub(p * 4)) {
+            // unit = 核心 (p-1) + 尾标点（任一标点等价）
+            let core = &chars[start..start + p - 1];
+            if !is_punct(chars[start + p - 1]) { continue; }
+            let mut reps = 1;
+            let mut i = start + p;
+            while i + p <= chars.len()
+                && &chars[i..i + p - 1] == core
+                && is_punct(chars[i + p - 1])
+            {
+                reps += 1;
+                i += p;
+            }
+            if reps >= 4 {
+                return chars[..start + p].iter().collect::<String>().trim_end().to_string();
+            }
+        }
+    }
+    s.to_string()
+}
+
+/// 句子级循环：同一句（去编号/去空白）重复 >=3 次 → 截到第 2 次出现末尾。
+/// 覆盖 "1.A。2.B。3.A。4.B。" 式交替循环。
+fn break_sentence_loops(s: &str) -> String {
+    let norm_sentence = |x: &str| -> String {
+        let mut t: String = x
+            .chars()
+            .skip_while(|c| c.is_ascii_digit() || matches!(c, '.' | '、' | '：' | ':' | '-'))
+            .collect();
+        t = t.split_whitespace().collect();
+        t.trim_end_matches(['。', '，', '；', '，', '.']).to_string()
+    };
+    let mut out = String::new();
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut rest = s;
+    while let Some(pos) = rest.find(['。', '；', '！', '？']) {
+        let end = pos + rest[pos..].chars().next().unwrap().len_utf8();
+        let (sentence, tail) = rest.split_at(end);
+        out.push_str(sentence);
+        rest = tail;
+        if sentence.chars().any(|c| !c.is_whitespace()) {
+            let key = norm_sentence(sentence);
+            if !key.is_empty() {
+                let n = seen.entry(key).or_insert(0);
+                *n += 1;
+                if *n >= 3 {
+                    return out;
+                }
+            }
+        }
+    }
+    out.to_string() + rest
 }
