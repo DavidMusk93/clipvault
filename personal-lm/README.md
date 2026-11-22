@@ -20,6 +20,26 @@ cd personal-lm
 产物链：`corpus/`（私有）→ `checkpoints/ckpt_latest.pt` → `exports/<version>/` →
 `~/Library/Application Support/Keepsake/models/personal-lm/`（cv-lm 从这里加载）。
 
+## 跨机同步（mac-work 使用同一模型）
+
+训练机（mac-home）push，消费机（mac-work）pull，经 ostore 私有 S3 中继
+（`clipvault/models/personal-lm/` 前缀；OSTORE_TOKEN 只在 cc 上读取，永不落 mac）：
+
+```sh
+# mac-home（训练完成后）
+personal-lm/sync_model.sh push
+
+# mac-work（拉取 + 安装，cv-lm 二进制已在 bundle 内）
+git clone git@github.com:DavidMusk93/clipvault.git   # 或已有仓库 git pull
+cd clipvault/personal-lm && ./sync_model.sh pull
+# 首次装 LaunchAgent（替换 <user> 后）：
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.davidmusk.clipvault-lm.plist
+# 之后每次更新：./sync_model.sh pull（热加载，无需重启）
+```
+
+传输验证：sha256 双端比对 + 远端对象大小校验。模型训练只在 mac-home 做，
+mac-work 只消费 bundle（不训练、不导语料）。
+
 ## 服务与 applet 接入
 
 ```sh
