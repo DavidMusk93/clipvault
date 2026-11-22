@@ -20,6 +20,22 @@ cd personal-lm
 产物链：`corpus/`（私有）→ `checkpoints/ckpt_latest.pt` → `exports/<version>/` →
 `~/Library/Application Support/Keepsake/models/personal-lm/`（cv-lm 从这里加载）。
 
+## 双引擎路由（v2）
+
+| 端点 | 默认引擎 | 语义 |
+| --- | --- | --- |
+| `POST /complete` | 本地 27M（candle/Metal，贪心+样板跳过） | ghost text：跳过 `---`/时间戳样板，直接给内容行；确定性，18ms/token |
+| `POST /compose` | **Qwen3-0.6B LoRA**（`CVLM_BACKEND_URL`，mlx_lm.server :8790） | 聪明引擎出初稿；后端不可达自动回落本地小模型 |
+
+补全评测准绳（`eval/autocomplete.py`，21 条 held-out）：
+v3000 基线 exact **0%** → v8000 **66.7%**（match4 4.8%→71.4%，lcp 1.2%→66.1%）。
+ppl 72.2 → 19.9。解码经验：rep_penalty 会破坏贪心的时间戳结构；多轮续写必须纯贪心；
+ghost text = 结构样板跳过（`---`/时间戳/截断碎片）+ 内容行。
+
+LoRA：`lora/prep_data.py`（加权语料 → JSONL）→ `mlx_lm lora --train --model Qwen/Qwen3-0.6B
+--data lora/data --adapter-path lora/adapters --iters 3000 --num-layers 16 --batch-size 2`。
+适配后的模型同属个人私有，绝不推送公共 Hub。
+
 ## 跨机同步（mac-work 使用同一模型）
 
 训练机（mac-home）push，消费机（mac-work）pull，经 ostore 私有 S3 中继

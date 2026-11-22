@@ -20,3 +20,6 @@ tokenizer.json
 vocab.json
 merges.txt
 manifest.json
+
+# LoRA 数据 = 语料，私有（v2 事故教训：GitHub Push Protection 拦下 Vercel key）
+lora/

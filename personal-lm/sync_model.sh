@@ -59,8 +59,8 @@ case "$CMD" in
          -o /dev/null -w 'PUT-LATEST %{http_code}\n'" < "$TMP/LATEST.json"
     echo "[push] 完成：$VER ($SHA)"
     # 校验远端对象大小与本地一致（PUT 200 ≠ 内容到齐）
-    RSIZE=$(oapi GET "/api/list?prefix=$PREFIX/" | python3 -c \
-      "import json,sys;[print(e['size']) for e in json.load(sys.stdin)['entries'] if e['path'].endswith('bundle.tar.gz')]" \
+    RSIZE=$(oapi GET "/api/list?path=$PREFIX&limit=20" | python3 -c \
+      "import json,sys;[print(e['size']) for e in json.load(sys.stdin)['entries'] if e['name']=='bundle.tar.gz']" \
       2>/dev/null || echo 0)
     [ "$RSIZE" = "$SIZE" ] || { echo "警告：远端 bundle.tar.gz 大小 $RSIZE 不等于本地 ${SIZE}，请重 push"; exit 1; }
     echo "[push] 远端校验 OK ($RSIZE B)"

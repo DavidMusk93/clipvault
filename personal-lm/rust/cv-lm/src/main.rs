@@ -210,7 +210,33 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine) {
                 rep_penalty: v["rep_penalty"].as_f64().map(|x| x as f32)
                     .unwrap_or(if is_complete { 1.2 } else { 1.15 }),
             };
-            if is_complete {
+            if is_complete && std::env::var("CVLM_COMPLETE_BACKEND").is_ok() {
+                // 显式指定补全也走大模型后端（延迟高，默认不用）
+                let text = proxy_backend(prefix, true, &v)
+                    .unwrap_or_else(|e| format!("<backend-error: {e}>"));
+                let ver = format!("qwen-backend+{}", shared.version().unwrap_or_default());
+                respond(&mut stream, "200 OK", &json!({"completion": text, "version": ver}));
+            } else if !is_complete && std::env::var("CVLM_BACKEND_URL").is_ok() {
+                // compose：聪明引擎优先（Qwen LoRA），失败回落本地小模型
+                let max_tokens = v["max_tokens"].as_u64().map(|x| x as usize).unwrap_or(256);
+                match proxy_backend(prefix, false, &v) {
+                    Ok(text) if !text.trim().is_empty() => {
+                        respond(&mut stream, "200 OK",
+                                &json!({"text": text, "version": "qwen-backend"}));
+                        return;
+                    }
+                    _ => {} // 回落到本地引擎
+                }
+                let p2 = cvlm_core::GenParams { max_tokens: max_tokens.min(512), ..p };
+                let guard = shared.engine.lock().unwrap();
+                let eng = guard.as_ref().unwrap();
+                match eng.generate(prefix, &p2) {
+                    Ok(text) => respond(&mut stream, "200 OK",
+                                        &json!({"text": text, "version": eng.version})),
+                    Err(e) => respond(&mut stream, "500 Internal Server Error",
+                                      &json!({"error": e.to_string()})),
+                }
+            } else if is_complete {
                 // ghost text：确定性贪心 + 跳过 ---/时间戳样板，给内容行。
                 // 采样会让多轮续写分歧；贪心保证结构预测（---+时间戳+列表项）稳定可跳过。
                 let p_complete = cvlm_core::GenParams {
@@ -300,4 +326,79 @@ fn skip_boilerplate(
         .find(|l| !l.is_empty() && !is_boilerplate_line(l))
         .unwrap_or("")
         .to_string()
+}
+
+
+/// 代理到 OpenAI 兼容后端（mlx_lm.server :8790）。
+/// complete=true → 温度0、行截断+样板跳过；compose → 温度0.8 全文。
+fn proxy_backend(prefix: &str, is_complete: bool, body: &Value) -> Result<String, String> {
+    let base = std::env::var("CVLM_BACKEND_URL").unwrap_or_default();
+    if base.is_empty() {
+        return Err("CVLM_BACKEND_URL not set".into());
+    }
+    let (host, port, path) = parse_base(&base)?;
+    let max_tokens = if is_complete { 80 } else {
+        body["max_tokens"].as_u64().map(|x| x as usize).unwrap_or(256).min(1024)
+    };
+    let temperature = if is_complete { 0.0 } else {
+        body["temperature"].as_f64().map(|x| x as f64).unwrap_or(0.8)
+    };
+    let payload = serde_json::json!({
+        "prompt": prefix,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stop": if is_complete { serde_json::json!(["\n\n"]) } else { serde_json::json!([]) },
+    });
+    let text = http_post_json(&host, port, &path, &payload.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("bad json from backend: {e}"))?;
+    let mut out = v["choices"][0]["text"].as_str().unwrap_or("").to_string();
+    if is_complete {
+        out = out.trim_start_matches(['\n', '\r', ' ']).to_string();
+        loop {
+            let end = out.find('\n');
+            let Some(end) = end else { break };
+            let line = out[..end].trim().to_string();
+            if is_boilerplate_line(&line) {
+                out = out[end + 1..].trim_start_matches(['\n', '\r']).to_string();
+                continue;
+            }
+            out.truncate(end);
+            break;
+        }
+        if let Some(end) = out.find('\n') {
+            out.truncate(end);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_base(base: &str) -> Result<(String, u16, String), String> {
+    // 期望 http://127.0.0.1:8790[/v1/completions]
+    let rest = base.strip_prefix("http://").ok_or("only http://")?;
+    let (hp, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], rest[i..].to_string()),
+        None => (rest, "/v1/completions".to_string()),
+    };
+    let (host, port) = match hp.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse::<u16>().map_err(|e| e.to_string())?),
+        None => (hp.to_string(), 80),
+    };
+    Ok((host, port, path))
+}
+
+fn http_post_json(host: &str, port: u16, path: &str, body: &str) -> Result<String, String> {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect((host, port)).map_err(|e| e.to_string())?;
+    let req = format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\ncontent-type: application/json\r\n\
+         content-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    let mut resp = Vec::new();
+    s.read_to_end(&mut resp).map_err(|e| e.to_string())?;
+    let s = String::from_utf8_lossy(&resp);
+    let idx = s.find("\r\n\r\n").ok_or("bad response")?;
+    Ok(s[idx + 4..].to_string())
 }

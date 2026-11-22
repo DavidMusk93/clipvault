@@ -54,7 +54,8 @@ def main():
     cfg = payload["config"]
     step = payload["step"]
 
-    version = f"v{step}-" + ck.stat().st_mtime_ns.__str__()[:10]
+    import time as _t
+    version = f"v{step}-e{int(_t.time())}"  # e=export 时间戳：重导出也会换版本，保证 mac-work pull 能感知二进制更新
     out = EXPORTS / version
     out.mkdir(parents=True, exist_ok=True)
 
