@@ -49,13 +49,14 @@ def main():
     ap.add_argument("--ckpt-every", type=int, default=250)
     ap.add_argument("--resume-latest", action="store_true")
     ap.add_argument("--max-steps", type=int, default=0, help="sanity run 上限")
+    ap.add_argument("--tokens", default=str(TOKENS_BIN), help="token 流文件（v2 加权用 tokens_weighted.bin）")
     ap.add_argument("--bf16", action="store_true", help="MPS bf16 autocast（实测比 fp32 慢，默认关）")
     args = ap.parse_args()
 
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     device = "mps" if torch.backends.mps.is_available() else "cpu"
 
-    data = np.memmap(TOKENS_BIN, dtype=np.uint16, mode="r")
+    data = np.memmap(args.tokens, dtype=np.uint16, mode="r")
     n_val = max(1000, len(data) // 100)
     val_data, train_data = data[-n_val:], data[:-n_val]
     print(f"[train] tokens: train={len(train_data):,} val={len(val_data):,} device={device}")

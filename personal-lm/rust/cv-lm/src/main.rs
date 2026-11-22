@@ -204,11 +204,11 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine) {
                     .unwrap_or(if is_complete { 24 } else { 256 })
                     .min(512),
                 temperature: v["temperature"].as_f64().map(|x| x as f32)
-                    .unwrap_or(if is_complete { 0.0 } else { 0.8 }),
-                top_k: v["top_k"].as_u64().map(|x| x as usize).unwrap_or(40),
+                    .unwrap_or(if is_complete { 0.35 } else { 0.8 }),
+                top_k: v["top_k"].as_u64().map(|x| x as usize).unwrap_or(if is_complete { 20 } else { 40 }),
                 stop_on_newline: if is_complete { true } else { false },
                 rep_penalty: v["rep_penalty"].as_f64().map(|x| x as f32)
-                    .unwrap_or(if is_complete { 1.3 } else { 1.15 }),
+                    .unwrap_or(if is_complete { 1.2 } else { 1.15 }),
             };
             let guard = shared.engine.lock().unwrap();
             let eng = guard.as_ref().unwrap();

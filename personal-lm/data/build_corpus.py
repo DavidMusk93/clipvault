@@ -10,13 +10,39 @@ from common import now_iso
 OUT = Path(__file__).resolve().parent.parent / "corpus"
 
 
+def split_docs(text: str) -> list[str]:
+    return [d for d in text.split("<|doc|>") if d.strip()]
+
+
 def main() -> None:
+    weighted = "--weighted" in sys.argv
     parts = {}
     for name in ("clipflow", "nmem"):
         p = OUT / f"{name}.txt"
         parts[name] = p.read_text(encoding="utf-8") if p.exists() else ""
     merged = OUT / "all.txt"
     merged.write_text("\n\n".join(v for v in parts.values() if v.strip()), encoding="utf-8")
+
+    if weighted:
+        # 打字面加权：用户手写的 ×4/×3，OCR 噪声 ×0.5，nmem(自己写的精炼记忆) ×2
+        cat = OUT / "categories"
+        def docs_of(name):
+            p = cat / f"{name}.txt"
+            return split_docs(p.read_text(encoding="utf-8")) if p.exists() else []
+        weighted_groups = [
+            (docs_of("compose"), 4),   # 笔记正文 = 最贴近补全目标
+            (docs_of("note"), 3),      # 手写笔记
+            (docs_of("anno"), 4),      # 用户批注
+            (docs_of("text"), 1),      # 复制文本
+            ([d for i, d in enumerate(docs_of("ocr")) if i % 2 == 0], 1),  # OCR 减半（噪声大）
+        ]
+        nmem_docs = split_docs(parts["nmem"])
+        chunks = []
+        for group, w in weighted_groups:
+            chunks.extend(group * w)
+        chunks.extend(nmem_docs * 2)
+        merged = OUT / "all_weighted.txt"
+        merged.write_text("<|doc|>".join(chunks), encoding="utf-8")
 
     text = merged.read_text(encoding="utf-8")
     manifest = {

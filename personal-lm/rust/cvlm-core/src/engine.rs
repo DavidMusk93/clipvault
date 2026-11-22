@@ -234,6 +234,7 @@ impl SharedEngine {
             Some(e) => e.needs_reload(),
         };
         if stale {
+            eprintln!("[cv-lm] reloading bundle (manifest changed)");
             let e = Engine::load(&self.bundle_dir)?;
             *guard = Some(e);
         }

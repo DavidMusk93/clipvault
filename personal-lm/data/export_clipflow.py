@@ -85,9 +85,13 @@ def export(incremental: bool = False) -> dict:
         note_docs.append(text)
         stats["notes"] += 1
 
-    # ---- 3) compose_ops 笔记本正文 ----
+    # ---- 3) compose_ops 笔记本正文（v2: 同一 item_id 只留最新版本，
+    #         5310 行历史版本实际只有 ~374 条不同笔记）----
     rows = con.execute(
-        "SELECT title, body FROM compose_ops WHERE ts > ? ORDER BY ts ASC",
+        """SELECT title, body FROM compose_ops c
+           WHERE ts > ?
+             AND ts = (SELECT MAX(ts) FROM compose_ops c2 WHERE c2.item_id = c.item_id)
+           ORDER BY ts ASC""",
         (last_ts,),
     ).fetchall()
     compose_docs = []
@@ -138,6 +142,18 @@ def export(incremental: bool = False) -> dict:
     ).fetchone()[0]
     compose_max_ts = con.execute("SELECT COALESCE(MAX(ts), 0) FROM compose_ops").fetchone()[0]
     con.close()
+
+    # ---- 分类文件（v2 加权训练用）----
+    cat_dir = OUT / "categories"
+    cat_dir.mkdir(exist_ok=True)
+    for name, group in (("compose", compose_docs), ("note", note_docs),
+                        ("text", docs), ("ocr", ocr_docs), ("anno", anno_docs)):
+        f = cat_dir / f"{name}.txt"
+        if incremental and last_ts > 0 and f.exists():
+            with f.open("a", encoding="utf-8") as fh:
+                fh.write(DOC_SEPARATOR.join(group) + DOC_SEPARATOR)
+        else:
+            f.write_text(DOC_SEPARATOR.join(group), encoding="utf-8")
 
     # ---- 写盘（增量 = 追加；全量 = 覆盖）----
     mode = "a" if (incremental and last_ts > 0) else "w"
