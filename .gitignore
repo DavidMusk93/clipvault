@@ -77,3 +77,4 @@ android/.externalNativeBuild/
 .tmp/
 .pi/
 cc-notes/target/
+personal-lm/rust/target/
