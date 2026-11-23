@@ -17,6 +17,8 @@ API="${CVLM_OSTORE_API:-http://127.0.0.1:8781}"
 KEEPSAKE="${KEEPSAKE_HOME:-$HOME/Library/Application Support/Keepsake}"
 BUNDLE_DIR="${CVLM_BUNDLE:-$KEEPSAKE/models/personal-lm}"
 BIN_DIR="$KEEPSAKE/bin"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+LORA_DIR="${CVLM_LORA_DIR:-$HERE/lora/adapters}"
 TMP="$(mktemp -d /tmp/cvlm-sync.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
