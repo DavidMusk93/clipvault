@@ -212,7 +212,7 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
                 temperature: v["temperature"].as_f64().map(|x| x as f32)
                     .unwrap_or(if is_complete { 0.35 } else { 0.8 }),
                 top_k: v["top_k"].as_u64().map(|x| x as usize).unwrap_or(if is_complete { 20 } else { 40 }),
-                stop_on_newline: false,
+                stop_on_newline: is_complete,   // ghost：到行尾即停，多行补全无意义且拖慢首字延迟
                 rep_penalty: v["rep_penalty"].as_f64().map(|x| x as f32)
                     .unwrap_or(if is_complete { 1.2 } else { 1.15 }),
                 min_confidence: 0.0,
@@ -271,10 +271,69 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
                     top_k: 1,
                     rep_penalty: 1.0,
                     min_confidence: min_conf,
-                    max_tokens: p.max_tokens.max(60).min(120),
+                    max_tokens: p.max_tokens.max(1).min(60),   // 尊重调用方（编辑器发 28）；不再强制抬到 ≥60（曾致 1.2s 延迟）
                     ..p.clone()
                 };
-                let text = skip_boilerplate(shared, prefix, &p_complete);
+                // ghost：贪心 + 行尾即停 + 样板行跳过（每次重试复用 KV，开销几近 0）
+                let text = {
+                    // mlx 路径：同样要跳样板行（---/时间戳/```），每次重试是 ~10ms 的增量 KV 查询
+                    let mut result = String::new();
+                    let mut accum = String::new();
+                    for _ in 0..4 {
+                        let piece = match ghost_via_mlx(&format!("{prefix}{accum}"), p_complete.max_tokens) {
+                            Some(t) => t,
+                            None => break,
+                        };
+                        if !is_boilerplate_line(piece.trim()) {
+                            result = piece.trim().to_string();
+                            break;
+                        }
+                        eprintln!("[ghost] mlx boilerplate piece={:?}", piece.trim());
+                        accum.push_str(piece.trim());
+                        accum.push('\n');
+                    }
+                    if !result.is_empty() { result } else {
+                    // 本地 candle 兜底（含 conf 门控 + 相同样板重试）
+                    let t_ghost = std::time::Instant::now();
+                    let mut result = String::new();
+                    let mut accum = String::new();
+                    let mut tries = 0;
+                    for _ in 0..4 {
+                        let prev = shared.gen_ctx.lock().unwrap().take();
+                        let prompt_now = format!("{prefix}{accum}");
+                        let guard = shared.engine.lock().unwrap();
+                        let eng = guard.as_ref().unwrap();
+                        let out = eng.generate_with_ctx(&prompt_now, &p_complete, prev);
+                        drop(guard);
+                        match out {
+                            Ok((piece, ctx)) => {
+                                tries += 1;
+                                *shared.gen_ctx.lock().unwrap() = Some(ctx);
+                                if piece.trim().is_empty() {
+                                    eprintln!("[ghost] gate-empty tries={tries} ms={}", t_ghost.elapsed().as_millis());
+                                    break;
+                                }
+                                let s = piece.trim();
+                                if !is_boilerplate_line(s) {
+                                    result = s.to_string();
+                                    break;
+                                }
+                                eprintln!("[ghost] boilerplate tries={tries} piece={s:?}");
+                                // 样板行（---/时间戳）：引擎停在行尾换行前；补回 \n 让下一轮跳下一行
+                                accum.push_str(s);
+                                accum.push('\n');
+                            }
+                            Err(e) => {
+                                eprintln!("[ghost] engine err: {e}");
+                                *shared.gen_ctx.lock().unwrap() = None;   // 出错丢弃，下一请求冷启动
+                                break;
+                            }
+                        }
+                    }
+                    eprintln!("[ghost] local-fallback done tries={tries} ms={} result={result:?}", t_ghost.elapsed().as_millis());
+                    result
+                    }
+                };
                 let ver = shared.version().unwrap_or_default();
                 respond(&mut stream, "200 OK", &json!({"completion": text, "version": ver, "source": "lm"}));
             } else {
@@ -316,46 +375,16 @@ fn is_boilerplate_line(s: &str) -> bool {
     ratio >= 0.4 && (t.contains('-') || t.contains(':'))
 }
 
-/// /complete 的内容行提取：迭代生成跳过样板（---/时间戳），返回第一条内容行。
-fn skip_boilerplate(
-    shared: &cvlm_core::SharedEngine,
-    prefix: &str,
-    p: &cvlm_core::GenParams,
-) -> String {
-    let mut accum = String::new();
-    for _ in 0..3 {
-        let guard = shared.engine.lock().unwrap();
-        let eng = guard.as_ref().unwrap();
-        let piece = match eng.generate(&format!("{prefix}{accum}"), p) {
-            Ok(t) => t,
-            Err(_) => break,
-        };
-        drop(guard);
-        if piece.trim().is_empty() {
-            break;
-        }
-        accum.push_str(&piece);
-        // 只认"换行终止"的完整行；末尾半行不算（下一轮补全后再取）
-        let complete_part = match accum.rfind('\n') {
-            Some(i) => &accum[..i],
-            None => "",
-        };
-        for line in complete_part.lines() {
-            let s = line.trim();
-            if !s.is_empty() && !is_boilerplate_line(s) {
-                return s.to_string();
-            }
-        }
-    }
-    // 兜底：最后一块去掉样板后的残余
-    accum
-        .lines()
-        .map(|l| l.trim())
-        .find(|l| !l.is_empty() && !is_boilerplate_line(l))
-        .unwrap_or("")
-        .to_string()
+/// ghost 解码走 MLX 服务（:8787，retrieval 仍在本地）。失败/未部署 → None（回落本地 candle）。
+fn ghost_via_mlx(prefix: &str, max_tokens: usize) -> Option<String> {
+    let base = std::env::var("CVLM_LM_URL").ok().filter(|s| !s.is_empty())?;
+    let (host, port, path) = parse_base(&base).ok()?;
+    let payload = serde_json::json!({"prefix": prefix, "max_tokens": max_tokens});
+    let text = http_post_json(&host, port, &path, &payload.to_string()).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let out = v["completion"].as_str()?.trim().to_string();
+    if out.is_empty() { None } else { Some(out) }   // mlx 侧 conf 门控空 → None
 }
-
 
 /// 代理到 OpenAI 兼容后端（mlx_lm.server :8790）。
 /// complete=true → 温度0、行截断+样板跳过；compose → 温度0.8 全文。

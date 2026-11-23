@@ -96,7 +96,7 @@ const lmCompleter = EditorView.updateListener.of((u) => {
     fetch(LM_URL + '/complete', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prefix, max_tokens: 28 }),
+      body: JSON.stringify({ prefix, max_tokens: 16 }),
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {

@@ -129,6 +129,18 @@ impl Engine {
 
     /// 续写。ctx 截断到 block_size；KV cache 增量解码（prefill 一次 + 逐 token）。
     pub fn generate(&self, prompt: &str, p: &GenParams) -> Result<String> {
+        Ok(self.generate_with_ctx(prompt, p, None)?.0)
+    }
+
+    /// 带前缀 KV 复用的生成（ghost 低延迟关键路径）。
+    /// 连续击键请求共享绝大部分前缀 → 只 prefill 增量 token，prefill 开销几近归零。
+    /// 返回 (文本, 本轮完整 ctx)；调用方把 ctx 存起来供下一请求复用。
+    pub fn generate_with_ctx(
+        &self,
+        prompt: &str,
+        p: &GenParams,
+        prev: Option<CachedCtx>,
+    ) -> Result<(String, CachedCtx)> {
         let mut ids = self.tok.encode(prompt);
         let max_new = p.max_tokens;
         if ids.len() > self.block_size - max_new.min(self.block_size / 2) {
@@ -137,14 +149,47 @@ impl Engine {
         }
         let mut out: Vec<u32> = Vec::with_capacity(max_new);
         let mut cache = KvCache::new(self.model.blocks.len());
-        // prefill：整段 ctx 一次算完
+        let mut start = 0usize;
+        if let Some(prev) = prev {
+            // token 级公共前缀（BPE 尾部合并差异会自然落在 common 之外，安全）
+            let common = prev
+                .ids
+                .iter()
+                .zip(ids.iter())
+                .take_while(|(a, b)| a == b)
+                .count();
+            // 复用条件：重叠足够大、留有生成空间、且至少有一个新 token 可 prefill
+            // （common == ids.len() 即与上次 prompt 完全相同 → 无增量，必须冷路径，
+            //   否则空 idx 会让 narrow(…,-1) 出错 → 曾致重复请求返回空）
+            if common >= 16 && common < ids.len() && common < prev.ids.len()
+                && common + max_new < self.block_size
+            {
+                cache.k = prev
+                    .cache
+                    .k
+                    .iter()
+                    .map(|t| t.narrow(2, 0, common))
+                    .collect::<candle_core::Result<Vec<_>>>()
+                    .map_err(|e| err(e.to_string()))?;
+                cache.v = prev
+                    .cache
+                    .v
+                    .iter()
+                    .map(|t| t.narrow(2, 0, common))
+                    .collect::<candle_core::Result<Vec<_>>>()
+                    .map_err(|e| err(e.to_string()))?;
+                start = common;
+            }
+        }
+        // prefill：整段 ctx（冷）或增量段（热，KV 已复用）一次算完
+        let rest = ids[start..].to_vec();
         let logits = {
-            let idx = Tensor::new(ids.clone(), &self.model.device)?
-                .reshape((1, ids.len()))?
+            let idx = Tensor::new(rest, &self.model.device)?
+                .reshape((1, ids.len() - start))?
                 .to_dtype(DType::U32)?;
-            self.model.forward_cached(&idx, 0, &mut cache)?
+            self.model.forward_cached(&idx, start, &mut cache)?
         };
-        let mut last = logits.narrow(1, ids.len() - 1, 1)?.squeeze(1)?; // (1,V)
+        let mut last = logits.narrow(1, ids.len() - start - 1, 1)?.squeeze(1)?; // (1,V)
         for step in 0..max_new {
             let logits_v = last.to_dtype(DType::F32)?.squeeze(0)?.to_vec1::<f32>()?;
             if step == 0 && p.min_confidence > 0.0 {
@@ -153,19 +198,31 @@ impl Engine {
                 let exps: f32 = logits_v.iter().map(|l| (l - mx).exp()).sum();
                 let conf = 1.0 / exps;
                 if conf < p.min_confidence {
-                    return Ok(String::new()); // 模型不确定 → 不出 ghost
+                    return Ok((String::new(), CachedCtx { ids, cache }));
                 }
             }
             let next = sample(&logits_v, p, &ids)?;
+            if std::env::var("CVLM_DEBUG_GEN").is_ok() {
+                let mut sorted: Vec<(usize, f32)> = logits_v.iter().enumerate().map(|(i, x)| (i, *x)).collect();
+                sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                let top: Vec<String> = sorted.iter().take(4)
+                    .map(|(i, l)| format!("{}:{:.2}", i, l)).collect();
+                eprintln!("[gen] step={step} next={next} top=[{}] ids_len={}", top.join(","), ids.len());
+            }
             if next == 0 {
                 break; // NUL 视作终止
             }
             let text_piece = self.tok.decode(&[next]);
+            if text_piece.contains("<|") {
+                break;   // 特殊 token（<|doc|> 等分隔符）不进 ghost 文本
+            }
+            // 先 push 再判停：行尾可能是「标点+换行」合体 token（如「？\n」），
+            // 若不 push 就停，行尾标点会丢（曾致 eval exact 89%→54%）
+            out.push(next);
+            ids.push(next);
             if p.stop_on_newline && text_piece.contains('\n') {
                 break;
             }
-            out.push(next);
-            ids.push(next);
             // decode：仅 1 token 前向（KV cache 已含全部历史）
             let idx = Tensor::new(vec![next], &self.model.device)?
                 .reshape((1, 1))?
@@ -174,7 +231,8 @@ impl Engine {
             last = logits.squeeze(1)?; // (1,V)
             let _ = step;
         }
-        Ok(self.tok.decode(&out))
+        let text = self.tok.decode(&out);
+        Ok((text, CachedCtx { ids, cache }))
     }
 }
 
@@ -235,15 +293,23 @@ fn sample(logits: &[f32], p: &GenParams, seen: &[u32]) -> Result<u32> {
     Ok(*idx.last().unwrap() as u32)
 }
 
+/// 可复用的生成上下文（token 序列 + 各层 KV）；下一请求按 token 级公共前缀切片复用。
+pub struct CachedCtx {
+    pub ids: Vec<u32>,
+    pub cache: KvCache,
+}
+
 /// 带热加载的共享引擎句柄（serve 模式用）。
 pub struct SharedEngine {
     pub engine: Mutex<Option<Engine>>,
     pub bundle_dir: PathBuf,
+    /// 最近一次 /complete 的生成上下文（连续击键复用 KV，热加载时清空）
+    pub gen_ctx: Mutex<Option<CachedCtx>>,
 }
 
 impl SharedEngine {
     pub fn new(bundle_dir: PathBuf) -> Self {
-        Self { engine: Mutex::new(None), bundle_dir }
+        Self { engine: Mutex::new(None), bundle_dir, gen_ctx: Mutex::new(None) }
     }
 
     /// 每次请求前调用：未加载或 manifest 变更 → 重载。
@@ -257,6 +323,7 @@ impl SharedEngine {
             eprintln!("[cv-lm] reloading bundle (manifest changed)");
             let e = Engine::load(&self.bundle_dir)?;
             *guard = Some(e);
+            *self.gen_ctx.lock().unwrap() = None;   // 新权重，旧 KV 全部作废
         }
         Ok(())
     }

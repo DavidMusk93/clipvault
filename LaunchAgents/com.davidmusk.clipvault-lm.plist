@@ -17,6 +17,10 @@
     <string>/Users/&lt;user&gt;</string>
     <key>CVLM_BUNDLE</key>
     <string>/Users/&lt;user&gt;/Library/Application Support/Keepsake/models/personal-lm</string>
+    <key>CVLM_GHOST_MIN_CONF</key>
+    <string>0.30</string>
+    <key>CVLM_LM_URL</key>
+    <string>http://127.0.0.1:8787/complete</string>
     <key>CVLM_BACKEND_URL</key>
     <string>http://127.0.0.1:8790/v1/completions</string>
     <key>PATH</key>

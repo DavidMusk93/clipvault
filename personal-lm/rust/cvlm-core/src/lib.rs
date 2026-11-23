@@ -9,4 +9,4 @@ pub mod gpt;
 pub mod retrieval;
 pub mod tokenizer;
 
-pub use engine::{Engine, GenParams, SharedEngine};
+pub use engine::{CachedCtx, Engine, GenParams, SharedEngine};
