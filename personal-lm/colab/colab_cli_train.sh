@@ -19,19 +19,19 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 PLM="$(cd "$HERE/.." && pwd)"
 SESSION="${CVLM_COLAB_SESSION:-ptrain}"
 GPU="${CVLM_COLAB_GPU:-A100}"
-STEPS="${1:-20000}"
-LAYERS="${2:-12}"
-DMODEL="${3:-768}"
-HEADS="${4:-12}"
+STEPS="${2:-20000}"
+LAYERS="${3:-12}"
+DMODEL="${4:-768}"
+HEADS="${5:-12}"
 VM="/content"
 EX () { echo "$2" | colab exec -s "$SESSION"; }   # EX <label> <code>
 
 has_session() { colab sessions 2>/dev/null | grep -q "$SESSION"; }
 
 _ensure_session() {
-  if has_session; then echo "[colab] 复用会话 $SESSION"; colab status -s "$SESSION" || true
+  if has_session; then echo "[colab] 复用会话 ${SESSION}"; colab status -s "${SESSION}" || true
   else
-    echo "[colab] 新建 $GPU 会话 $SESSION（首次会要求 OAuth 授权）"
+    echo "[colab] 新建 $GPU 会话 ${SESSION}（首次会要求 OAuth 授权）"
     colab new -s "$SESSION" --gpu "$GPU"
   fi
 }
@@ -110,5 +110,5 @@ print(vs[-1] if vs else '')" | tail -1)
     echo "[colab] 会话已释放"
     ;;
 
-  *) echo "用法: $0 start|poll|download|push|status|stop"; exit 1 ;;
+  *) echo "用法: $0 start [steps] [layers] [d_model] [heads] | poll|download|push|status|stop"; exit 1 ;;
 esac
