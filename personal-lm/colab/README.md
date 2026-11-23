@@ -8,11 +8,12 @@
 
 | 路径 | 算力来源 | CLI 化 | 代价 |
 | --- | --- | --- | --- |
-| **消费版 Colab（Pro 会员）** | Pro 算力池（T4/A100/L4） | ❌ 官方无执行 API | 你开浏览器点 Run all；watcher 模式下只开一次 |
+| **消费版 Colab（Pro 会员）** | Pro 算力池（T4/L4/A100/H100/TPU） | ✅ 官方 **google-colab-cli**（github.com/googlecolab/google-colab-cli，2026-11-23 核实）：`colab new/exec/upload/download/run/ssh`，A100 可免人工跑完训练 | 首次 OAuth copy-paste（一次）；算力烧 Pro 单位 |
 | **Colab Enterprise（gcloud colab）** | GCP 计费（新账号 $300 试用金；L4/A100） | ✅ 官方 `gcloud colab executions` 全 CLI | 一次性 setup（10 分钟，2 步浏览器） |
 | Kaggle | 免费配额 30h/周（P100/T4×2） | ✅ 官方 CLI | 换个平台（包已备好 kaggle/） |
 
-⚠️ GitHub 上"利用 Colab 算力"的库 = 教程 notebook（仍人点）或浏览器自动化 hack（拿 cookie 模拟点击，脆弱+灰区）——不存在官方消费版 CLI，这是 Google 产品分界。
+> 2026-11-23 更正：此前记录「消费版 Colab 无官方执行 API」已过时——Google 发布了官方 CLI（`uv tool install google-colab-cli`），支持建会话/执行代码/传文件/收文件全流程免人工，首次授权后 token 存 OS keyring。驱动脚本：`colab/colab_cli_train.sh`（start/poll/download/push/stop）。
+> 注意：仍勿用浏览器 cookie 自动化 hack（脆弱+灰区），有官方 CLI 就走官方。
 
 ## 数据流
 
