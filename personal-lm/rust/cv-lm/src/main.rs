@@ -218,22 +218,24 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
                 min_confidence: 0.0,
             };
             if is_complete {
-                // 意图召回优先：本地历史里找"你上次怎么写的"
-                let tail: String = {
-                    let chars: Vec<char> = prefix.chars().collect();
-                    let start = chars.len().saturating_sub(100);
-                    chars[start..].iter().collect()
+                // 意图召回优先（行级对齐）：正在打的行是历史某行的前缀 → 补那行的剩余部分。
+                // 构造上保证相关；不再做跨行模糊召回（曾把主题相似的无关 MR 流水账塞进「应该用」后面）。
+                let cur: String = match prefix.rfind('\n') {
+                    Some(i) => prefix[i + 1..].to_string(),
+                    None => prefix.to_string(),
                 };
-                if let Some(idx) = retrieval.as_ref() {
-                    if let Some((line, score)) = idx.query(&tail) {
-                        if !prefix.contains(&line) {
+                if !cur.trim().is_empty() {
+                    if let Some(idx) = retrieval.as_ref() {
+                        if let Some(rest) = idx.query_line(&cur) {
+                            eprintln!("[retrieval] line-hit len={} cur={:?}", rest.chars().count(), cur.trim());
                             let ver = shared.version().unwrap_or_default();
                             respond(&mut stream, "200 OK",
-                                    &json!({"completion": line, "version": ver, "source": "retrieval", "score": score}));
+                                    &json!({"completion": rest, "version": ver, "source": "retrieval"}));
                             return;
                         }
                     }
                 }
+                eprintln!("[retrieval] miss cur={:?}", cur.trim());
             }
             if is_complete && std::env::var("CVLM_COMPLETE_BACKEND").is_ok() {
                 // 显式指定补全也走大模型后端（延迟高，默认不用）

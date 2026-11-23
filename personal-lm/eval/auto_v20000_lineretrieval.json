@@ -1,0 +1,306 @@
+{
+ "summary": {
+  "cases": 37,
+  "exact_rate": 0.9189,
+  "match4_rate": 0.9189,
+  "lcp_mean": 0.9088
+ },
+ "per_case": [
+  {
+   "prefix": "# index design for high cardinality column\n\n我是数据库开发人员。现在要为parquet 的高基数(high cardinality)列设计一个模糊的row-id 索引。\n\n# 场景\n\n- parquet append-only 写入\n- rg 一般长度限制1024*1024\n\n# 语义\n- 模糊的含义是不存储真正的数据，存储hash 或者其他计算。\n- row-id 是在row group 层面。从0开始\n",
+   "gold": "- 索引是独立的文件，不扩展parquet 的format。",
+   "completion": "- 索引是独立的文件，不扩展parquet 的format。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault &语言模型\n\n我在clipvault 中记录了大量的文字，截图、笔记、对话。\n\n- 我现在希望为clipvault 增加两个大功能：打字自动补全&生成个人风格的文字或者技术方案。\n- 这个实现路径是什么呢？小的模型。\n- 我希望训练自己独有的小模型，输入是clipvault 所有文字、nmem 所有的历史。\n- 而且这个模型可以不断迭代，因为我的内容也在不断丰富。\n- 从github 或科技博客中寻找优秀轻量级模型的训练方法、加载方式。这是一个专用模型，应该不会很大。\n",
+   "gold": "- 梳理清楚训练框架、应用框架，以ascii graph 的形式整理到nmem。",
+   "completion": "- 梳理清楚训练框架、应用框架，以ascii graph 的形式整理到nmem。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# cdn 入库小时抖动分析\n\n- 这是cdn kafka 消费和tm 进程状态监控大盘 https://grafana.byted.org/d/0KNAOkxVzx/tide-woker-status-viewer?orgId=1&refresh=1m&from=now-12h&to=now\n- 每个小时集群的负载都会剧烈抖动。\n- 这是其中的一个topic 流量信息：https://grafa",
+   "gold": "na.byted.org/d/vEE7GNQmk/data-inf-kafka-user-consumer_offset",
+   "completion": ".bytedance.net/dashboard/data-dev/data-dev/job-manage/78",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.0
+  },
+  {
+   "prefix": "# doubao 集群迁移&cf 演练自修复\n\n# 上下文\ndoubao 集群的所有流任务要迁移到velox_stream。\n\n- 参考lark 文档：https://bytedance.my.larkoffice.com/docx/YXycd3kDOoqgUExfF95md7XWyUg 使用larkcli 去理解\n- doubao 集群任务列表：\n    - https://tiview.bytedance.net/data-dev/data-dev/job-manage/29853\n",
+   "gold": "- 还有doubao 目录中的其他任务。暂时不包含metrics。",
+   "completion": "- 使用tiview_ops 完成操作，绑定。",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.032
+  },
+  {
+   "prefix": "# gw-pulse ai friendly api\n\n- gw-pulse 现在fwd 消息，还会丢数据吗？\n- 评估pg 是否健康？如何基于metrics 持续优化？\n- 节点级别流量探测是否能发现异常节点？如果发现异常节点，是否可以主动action？\n- 网关版本现在已经升级，配置可以快速同步。现在控制模块是否达到了上限标准？\n- ui 展示还是缺乏信息，比如节点屏蔽，什么时间处理、原因是什么？\n",
+   "gold": "- gw-pulse 最终要提供ai friendly api:",
+   "completion": "- gw-pulse 最终要提供ai friendly api:",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# cf 迭代 26/11/20\n\n- cf 当前完全做不到快速开发、测试。\n- 代码更新后，好多东西对比上，ci 挂，agent 也抱怨问题。\n- cf 还没找到自己的第一性原理对不对？\n- feedback 还有很多。\n- 什么时候才能真的加速开发、测试？缩短ci 流程？\n\n---\n2026-11-21 15:08\n\n- 在其他环境，很多agent 反馈cf 很难用，都有文档记录。\n- docker 拉取镜像慢、新增测试case 容易报错。\n",
+   "gold": "- 本机ci runner，空间占据非常夸张。",
+   "completion": "- 本机ci runner，空间占据非常夸张。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault 访问优化\n\nxyz69.top/clipvault cloudflare tunnel 很不稳定，分析根因。如果优化，可以从记忆中获取上下文。\n\n---\n",
+   "gold": "- 能做的优化都尽可能去做，把优化经验以ascii graph的形式整理到nmem。注意使用flowkit:nmem-l",
+   "completion": "- 能做的优化都尽可能去做，把优化经验以ascii graph的形式整理到nmem。注意使用flowkit:nmem",
+   "exact": true,
+   "match4": true,
+   "lcp": 0.966
+  },
+  {
+   "prefix": "# lvs 26/11/21\n\n- 搞清楚lvs 集群的目标是什么？\n- 检查direct io,block ttl 功能是否ready？\n- stream_engine b:lvs 要把velox pin 在最新分支。\n- ci 测试、覆盖率过了就可以合并了，cpu guard 问题太多了，暂时不用关注。\n- 一切稳定后，scm 发布lvs版本，tiview 升级lvs 集群写入tm 版本。\n",
+   "gold": "- 经验及时沉淀到文档、applet,nmem.",
+   "completion": "- 经验及时沉淀到文档、applet,nmem.",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# tlb ops 复盘 26/11/21\n\n- 9个任务升级持续了24个小时。很长啦！！\n- 这3个集群，问题确实多，排查用了特别多的时间。\n- 从快速升级、保障流畅的视角来看，整个升级流程，我们可以沉淀哪些可复用、有利于加速、稳定性的经验、教训？\n",
+   "gold": "- flowkit 相关rust applet 是否可以得到进化？",
+   "completion": "- flowkit 相关rust applet 是否可以得到进化？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# gw-pulse 服务对齐 26/11/20\n\ngw-pulse 服务没有对齐\n- 线上v23,v41 部署着服务\n- 没有更新到最新版本，每次重启都要同步海量的db，这是愚蠢的，仅同步重要的配置信息。其他历史仅依赖心跳服务或者fwd 构建。\n- 对齐版本。\n\n---\n2026-11-20 22:11\n",
+   "gold": "- blaze 为什么失败？",
+   "completion": "- blaze 为什么失败？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# cdn 升级写入 26/11/19\n\n- 确认cdn 内存泄漏修复，都进了主分支。stream_engine b:velox_stream\n- scm 发布分支\n- tiview 基于最新的cdn 集群版本配置，修改版本号\n- 升级cdn2 集群。单批次10%\n- 升级过程中，使用tm_ops 登录机器，查看tm 日志是否有异常。\n- 使用tide metrics 分析任务：https://tiview.bytedance.net/data-dev/data-dev/job-manage/10181 输入、输出流量是否正常。\n",
+   "gold": "- 升级完成后，使用tm_ops perf 分析，当前版本是否存在内存泄漏问题。",
+   "completion": "- 升级完成后，使用tm_ops perf 分析，当前版本是否存在内存泄漏问题。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# lvs 26/11/18\n\n- fringedb & stream_engine 的ci 系统卡住了当前的快速交付，不符合预期。\n- fringedb 基于分支velox_stream 新建lvs 分支。并把相关的mr 改动提交到lvs，https://code.byted.org/tide/fringedb/merge_requests 关闭相关mr。\n- stream_engine 基于velox_stream 新建lvs 分支。fringedb版本pin 到lvs 不需要加commit id。\n",
+   "gold": "- 我们要快速交付！！这是ai 时代的开发精神。把这个价值观写到nmem。",
+   "completion": "- 我们要快速交付！！这是ai 时代的开发精神。把这个价值观写到nmem。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault 26/11/17\n\n- clipvault 剪切板总会出现`Other` txt,应该不是我的操作。分析这是怎么产生的，如何避免。是否为代码bug\n\n---\n2026-11-17 23:15\n\n- 笔记功能除了界面编辑外。现在应该增加api 操作：agent friendly api.\n- 后面会把笔记的功能开发给agent。\n- 笔记提供编辑、链接、bm25 检索、tag 检索。目标是向通用记忆层演进、以及用户&agent 共同编辑。\n",
+   "gold": "- 帮我评估当前框架，缺少哪些基础设施以及设计问题。",
+   "completion": "- 帮我评估当前框架，缺少哪些基础设施以及设计问题。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# b+tree impl.\n\n- 学习的价值观有问题，只是为了作出demo。核心实现其实没那么难，我们应该做一个通用的lib，不是一个玩具。production ready！！把这个理念写入AGENTS.md，recallfs 的价值就是探索、沉淀可复用的知识\n- kv 的类型应该泛化，通用才有价值。\n- bpt_tree_* 这个前缀很难看。业内实践一般是用btree表达b+tree，你可以给出一个更加优雅的前缀。\n",
+   "gold": "- 我希望把这个项目用在生产环境。接口要清晰易于理解。",
+   "completion": "- 我希望把这个项目用在生产环境。接口要清晰易于理解。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# lvs 26/11/17\n\nhttps://tiview-i18ntt-sg.tiktok-row.net/tide-rsc/tide-rsc/cluster_version\n- 基于lvs__20261117_143721 新建版本\n- 去掉写入配置\n```\n  export FRINGEDB_V2_ENCODE_THREADS=16\n  export FRINGEDB_V2_ENCODE_MAX_INFLIGHT=16\n",
+   "gold": "```",
+   "completion": "- 增加写入配置",
+   "exact": false,
+   "match4": false,
+   "lcp": 0.0
+  },
+  {
+   "prefix": "# lvs 查询说明 26/11/18\n\n之前查询存在热数据 ssd+hdd 混查的问题，filter 很慢。前几天做了优化：\n\n- 修复索引相关问题。\n- 热数据不写hdd\n\n但引入了新的问题：\n",
+   "gold": "- 热数据全写ssd，ssd数据向hdd 迁徙压力大增。目前有一些设计性能回归问题，导致cpu整体增加20%，hdd 持",
+   "completion": "- 热数据全写ssd，ssd数据向hdd 迁徙压力大增。目前有一些设计性能回归问题",
+   "exact": true,
+   "match4": true,
+   "lcp": 0.684
+  },
+  {
+   "prefix": "# cdn hdfs 残留任务清理\n\n- 通过lark 群`CDN日志查询优化` 获取查询lag 相关的上下文\n- cdn 监控大盘：https://grafana.byted.org/d/0KNAOkxVzx/tide-woker-status-viewer?orgId=1&refresh=1m hdfs 的负载需要看小时级别\n- 依次登录cdn 集群的机器，通过tm debug http api 或者检查进程server 是否在工作。确认hdfs 是否有残留任务存在。\n",
+   "gold": "- 通过jm_ops `tcesh data.tide.jobmgr --cluster fringedb-newly ",
+   "completion": "- 通过jm_ops `tcesh data.tide.jobmgr --cluster fringedb-newly --pod dp-114340ce55-554ff",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# gw-pulse 26/11/17\n\n- 在tlb 表上移除了一个节点\n- 大概经历了一分钟才生效，这跟我们的设计有出入。\n- 从nmem 中加载我们的设计细节，结合gw-pulse &gateway 代码&运行时，分析配置延迟这么久的原因。\n- 通过gateway_ops `tcesh data.tide.data_gateway --cluster mirror --pod fed-dp-c947363291-7588876f8-wftlt` 访问网关，或者去掉--pod 列举出所有pod\n",
+   "gold": "- 给出问题归因的报告。",
+   "completion": "- 给出问题归因的报告。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# lvs 慢查询 26/11/14\n\n- flowkit 改动全部分类提交并推送，无关内容假如gitignore 并删除。及时rebase，加载AGETNS.md.\n- fringedb mr 已合并，检查se 是否pin 了fringedb 版本。修复要随着se 一起编译后才能生效。\n- mr ci 通过后，确保评论全部resolve，有价值改正，无价值battle。忽略review，直接合并mr。要求整理到AGETNS.md 中。\n",
+   "gold": "- se 确认没问题后，scm 发布release 版本。",
+   "completion": "- se 确认没问题后，scm 发布release 版本。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# gw-pulse 用户体验\n\n- 用户体验是产品有竞争力的核心。\n- 当前fe 的体验还有很大的提升空间。\n- 逐项优化。改动及时提交并推送。\n- 稍后我会提供新的用户需求。\n\n---\n2026-11-14 21:51\n\n- 够了吗？\n- 从nmem 加载记忆，理解设计的核心。\n- 围绕核心做优化&用户体验演进。\n\n---\n2026-11-14 21:58\n\n- 模版拦截这个功能，be 的聚合接口太慢了。应该增加物化视图，对某个时间段的查询分析，以后是一个常态。应该具备低延迟，可以大范围查询。\n",
+   "gold": "- 节点scale-in & out，缺少了对历史的回顾，比如tlb 集群，查询节点从1040 掉到1020，我们不知道",
+   "completion": "- 节点scale-in & out，缺少了对历史的回顾，比如tlb 集群，查询节点从1040 掉到1020，我们",
+   "exact": true,
+   "match4": true,
+   "lcp": 0.945
+  },
+  {
+   "prefix": "# xstream 26/11/15\n\n- 选择magnet 逻辑有些问题，现在高清基本都是`4k688.com@` 开头的mp4.\n- 选择magent 的逻辑是否有问题，我对照演员的主页，看起来少了一些视频。\n\n---\n2026-11-15 22:40\n\nLTX 我不想看。\n\n---\n2026-11-15 22:42\n\n移动端浏览xstream 时，左右两侧有明显的切割感。用户体验不够好。\n",
+   "gold": "- 检查线上所有magnet 是否符合要求、是否有异常。及时更新或者替换。",
+   "completion": "- 检查线上所有magnet 是否符合要求、是否有异常。及时更新或者替换。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# 高基数点查\n\nhttp://10.37.125.152:8000/2026-11-06-tlb-sla-v0-4.html 这是tlb 某一周的查询数据分析。\n注意查询模版第一项，domain+uri 点查。\n\n现在我们要针对这个高频点查。去物理机上，实地分析查询性能。\n\n# 机器选择\n\n- fdbd:dc02:24:b2a::23\n\n特征：\n- 高负载\n- 查询环境一致\n\n# 测试框架 & 细节\n",
+   "gold": "- cf: git@code.byted.org:sunmingqiang/cmake-foundation.git",
+   "completion": "- cf: git@code.byted.org:sunmingqiang/cmake-foundation.git",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# ostore 26/11/15\n\n- google drive 认证自动失效。这很影响体验！！\n- 删除grafana，比较吃资源。将metrics 统计，集成到ostore fe 上，增加一个按钮，弹出metrics panel。让用户理解ostore 发生了什么，状态是否健康。图标要注意交互性和美观。\n",
+   "gold": "- 改动及时提交并推送。",
+   "completion": "- 改动及时提交并推送。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# cf 集成cmake-foundation\n\n讲codebase-memory-mcp 集成到cf，并对arrow,velox,fringedb,stream_engine 进行建模，集成到image.\n",
+   "gold": "- 你觉得这是个好主意吗？",
+   "completion": "- 你觉得这是个好主意吗？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# gw-pulse 上线验证\n\n线上机器：\nfdbd:dc05:11:636::23\nfdbd:dc05:11:636::41\n\n当前gw-pulse boe 测试是否完善，现在我们执行上线前验证。\n\n# boe 操作\n- 对boe 常用的、有数据的tlb 表执行quota,模版控制,节点scale in & out 验证。\n- 验证要包含配置 & 配置移除。\n- 通过fe 自身，获取验证相关证据。\n",
+   "gold": "- 整理为文档。放在docs/reports/{domain}",
+   "completion": "- 整理为文档。放在docs/reports/{domain}",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault 26/11/08\n\n- 笔记的色彩系统。导致置顶不明显。\n- 最简单的解决方案，我觉得是修改置顶按钮的色彩。\n- 将置顶用分割线隔离也不错。你怎么看？\n",
+   "gold": "sse 是不是有点问题？瀑布流经常会乱或者不更新，刷新后恢复。",
+   "completion": "sse 是不是有点问题？瀑布流经常会乱或者不更新，刷新后恢复。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# nmem-edge 26/11/08\n\n怎么实现上又出现这种愚蠢的同步问题？？\n\n- 3个小时全量同步一次就够了啊！！\n- nmem-edge 在server 异常时，才充当查询备份，不需要频繁对齐！！\n- 为什么要这么频繁？\n",
+   "gold": "- 优雅解决这个问题！！",
+   "completion": "- 优雅解决这个问题！！",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault realtime\n\nclipvault 现在可以利用ostore 实现多端实时同步。\n\n- 可以从nmem 获取ostore 相关上下文。\n- ostore 提供了备份服务和通知接口。可以去ssh cc 上发现该服务。如果ostore 有开发需求，使用cc: agy --dangerously-skip-permissions agent 主导修复并要求及时推送&部署，本机agent 负责验证更新。\n",
+   "gold": "- ostore 的备份可以batch 投递，获取通知后及时同步，并通过sse 推送更新。",
+   "completion": "- ostore 的备份可以batch 投递，获取通知后及时同步，并通过sse 推送更新。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# cmake-foundation ci 迭代\n\n- ci 的quota 一直不过。\n- 当前的ci 没有什么价值，太慢了！！\n- 引入devbox 私有协议，devbox 上运行ci 服务，集成到ci_ops,建议以systemctl 服务运行。\n",
+   "gold": "- 通过nfs 导出共享存储。",
+   "completion": "- 通过nfs 导出共享存储。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# trae 插件开发\n\n- hosts 文件本质上是ini 文件\n- 当前trae 不支持渲染，后折缺乏渲染工具。\n- 我们是否可以开发一个ini 渲染插件\n- 优雅区分tag、注释、有效内容\n- 可以区分注释中的结构化信息（可以考虑为注释增加阴影渲染）\n- 主要目标是让用户所见即所得。\n- 开发一个trae 插件，命名简洁优雅，新建仓库，提交并推送。\n- 在当前trae 中加载。可能要自动识别文件的类型。\n",
+   "gold": "从nmem 获取我的ini 渲染插件上下文。",
+   "completion": "从nmem 获取我的ini 渲染插件上下文。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault 26/11/07\n\n- 笔记增加删除操作，是否可以对齐apple 右滑弹出操作按钮？注意ui 的一致性。\n\n---\n2026-11-07 21:44\n\n这个删除弹出太累人了。\n- 交互的重点变成了删除。。谁会这样设计？？\n- 向左拖拽才出现删除！！\n\n---\n2026-11-07 21:51\n\n- 这个方式是弹出删除，而不是正确苹果的设计。\n- 不够优雅，缺乏动画。对齐苹果的ui 设计。\n",
+   "gold": "- 为什么改动如此雷人？？",
+   "completion": "- 为什么改动如此雷人？？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# cmake-foundation 迭代 26/11/06\n\ncmake-foundation 迁移到了rust，我们有了更加稳健的构建版本。\n\n- fringedb,velox,stream_engine 在持续迭代，cf 也要持续的适配并优化编译。\n- cf 的镜像能力也要提升，比如内置rust toolchain,blaze,rust-guideline-skill;以及编程相关的skill、配置、taste。更好地服务于测试、开发。\n",
+   "gold": "- 将ci 利用起来，使用我们定制的镜像，注意及时更新、提交至bytehub。",
+   "completion": "- 将ci 利用起来，使用我们定制的镜像，注意及时更新、提交至bytehub。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# xstream 迭代 26/11/07\n\n- 排序逻辑不合理，当前仅仅按照演员最新作品的发布日期。没有考虑到xstream 上作品的发现日志。\n- 每个更新作品，tg 消息都应该包含封面。尽可能以结构化、完善的作品推送。不应该有缩略，这是更新的价值所在。用户可以所见即所得。\n- 改动及时提交并推送。及时部署。\n",
+   "gold": "搞错了吧？？",
+   "completion": "搞错了吧？？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# xstream 迭代 26/11/07\n\n- 排序逻辑不合理，当前仅仅按照演员最新作品的发布日期。没有考虑到xstream 上作品的发现日志。\n- 每个更新作品，tg 消息都应该包含封面。尽可能以结构化、完善的作品推送。不应该有缩略，这是更新的价值所在。用户可以所见即所得。\n- 改动及时提交并推送。及时部署。\n",
+   "gold": "搞错了吧？？",
+   "completion": "搞错了吧？？",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# clipvault 迭代 26/11/06\n\nclipvault item 展示增加色彩设计。\n\n- 选择一种柔和、阳光的色彩。\n- 根据item 被编辑的次数，决定渲染色彩深度。\n- 色彩即可展示用户当前的工作以及区分重要的item 是什么。\n- 这是一个以色彩为主题的设计。\n",
+   "gold": "- 改动及时提交并推送。",
+   "completion": "- 改动及时提交并推送。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# sqlite 膨胀\n\n- 200-300mb 的sqlite3,backup 竟然能膨胀>2g. 难以置信呀！！\n- 所以我们要研究一个流失的备份流程，这甚至是一个优秀的feature 哦！有很大价值，可以考虑开源，提交到github。仓库名称要简洁、清晰。\n- 如果独立的话，应该自动推导表，不应该与任何一个场景或者schema 绑定。\n\n---\n2026-11-06 21:00\n\n- 有冲突，以nmem-lint 为准。适配、修改、优化\n",
+   "gold": "- 开始实现吧。",
+   "completion": "- 开始实现吧。",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  },
+  {
+   "prefix": "# gw-pulse 26/11/06\n\n参考这个skill，为gw-pulse fe 增加免密自动登录。相关ci 也要同步修改适配。 \n\n---\n2026-11-06 15:52\n\n- gw-pulse fe 中`策略控制` 这个分页已经名存实亡实亡，没有什么价值。改为`表控制`，将物理表拦截、模版拦截、查询节点scale in&out 这个三个子界面移动到`表管理`\n- fe 存在的问题：\n  1. `表请求观测` 完全没有数据\n",
+   "gold": "2. 心跳metadata 没有数据",
+   "completion": "2. 心跳metadata 没有数据",
+   "exact": true,
+   "match4": true,
+   "lcp": 1.0
+  }
+ ]
+}
