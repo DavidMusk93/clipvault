@@ -13,7 +13,8 @@ MLX 惰性图 + 单次 eval：没有逐 op 开销。
   curl :8787/metrics
 
 语义与 cv-lm ghost 对齐：贪心、行尾即停（标点+\n 合体 token 先吐后停）、
-特殊 token 截停、首 token 置信度门控（CVLM_GHOST_MIN_CONF，默认 0.30）、
+特殊 token 截停、首 token 置信度门控（CVLM_GHOST_MIN_CONF，默认 0.55）、
+生成中途低置信截断（token 概率 < 0.15 → 停在该 token 前，不输出半截胡话），
 前缀 KV 复用（连续请求只 prefill 增量）。
 
 metrics：每请求追加 JSONL 到 Keepsake/logs/cv-lm-mlx.jsonl，/metrics 聚合。
@@ -213,6 +214,7 @@ class Svc:
         out_ids = []
         stop = "max_tokens"
         conf = None
+        probs = []
         logits = self._forward(ids, start, caches)  # 冷全量 / 热增量，同一入口
         t_prefill = time.time() - t0
         for _ in range(max_tokens):
@@ -225,6 +227,12 @@ class Svc:
                     stop = "low_conf"
                     self.stats["empty"] += 1
                     break
+            # 中途门控：贪心也会在句中骑墙（概率骤降=模型不知道接什么），
+            # 在吐出该 token 前截断 → 宁短勿错，不输出后半截胡话
+            probs.append(p)
+            if p < 0.15:
+                stop = "mid_conf"
+                break
             if top == 0:
                 stop = "eos"
                 break
@@ -259,7 +267,7 @@ class Svc:
 # ---------------- HTTP ----------------
 class Handler(BaseHTTPRequestHandler):
     svc = None
-    min_conf = 0.30
+    min_conf = 0.55
 
     def log_message(self, *a):
         pass
@@ -318,7 +326,7 @@ def main():
     ap.add_argument("--fp16", action="store_true", default=True)
     ap.add_argument("--fp32", dest="fp16", action="store_false")
     ap.add_argument("--min-conf", type=float,
-                    default=float(os.environ.get("CVLM_GHOST_MIN_CONF", "0.30")))
+                    default=float(os.environ.get("CVLM_GHOST_MIN_CONF", "0.55")))
     args = ap.parse_args()
     Handler.svc = Svc(Path(args.bundle), args.fp16)
     Handler.min_conf = args.min_conf

@@ -10,6 +10,8 @@ use std::path::Path;
 pub struct Retrieval {
     pub lines: Vec<String>,
     postings: HashMap<u64, Vec<u32>>,
+    /// 拉丁词频表（小写→出现次数）：词级补全（英文体验）的词典源
+    words: HashMap<String, u32>,
 }
 
 fn fnv64(s: &str) -> u64 {
@@ -59,17 +61,48 @@ fn is_cjk(c: char) -> bool {
         0x2E80..=0x303F | 0x3040..=0x30FF | 0x31C0..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF)
 }
 
+/// 行内拉丁词（小写，保留内部数字/下划线，如 arrow2、recall_fs），len>=3
+fn latin_words(s: &str) -> impl Iterator<Item = String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_alphabetic() {
+            let start = i;
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '-')
+            {
+                i += 1;
+            }
+            let w: String = chars[start..i].iter().collect::<String>().to_lowercase();
+            // 去掉首尾的 '-'/'_'，纯分隔符不算字符
+            let core = w.trim_matches(|c| c == '-' || c == '_');
+            if core.chars().count() >= 3 && !core.chars().all(|c| c.is_ascii_digit()) {
+                out.push(core.to_string());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out.into_iter()
+}
+
 impl Retrieval {
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let lines: Vec<String> = raw.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         let mut postings: HashMap<u64, Vec<u32>> = HashMap::new();
+        let mut words: HashMap<String, u32> = HashMap::new();
         for (i, line) in lines.iter().enumerate() {
             for t in tokens_of(line) {
                 postings.entry(fnv64(&t)).or_default().push(i as u32);
             }
+            // 词表：只用原始行（不重复去 bigram 顺序影响）里的拉丁词
+            for w in latin_words(line) {
+                *words.entry(w).or_insert(0) += 1;
+            }
         }
-        Ok(Self { lines, postings })
+        Ok(Self { lines, postings, words })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -130,6 +163,33 @@ impl Retrieval {
             };
             if rest.trim().is_empty() { None } else { Some(rest) }
         })
+    }
+
+    /// 词级补全（英文体验）：partial = 正在打的行尾部未完成的拉丁词（≥2字符）。
+    /// 从历史词表里找以它为前缀、频次最高的词，返回剩余部分（保留原词大小写风格）。
+    /// 例：`please send me the dep` → `loyment`（deployment）
+    pub fn query_word(&self, partial: &str) -> Option<String> {
+        let p = partial.to_lowercase();
+        if p.chars().count() < 2 {
+            return None;
+        }
+        let mut best: Option<(&String, u32)> = None;
+        for (w, n) in self.words.iter() {
+            // 必须比 partial 长（补全才有意义），且大小写不敏感前缀匹配
+            if w.chars().count() > p.chars().count() && w.starts_with(&p) {
+                if best.map(|(_, bn)| *n > bn).unwrap_or(true) {
+                    best = Some((w, *n));
+                }
+            }
+        }
+        // 词频太低（只出现过 1 次）的噪声不推
+        let (w, _n) = best?;
+        if self.words.get(w).copied().unwrap_or(0) < 2 {
+            return None;
+        }
+        // 保留用户已打部分的原始大小写：只返回剩余部分（一律小写，
+        // 与用户已输入部分拼接后自然呈现，避免大小写错乱）
+        Some(w[p.chars().count()..].to_string())
     }
 
     /// tail = prefix 末尾 ~100 字符。返回 (最佳行, 分数) 或 None。

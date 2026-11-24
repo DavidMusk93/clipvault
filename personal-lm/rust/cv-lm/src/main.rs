@@ -236,6 +236,21 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
                     }
                 }
                 eprintln!("[retrieval] miss cur={:?}", cur.trim());
+
+                // 词级补全（英文体验）：正在打的行以未完拉丁词结尾 →
+                // 从历史词表补全该词（0ms、确定性、零幻觉），仍不中才走 LM。
+                // 例：`please send me the dep|` → `loyment`；`cargo build --rel|` → `ease`
+                if let Some(partial) = trailing_partial_word(&cur) {
+                    if let Some(idx) = retrieval.as_ref() {
+                        if let Some(rest) = idx.query_word(&partial) {
+                            eprintln!("[word] hit partial={:?} rest={:?}", partial, rest);
+                            let ver = shared.version().unwrap_or_default();
+                            respond(&mut stream, "200 OK",
+                                    &json!({"completion": rest, "version": ver, "source": "word"}));
+                            return;
+                        }
+                    }
+                }
             }
             if is_complete && std::env::var("CVLM_COMPLETE_BACKEND").is_ok() {
                 // 显式指定补全也走大模型后端（延迟高，默认不用）
@@ -355,6 +370,30 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
 
 
 /// 样板行判定：--- 分隔行、纯数字/时间戳形态行（小模型生成的时间戳常是乱码）。
+/// 正在打的行的尾部未完成拉丁词：如 `... the dep|` → `dep`；`cargo build --rel|` → `rel`。
+/// 无尾部拉丁词（行尾是标点/空白/CJK）→ None。
+fn trailing_partial_word(cur: &str) -> Option<String> {
+    let chars: Vec<char> = cur.chars().collect();
+    let mut end = chars.len();
+    // 不 trim 尾部空白：行尾是空格 = 用户已把词打完，该补的是下一个词（走 LM/检索）
+    if end == 0 || !chars[end - 1].is_ascii_alphanumeric() {
+        return None;
+    }
+    let mut start = end;
+    while start > 0
+        && (chars[start - 1].is_ascii_alphanumeric() || chars[start - 1] == '_' || chars[start - 1] == '-')
+    {
+        start -= 1;
+    }
+    let w: String = chars[start..end].iter().collect::<String>();
+    let core = w.trim_matches(|c| c == '-' || c == '_');
+    if core.chars().count() >= 2 {
+        Some(core.to_string())
+    } else {
+        None
+    }
+}
+
 fn is_boilerplate_line(s: &str) -> bool {
     let t = s.trim();
     if t.is_empty() || t == "---" || t == "***" || t == "___" {
