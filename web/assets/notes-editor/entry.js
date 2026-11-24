@@ -62,6 +62,37 @@ function acceptLmGhost(v) {
   return true
 }
 
+/* 从 ghost 开头切下一个“词块”：拉丁词(含尾部空白)/CJK 2字/一串标点。
+   返回 null 表示 ghost 已无可切 */
+const LM_CHUNK_RE = /^(?:[A-Za-z][A-Za-z0-9_-]*\s*|[\p{Script=Han}]{2}|[\p{P}\p{S}]+|\s+)/u
+function splitLmChunk(text) {
+  const m = LM_CHUNK_RE.exec(text)
+  if (!m || !m[0]) return null
+  // 纯空白尾巴只留下一个空格，避免一口气吞到底
+  let chunk = m[0]
+  if (/^\s+$/.test(chunk)) chunk = ' '
+  const rest = text.slice(chunk.length)
+  return { chunk, rest }
+}
+
+/* ⌘→：渐进接受。每按一次吞一个词块，剩余部分继续作为 ghost（连续按直到全部接受） */
+function acceptLmGhostWord(v) {
+  const g = v.state.field(lmGhostField, false)
+  if (!g || !g.text) return false
+  const pos = v.state.selection.main.head
+  if (pos !== g.pos) return false
+  const part = splitLmChunk(g.text)
+  if (!part) return acceptLmGhost(v) // 兜底：切不动就整段接受
+  v.dispatch({
+    changes: { from: pos, insert: part.chunk },
+    selection: { anchor: pos + part.chunk.length },
+    effects: part.rest ? setLmGhost.of({ text: part.rest, pos: pos + part.chunk.length })
+                       : clearLmGhost.of({}),
+    userEvent: 'input.personal-lm.accept',
+  })
+  return true
+}
+
 function lmCompose(v) {
   const topic = window.prompt('个人风格初稿 · 主题 / 一句话需求')
   if (!topic || !topic.trim()) return true
@@ -83,6 +114,8 @@ function lmCompose(v) {
 
 let lmTimer = 0
 const lmCompleter = EditorView.updateListener.of((u) => {
+  // 词级接受事务自带新 ghost（剩余部分），不能清掉 —— 只跳过清除，不重拉请求
+  if (u.transactions.some((t) => (t.userEvent || '').startsWith('input.personal-lm.accept'))) return
   if (!u.docChanged && !u.selectionSet) return
   const view = u.view
   view.dispatch({ effects: clearLmGhost.of({}) })
@@ -105,7 +138,9 @@ const lmCompleter = EditorView.updateListener.of((u) => {
         if (!text || !now.empty) return
         const nowPrefix = view.state.doc.sliceString(Math.max(0, now.head - 400), now.head)
         if (nowPrefix !== prefix) return // 光标已移动或文档已变
-        view.dispatch({ effects: setLmGhost.of({ text, pos: now.head }) })
+        // ghost 上限：宁短勿长，超过 120 字符的部分丢弃（词级 ⌘→ 可继续要回）
+        const ghost = text.length > 120 ? text.slice(0, 120) : text
+        view.dispatch({ effects: setLmGhost.of({ text: ghost, pos: now.head }) })
       })
       .catch(() => {}) // cv-lm 未起：静默降级，编辑器不受影响
   }, 150)
@@ -918,6 +953,7 @@ async function mount(root, opts) {
       EditorView.inputHandler.of(notesInput),
       Prec.highest(keymap.of([
         { key: 'Tab', run: acceptLmGhost },
+        { key: 'Mod-ArrowRight', run: acceptLmGhostWord },
         { key: 'Mod-Shift-g', run: lmCompose },
         { key: 'Tab', run: acceptCalc },
         { key: 'Tab', run: (v) => indentList(v, 1) },
