@@ -31,6 +31,40 @@ JSONL = OUT / "lark_messages.jsonl"
 LARK = "lark-cli"
 KEEP_TYPES = {"text", "post"}
 
+# ---- 语料剔除（用户裁决 2026-11-25：告警、垃圾对话不进语料）----
+# 1) 群名黑名单：告警/机器人/通知类群整个剔除
+CHAT_EXCLUDE_RE = [
+    "告警", "报警", "監控", "监控", "alarm", "alert", "monitor",
+    "通知群", "提醒群", "机器人", "bot群", "值班", "oncall", "on-call",
+    "值班群", "工单群", "服务台", "helpdesk", "it服务", "订阅",
+]
+# 2) 发送者黑名单：机器通知账号（正文里多为推送卡残留）
+SENDER_EXCLUDE_RE = [
+    "机器人", "bot", "通知", "监控", "告警", "提醒", "monitor", "alarm",
+    "alert", "jenkins", "gitlab", "ci", "pipelin", "webhook",
+]
+# 3) 正文级噪声：告警模板/纯@/系统提醒行丢弃
+TEXT_EXCLUDE_RE = [
+    r"has confirmed (No )?Lark Repeat for the same alarm",
+    r"^@\S+( @\S+)*$",                      # 纯 @ 行
+    r"^(ok|好的|收到|okk)\s*$",             # 低信息确认行(保 2 字以下泛噪音)
+]
+import re as _re
+CHAT_EXCLUDE = [_re.compile(p, _re.I) for p in CHAT_EXCLUDE_RE]
+SENDER_EXCLUDE = [_re.compile(p, _re.I) for p in SENDER_EXCLUDE_RE]
+TEXT_EXCLUDE = [_re.compile(p, _re.I) for p in TEXT_EXCLUDE_RE]
+
+
+def line_keep(chat_name: str, sender: str, text: str) -> bool:
+    if any(p.search(chat_name) for p in CHAT_EXCLUDE):
+        return False
+    if any(p.search(sender) for p in SENDER_EXCLUDE):
+        return False
+    for p in TEXT_EXCLUDE:
+        if p.search(text):
+            return False
+    return True
+
 
 def wm_read() -> dict:
     return json.loads(WATERMARK.read_text()) if WATERMARK.exists() else {}
@@ -183,6 +217,7 @@ def compile_corpus() -> dict:
     by_doc = defaultdict(list)
     seen = set()
     n_lines = 0
+    dropped = 0
     for line in JSONL.open(encoding="utf-8"):
         try:
             m = json.loads(line)
@@ -192,22 +227,38 @@ def compile_corpus() -> dict:
         if mid and mid in seen:
             continue
         seen.add(mid)
+        chat_name = m.get("chat_name") or ""
+        sender = m.get("sender") or ""
         text = clean_text(m["text"])
         if not text.strip():
             continue
+        if not line_keep(chat_name, sender, text):
+            dropped += 1
+            continue
         day = (m.get("ts") or "")[:10]
-        doc_key = f"{m.get('chat_name') or m['chat_id']} · {day}"
+        doc_key = f"{chat_name or m['chat_id']} · {day}"
         body = text if "\n" not in text else text
-        by_doc[doc_key].append(f"{day} {m['sender']}: {body}")
+        by_doc[doc_key].append(f"{day} {sender}: {body}")
         n_lines += 1
+    # 3) 文档内精确重复行折叠：同一 chat×day 里完全相同的正文只留 1 份
+    #    （告警重复、群发模板），保留行序
+    for key in list(by_doc):
+        out_lines, seen_line = [], set()
+        for ln in by_doc[key]:
+            body_part = ln.split(": ", 1)[-1]
+            if len(body_part) > 12 and body_part in seen_line:
+                continue
+            seen_line.add(body_part)
+            out_lines.append(ln)
+        by_doc[key] = out_lines
     docs = []
     for key, lines in sorted(by_doc.items()):
         doc = f"## {key}\n" + "\n".join(lines)
-        if len(doc) >= 20:
+        if len(doc) >= 60:
             docs.append(clean_text(doc))
     (OUT / "lark.txt").write_text(docs_to_corpus(docs), encoding="utf-8")
-    return {"messages": n_lines, "docs": len(docs),
-            "bytes": (OUT / "lark.txt").stat().st_size}
+    return {"messages_kept": n_lines, "messages_dropped": dropped,
+            "docs": len(docs), "bytes": (OUT / "lark.txt").stat().st_size}
 
 
 if __name__ == "__main__":
