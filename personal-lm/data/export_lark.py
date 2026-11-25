@@ -40,15 +40,16 @@ def wm_write(wm: dict) -> None:
     WATERMARK.write_text(json.dumps(wm, ensure_ascii=False, indent=1))
 
 
-def lark_cli_json(args: list[str], timeout: int = 300) -> dict:
+def lark_cli_json(args: list[str], timeout: int = 900) -> dict:
     r = subprocess.run([LARK] + args, capture_output=True, text=True, timeout=timeout)
-    out = r.stdout.strip()
-    if out:
-        try:
-            return json.loads(out)   # 失败也是 JSON（{ok:false,error}），交给调用方分类
-        except Exception:
-            pass
-    raise RuntimeError(f"lark-cli {args[:3]}: rc={r.returncode} {r.stderr[-200:]}")
+    for stream in (r.stdout, r.stderr):
+        out = (stream or "").strip()
+        if out and out.lstrip().startswith("{"):
+            try:
+                return json.loads(out)   # 失败响应也是 JSON（{ok:false,error}），交给调用方分类
+            except Exception:
+                continue
+    raise RuntimeError(f"lark-cli {args[:3]}: rc={r.returncode} {(r.stderr or '')[-200:]}")
 
 
 def list_chats() -> list[dict]:
@@ -102,8 +103,8 @@ def fetch_chat(chat: dict, wm: dict) -> str:
     try:
         while True:
             args = ["im", "+chat-messages-list", "--chat-id", chat_id,
-                    "--order", "asc", "--page-all", "--page-limit", "1000",
-                    "--page-delay", "150"]
+                    "--order", "asc", "--page-all", "--page-limit", "200",
+                    "--page-delay", "150"]   # 200 页≈1 万条/批：单次子进程 <3min，游标由 watermark 续
             if token:
                 args += ["--page-token", token]
             d = lark_cli_json(args)
