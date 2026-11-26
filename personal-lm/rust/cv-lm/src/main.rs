@@ -189,13 +189,28 @@ fn handle_conn(mut stream: TcpStream, shared: &SharedEngine, retrieval: std::syn
                         "version": loaded, "server": "cv-lm"}),
             );
         }
-        ("POST", "/complete") | ("POST", "/compose") => {
+        ("POST", "/correct") | ("POST", "/complete") | ("POST", "/compose") => {
             if let Err(e) = shared.ensure() {
                 respond(&mut stream, "503 Service Unavailable",
                         &json!({"error": format!("engine load failed: {e}")}));
                 return;
             }
             let v: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+            // 输入纠错：词典层，确定性；永不改用户文本，只给候选（不要求 prefix/prompt）
+            if path == "/correct" {
+                let word = v["word"].as_str().unwrap_or("").to_string();
+                if let Some(idx) = retrieval.as_ref() {
+                    let out = idx.query_spell(&word)
+                        .map(|(s, conf)| json!({"word": word, "suggestion": s,
+                                                "confidence": conf, "source": "spell"}))
+                        .unwrap_or(json!({"word": word, "suggestion": "", "source": "spell"}));
+                    respond(&mut stream, "200 OK", &out);
+                } else {
+                    respond(&mut stream, "200 OK",
+                            &json!({"word": word, "suggestion": "", "source": "spell"}));
+                }
+                return;
+            }
             let prefix = v["prefix"]
                 .as_str()
                 .or(v["prompt"].as_str())

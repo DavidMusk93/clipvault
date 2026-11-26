@@ -93,6 +93,102 @@ function acceptLmGhostWord(v) {
   return true
 }
 
+/* ── 输入纠错（词典层）：刚打完的词若疑似拼写错误 → 轻提示 chip。
+   原则：永不自动替换；单击或 ⌘. 接受；继续打字 / Esc 即消失 ── */
+const setLmFix = StateEffect.define()
+const clearLmFix = StateEffect.define()
+
+class LmFixWidget extends WidgetType {
+  constructor(from, bad, good) { super(); this.from = from; this.bad = bad; this.good = good }
+  eq(o) { return o.from === this.from && o.bad === this.bad && o.good === this.good }
+  toDOM() {
+    const s = document.createElement('span')
+    s.className = 'cm-lm-fix'
+    s.textContent = ` ${this.bad} → ${this.good}`
+    s.title = '疑似拼写错误 · 单击或 ⌘. 采纳'
+    s.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      window.dispatchEvent(new CustomEvent('cv-lm-fix-accept', { detail: this }))
+    })
+    return s
+  }
+  ignoreEvent() { return false }
+}
+
+const lmFixField = StateField.define({
+  create() { return null },
+  update(v, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setLmFix)) return e.value
+      if (e.is(clearLmFix)) return null
+    }
+    if (tr.docChanged) return null   // 打字即消失
+    return v
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => {
+    if (!v) return Decoration.none
+    return Decoration.set([Decoration.widget({
+      widget: new LmFixWidget(v.from, v.bad, v.good), side: 1,
+    }).range(v.pos)])
+  }),
+})
+
+function acceptLmFix(v) {
+  const f = v.state.field(lmFixField, false)
+  if (!f) return false
+  const pos = v.state.selection.main.head
+  // 词必须仍在原位（光标在词后、无其他编辑）
+  const bad = v.state.sliceDoc(f.from, f.pos)
+  if (bad !== f.bad) return false
+  v.dispatch({
+    changes: { from: f.from, to: f.pos, insert: f.good },
+    selection: { anchor: f.from + f.good.length },
+    userEvent: 'input.personal-lm.fix',
+  })
+  return true
+}
+
+let lmFixTimer = 0
+let lmFixPending = ''   // 上次已请求的词，避免重复请求
+const lmFixer = EditorView.updateListener.of((u) => {
+  if (!u.docChanged) return
+  const view = u.view
+  const tr = u.transactions[u.transactions.length - 1]
+  if (tr && (tr.userEvent || '').startsWith('input.personal-lm.accept')) return
+  const cur = view.state.selection.main
+  if (!cur.empty) { view.dispatch({ effects: clearLmFix.of({}) }); return }
+  // 触发条件：刚敲了词尾分隔符（空格/标点/换行）→ 检查它前面的那个词
+  const ch = u.state.doc.sliceString(Math.max(0, cur.head - 1), cur.head)
+  if (!/^[\s，。；、：！？,.;:!?)】》"']$/.test(ch)) return
+  const line = view.state.doc.lineAt(cur.head)
+  const before = line.text.slice(0, cur.head - line.from - 1)
+  const m = before.match(/([\u4e00-\u9fff]{2,4}|[A-Za-z][A-Za-z0-9_-]{3,20})$/)
+  if (!m) return
+  const word = m[1]
+  if (word === lmFixPending) return
+  clearTimeout(lmFixTimer)
+  const pos = cur.head
+  lmFixTimer = setTimeout(() => {
+    lmFixPending = word
+    fetch(LM_URL + '/correct', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ word }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const good = d && d.suggestion
+        const now = view.state.selection.main
+        if (!good || !now.empty) return
+        // 词仍原样在光标前才提示
+        if (view.state.sliceDoc(Math.max(0, pos - word.length - 1), pos - 1) !== word) return
+        view.dispatch({ effects: setLmFix.of({
+          from: pos - 1 - word.length, pos, bad: word, good,
+        }) })
+      })
+      .catch(() => {})
+  }, 250)
+})
+
 function lmCompose(v) {
   const topic = window.prompt('个人风格初稿 · 主题 / 一句话需求')
   if (!topic || !topic.trim()) return true
@@ -575,10 +671,35 @@ function acceptCalc(view) {
 }
 
 function dismissCalc(view) {
+  if (view.state.field(lmFixField, false)) {
+    view.dispatch({ effects: clearLmFix.of({}) })
+    return true
+  }
   if (!view.state.field(calcField, false)) return false
   view.dispatch({ effects: clearCalc.of(null) })
   return true
 }
+
+// chip 单击采纳（widget 内 mousedown 转发）
+window.addEventListener('cv-lm-fix-accept', (e) => {
+  const f = e.detail
+  const root = document.querySelector('.notes-source .cm-editor')
+  if (!root || !root.cmView) return
+})   // 实际采纳走 acceptLmFix（⌘.）；单击路径在 widget 里直接改文档
+window.addEventListener('cv-lm-fix-accept', (e) => {
+  const { from, bad, good } = e.detail
+  const cm = document.querySelector('.notes-source .cm-editor')
+  if (!cm) return
+  const view = cm.cmView?.view
+  if (!view) return
+  const pos = view.state.selection.main.head
+  if (view.state.sliceDoc(from, pos) !== bad) return
+  view.dispatch({
+    changes: { from, to: pos, insert: good },
+    selection: { anchor: from + good.length },
+    userEvent: 'input.personal-lm.fix',
+  })
+})
 
 function stampHrCheckpoint(view) {
   const sel = view.state.selection.main
@@ -949,11 +1070,14 @@ async function mount(root, opts) {
       findField,
       atomicWrapField,
       lmGhostField,
+      lmFixField,
       lmCompleter,
+      lmFixer,
       EditorView.inputHandler.of(notesInput),
       Prec.highest(keymap.of([
         { key: 'Tab', run: acceptLmGhost },
         { key: 'Mod-ArrowRight', run: acceptLmGhostWord },
+        { key: 'Mod-.', run: acceptLmFix },
         { key: 'Mod-Shift-g', run: lmCompose },
         { key: 'Tab', run: acceptCalc },
         { key: 'Tab', run: (v) => indentList(v, 1) },

@@ -535,3 +535,26 @@
 @media (prefers-color-scheme: dark) {
   .cm-lm-ghost { color: var(--notes-ghost-dark, #6e6e78); }
 }
+
+/* ── personal-lm 输入纠错 chip（可点击，不自动改） ── */
+.cm-lm-fix {
+  margin-left: 2px;
+  padding: 1px 7px;
+  border: 1px solid var(--notes-fix-border, rgba(255, 149, 0, 0.45));
+  border-radius: 9px;
+  background: var(--notes-fix-bg, rgba(255, 149, 0, 0.08));
+  color: var(--notes-fix-fg, #b06000);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.cm-lm-fix:hover { background: var(--notes-fix-bg-hover, rgba(255, 149, 0, 0.16)); }
+@media (prefers-color-scheme: dark) {
+  .cm-lm-fix {
+    border-color: var(--notes-fix-border-dark, rgba(255, 159, 10, 0.4));
+    background: var(--notes-fix-bg-dark, rgba(255, 159, 10, 0.1));
+    color: var(--notes-fix-fg-dark, #ffb340);
+  }
+  .cm-lm-fix:hover { background: var(--notes-fix-bg-hover-dark, rgba(255, 159, 10, 0.2)); }
+}

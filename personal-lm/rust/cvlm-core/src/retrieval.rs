@@ -12,6 +12,12 @@ pub struct Retrieval {
     postings: HashMap<u64, Vec<u32>>,
     /// 拉丁词频表（小写→出现次数）：词级补全（英文体验）的词典源
     words: HashMap<String, u32>,
+    /// 纠错词表（词→权重）：历史词 + 系统英语词典
+    spell_words: HashMap<String, u32>,
+    /// CJK 单字 → 无调拼音（同音字纠错候选）
+    pinyin: HashMap<char, String>,
+    /// 拼音 → 字列表（按语料出现顺/频率近似排序）
+    pinyin_chars: HashMap<String, Vec<char>>,
 }
 
 fn fnv64(s: &str) -> u64 {
@@ -61,6 +67,22 @@ fn is_cjk(c: char) -> bool {
         0x2E80..=0x303F | 0x3040..=0x30FF | 0x31C0..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF)
 }
 
+fn edit_distance(a: &str, b: &str) -> usize {
+    let x: Vec<char> = a.chars().collect();
+    let y: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=y.len()).collect();
+    let mut cur: Vec<usize> = vec![0; y.len() + 1];
+    for i in 1..=x.len() {
+        cur[0] = i;
+        for j in 1..=y.len() {
+            let cost = if x[i - 1] == y[j - 1] { 0 } else { 1 };
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[y.len()]
+}
+
 /// 行内拉丁词（小写，保留内部数字/下划线，如 arrow2、recall_fs），len>=3
 fn latin_words(s: &str) -> impl Iterator<Item = String> {
     let chars: Vec<char> = s.chars().collect();
@@ -102,7 +124,33 @@ impl Retrieval {
                 *words.entry(w).or_insert(0) += 1;
             }
         }
-        Ok(Self { lines, postings, words })
+        // 纠错资产（可选，缺失不影响主功能）
+        let dir = path.parent();
+        let mut spell_words = HashMap::new();
+        let mut pinyin = HashMap::new();
+        let mut pinyin_chars: HashMap<String, Vec<char>> = HashMap::new();
+        if let Some(dir) = dir {
+            if let Ok(raw) = std::fs::read_to_string(dir.join("spell_words.txt")) {
+                for ln in raw.lines() {
+                    if let Some((w, n)) = ln.rsplit_once(' ') {
+                        if let Ok(n) = n.parse::<u32>() {
+                            spell_words.insert(w.to_string(), n);
+                        }
+                    }
+                }
+            }
+            if let Ok(raw) = std::fs::read_to_string(dir.join("pinyin_map.json")) {
+                if let Ok(json) = serde_json::from_str::<HashMap<String, String>>(&raw) {
+                    for (ch, py) in json {
+                        if let Some(c) = ch.chars().next() {
+                            pinyin.insert(c, py.clone());
+                            pinyin_chars.entry(py).or_default().push(c);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Self { lines, postings, words, spell_words, pinyin, pinyin_chars })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -190,6 +238,120 @@ impl Retrieval {
         // 保留用户已打部分的原始大小写：只返回剩余部分（一律小写，
         // 与用户已输入部分拼接后自然呈现，避免大小写错乱）
         Some(w[p.chars().count()..].to_string())
+    }
+
+    /// 输入纠错：word = 刚打完的词（行尾词，拼写未知/有误）。
+    /// 返回 (建议, 置信度 0..1)。英语 = 编辑距离 ≤2 的词表最近邻；
+    /// CJK = 同音单字替换 + 语料 bigram 链验证。永不改用户文本，只给候选。
+    pub fn query_spell(&self, word: &str) -> Option<(String, f32)> {
+        let trimmed = word.trim();
+        let chars: Vec<char> = trimmed.chars().collect();
+        if chars.is_empty() || chars.len() > 12 {
+            return None;
+        }
+        if chars.iter().all(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-') {
+            self.spell_latin(trimmed)
+        } else {
+            self.spell_cjk(trimmed)
+        }
+    }
+
+    fn spell_latin(&self, word: &str) -> Option<(String, f32)> {
+        let w = word.trim_matches(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')).to_lowercase();
+        if w.chars().count() < 4 || w.chars().all(|c| c.is_ascii_digit()) {
+            return None; // 过短/纯数字不可靠
+        }
+        if self.spell_words.contains_key(&w) {
+            return None; // 拼写正确（在词表中）→ 不建议
+        }
+        let wl = w.chars().count();
+        let first = w.chars().next()?;
+        let mut best: Option<(String, u32, usize)> = None;
+        for (cand, weight) in self.spell_words.iter() {
+            if cand.chars().next() != Some(first) {
+                continue; // 首字母过滤：拼写错误极少换首字母
+            }
+            let cl = cand.chars().count();
+            if cl.abs_diff(wl) > 2 {
+                continue;
+            }
+            let d = edit_distance(&w, cand);
+            if d <= 2 && d < wl {
+                let score = weight.saturating_mul(100)
+                    + 1000 * (3 - d as u32)  // 距离优先
+                    + if cand.starts_with(&w[..wl.min(3)]) { 500 } else { 0 };
+                if best.as_ref().map(|(_, s, _)| score > *s).unwrap_or(true) {
+                    best = Some((cand.clone(), score, d));
+                }
+            }
+        }
+        let (cand, _score, d) = best?;
+        // 距离 1 → 高置信；距离 2 → 中置信（只在词长 ≥6 时给）
+        if d == 2 && wl < 6 {
+            return None;
+        }
+        let conf = if d == 1 { 0.8 } else { 0.5 };
+        Some((cand, conf))
+    }
+
+    fn spell_cjk(&self, word: &str) -> Option<(String, f32)> {
+        let chars: Vec<char> = word.chars().collect();
+        if chars.len() < 2 || chars.len() > 4 {
+            return None;
+        }
+        if self.pinyin.is_empty() {
+            return None;
+        }
+        // 用户词任意 bigram 在语料中存在 → 视为拼写正确
+        if self.bigram_exists(&chars[0], &chars[1]) {
+            return None;
+        }
+        // 单字同音替换：对每个位置，用同音字替换后验证整词 bigram 链在语料中存在
+        let mut best: Option<(String, u64)> = None;
+        for pos in 0..chars.len() {
+            let py = match self.pinyin.get(&chars[pos]) {
+                Some(p) => p.clone(),
+                None => continue,
+            };
+            for cand_ch in self.pinyin_chars.get(&py).into_iter().flatten() {
+                if *cand_ch == chars[pos] {
+                    continue;
+                }
+                let mut cand = chars.clone();
+                cand[pos] = *cand_ch;
+                // 整词 bigram 链验证
+                let mut ok = true;
+                let mut freq: u64 = u64::MAX;
+                for w in cand.windows(2) {
+                    if let Some(post) = self.postings.get(&fnv64(&w.iter().collect::<String>())) {
+                        freq = freq.min(post.len() as u64);
+                    } else {
+                        ok = false;
+                        break;
+                    }
+                }
+                if ok {
+                    let s = format!("{}", cand.iter().collect::<String>());
+                    let score = freq.saturating_mul(10)
+                        + if pos == chars.len() - 1 { 5 } else { 0 };  // 末字错更常见（同音输入法）
+                    if best.as_ref().map(|(_, b)| score > *b).unwrap_or(true) {
+                        best = Some((s, score));
+                    }
+                }
+            }
+        }
+        let (cand, freq) = best?;
+        if freq < 2 {
+            return None; // 语料频次太低的同音替换不可信
+        }
+        Some((cand, 0.75))
+    }
+
+    fn bigram_exists(&self, a: &char, b: &char) -> bool {
+        let mut s = String::new();
+        s.push(*a);
+        s.push(*b);
+        self.postings.contains_key(&fnv64(&s))
     }
 
     /// tail = prefix 末尾 ~100 字符。返回 (最佳行, 分数) 或 None。
