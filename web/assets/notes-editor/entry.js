@@ -209,7 +209,10 @@ function lmCompose(v) {
 }
 
 let lmTimer = 0
-const lmCompleter = EditorView.updateListener.of((u) => {
+  // 上下文窗口：Qwen 后端带 2000 字符（当前 note 全文谱系，让补全理解上下文）；
+  // 98M 小模型时代只有 400 —— 切 Qwen 后这是发挥能力的关键
+  const LM_CTX_CHARS = 2000
+  const lmCompleter = EditorView.updateListener.of((u) => {
   // 词级接受事务自带新 ghost（剩余部分），不能清掉 —— 只跳过清除，不重拉请求
   if (u.transactions.some((t) => (t.userEvent || '').startsWith('input.personal-lm.accept'))) return
   if (!u.docChanged && !u.selectionSet) return
@@ -218,7 +221,7 @@ const lmCompleter = EditorView.updateListener.of((u) => {
   if (!u.docChanged) return
   const cur = u.state.selection.main
   if (!cur.empty) return
-  const prefix = u.state.doc.sliceString(Math.max(0, cur.head - 400), cur.head)
+  const prefix = u.state.doc.sliceString(Math.max(0, cur.head - LM_CTX_CHARS), cur.head)
   if (!prefix.trim()) return
   clearTimeout(lmTimer)
   lmTimer = setTimeout(() => {
@@ -232,7 +235,7 @@ const lmCompleter = EditorView.updateListener.of((u) => {
         const text = d && d.completion
         const now = view.state.selection.main
         if (!text || !now.empty) return
-        const nowPrefix = view.state.doc.sliceString(Math.max(0, now.head - 400), now.head)
+        const nowPrefix = view.state.doc.sliceString(Math.max(0, now.head - LM_CTX_CHARS), now.head)
         if (nowPrefix !== prefix) return // 光标已移动或文档已变
         // ghost 上限：宁短勿长，超过 120 字符的部分丢弃（词级 ⌘→ 可继续要回）
         const ghost = text.length > 120 ? text.slice(0, 120) : text

@@ -17,7 +17,7 @@ def split_docs(text: str) -> list[str]:
 def main() -> None:
     weighted = "--weighted" in sys.argv
     parts = {}
-    for name in ("clipflow", "nmem", "lark", "en_arxiv_csdb", "en_papers_classic"):
+    for name in ("clipflow", "nmem", "lark", "repos", "en_arxiv_csdb", "en_papers_classic"):
         p = OUT / f"{name}.txt"
         parts[name] = p.read_text(encoding="utf-8") if p.exists() else ""
     merged = OUT / "all.txt"
@@ -38,6 +38,7 @@ def main() -> None:
         ]
         nmem_docs = split_docs(parts["nmem"])
         lark_docs = split_docs(parts["lark"])
+        repos_docs = split_docs(parts["repos"])
         # 英文域语料：克制加权（词汇/语法骨架，防正式书面语盖过个人风格）
         arxiv_docs = split_docs(parts["en_arxiv_csdb"])
         papers_docs = split_docs(parts["en_papers_classic"])
@@ -46,6 +47,7 @@ def main() -> None:
             chunks.extend(group * w)
         chunks.extend(nmem_docs * 2)
         chunks.extend(lark_docs * 2)            # 聊天 = 高频真实打字面
+        chunks.extend(repos_docs * 2)           # 个人仓库思考/设计沉淀（用户指定）
         chunks.extend(arxiv_docs * 1)           # 英文摘要
         chunks.extend(papers_docs * 1)          # 经典论文全文
         merged = OUT / "all_weighted.txt"
