@@ -1,5 +1,5 @@
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, Decoration, ViewPlugin, WidgetType } from '@codemirror/view'
-import { EditorState, Prec, StateField, StateEffect } from '@codemirror/state'
+import { EditorState, EditorSelection, Prec, StateField, StateEffect } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput } from '@codemirror/language'
@@ -1051,9 +1051,9 @@ async function mount(root, opts) {
     },
   })
 
-  const state = EditorState.create({
-    doc: lastMd,
-    extensions: [
+  // 扩展工厂：setMarkdown 需要用它重建 EditorState（换笔记时重置 undo 历史）。
+  function buildExtensions() {
+    return [
       lineNumbers(),
       highlightActiveLine(),
       highlightActiveLineGutter(),
@@ -1107,7 +1107,12 @@ async function mount(root, opts) {
           notifyFind(found.length, findActive)
         }
       }),
-    ],
+    ]
+  }
+
+  const state = EditorState.create({
+    doc: lastMd,
+    extensions: buildExtensions(),
   })
 
   const view = new EditorView({ state, parent: sourceEl })
@@ -1661,9 +1666,20 @@ async function mount(root, opts) {
       const g = gen
       applying = true
       const next = String(md || '')
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: next },
-      })
+      // 修复 ⌘Z 跨笔记污染（2026-11-27 AFEAD4C5 事故）：切笔记/收尾 trim 的整篇替换
+      // 绝不能进 undo 栈，也不能让旧笔记的 history 事件残留 —— 否则 ⌘Z 会把
+      // 上一笔记的内容（或按旧笔记坐标的删改）灌进当前笔记，再被自动保存固化。
+      // EditorView.setState() 重建 state，undo 历史随之清零；光标钳制到新文长度。
+      const prevHead = view.state.selection.main.head
+      view.setState(EditorState.create({
+        doc: next,
+        selection: EditorSelection.cursor(Math.min(Math.max(0, prevHead), next.length)),
+        extensions: buildExtensions(),
+      }))
+      // setState 换掉字段实例：查找栏若开着，重放到新文档上。
+      if (findSpec.query || findSpec.tokens.length) {
+        view.dispatch({ effects: setFindQuery.of({ spec: findSpec, active: findActive }) })
+      }
       lastMd = next
       renderPreview(next, true, { preserveScroll: false, remap: true })
       const clear = () => { if (g === gen) applying = false }

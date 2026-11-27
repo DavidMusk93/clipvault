@@ -5762,7 +5762,7 @@ window.ClipViewMasonry = Masonry;
       if (notesEditorLoading) return notesEditorLoading;
       notesEditorLoading = new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = '/assets/notes-editor/notes-editor.js?v=n34';
+        s.src = '/assets/notes-editor/notes-editor.js?v=n35';
         s.async = true;
         s.onload = () => resolve(globalThis.ClipNotesEditor);
         s.onerror = () => reject(new Error('notes-editor load failed'));
